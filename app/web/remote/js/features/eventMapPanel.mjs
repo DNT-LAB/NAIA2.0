@@ -21,6 +21,14 @@
  *  3. 깊이 1부터는 200ms 남짓이고 lift 30~500 으로 뜻이 있다. 추적은 거기서부터다.
  *
  * 공용 Draggable Window: 제목줄 이동, 크기 조절, 바깥 클릭에도 유지.
+ *
+ * 화면 버전 둘(사용자 지정 2026-10-14): 머리줄의 [3단 지도 | 기존] 토글. 고른 쪽을 기억한다.
+ *  · 3단 지도 = Danbooru 위키 tag_groups 를 다듬은 갈래 › 그룹 › 절 지도(`/api/event-map/tree*`).
+ *    핀이 없으면 갈래 탭 · 왼쪽 나무(그룹 아래로 고른 그룹의 절이 펼쳐진다) · 오른쪽 고른 절의 태그 전부
+ *    (사용자 스케치 2026-10-14 - 절마다 '+N개 더' 가 박힌 개요는 비좁아 걷었다). 핀을 꽂으면 기존과 같은 추적이되
+ *    후보는 지도의 태그로만 오고(explore `tree=1`) 탭이 갈래별 후보 수가 된다. 갈래 탭에서는 같은 나무에
+ *    그룹 · 절별 후보 수(0 은 숨김)와 고른 절의 후보, [전체] 탭에서는 경로가 붙은 한 줄 목록(사용자 결정 2026-10-14).
+ *  · 기존 = 대분류 · 소분류 화면. 핀 · 제외 · 인원 · 등급은 두 화면이 같이 쓴다.
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
@@ -70,6 +78,17 @@ function loadPrefs() {
 }
 function savePrefs(persons, ratings, sort) {
   try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings], sort })); } catch { /* 저장 못 해도 동작한다 */ }
+}
+// 화면 버전 · 3단 지도에서 마지막으로 본 갈래 · 그룹. 처음 여는 사람은 3단 지도(목업 승인 2026-10-14).
+const VIEW_KEY = 'naia_event_map_view_v1';
+function loadViewPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(VIEW_KEY) || 'null');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch { return {}; }
+}
+function saveViewPrefs(view) {
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { /* 저장 못 해도 동작한다 */ }
 }
 // 후보 정렬(사용자 지정 2026-09-12 밤). 서버가 세운다 - 상위 40 만 내려오므로 화면에서 다시 세우면 안 된다.
 const SORT_MODES = [
@@ -162,6 +181,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let thumbAsked = false;
   let rows = [];                  // 키보드 이동 단위(지금 보이는 목록)
   let active = -1;
+  // 3단 지도. 골격(/tree)은 열 때마다 새로 받는다(색인이 바뀌면 절의 태그 수가 바뀐다).
+  const viewPrefs = loadViewPrefs();
+  let viewMode = viewPrefs.mode === 'classic' ? 'classic' : 'tree';
+  let treeMap = null, treeError = '';
+  let treeSel = { d1: String(viewPrefs.d1 || ''), d2: String(viewPrefs.d2 || ''), d3: '' };
+  const treeLastD2 = new Map();   // 갈래 -> 마지막으로 본 그룹(이번 실행 동안)
+  let treeData = null;            // 핀이 없을 때: 고른 절의 결과(쪽 단위 · 같은 그룹의 절마다 후보 수)
+  let treeAuto = false;           // 절을 사람이 고르지 않았다(그룹만 눌렀다) - 비면 다음 절로 옮겨도 된다
+  let treeFilter = '';            // 핀이 있을 때: 갈래 탭(비면 전체). 그 안의 그룹 · 절은 treeSel 을 같이 쓴다
+  let ttabsEl = null, actsEl = null, menuEl = null;
+  const isTree = () => viewMode === 'tree';
 
   const esc = value => String(value == null ? '' : value)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -257,6 +287,110 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     render();
   }
 
+  // ── 3단 지도 ──────────────────────────────────────────────────────────────
+  function rememberView() { saveViewPrefs({ mode: viewMode, d1: treeSel.d1, d2: treeSel.d2 }); }
+  const treeBranch = id => (treeMap?.d1 || []).find(b => b.id === id) || null;
+  function treeGroupOf(d2) {
+    for (const b of treeMap?.d1 || []) { const g = b.d2.find(x => x.id === d2); if (g) return g; }
+    return null;
+  }
+  const treeSectionOf = (d2, d3) => treeGroupOf(d2)?.d3.find(x => x.id === d3) || null;
+  /** 핀 질의에 얹는 지도 조건. 대분류(groups · subcategory)는 기존 화면의 것이라 비운다. */
+  function treeParams() {
+    if (!isTree()) return {};
+    const here = treeFilter && treeSel.d1 === treeFilter;
+    return { groups: '', subcategory: '', tree: 1, d1: treeFilter, d2: here ? treeSel.d2 : '', d3: here ? treeSel.d3 : '' };
+  }
+  /** 핀 화면의 갈래 · 그룹 · 절을 고른다. 응답의 그룹 · 절별 수(가두기 전의 풀이라 어느 자리의 응답이든 같다)로
+   *  후보가 있는 자리만 고른다 - 바라는 자리(d2 · d3)가 비었으면 그 갈래 / 그룹의 첫 비지 않은 자리. 바뀌었으면 true. */
+  function choosePinnedSlot(d1, d2 = treeSel.d2, d3 = treeSel.d3) {
+    const b = treeBranch(d1);
+    const counts = result?.tree_counts;
+    if (!b || !counts?.d2) return false;
+    const c3 = (g, x) => counts.d3?.[`${g}\t${x}`] || 0;
+    const g = b.d2.find(x => x.id === d2 && counts.d2[x.id]) || b.d2.find(x => counts.d2[x.id]);
+    if (!g) return false;
+    const x = g.d3.find(r => r.id === d3 && c3(g.id, r.id)) || g.d3.find(r => c3(g.id, r.id));
+    const next = { d1: b.id, d2: g.id, d3: x?.id || '' };
+    if (next.d1 === treeSel.d1 && next.d2 === treeSel.d2 && next.d3 === treeSel.d3) return false;
+    treeSel = next;
+    treeLastD2.set(b.id, g.id);
+    rememberView();
+    return true;
+  }
+  function treeFilterParams() { const fp = filterParams(); return { ratings: fp.ratings, persons: fp.persons }; }
+
+  async function loadTreeMap() {
+    try { treeMap = await getJson('/api/event-map/tree', {}); treeError = ''; }
+    catch (error) { treeMap = null; treeError = String(error && error.message || error); }
+    // 기억한 자리가 지도에서 사라졌으면(지도 판이 바뀌었다) 첫 자리로.
+    const b = treeBranch(treeSel.d1) || treeMap?.d1?.[0];
+    if (!b) { treeSel = { d1: '', d2: '', d3: '' }; return; }
+    const g = b.d2.find(x => x.id === treeSel.d2) || b.d2[0];
+    treeSel = { d1: b.id, d2: g?.id || '', d3: g?.d3.some(x => x.id === treeSel.d3) ? treeSel.d3 : '' };
+  }
+
+  /** 핀이 없을 때의 3단 지도: 고른 절 하나(쪽 단위). 절을 안 골랐으면 그 그룹의 첫 절이다. */
+  async function loadTree() {
+    if (randomLink.enabled) void syncRandomLink();
+    moreRequest = null; moreError = '';
+    active = -1;
+    treeData = null;
+    if (bodyEl) bodyEl.scrollTop = 0;
+    const mine = ++seq;
+    if (!treeMap) {
+      setStatus('지도를 여는 중…', 'busy');
+      await loadTreeMap();
+      if (mine !== seq) return;
+    }
+    if (!treeSel.d2) { render(); return; }
+    if (!treeSel.d3) { treeSel.d3 = treeGroupOf(treeSel.d2)?.d3[0]?.id || ''; treeAuto = true; }
+    setStatus('찾는 중…', 'busy');
+    setBusy(true);
+    try {
+      const body = await getJson('/api/event-map/tree/browse', {
+        d2: treeSel.d2, d3: treeSel.d3, limit: CANDIDATE_LIMIT, ...treeFilterParams() });
+      if (mine !== seq) return;
+      treeData = body;
+    } catch (error) {
+      if (mine !== seq) return;
+      // fetch 자체가 실패하면(서버가 꺼졌다) 브라우저 문구 'Failed to fetch' 대신 우리 말로.
+      treeData = { status: 'error', candidates: [], sections: [],
+        message: error instanceof TypeError ? '서버에 연결하지 못했습니다' : error.message };
+    } finally { setBusy(false); }
+    // 그룹만 눌러 첫 절로 왔는데 이 조건에서 비었으면, 후보가 있는 첫 절로 한 번 옮긴다.
+    if (treeAuto && treeData?.status !== 'error') {
+      treeAuto = false;
+      const rows = treeData?.sections || [];
+      const here = rows.find(r => r.id === treeSel.d3);
+      const next = rows.find(r => r.live > 0);
+      if (here && here.live === 0 && next) { treeSel.d3 = next.id; void loadTree(); return; }
+    }
+    render();
+  }
+  function pickTree(d1, d2 = '', d3 = '') {
+    const b = treeBranch(d1);
+    if (!b) return;
+    const g = b.d2.find(x => x.id === d2) || b.d2.find(x => x.id === treeLastD2.get(d1)) || b.d2[0];
+    treeSel = { d1: b.id, d2: g?.id || '', d3: g?.d3.some(x => x.id === d3) ? d3 : '' };
+    treeAuto = false;
+    if (g) treeLastD2.set(b.id, g.id);
+    rememberView();
+    void loadTree();
+  }
+  /** 고른 갈래 탭에 후보가 없으면 전체로(기존 화면의 widenEmptySelection 과 같은 규칙). */
+  function widenTreeFilter(r) {
+    if (!treeFilter || !r || r.status !== 'matched') return false;
+    const counts = r.tree_counts?.d1 || [];
+    const mine = counts.find(x => x.id === treeFilter);
+    if (mine && mine.count) return false;
+    const elsewhere = counts.some(x => x.count > 0);
+    const label = mine?.ko || treeFilter;
+    treeFilter = '';
+    widenNote = elsewhere ? `${label} → 전체 (비어서 자동 전환)` : '';
+    return elsewhere;
+  }
+
   /** 고른 갈래·소분류에 후보가 **하나도 없으면 전체로 되돌린다**(사용자 지정 2026-09-18).
    *
    *  핀을 더할수록 좁아지다 보면 "고른 분류에만" 후보가 없는 자리에 닿는다. 거기서 빈 목록을
@@ -302,16 +436,18 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     samples = null;
     if (!pins.length) {
       result = null;
+      if (isTree()) { void loadTree(); return; }
       if (group) { void loadBrowse(); return; }
       render(); return;
     }
     const mine = ++seq;
+    if (isTree() && !treeMap) { await loadTreeMap(); if (mine !== seq) return; }
     setStatus('찾는 중…', 'busy');
     setBusy(true);
     try {
       const body = await getJson('/api/event-map/explore', {
         pins: pins.join(','), exclude: excludes.join(','), limit: CANDIDATE_LIMIT, sort: sortMode,
-        relax: relaxOne && canRelax() ? 1 : 0, ...filterParams(),
+        relax: relaxOne && canRelax() ? 1 : 0, ...filterParams(), ...treeParams(),
       });
       if (mine !== seq) return;
       result = body;
@@ -319,20 +455,23 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mine !== seq) return;
       result = { status: 'error', message: error.message, code: error.code, candidates: [] };
     } finally { setBusy(false); }
-    if (mine === seq && widenEmptySelection(result)) { void explore(true); return; }
+    if (mine === seq && (isTree() ? widenTreeFilter(result) || (result?.status === 'matched' && treeFilter
+        && choosePinnedSlot(treeFilter)) : widenEmptySelection(result))) { void explore(true); return; }
     render();
     // Open actual posts only when the whole candidate pool is exhausted,
     // not merely when the selected category has no candidates.
+    const counts = isTree() ? result?.tree_counts?.d1 : result?.group_counts;
     if (mine === seq && open && result?.observed_posts > 0
-        && Array.isArray(result.group_counts)
-        && !result.group_counts.some(g => Number(g.count) > 0
-          && (g.id !== 'unsorted' || result.unclassified_available))) {
+        && Array.isArray(counts)
+        && !counts.some(g => Number(g.count) > 0
+          && (isTree() || g.id !== 'unsorted' || result.unclassified_available))) {
       void drawSamples();
     }
   }
 
   function currentCandidates() {
     if (!open || mapState?.state !== 'ready' || input?.value.trim()) return null;
+    if (isTree()) return pins.length ? result : (treeData?.mode === 'section' ? treeData : null);
     return pins.length ? result : (group ? browse : null);
   }
 
@@ -353,12 +492,15 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const footer = bodyEl.querySelector('[data-em-more]');
     if (footer) footer.outerHTML = moreHtml();
     const exploring = pins.length > 0;
-    const params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...filterParams() };
+    let params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...filterParams() };
     if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode,
-      relax: relaxOne && canRelax() ? 1 : 0 });
+      relax: relaxOne && canRelax() ? 1 : 0 }, treeParams());
+    else if (isTree()) params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...treeFilterParams(),
+      d2: treeSel.d2, d3: treeSel.d3 };
     else Object.assign(params, { group, groups: '' });
+    const route = exploring ? 'explore' : (isTree() ? 'tree/browse' : 'browse');
     try {
-      const page = await getJson(`/api/event-map/${exploring ? 'explore' : 'browse'}`, params);
+      const page = await getJson(`/api/event-map/${route}`, params);
       if (mine !== seq || moreRequest !== ticket || currentCandidates() !== source) return;
       // 구형 서버가 offset을 무시해 첫 페이지를 다시 보내면 중복해서 붙이지 않는다.
       if (page.offset !== params.offset) throw new Error('서버를 재시작한 뒤 다시 시도해 주세요.');
@@ -420,7 +562,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
 
   // ── 상태 조작 ────────────────────────────────────────────────────────────
   function pin(tag) {
-    if (!pins.length) subcategory = '';
+    if (!pins.length) { subcategory = ''; treeFilter = isTree() ? treeSel.d1 : ''; }
     const clean = String(tag || '').trim();
     if (!clean || pins.includes(clean)) return;
     const max = Number(mapState?.limits?.max_pins || 16);
@@ -445,6 +587,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function goBack() {
     subcategory = '';
     if (pins.length) { goTo(pins.length - 1); return; }
+    if (isTree()) return;   // 그룹 · 절은 왼쪽 나무에서 고른다 - 핀이 없으면 돌아갈 단계가 없다
     if (group) { group = ''; browse = null; render(); }
   }
   function pickGroup(id) { subcategory = ''; group = id; browse = null; void loadBrowse(); }
@@ -502,7 +645,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
   function tipComboLine(row) {
     // 포함 = 이 태그도 달린 게시물(후보의 observed) · 제외 = 지금 조건의 게시물 - 포함. 왕복 없이 계산.
-    const src = pins.length ? result : browse;
+    const src = pins.length ? result : (isTree() ? treeData : browse);
     const total = Number(src?.observed_posts || 0);
     const inc = Number(row.dataset.emEst || 0);
     if (!total || !inc) return '';
@@ -519,7 +662,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const thumb = axis ? `<img class="em-tip-thumb" alt="" src="/api/interactive-thumb?axis=${encodeURIComponent(axis)}&tag=${encodeURIComponent(tag)}">` : '';
     tip.innerHTML = `<div class="em-tip-row">
       <div class="em-tip-main">
-        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(roleLabel(row.dataset.emG || info?.group || 'unsorted'))}</span></div>
+        <div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span>${row.dataset.emPath ? ''
+          : `<span class="em-tip-src">${esc(roleLabel(row.dataset.emG || info?.group || 'unsorted'))}</span>`}</div>
+        ${row.dataset.emPath ? `<div class="em-tip-path">${esc(row.dataset.emPath)}</div>` : ''}
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
         <div class="em-tip-stats">${row.dataset.emLift ? `lift ${esc(row.dataset.emLift)} · ` : ''}${info?.count ? `Danbooru ${fmt(info.count)}` : ''}</div>
         <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : "클릭 꽂기 · 우클릭 제외"}</div></div>
@@ -631,6 +776,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mapState?.state === 'ready') {
         stopDlPoll();
         render();
+        if (isTree() || pins.length) void explore();
         focusInput();
         return;
       }
@@ -737,7 +883,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       .join('<span class="em-sep">›</span>');
     const ex = excludes.map(tag =>
       `<button type="button" class="em-ex" data-em-unexclude="${esc(tag)}" title="제외 풀기">− ${esc(tag)}</button>`).join('');
-    const g = group ? groupInfo(group) : null;
+    if (isTree() && !pins.length) { paintTreeTrail(ex); return; }
+    const g = isTree() ? null : (group ? groupInfo(group) : null);
     const groupCrumb = g ? `<span class="em-crumb em-crumb-group em-g-${esc(group)}"><button type="button" class="em-crumb-go" data-em-group-back
         title="이 대분류의 목록으로">${esc(g.label)}</button></span>${crumbs ? '<span class="em-sep">›</span>' : ''}` : '';
     trailEl.innerHTML = `
@@ -746,6 +893,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     paintActions();
   }
   function groupInfo(id) { return (mapState?.groups || []).find(g => g.id === id) || null; }
+  /** 핀이 없을 때의 3단 지도 부스러기: 갈래 › 그룹 › 절(지금 보고 있는 자리 - 고르기는 왼쪽 나무에서). */
+  function paintTreeTrail(ex) {
+    const b = treeBranch(treeSel.d1), g = treeGroupOf(treeSel.d2);
+    const s = treeSel.d3 ? treeSectionOf(treeSel.d2, treeSel.d3) : null;
+    const parts = [b && `<span class="emt-crumb">${esc(b.ko)}</span>`, g && `<span class="emt-crumb">${esc(g.ko)}</span>`,
+      s && `<b class="emt-crumb">${esc(s.ko)}</b>`].filter(Boolean);
+    trailEl.innerHTML = `
+      <button type="button" class="em-back" data-em-back disabled title="한 단계 위로 (Backspace)">←</button>
+      <div class="em-crumbs emt-crumbs">${parts.join('<span class="em-sep">›</span>')
+        || `<span class="em-crumb-empty">${treeError ? '지도를 열지 못했습니다' : '지도를 여는 중…'}</span>`}${ex}</div>
+      ${parts.length ? '<span class="em-note emt-hint">이 인원·등급에서 특징적인 순</span>' : ''}`;
+    paintActions();
+  }
 
   /** 고른 것을 한 번에 비운다: 핀 · 제외 · 소분류 · 대분류. 등급/인원은 **그대로 둔다**
    *  (그건 한 번 눌러 두는 취향이지, 하나씩 닫아야 하는 것이 아니다 - 사용자 지정 2026-09-13). */
@@ -755,6 +915,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     excludes = [];
     browse = null;
     samples = null;
+    if (isTree()) { treeFilter = ''; void loadTree(); return; }
     void loadBrowse();
   }
 
@@ -768,24 +929,42 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
     const rs = overlay.querySelector('[data-em-reset]');
     if (rs) rs.disabled = !(pins.length || excludes.length || subcategory || group);
+    // 3단 지도: 넣기 · 생성 · 복사 · 실제 조합은 발줄 오른쪽에, **핀이 있을 때만** 보인다(목업).
+    if (actsEl) actsEl.hidden = !(isTree() && on);
   }
 
-  function paintFilters() {
-    filtersEl.innerHTML = `
+  const ACTION_BUTTONS = `<button type="button" data-em-insert disabled
+              title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-insert-generate disabled
+              title="지금 고른 태그로 메인 프롬프트를 대치한 뒤 바로 Generate">생성</button><button type="button" data-em-copy disabled
+              title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
+              title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button>`;
+  function filterHeadHtml() {
+    return `
       <button type="button" class="em-person-btn" data-em-person aria-haspopup="dialog" aria-expanded="false"
               title="인원 구성 고르기"><b data-em-person-count></b></button>
       <span class="em-rating-bar" role="group" aria-label="등급">${RATING_OPTIONS.map(r =>
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
-                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>
+                 aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>`;
+  }
+  /** 3단 지도의 조건 줄: 인원 · 등급 · [⋯] 뿐이다. 초기화 · PE설정 · 조합 저장/불러오기는 [⋯] 안으로,
+   *  넣기 · 생성 · 복사 · 실제 조합은 발줄로(목업 승인 2026-10-14). */
+  function paintTreeFilters() {
+    filtersEl.innerHTML = `${filterHeadHtml()}
+      <button type="button" class="em-reset emt-menu-btn" data-emt-menu aria-haspopup="menu" aria-expanded="false"
+              title="초기화 · PE설정 · 조합 저장/불러오기">⋯</button>`;
+    personBtn = filtersEl.querySelector('[data-em-person]');
+    paintPersonButton();
+    paintActions();
+  }
+  function paintFilters() {
+    if (actsEl) actsEl.innerHTML = isTree() ? ACTION_BUTTONS : '';
+    if (isTree()) { paintTreeFilters(); return; }
+    filtersEl.innerHTML = `${filterHeadHtml()}
       <button type="button" class="em-reset" data-em-reset
               title="핀 · 제외 · 소분류를 한 번에 비우고 대분류로 돌아간다">초기화</button>
       <button type="button" class="em-reset em-pe" data-em-pe-settings
               title="Prompt Engineering — prefix · postfix · autohide · 옵션 (메인 프롬프트의 /pe 와 같은 목록)">PE설정</button>
-      <span class="em-actions em-actions-right"><button type="button" data-em-insert disabled
-              title="지금 고른 태그로 메인 프롬프트를 대치한다 (Random 과 같은 길)">넣기</button><button type="button" data-em-insert-generate disabled
-              title="지금 고른 태그로 메인 프롬프트를 대치한 뒤 바로 Generate">생성</button><button type="button" data-em-copy disabled
-              title="지금 고른 태그 전부를 클립보드로">복사</button><button type="button" data-em-samples disabled
-              title="핀을 전부 포함하는 실제 게시물의 조합">실제 조합</button></span>`;
+      <span class="em-actions em-actions-right">${ACTION_BUTTONS}</span>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
     paintPersonButton();
     paintActions();
@@ -823,13 +1002,135 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     personBtn.classList.toggle('is-filtered', !all);
   }
 
-  function candidateRow(c, i) {
-    const unclassified = c.group === 'unsorted';
+  function rowNumbers(c) {
     const lift = Number(c.lift || 0);
     const liftText = lift >= 100 ? `×${Math.round(lift)}` : `×${lift.toFixed(lift >= 10 ? 0 : 1)}`;
     const obs = c.observed_estimate != null && c.observed_estimate !== c.observed
       ? `≈${fmt(c.observed_estimate)}` : fmt(c.observed);
     const est = c.observed_estimate != null ? c.observed_estimate : c.observed;
+    return { liftText, obs, est };
+  }
+  /** 3단 지도의 줄. 핀 결과에서는 줄 아래에 경로(갈래 › 그룹 › 절)를 적는다 - 기존 화면의 색 대신. */
+  function treeRow(c, i, path = '', showPath = false) {
+    const { liftText, obs, est } = rowNumbers(c);
+    const where = c.path?.ko || path;
+    return `<div class="em-row emt-row${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
+        data-em-est="${Number(est) || 0}" data-em-lift="${liftText}"${where ? ` data-em-path="${esc(where)}"` : ''} role="option">
+      <span class="em-tag">${esc(c.tag)}</span>
+      <span class="em-lift">${liftText}</span>
+      <span class="em-obs">${obs}</span>
+      <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
+      ${showPath && where ? `<span class="emt-path">${esc(where)}</span>` : ''}
+    </div>`;
+  }
+  /** 핀이 없을 때의 3단 지도: 왼쪽 = 나무(갈래의 그룹 · 고른 그룹 아래로 그 절), 오른쪽 = 고른 절의 태그 전부.
+   *  나무는 지도 골격(/tree)으로 그린다 - 서버 응답을 기다리지 않는다. 절마다 이 조건의 후보 수는 절 응답이
+   *  같은 그룹 것을 함께 실어 온다(`sections[].live`). 0 이면 흐리게. */
+  function treeBodyHtml() {
+    if (!treeMap) {
+      return `<div class="em-empty">${treeError
+        ? `3단 지도를 열지 못했습니다 — ${esc(treeError)}<br>머리줄의 <b>기존</b> 으로 바꾸면 예전 화면을 씁니다.` : '지도를 여는 중…'}</div>`;
+    }
+    const b = treeBranch(treeSel.d1);
+    if (!b) return '<div class="em-empty">지도가 비었습니다</div>';
+    const live = treeData?.d2 === treeSel.d2 && Array.isArray(treeData.sections)
+      ? new Map(treeData.sections.map(r => [r.id, r.live])) : null;
+    return `<div class="emt-grid">${treeNavHtml(b, null, x => live?.get(x.id))}
+      <div class="emt-right">${treeRightHtml()}</div></div>`;
+  }
+  /** 왼쪽 나무. 펼치는 것은 고른 그룹 하나다.
+   *  · 핀이 없을 때(`pinned` = null): 그룹 = 태그 수, 절 = `이 조건의 후보 / 태그 수`(0 이면 흐리게).
+   *  · 핀 화면(`pinned` = 그룹 id -> 후보 수): 그룹 · 절 = 핀과 함께 달린 후보 수, **0 은 숨긴다**(사용자 결정). */
+  function treeNavHtml(b, pinned, sectionCount) {
+    const items = b.d2.map(g => {
+      const gn = pinned ? (pinned[g.id] || 0) : g.tags;
+      if (pinned && !gn) return '';
+      const openGroup = g.id === treeSel.d2;
+      const head = `<button type="button" class="emt-d2${openGroup ? ' is-open' : ''}" data-emt-d2="${esc(g.id)}"
+        aria-expanded="${openGroup}" title="${esc(g.ko)} · ${pinned ? `핀과 함께 달린 후보 ${fmt(gn)}` : `절 ${g.d3.length}개 · 태그 ${fmt(g.tags)}`}"><span><i class="emt-caret">${openGroup ? '▾' : '▸'}</i>${esc(g.ko)}</span><small>${fmt(gn)}</small></button>`;
+      if (!openGroup) return head;
+      return head + g.d3.map(x => {
+        const n = sectionCount(x, g);
+        if (pinned && !n) return '';
+        const on = x.id === treeSel.d3;
+        const empty = !pinned && n === 0;
+        const label = pinned ? fmt(n) : `${n != null ? `${fmt(n)} / ` : ''}${fmt(x.tags)}`;
+        return `<button type="button" class="emt-d3i${on ? ' is-on' : ''}${empty ? ' is-empty' : ''}" data-emt-d3="${esc(x.id)}"
+          aria-pressed="${on}" title="${esc(x.ko)}${empty ? ' · 이 인원·등급에 없음' : ''}"><span>${esc(x.ko)}</span><small>${label}</small></button>`;
+      }).join('');
+    }).join('');
+    return `<nav class="emt-left" aria-label="${esc(b.ko)} 그룹 · 절">${items}</nav>`;
+  }
+  /** 핀 화면의 갈래 탭: 왼쪽 나무(빈 그룹 · 절은 숨김) + 오른쪽 고른 절의 후보(정렬 · -1 허용 · 더 보기 그대로). */
+  function pinnedTreeHtml(cs) {
+    const b = treeBranch(treeFilter);
+    const counts = result?.tree_counts || {};
+    if (!b || !counts.d2) return '';
+    const x = treeSectionOf(treeSel.d2, treeSel.d3);
+    const n = x ? (counts.d3?.[`${treeSel.d2}\t${x.id}`] || 0) : 0;
+    const right = (x ? `<div class="emt-d3h"><span>${esc(x.ko)}</span><small>후보 ${fmt(n)}</small></div>` : '')
+      + candidateCapHtml(result, cs.length)
+      + (cs.length ? cs.map((c, i) => treeRow(c, i, '')).join('')
+        : `<div class="em-empty">${floorPhrase(result, '이 절에 함께 달린 태그가 없습니다.')}</div>`)
+      + moreHtml();
+    return `<div class="emt-grid">${treeNavHtml(b, counts.d2, (r, g) => counts.d3?.[`${g.id}\t${r.id}`] || 0)}
+      <div class="emt-right">${right}</div></div>`;
+  }
+  /** 나무를 다시 그려도 스크롤 자리를 지키고, 펼친 그룹(머리 + 절)이 칸 밖이면 보이게 민다 - 아래쪽 그룹을 펼치면
+   *  절이 칸 아래로 숨었다(라이브 확인 2026-10-14). 머리가 위로 밀려나지 않는 만큼만 내린다. */
+  function keepTreeInView(prev) {
+    const nav = bodyEl.querySelector('.emt-left');
+    if (!nav) return;
+    nav.scrollTop = prev;
+    const head = nav.querySelector('.emt-d2.is-open');
+    if (!head) return;
+    const items = nav.querySelectorAll('.emt-d3i');
+    const last = items[items.length - 1] || head;
+    const box = nav.getBoundingClientRect(), top = head.getBoundingClientRect().top, bottom = last.getBoundingClientRect().bottom;
+    if (top < box.top) nav.scrollTop -= box.top - top;
+    else if (bottom > box.bottom) nav.scrollTop += Math.min(bottom - box.bottom, top - box.top);
+  }
+  function treeRightHtml() {
+    const d = treeData;
+    if (!d) return '<div class="em-empty">불러오는 중…</div>';
+    if (d.status === 'error') {
+      setStatus('오류', 'error');
+      return `<div class="emt-error"><span>${esc(d.message || '실패')}</span>
+        <button type="button" class="em-mini" data-emt-retry>다시 시도</button></div>`;
+    }
+    setStatus(`${fmt(d.observed_posts)}건${d.sampled ? ' · 표본' : ''}`, 'ok',
+      `${Math.round(d.elapsed_ms || 0)}ms · 이 분면에서의 비율 ÷ 코퍼스 전체에서의 비율`);
+    const cs = d.candidates || [];
+    rows = cs.map(c => c.tag);
+    const path = (d.path || []).join(' › ');
+    return `<div class="emt-d3h"><span>${esc((d.path || [])[2] || treeSel.d3)}</span>
+        <small>${fmt(d.candidate_pool ?? cs.length)} / ${fmt(d.tags)}</small></div>`
+      + (cs.length ? cs.map((c, i) => treeRow(c, i, path)).join('')
+        : `<div class="em-empty">이 인원·등급에 ${floorPhrase(d, '나온 태그가 없습니다.')}</div>`)
+      + moreHtml();
+  }
+  /** 갈래 탭. 핀이 없으면 = 갈래 바꾸기, 핀이 있으면 = 후보 필터(갈래별 후보 수 · 0 이면 흐림). */
+  function paintTreeTabs() {
+    if (!ttabsEl) return;
+    const show = isTree() && open && mapState?.state === 'ready' && !input?.value.trim() && !!treeMap;
+    ttabsEl.hidden = !show;
+    if (!show) { ttabsEl.innerHTML = ''; return; }
+    const pinned = pins.length > 0;
+    const counts = pinned && Array.isArray(result?.tree_counts?.d1)
+      ? new Map(result.tree_counts.d1.map(r => [r.id, Number(r.count) || 0])) : null;
+    const tab = (id, label, n, on) => {
+      const empty = counts != null && id && !n;
+      return `<button type="button" class="em-cat emt-tab${on ? ' is-on' : ''}${empty ? ' is-empty' : ''}" data-emt-d1="${esc(id)}"
+        role="tab" aria-selected="${on}" ${empty ? 'disabled' : ''}><span class="em-tag">${esc(label)}</span>${n != null ? `<span class="em-cat-n">${fmt(n)}</span>` : ''}</button>`;
+    };
+    ttabsEl.innerHTML = (pinned ? tab('', '전체', null, !treeFilter) : '')
+      + treeMap.d1.map(b => tab(b.id, b.ko, counts ? (counts.get(b.id) || 0) : null,
+        pinned ? b.id === treeFilter : b.id === treeSel.d1)).join('');
+  }
+
+  function candidateRow(c, i) {
+    const unclassified = c.group === 'unsorted';
+    const { liftText, obs, est } = rowNumbers(c);
     return `<div class="em-row em-g-${esc(c.group || 'unsorted')}${unclassified ? ' em-row-unclassified' : ''}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
         data-em-g="${esc(c.group || 'unsorted')}" data-em-est="${Number(est) || 0}" data-em-lift="${liftText}" role="option">
       <span class="em-tag">${esc(c.tag)}</span>
@@ -919,7 +1220,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     positionSide();
   }
   function selectedCategory() {
-    if (roles.has('unsorted')) return '';
+    if (isTree() || roles.has('unsorted')) return '';
     return pins.length ? (roles.size === 1 ? [...roles][0] : '') : group;
   }
 
@@ -1026,8 +1327,10 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     library?.update();
     paintTrail();
     paintFilters();
+    paintTreeTabs();
     rows = [];
     let html = '';
+    let treeBody = false;
     // 색인이 없으면 화면은 **내려받기 진행 표면**이 된다(사용자 결정 2026-09-13). 단추도 직접
     // 빌드 안내도 두지 않는다 - 열면 알아서 받는다. 그 동안 검색·조건·발줄은 잠근다.
     setLocked(mapState?.state !== 'ready');
@@ -1050,6 +1353,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       //    `is-active` 를 박는다. 뒤에 정하면 값은 맞는데 화면에는 안 보인다.
       if (active < 0) active = exactRowIndex();
       html += suggestHtml();
+    } else if (!pins.length && isTree()) {
+      html += treeBodyHtml();
+      treeBody = true;
     } else if (!pins.length && group) {
       html += browseHtml();
     } else if (!pins.length) {
@@ -1072,20 +1378,27 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         const cs = result.candidates || [];
         rows = cs.map(c => c.tag);
         const gc = result.group_counts || null;   // 옛 백엔드(재시작 전)는 이 키가 없다 - 그래도 탭은 그린다
-        html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + (r.id === 'unsorted' ? 0 : r.count), 0) : null);
-        if (result.unclassified_available && result.unclassified_count > 0) {
+        // 3단 지도에서는 갈래 탭(ttabsEl)이 후보 필터다 - 대분류 탭 · 미분류 입구는 기존 화면의 것.
+        if (!isTree()) html += catsHtml(gc, roles.size ? [...roles][0] : '', gc ? gc.reduce((n, r) => n + (r.id === 'unsorted' ? 0 : r.count), 0) : null);
+        if (!isTree() && result.unclassified_available && result.unclassified_count > 0) {
           const expanded = roles.has('unsorted');
           html += `<div class="em-unclassified"><button type="button" class="em-mini" data-em-unclassified aria-expanded="${expanded}">${expanded ? '▾ 미분류 후보 접기' : '▸ 미분류 후보 더 보기'} · ${fmt(result.unclassified_count)}</button>${expanded
             ? `<span class="em-note">${result.sampled ? '표본 집계 · 범위를 좁히면 전체 집계' : '전체 집계'}${floorOf(result) > 1 ? ` · ${floorOf(result)}건 이상 함께 등장` : ''} · 분류 검토 중</span>` : ''}</div>`;
         }
-        html += candidateCapHtml(result, cs.length);
-        html += cs.length ? cs.map(candidateRow).join('') : `<div class="em-empty">${result.unclassified_count > 0 && !roles.has('unsorted')
-          ? (result.unclassified_available ? '분류된 후보가 없습니다. 미분류 후보 또는 실제 조합을 확인하세요.' : '분류된 후보가 없습니다. 실제 조합을 확인하세요.') : floorPhrase(result, '함께 달린 태그가 없습니다.')}</div>`;
+        const pinnedTree = isTree() && treeFilter ? pinnedTreeHtml(cs) : '';
+        if (pinnedTree) { html += pinnedTree; treeBody = true; }
+        else {
+          html += candidateCapHtml(result, cs.length);
+          html += cs.length ? cs.map((c, i) => (isTree() ? treeRow(c, i, '', true) : candidateRow(c, i))).join('') : `<div class="em-empty">${!isTree() && result.unclassified_count > 0 && !roles.has('unsorted')
+            ? (result.unclassified_available ? '분류된 후보가 없습니다. 미분류 후보 또는 실제 조합을 확인하세요.' : '분류된 후보가 없습니다. 실제 조합을 확인하세요.') : floorPhrase(result, '함께 달린 태그가 없습니다.')}</div>`;
+        }
         setStatus(`${fmt(result.observed_posts)}건${result.sampled ? ' · 표본' : ''}`, 'ok',
           `${Math.round(result.elapsed_ms || 0)}ms${result.sampled ? ' · 교집합이 커서 표본으로 셌다(건수는 정확하다)' : ''}`);
       }
     }
-    bodyEl.innerHTML = html + moreHtml();
+    const navTop = bodyEl.querySelector('.emt-left')?.scrollTop || 0;
+    bodyEl.innerHTML = treeBody ? html : html + moreHtml();   // 3단 지도의 [더 보기] 는 오른쪽 칸 안에 있다
+    if (treeBody) keepTreeInView(navTop);
     paintSubcategories();
     paintSide();
     if (active >= rows.length) active = rows.length - 1;
@@ -1166,6 +1479,75 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
 
 
+  // ── 3단 지도: [⋯] 메뉴 · 버전 토글 ────────────────────────────────────────
+  function openTreeMenu(btn) {
+    if (!menuEl) {
+      menuEl = document.createElement('div');
+      menuEl.className = 'emt-menu';
+      menuEl.hidden = true;
+      menuEl.setAttribute('role', 'menu');
+      document.body.append(menuEl);
+      menuEl.addEventListener('click', event => {
+        const item = event.target.closest('[data-emt-act]');
+        if (!item || item.disabled) return;
+        const act = item.dataset.emtAct;
+        closeTreeMenu();
+        if (act === 'reset') resetSelection();
+        else if (act === 'pe') openPeSettings();
+        // 저장/불러오기는 기존 저장 줄의 단추를 그대로 누른다 - 저장 패널은 하나다(줄은 3단 지도에서 숨는다).
+        else overlay.querySelector(`.em-library-bar [data-library-mode="${act}"]`)?.click();
+      });
+    }
+    const anything = pins.length || excludes.length || treeFilter;
+    menuEl.innerHTML = `
+      <button type="button" role="menuitem" data-emt-act="reset" ${anything ? '' : 'disabled'}>초기화<small>핀 · 제외를 비우고 지도로</small></button>
+      <button type="button" role="menuitem" data-emt-act="pe">PE설정<small>메인 프롬프트의 /pe 와 같은 목록</small></button>
+      <button type="button" role="menuitem" data-emt-act="save" ${pins.length ? '' : 'disabled'}>이 조합 저장하기</button>
+      <button type="button" role="menuitem" data-emt-act="load">조합 불러오기</button>`;
+    menuEl.hidden = false;
+    menuEl.style.zIndex = String(Number(overlay.style.zIndex) + 1);
+    btn.setAttribute('aria-expanded', 'true');
+    const r = btn.getBoundingClientRect(), m = menuEl.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.right - m.width, window.innerWidth - m.width - 8));
+    let top = r.bottom + 4;
+    if (top + m.height > window.innerHeight - 8) top = Math.max(8, r.top - m.height - 4);
+    menuEl.style.left = `${Math.round(left)}px`;
+    menuEl.style.top = `${Math.round(top)}px`;
+    document.addEventListener('pointerdown', onMenuOutside, true);
+  }
+  function closeTreeMenu() {
+    if (!menuEl || menuEl.hidden) return;
+    menuEl.hidden = true;
+    filtersEl?.querySelector('[data-emt-menu]')?.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', onMenuOutside, true);
+  }
+  function onMenuOutside(event) {
+    if (menuEl?.contains(event.target) || event.target.closest?.('[data-emt-menu]')) return;
+    closeTreeMenu();
+  }
+  function paintViewToggle() {
+    if (!panel?.slot) return;
+    const views = [['tree', '3단 지도', 'Danbooru 위키 tag_groups 를 다듬은 갈래 › 그룹 › 절 지도'],
+      ['classic', '기존', '대분류 · 소분류 화면']];
+    panel.slot.innerHTML = `<span class="emt-seg" role="group" aria-label="화면 버전">${views.map(([id, label, title]) =>
+      `<button type="button" data-em-view="${id}" class="${viewMode === id ? 'is-on' : ''}" aria-pressed="${viewMode === id}"
+        title="${esc(title)}">${label}</button>`).join('')}</span>`;
+    overlay?.classList.toggle('em-tree', isTree());
+  }
+  /** 버전을 바꾼다. 핀 · 제외 · 인원 · 등급은 그대로 - 핀이 있으면 그 핀으로 새 화면에서 다시 묻는다. */
+  function setViewMode(mode) {
+    if (mode === viewMode || (mode !== 'tree' && mode !== 'classic')) return;
+    viewMode = mode;
+    rememberView();
+    closeTreeMenu(); closePersonPopup(); hideTip();
+    if (library?.isOpen()) library.close();
+    samples = null; widenNote = ''; result = null; browse = null; treeData = null;
+    treeFilter = isTree() && pins.length ? treeSel.d1 : '';
+    paintViewToggle();
+    if (mapState?.state !== 'ready' || input.value.trim()) { render(); return; }
+    void explore();
+  }
+
   // ── 창 ───────────────────────────────────────────────────────────────────
   function build() {
     if (overlay) return overlay;
@@ -1178,7 +1560,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       // 발줄은 남긴다**(사용자 지정 2026-10-08 · 10-11) - 접은 채로 고른 태그를 보고 넣기 · 생성 · [랜덤] 을 누를 수
       // 있다. 무엇을 남기는지는 style.css 의 `.em-window.is-collapsed` 짝 규칙이 정한다.
       onCollapse: syncCollapsed,
-      onClose: close, onMove: () => { closePersonPopup(); hideTip(); fitHeight(); },
+      onClose: close, onMove: () => { closePersonPopup(); closeTreeMenu(); hideTip(); fitHeight(); },
     });
     overlay = panel.el;
     overlay.setAttribute('aria-label', '이벤트 맵');
@@ -1195,6 +1577,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       </div>
       <div class="em-trail"></div>
       <div class="em-filters"></div>
+      <div class="em-cats emt-tabs" role="tablist" aria-label="갈래" hidden></div>
       <div class="em-library-bar"><button type="button" data-library-mode="save" aria-expanded="false">이 조합 저장하기</button><button type="button" data-library-mode="load" aria-expanded="false">조합 불러오기</button></div>
       <div class="em-library-panel" hidden></div>
       <div class="em-body" role="listbox"></div>
@@ -1203,7 +1586,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
             title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
         <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
-        <label class="em-random-link" title="메인 Random과 Auto Gen이 현재 핀·제외·인원·등급을 사용합니다. 패널을 닫아도 연결됩니다."><input type="checkbox" data-em-random-link>랜덤 버튼 연결</label>
+        <label class="em-random-link" title="메인 Random과 Auto Gen이 현재 핀·제외·인원·등급을 사용합니다. 패널을 닫아도 연결됩니다."><input type="checkbox" data-em-random-link><span class="em-link-long">랜덤 버튼 </span>연결</label>
+        <span class="em-actions emt-acts" hidden></span>
       </div>`;
     busyEl = document.createElement('div');
     busyEl.className = 'em-busy';
@@ -1218,6 +1602,26 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     filtersEl = overlay.querySelector('.em-filters');
     bodyEl = overlay.querySelector('.em-body');
     footEl = overlay.querySelector('.em-foot');
+    ttabsEl = overlay.querySelector('.emt-tabs');
+    actsEl = overlay.querySelector('.emt-acts');
+    paintViewToggle();
+    panel.slot.addEventListener('click', event => {
+      const v = event.target.closest('[data-em-view]');
+      if (v) setViewMode(v.dataset.emView);
+    });
+    ttabsEl.addEventListener('click', event => {
+      const t = event.target.closest('[data-emt-d1]');
+      if (!t || t.disabled || busyCount) return;
+      const id = t.dataset.emtD1;
+      if (pins.length) {
+        if (id === treeFilter) return;
+        treeFilter = id;
+        if (id) choosePinnedSlot(id, treeLastD2.get(id) || '', '');
+        void explore();
+        return;
+      }
+      if (id && id !== treeSel.d1) pickTree(id);
+    });
     library = initEventMapLibrary({
       bar: overlay.querySelector('.em-library-bar'), panel: overlay.querySelector('.em-library-panel'), anchor: overlay,
       onClose: () => paintSubcategories(),
@@ -1256,19 +1660,27 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (t.closest('[data-em-group-back]')) { resetSelection(); return; }
       if (t.closest('[data-em-back]')) { goBack(); return; }
     });
+    // 넣기 · 생성 · 복사 · 실제 조합 - 기존 화면은 조건 줄에, 3단 지도는 발줄에 있다.
+    function onActionClick(t) {
+      if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return true; }
+      if (t.closest('[data-em-insert-generate]')) { void applyPins(t.closest('[data-em-insert-generate]'), true); return true; }
+      if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return true; }
+      if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return true; }
+      return false;
+    }
     footEl.addEventListener('click', event => {
       const t = event.target;
       const rb = t.closest('[data-em-random]');
       if (rb) { void randomAssign(rb, rb.dataset.emRandom === 'generate'); return; }
+      onActionClick(t);
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
+      const menuBtn = t.closest('[data-emt-menu]');
+      if (menuBtn) { if (menuEl && !menuEl.hidden) closeTreeMenu(); else openTreeMenu(menuBtn); return; }
       if (t.closest('[data-em-pe-settings]')) { openPeSettings(); return; }
       if (t.closest('[data-em-reset]')) { resetSelection(); return; }
-      if (t.closest('[data-em-insert]')) { void applyPins(t.closest('[data-em-insert]')); return; }
-      if (t.closest('[data-em-insert-generate]')) { void applyPins(t.closest('[data-em-insert-generate]'), true); return; }
-      if (t.closest('[data-em-copy]')) { void copyText(currentPrompt()); return; }
-      if (t.closest('[data-em-samples]')) { if (samples) { samples = null; render(); } else void drawSamples(); return; }
+      if (onActionClick(t)) return;
       if (t.closest('[data-em-person]')) {
         if (personPopup && !personPopup.hidden) closePersonPopup(); else openPersonPopup();
         return;
@@ -1296,6 +1708,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (sc) { void copyText(samplePrompt(Number(sc.dataset.emSampleCopy))); return; }
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
+      if (t.closest('[data-emt-retry]')) { void loadTree(); return; }
+      const d2 = t.closest('[data-emt-d2]');
+      if (d2) {
+        if (d2.dataset.emtD2 === treeSel.d2) return;
+        if (pins.length) { if (choosePinnedSlot(treeFilter, d2.dataset.emtD2, '')) void explore(); return; }
+        pickTree(treeSel.d1, d2.dataset.emtD2); return;
+      }
+      const d3 = t.closest('[data-emt-d3]');
+      if (d3) {
+        if (d3.dataset.emtD3 === treeSel.d3) return;
+        if (pins.length) { treeSel.d3 = d3.dataset.emtD3; rememberView(); void explore(); return; }
+        pickTree(treeSel.d1, treeSel.d2, d3.dataset.emtD3); return;
+      }
       const rb = t.closest('[data-em-relax]');
       if (rb) { relaxOne = !relaxOne; void explore(); return; }
       const sb = t.closest('[data-em-sort]');
@@ -1468,7 +1893,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (manualSize || !bodyEl || panel?.isCollapsed()) return;
     const last = bodyEl.lastElementChild;
     const bodyRect = bodyEl.getBoundingClientRect();
-    const content = last ? Math.ceil(last.getBoundingClientRect().bottom - bodyRect.top + bodyEl.scrollTop + 8) : 0;
+    // 3단 지도의 왼쪽 목록은 몸통 높이에 묶여 있다(sticky) - 그 높이로 재면 잴 때마다 창이 자란다.
+    // 두 칸 각자의 **원래 높이**로 잰다.
+    const grid = last?.classList.contains('emt-grid') ? last : null;
+    const content = grid ? Math.ceil((grid.getBoundingClientRect().top - bodyRect.top + bodyEl.scrollTop)
+        + Math.max(...[...grid.children].map(el => el.scrollHeight)) + 8)
+      : last ? Math.ceil(last.getBoundingClientRect().bottom - bodyRect.top + bodyEl.scrollTop + 8) : 0;
     const chrome = overlay.offsetHeight - bodyEl.clientHeight;
     const room = Math.max(EM_MIN_HEIGHT, window.innerHeight - Math.max(8, rect.top) - 12);
     const want = Math.round(Math.min(room, Math.max(EM_BASE_HEIGHT, chrome + content)));
@@ -1484,6 +1914,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (!overlay || overlay.hidden) return;
     fitWindow();
     panel.refit();
+    if (bodyEl) bodyEl.style.setProperty('--emt-h', `${Math.max(120, bodyEl.clientHeight - 10)}px`);
     const z = Number(overlay.style.zIndex) + 1;
     for (const el of [subEl, sideEl, personPopup, document.querySelector('.em-saved-panel')]) {
       if (el) el.style.zIndex = String(z);
@@ -1504,10 +1935,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     focusInput();                   // 열자마자 - 바로 칠 수 있게(사용자 지정 2026-09-12 밤)
     setStatus('여는 중…', 'busy');
     dlFailed = false; dlError = '';      // 다시 열면 다시 시도한다
+    treeMap = null; treeData = null;     // 3단 지도의 골격도 열 때마다 새로(색인이 바뀌면 절의 태그 수가 바뀐다)
     await loadState();
     if (mapState?.state !== 'ready') { await autoDownload(); startDlPoll(); }
     render();
-    if (mapState?.state === 'ready' && pins.length) void explore();
+    if (mapState?.state === 'ready' && (pins.length || isTree())) void explore();
     position();
     focusInput();                   // 그려진 뒤 한 번 더(그 사이 누가 가져갔어도)
   }
@@ -1522,7 +1954,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
    *  열리므로 숨기지 않는다 - 다만 창의 모양이 바뀌는 순간에는 떠 있던 팝업 · 툴팁을 닫고, 실제 조합은 새 자리에 다시 앉힌다. */
   function syncCollapsed(collapsed = panel?.isCollapsed()) {
     document.documentElement.classList.toggle('em-window-collapsed', !!collapsed && open);
-    if (collapsed) { closePersonPopup(); hideTip(); if (open) queueMicrotask(positionSide); }
+    if (collapsed) { closePersonPopup(); closeTreeMenu(); hideTip(); if (open) queueMicrotask(positionSide); }
     else if (open) queueMicrotask(fitHeight);
   }
   function close() {
@@ -1532,6 +1964,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     moreRequest = null; moreError = '';
     if (!overlay) return;
     closePersonPopup();
+    closeTreeMenu();
     open = false;
     if (panel.isOpen()) panel.close();
     if (subEl) subEl.hidden = true;
@@ -1572,6 +2005,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (event.key === 'Escape' && open) {
       event.preventDefault(); event.stopPropagation();
       if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
+      if (menuEl && !menuEl.hidden) { closeTreeMenu(); return; }
       if (library?.isOpen()) {
         library.close();
         overlay.querySelector('.em-library-bar button')?.focus();

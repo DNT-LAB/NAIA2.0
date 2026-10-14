@@ -45,7 +45,8 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 
 
 # `code` -> HTTP 상태. 나머지는 400.
-STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500, "library_error": 500, "duplicate": 409, "not_found": 404}
+STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500, "library_error": 500, "duplicate": 409, "not_found": 404,
+                  "tree_unavailable": 503}
 
 
 def _no_store() -> dict[str, str]:
@@ -270,16 +271,42 @@ def register_event_map_routes(
     async def api_event_map_explore(pins: str = "", exclude: str = "", ratings: str = "",
                                     persons: str = "", roles: str = "", groups: str = "",
                                     limit: int = 24, sort: str = "lift", offset: int = 0, subcategory: str = "",
-                                    relax: int = 0):
+                                    relax: int = 0, tree: int = 0, d1: str = "", d2: str = "", d3: str = ""):
         """색상 태그는 **항상** 후보에서 빠진다(켜는 파라미터를 두지 않는다 - 사용자 지정 2026-09-12).
         `groups` 는 접기 표의 갈래 id(쉼표) - 후보를 그 대분류로 가둔다.
-        `relax=1` 은 [-1 허용] - 핀 n개 중 n-1개만 있는 게시물까지 센다."""
+        `relax=1` 은 [-1 허용] - 핀 n개 중 n-1개만 있는 게시물까지 센다.
+        `tree=1` 은 3단 지도 화면 - 후보를 지도의 태그로(`d1`/`d2`/`d3` 를 주면 그 자리로) 가두고
+        후보마다 `path`, 결과에 `tree_counts`(갈래별 후보 수)를 단다. 이때 groups · subcategory 는 쓰지 않는다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.explore, pins=pins, exclude=exclude, ratings=ratings,
                 persons=persons, roles=roles, groups=groups, limit=limit, sort=sort, offset=offset, subcategory=subcategory,
-                relax=relax)
+                relax=relax, tree=tree, d1=d1, d2=d2, d3=d3)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/tree")
+    async def api_event_map_tree():
+        """3단 지도 골격(갈래 › 그룹 › 절, 한국어 이름 · 태그 수). 색인이 없어도 200 (`indexed: false`)."""
+        service = ensure_event_map_service(session_context)
+        try:
+            payload = await run_in_thread(_call, service.tree_state)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/tree/browse")
+    async def api_event_map_tree_browse(d1: str = "", d2: str = "", d3: str = "", ratings: str = "",
+                                        persons: str = "", limit: int = 40, offset: int = 0, per: int = 5):
+        """핀 없이 지도의 한 자리: 절(d2+d3) = 그 절을 쪽 단위로 · 그룹(d2) = 절마다 상위 `per` ·
+        갈래(d1) = 그룹마다 상위 `per`. 고른 인원 · 등급에서 특징적인 순(browse 와 같은 점수)."""
+        service = ensure_event_map_service(session_context)
+        try:
+            payload = await run_in_thread(
+                _call, service.tree_browse, d1=d1, d2=d2, d3=d3, ratings=ratings, persons=persons,
+                limit=limit, offset=offset, per=per)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

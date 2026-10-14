@@ -253,6 +253,7 @@
       "name": "Event Map (Ctrl+E) pinned tag co-occurrence over the observed corpus",
       "unclassified_exploration": "GET explore excludes unsorted candidates by default. Explicit groups=unsorted requires at least two distinct resolved pins. unclassified_available/unclassified_count expose the opt-in entry; group_counts include unsorted while candidate_pool and paging describe the selected list. Minimum observed co-occurrence remains five; sampled responses are labelled, and unsampled responses show exact co-occurrence alongside observed_total. Reviewed candidate_exclusions in the bundled compact mapping remove color/ambiguous recommendations without deleting posts or blocking explicit search.",
       "subcategories": "GET explore/browse accept subcategory with a single selected group. subcategories counts cover the entire matching group before the subcategory filter; unknown and pending tags remain accessible. Compact mapping is bundled as data/event_map_subcategories.json.",
+      "tree_3depth": "New-version 3-level map (d1 section > d2 group > d3 section > tags) bundled as core/event_map/tree_3depth.json (names and hierarchy only; built by tools/export_event_map_tree.py from the curated Danbooru wiki tag_groups draft). GET tree returns the skeleton with Korean labels and tag counts even without the index (indexed=false). GET tree/browse returns, for the chosen ratings/persons, a section page (d2+d3, offset paging), per-section top candidates for a group (d2) or per-group top candidates for a branch (d1) from one counting pass. GET explore with tree=1 restricts candidates to map tags (optionally d1/d2/d3), attaches candidate path and tree_counts per d1, and ignores groups/subcategory.",
       "pagination": "GET explore/browse accept zero-based offset and bounded limit; return offset, next_offset and has_more. The panel appends 40 candidates on bottom scroll and resets on query changes.",
       "source_files": [
         "app/backend/server/event_map_routes.py",
@@ -268,6 +269,8 @@
         "data/event_map_subcategories.json",
         "core/event_map/kr_category_fold.json",
         "core/event_map/pe_filter.py",
+        "core/event_map/tree.py",
+        "core/event_map/tree_3depth.json",
         "app/web/remote/js/features/eventMapPanel.mjs",
         "app/web/remote/js/features/draggablePanel.mjs"
       ],
@@ -284,6 +287,8 @@
         {"method": "GET", "path": "/api/event-map/describe", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/resolve", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/browse", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/tree", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/tree/browse", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/pe-filter", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-map/apply", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/event-map/generate", "smoke": "external_live"}

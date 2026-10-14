@@ -43,8 +43,9 @@ from typing import Any, Callable, Iterable, Sequence
 import numpy as np
 
 from core.event_map import categories as C
-from core.event_map.index import (SORT_MODES, 
+from core.event_map.index import (SORT_MODES,
     MAX_EXCLUDE, MAX_PINS, MAX_SAMPLES, SCAN_CAP, EventMapIndex)
+from core.event_map.tree import BoundTree, EventMapTree, TreeError
 
 # 대분류 재료. `data/KR_tags.parquet` 의 category 를 접기 표로 접는다(사용자 결정 2026-09-12).
 KR_TAGS_REL = Path("data") / "KR_tags.parquet"
@@ -115,9 +116,13 @@ class EventMapService:
     """맵 색인을 지연 개방하고 질의를 검증해 넘긴다. 스레드 안전."""
 
     def __init__(self, roots: Sequence[Path] | None = None,
-                 kr_tags_path: Path | None = None) -> None:
+                 kr_tags_path: Path | None = None, tree_path: Path | None = None) -> None:
         self._roots = [Path(r) for r in (roots or [])]
         self._kr_tags_path = kr_tags_path
+        # 3단 지도(새 버전 화면). 골격은 색인 없이도 준다 - 색인에 묶는 것은 색인을 연 뒤.
+        self._tree_path = tree_path
+        self._tree: EventMapTree | None = None
+        self._bound: BoundTree | None = None
         self._lock = threading.Lock()
         self._index: EventMapIndex | None = None
         # 대분류: 태그 id -> 갈래 순번(groups() 순서). 색인을 열 때 같이 만든다.
@@ -298,6 +303,7 @@ class EventMapService:
             self._group_arr, self._group_rows = None, []
             self._candidate_excluded = None
             self._sub_arr, self._sub_names = None, []
+            self._bound = None   # 다른 색인이면 태그 id 가 다르다
         if idx is not None:
             try:
                 idx.close()
@@ -488,14 +494,150 @@ class EventMapService:
         return {"ok": True, "status": "matched" if items else "no_match",
                 "query": raw, "items": items, "translated": translated}
 
+    # -- 3단 지도(갈래 › 그룹 › 절 › 태그) -------------------------------------------------
+    def tree(self) -> EventMapTree:
+        """지도 파일. 못 읽으면 `MapQueryError('tree_unavailable')` - 기존 화면은 그래도 돈다."""
+        if self._tree is None:
+            try:
+                self._tree = EventMapTree.load(self._tree_path)
+            except (OSError, ValueError, KeyError, TypeError, TreeError) as exc:
+                raise MapQueryError("tree_unavailable", "3단 지도 파일을 읽지 못했다: %s" % exc) from exc
+        return self._tree
+
+    def _bound_tree(self, idx: EventMapIndex) -> BoundTree:
+        bound = self._bound
+        if bound is None or bound.n_tags != idx.n_tags:
+            bound = self.tree().bind(idx.resolve, idx.n_tags)
+            self._bound = bound
+        return bound
+
+    def _tree_slots(self, tree: EventMapTree, d1: Any, d2: Any, d3: Any) -> list[int]:
+        try:
+            return tree.select(d1=d1, d2=d2, d3=d3)
+        except KeyError as exc:
+            raise MapQueryError("bad_tree_slot", "지도에 없는 자리다: %s" % exc,
+                                d1=str(d1 or ""), d2=str(d2 or ""), d3=str(d3 or "")) from exc
+
+    def tree_state(self) -> dict[str, Any]:
+        """지도 골격(id · 한국어 이름 · 태그 수). 색인이 열려 있으면 색인에 있는 태그만 센다."""
+        tree = self.tree()
+        bound = None
+        try:
+            bound = self._bound_tree(self.index())
+        except MapQueryError:
+            bound = None   # 색인이 없어도 골격은 준다(화면이 내려받기 안내와 함께 그린다)
+        d1_rows = []
+        for d1 in tree.d1:
+            d2_rows = []
+            for d2 in d1["d2"]:
+                d3_rows = [{"id": d3["id"], "ko": d3["ko"],
+                            "tags": bound.slot_size(d3["slot"]) if bound else len(tree.slots[d3["slot"]][3])}
+                           for d3 in d2["d3"]]
+                d2_rows.append({"id": d2["id"], "ko": d2["ko"], "tags": sum(r["tags"] for r in d3_rows),
+                                "d3": d3_rows})
+            d1_rows.append({"id": d1["id"], "ko": d1["ko"], "d2": d2_rows})
+        return {"ok": True, "schema": "naia-event-map-tree-v1", "version": tree.version,
+                "indexed": bound is not None, "unresolved": bound.unresolved if bound else None,
+                "d1": d1_rows}
+
+    def tree_browse(self, *, d1: Any = "", d2: Any = "", d3: Any = "", ratings: Any = None,
+                    persons: Any = None, limit: Any = DEFAULT_CANDIDATES, offset: Any = 0,
+                    per: Any = 5) -> dict[str, Any]:
+        """핀 없이 지도의 한 자리에서 고른 인원 · 등급에 특징적인 태그.
+
+        * 절(d2+d3) - 그 절 하나를 쪽 단위로(`offset` · `has_more`). 같은 셈에서 그 그룹의 절마다
+          이 조건의 후보 수도 단다(`sections[].live` - 화면의 나무 목록이 빈 절을 흐리게 한다).
+        * 그룹(d2)  - 절마다 상위 `per` 개(`sections`). 한 번 세고 절마다 줄만 다시 세운다.
+        * 갈래(d1)  - 그룹마다 상위 `per` 개(`sections`).
+        """
+        idx = self.index()
+        tree = self.tree()
+        bound = self._bound_tree(idx)
+        want_r, want_p = self._filters(idx, ratings, persons)
+        d1, d2, d3 = (str(x or "").strip() for x in (d1, d2, d3))
+        if not (d1 or d2 or d3):
+            raise MapQueryError("bad_tree_slot", "갈래 · 그룹 · 절 중 하나는 골라야 한다.")
+        slots = self._tree_slots(tree, d1, d2, d3)
+        if d3:
+            off = self._page_offset(offset, idx.n_tags)
+            result = idx.browse(ratings=want_r, persons=want_p, allowed=bound.mask(slots),
+                                limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=off)
+            pool = result.pop("_pool", None)
+            self._attach_page(result, off)
+            siblings = tree.select(d2=d2)
+            result.update({"ok": True, "mode": "section", "d2": d2, "d3": d3,
+                           "path": tree.path_ko(slots[0]), "tags": bound.slot_size(slots[0]),
+                           "sections": [{"id": tree.slots[s][2], "ko": tree.d3_ko(d2, tree.slots[s][2]),
+                                         "tags": bound.slot_size(s),
+                                         "live": int((pool & bound.mask([s])).sum()) if pool is not None else None}
+                                        for s in siblings]})
+            return result
+        per_n = self._count(per, 5, 20)
+        if d2:
+            units = [{"id": tree.slots[s][2], "ko": tree.d3_ko(d2, tree.slots[s][2]), "slots": [s]} for s in slots]
+            mode = "group"
+        else:
+            units = [{"id": row["id"], "ko": row["ko"], "slots": [r["slot"] for r in row["d3"]]}
+                     for row in next(x for x in tree.d1 if x["id"] == d1)["d2"]]
+            mode = "branch"
+        result = idx.browse_groups(groups=[bound.mask(u["slots"]) for u in units],
+                                   ratings=want_r, persons=want_p, limit=per_n)
+        result.pop("_pool", None)
+        sections = []
+        for u, g in zip(units, result.pop("groups")):
+            sections.append({"id": u["id"], "ko": u["ko"],
+                             "tags": sum(bound.slot_size(s) for s in u["slots"]),
+                             "live": g["candidate_pool"], "candidates": g["candidates"]})
+        result.update({"ok": True, "mode": mode, "d1": d1 or tree.d2[d2]["d1"], "d2": d2,
+                       "sections": sections})
+        return result
+
+    def _attach_tree(self, result: dict, bound: BoundTree) -> None:
+        """핀 결과에 지도 정보를 단다: 후보마다 첫 자리(경로) · 갈래 / 그룹 / 절별 후보 수.
+
+        수는 고른 자리(d1 · d2 · d3)로 가두기 **전의** 풀에서 센다 - 탭 · 나무가 다른 자리의 수도 보여 준다.
+        그룹 · 절은 0 을 싣지 않는다(핀 화면의 나무는 빈 그룹 · 절을 숨긴다 - 사용자 결정 2026-10-14).
+        `d3` 의 키는 `그룹 id + "\\t" + 절 id` 다(절 id 는 그룹 안에서만 고유하다)."""
+        idx = self._index
+        if idx is None:
+            return
+        for c in result.get("candidates") or []:
+            tid = idx.by_name.get(c.get("tag"))
+            if tid is not None:
+                c["path"] = bound.first_path(tid)
+        pool = result.get("_pool")
+        if pool is None:
+            return
+        pool = pool & bound.universe
+        tree = bound.tree
+        d2_counts, d3_counts = {}, {}
+        for d2, group in tree.d2.items():
+            n = int(pool[bound.group_tids[d2]].sum())
+            if not n:
+                continue
+            d2_counts[d2] = n
+            for row in group["d3"]:
+                k = int(pool[bound.slot_tids[row["slot"]]].sum())
+                if k:
+                    d3_counts[f"{d2}\t{row['id']}"] = k
+        result["tree_counts"] = {
+            "d1": [{"id": d1, "ko": tree.d1_ko(d1), "count": int((pool & bound.d1_masks[d1]).sum())}
+                   for d1 in tree.d1_ids],
+            "d2": d2_counts,
+            "d3": d3_counts,
+        }
+
     # 색상은 앱 경로에서 **항상** 뺀다(사용자 지정 2026-09-12). 리더의 include_color 는 시험대
     # (tools/event_map_playground.py)가 연구용으로만 쓴다 - 여기서는 켤 길을 두지 않는다.
     def explore(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                 persons: Any = None, roles: Any = None, groups: Any = None,
                 limit: Any = DEFAULT_CANDIDATES, sort: Any = "lift", offset: Any = 0, subcategory: str = "",
-                relax: Any = 0) -> dict[str, Any]:
+                relax: Any = 0, tree: Any = 0, d1: Any = "", d2: Any = "", d3: Any = "") -> dict[str, Any]:
         idx = self.index()
         relax_one = str(relax or "").strip().lower() in ("1", "true", "on", "yes")
+        # 3단 지도 화면: 후보를 **지도에 있는 태그**로(갈래 · 그룹 · 절을 고르면 그 자리로) 가둔다.
+        # 대분류(groups · subcategory · unsorted) 규칙은 기존 화면의 것이라 여기서는 쓰지 않는다.
+        tree_on = str(tree or "").strip().lower() in ("1", "true", "on", "yes")
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         if not wanted:
             raise MapQueryError("no_pins", "핀이 하나는 있어야 한다.")
@@ -508,15 +650,22 @@ class EventMapService:
         want_r, want_p = self._filters(idx, ratings, persons)
         want_roles = self._tags(roles, cap=32, what="갈래", code="bad_role")
         want_groups = self._tags(groups, cap=16, what="대분류", code="bad_group")
-        allowed = self._subcategory_mask(want_groups, subcategory)
-        # Unclassified tags are opt-in after two distinct pins. Keep their
-        # counts in _pool so the UI can offer a separate exploration entry.
         distinct_pins = {idx.resolve(tag) for tag in wanted} - {None}
         unclassified_available = len(distinct_pins) >= 2
-        unsorted = self.group_mask([C.UNSORTED])
-        if unsorted is not None:
-            if C.UNSORTED not in want_groups or not unclassified_available:
-                allowed = (allowed & ~unsorted) if allowed is not None else ~unsorted
+        bound = None
+        if tree_on:
+            bound = self._bound_tree(idx)
+            picked = any(str(x or "").strip() for x in (d1, d2, d3))
+            allowed = bound.mask(self._tree_slots(bound.tree, d1, d2, d3)) if picked else bound.universe.copy()
+            want_groups, subcategory = [], ""
+        else:
+            allowed = self._subcategory_mask(want_groups, subcategory)
+            # Unclassified tags are opt-in after two distinct pins. Keep their
+            # counts in _pool so the UI can offer a separate exploration entry.
+            unsorted = self.group_mask([C.UNSORTED])
+            if unsorted is not None:
+                if C.UNSORTED not in want_groups or not unclassified_available:
+                    allowed = (allowed & ~unsorted) if allowed is not None else ~unsorted
         try:
             result = idx.explore(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
@@ -526,6 +675,8 @@ class EventMapService:
                 candidate_excluded=self._candidate_excluded)
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
+        if bound is not None:
+            self._attach_tree(result, bound)
         self._attach_subcategories(result, want_groups, subcategory)
         self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)

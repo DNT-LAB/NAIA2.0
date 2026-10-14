@@ -28474,6 +28474,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-tip-head { display: flex; align-items: baseline; gap: 10px; }
 .em-tip-tag { flex: 1 1 auto; min-width: 0; font-family: var(--font-mono); font-size: 11px; font-weight: 700; color: #f7f6ff; overflow-wrap: anywhere; }
 .em-tip-src { flex: 0 0 auto; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); white-space: nowrap; }
+/* 3단 지도의 경로(갈래 › 그룹 › 절)는 길다 - 머리줄에 두면 태그 이름이 한 글자씩 세로로 꺾였다. 제 줄에 둔다. */
+.em-tip-path { margin-top: 2px; font-size: 9px; color: var(--text-dim); overflow-wrap: anywhere; }
 .em-tip-desc { margin-top: 3px; font-size: 10px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
 .em-tip-wait { color: var(--text-dim); }
 .em-tip-stats { margin-top: 3px; font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); }
@@ -28652,6 +28654,73 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    줄에서 열리므로 접혀도 뜬다 - 숨기면 눌러도 아무 일이 없는 단추가 된다. */
 .em-window-collapsed .em-subpanel,
 .em-window-collapsed .em-saved-panel { display: none !important; }
+/* ── 3단 지도(새 버전 · 사용자 지정 2026-10-14) ──────────────────────────────────────────────
+   머리줄의 [3단 지도 | 기존] 토글(eventMapPanel paintViewToggle). 3단 지도에서는 조건 줄 → 갈래 탭 → 부스러기
+   (갈래 › 그룹 › 절) → 본문(왼쪽 나무 · 오른쪽 고른 절의 태그) 순서로 선다 - DOM 은 기존 화면 그대로 두고 order 로만 바꾼다. 저장 줄은 [⋯] 안으로,
+   넣기 · 생성 · 복사 · 실제 조합은 발줄 오른쪽(핀이 있을 때만)으로 간다. */
+.emt-seg { display: inline-flex; margin-left: 6px; border: 1px solid var(--border-dim); border-radius: 4px; overflow: hidden; }
+.emt-seg button { border: 0; background: transparent; color: var(--text-dim); font-family: var(--font-mono); font-size: 9.5px;
+  line-height: 1; padding: 2px 7px; cursor: pointer; }
+.emt-seg button + button { border-left: 1px solid var(--border-dim); }
+.emt-seg button:hover { color: var(--text-primary); }
+.emt-seg button.is-on { background: rgba(88,76,170,0.42); color: #fff; }
+.em-window.em-tree .em-trail { order: 1; }
+.em-window.em-tree .em-library-bar, .em-window.em-tree .em-library-panel,
+.em-window.em-tree .em-body, .em-window.em-tree .em-foot { order: 2; }
+.em-window.em-tree .em-library-bar, .em-window.em-tree .em-keys { display: none; }
+.em-window.em-tree .em-random-link { margin-left: 4px; }
+.em-cats.emt-tabs { position: static; flex: 0 0 auto; margin: 0; }
+.emt-tabs[hidden], .emt-acts[hidden], .emt-menu[hidden] { display: none; }
+.em-foot .emt-acts { margin-left: auto; }
+.em-window.em-tree .em-foot > .em-actions:first-child { margin-left: 0; }   /* 랜덤 단추는 왼쪽(목업) */
+.emt-menu-btn { margin-left: auto; padding: 0 9px; font-size: 13px; line-height: 1; }
+.emt-menu {
+  position: fixed; z-index: calc(var(--z-floating-module-aux) + 1); display: flex; flex-direction: column; min-width: 190px;
+  padding: 4px; border: 1px solid rgba(130,150,255,0.30); border-radius: 6px; background: rgba(18,18,28,0.99);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+}
+.emt-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-primary); font-size: 11px; text-align: left; padding: 5px 8px; cursor: pointer; }
+.emt-menu button small { color: var(--text-dim); font-size: 9.5px; }
+.emt-menu button:hover:not(:disabled) { background: rgba(88,76,170,0.30); }
+.emt-menu button:disabled { opacity: 0.4; cursor: default; }
+.emt-crumbs { gap: 4px; font-size: 11px; color: var(--text-muted); }
+.emt-crumb { border: 0; background: transparent; padding: 0; color: var(--text-muted); font: inherit; }
+b.emt-crumb { color: var(--text-primary); font-weight: 600; }
+.emt-hint { flex: 0 1 auto; align-self: center; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 본문 = 왼쪽 나무(그룹 · 고른 그룹 아래로 그 절) + 오른쪽 고른 절의 태그. 스크롤은 몸통 하나(더 보기 · 키보드가
+   그대로 먹는다), 왼쪽 나무는 몸통 높이에 붙어 서서(sticky) 따로 스크롤한다. 높이(--emt-h)는 fitHeight 가 적는다. */
+.emt-grid { display: grid; grid-template-columns: minmax(118px, 36%) minmax(0, 1fr); align-items: start; }
+.emt-left { position: sticky; top: 0; max-height: var(--emt-h, 400px); overflow-y: auto; border-right: 1px solid var(--border-dim); padding-bottom: 4px; }
+.emt-d2 { display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 6px; border: 0; background: transparent;
+  color: var(--text-secondary); font-size: 11px; text-align: left; padding: 5px 8px 5px 10px; cursor: pointer; }
+.emt-d2 span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emt-d2 small { flex: 0 0 auto; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; }
+.emt-d2:hover, .emt-d3i:hover { background: rgba(255,255,255,0.05); }
+.emt-d2.is-open { color: var(--text-primary); font-weight: 600; }
+.emt-caret { display: inline-block; width: 12px; font-style: normal; color: var(--text-dim); }
+.emt-d3i { display: flex; width: calc(100% - 14px); margin-left: 14px; justify-content: space-between; align-items: baseline; gap: 6px;
+  border: 0; border-left: 1px solid var(--border-dim); background: transparent; color: var(--text-secondary); font-size: 10.5px;
+  text-align: left; padding: 4px 8px 4px 10px; cursor: pointer; }
+.emt-d3i span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.emt-d3i small { flex: 0 0 auto; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; }
+.emt-d3i.is-on { background: rgba(88,76,170,0.34); color: #fff; border-left-color: rgba(139,118,255,0.8); }
+.emt-d3i.is-empty { opacity: 0.45; }
+.emt-right { min-width: 0; padding-bottom: 4px; }
+.emt-d3h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--border-dim);
+  color: var(--text-primary); font-size: 11px; font-weight: 600; padding: 3px 10px; }
+.emt-d3h small { flex: 0 0 auto; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; font-weight: 400; }
+/* 400 폭의 핀 화면: 동작 단추가 발줄에 서면 '랜덤 버튼 연결' 을 '연결' 로 접는다(뜻은 툴팁이 말한다) ·
+   오른쪽 칸의 정렬 줄은 이름표 없이 한 줄로(절 머리가 이름표다). */
+.em-window.em-tree .em-foot:has(.emt-acts:not([hidden])) .em-link-long { display: none; }
+.emt-right .em-cap { gap: 6px; padding: 4px 10px 2px; }
+.emt-right .em-cap-label { display: none; }
+.emt-right .em-sort { margin: 0; white-space: nowrap; }
+.emt-error { display: flex; align-items: center; gap: 8px; margin: 8px 10px; padding: 6px 8px; border: 1px solid rgba(229,115,115,0.45);
+  border-radius: 5px; color: #e57373; font-size: 11px; }
+.emt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; column-gap: 8px; }
+.emt-path { grid-column: 1 / -1; min-width: 0; margin-top: -2px; line-height: 1.25; font-family: var(--font-sans, inherit); font-size: 9.5px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }

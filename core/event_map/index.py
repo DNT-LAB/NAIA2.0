@@ -519,6 +519,44 @@ class EventMapIndex:
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return out
 
+    def browse_groups(self, *, groups, ratings=None, persons=None, limit=5, min_posts=5,
+                      scan_cap=SCAN_CAP, prior=RANK_PRIOR) -> dict:
+        """browse 와 같은 줄 세우기를 **여러 태그 묶음에 한 번의 집계로** 낸다(3단 지도의 그룹 화면용).
+
+        그룹 하나를 고르면 그 안의 절이 15개 안팎이다. 절마다 browse 를 부르면 같은 게시물을 15번
+        센다(분면이 크면 한 번에 수백 ms) - 여기서는 한 번 세고 묶음마다 `_rank` 만 다시 한다.
+        `groups` 는 태그 불리언 마스크 목록이고, 결과의 `groups` 는 같은 순서다.
+        """
+        started = time.perf_counter()
+        parts = self._partition_filter(ratings, persons)
+        rids = self._live_posts(parts)
+        out = {"schema": SCHEMA, "ratings": sorted(ratings or []), "persons": sorted(persons or []),
+               "observed_posts": int(rids.size), "corpus_posts": self.total_posts,
+               "count_meaning": "고른 분면의 게시물 수", "note": NOTE,
+               "groups": [{"candidates": [], "candidate_pool": 0} for _ in groups]}
+        if rids.size == 0:
+            out["status"] = "no_match"
+            return out
+        scanned = rids
+        sampled = rids.size > scan_cap > 0
+        if sampled:
+            scanned = rids[np.linspace(0, rids.size - 1, scan_cap).astype(np.int64)]
+        out["scanned_posts"] = int(scanned.size)
+        out["sampled"] = sampled
+        out["min_posts"] = int(min_posts)
+        counts = self._count_tags(scanned)
+        keep = (counts >= min_posts) & self.usable_arr & (self.obs_arr > 0) & ~self.color_arr
+        out["_pool"] = keep.copy()
+        for slot, mask in zip(out["groups"], groups):
+            k = keep & mask
+            slot["candidate_pool"] = int(k.sum())
+            if slot["candidate_pool"]:
+                slot["candidates"] = self._rank(counts, k, int(scanned.size), rids.size, sampled, limit, prior,
+                                                support_weighted=True)
+        out["status"] = "matched" if any(g["candidates"] for g in out["groups"]) else "no_match"
+        out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
+        return out
+
     def _rank(self, counts, keep, base, matched, sampled, limit, prior,
               support_weighted: bool = False, sort: str = "lift", offset: int = 0) -> list[dict]:
         """explore/browse 공통 줄 세우기. lift 는 언제나 날 값으로 보인다.

@@ -1,0 +1,430 @@
+tag	d2	d3	source
+animification	tag_group:image_composition	Styles	codex:style
+sign language	tag_group:gestures	Other gestures	codex:lang
+fake text	tag_group:text	Use	codex:lang
+striped hair	tag_group:hair	Miscellaneous	codex:haircolor
+spotted hair	tag_group:hair	Miscellaneous	codex:haircolor
+raccoon tails (hairstyle)	tag_group:hair	Miscellaneous	codex:haircolor
+see-through hair	tag_group:hair	Miscellaneous	codex:haircolor
+gatling gun	list_of_weapons	Firearms	codex:guns
+minigun	list_of_weapons	Firearms	codex:guns
+firelock	list_of_weapons	Firearms	codex:guns
+flintlock	list_of_weapons	Firearms	codex:guns
+musket	list_of_weapons	Firearms	codex:guns
+double-barreled shotgun	list_of_weapons	Firearms	codex:guns
+autocannon	list_of_weapons	Firearms	codex:guns
+snubnosed revolver	list_of_weapons	Firearms	codex:guns
+blunderbuss	list_of_weapons	Firearms	codex:guns
+flare gun	list_of_weapons	Firearms	codex:guns
+derringer	list_of_weapons	Firearms	codex:guns
+pepperbox revolver	list_of_weapons	Firearms	codex:guns
+matchlock	list_of_weapons	Firearms	codex:guns
+sawed-off shotgun	list_of_weapons	Firearms	codex:guns
+ace of hearts	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+ace of spades	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+ace of diamonds	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+ace of clubs	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+queen (playing card)	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+king (playing card)	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+jack (playing card)	tag_group:cards	Card games and their cards; except the ones associated with animes, books, video games, Trading Card Games, etc.	codex:cards
+queen of spades symbol	tag_group:symbols	Playing Card	codex:cards
+shiba inu	list_of_animals	Types · Dog	codex:breeds
+welsh corgi	list_of_animals	Types · Dog	codex:breeds
+great pyrenees	list_of_animals	Types · Dog	codex:breeds
+husky	list_of_animals	Types · Dog	codex:breeds
+pomeranian (dog)	list_of_animals	Types · Dog	codex:breeds
+golden retriever	list_of_animals	Types · Dog	codex:breeds
+german shepherd	list_of_animals	Types · Dog	codex:breeds
+siamese cat	list_of_animals	Types · Cat	codex:breeds
+scottish fold	list_of_animals	Types · Cat	codex:breeds
+cat teaser	naia:everyday_objects	Toys and play objects	codex:etym
+pet bowl	naia:everyday_objects	Containers and boxes	codex:etym
+maneki-neko	naia:everyday_objects	Toys and play objects	codex:etym
+pet food	tag_group:food_tags	Meal Items / Misc. Tags	codex:etym
+catfight	tag_group:verbs_and_gerunds	Combat harm and defense	codex:etym
+cat o' nine tails	tag_group:sex_objects	BDSM / Bondage Gear	codex:etym
+cat-shaped pillow	naia:everyday_objects	Beds and bedding	codex:etym
+pyramid (structure)	tag_group:locations	Buildings	codex:places
+moai	tag_group:locations	Outdoors	codex:places
+medieval	tag_group:theme	(intro)	codex:history
+war	tag_group:theme	(intro)	codex:history
+fluffy	tag_group:theme	Materials and physical properties	codex:subjective
+stuffed shark	naia:everyday_objects	Toys and play objects	codex:trans
+transgender flag	tag_group:symbols	Flags and emblems	codex:trans
+mastectomy scar	injury	Visible signs of injury	codex:trans
+uohhhhhhhhh! (meme)	tag_group:phrases	Meme phrases	codex:phrases
+koi dance	tag_group:dances	Meme dances	codex:dance
+mochi mochi dance	tag_group:dances	Meme dances	codex:dance
+kitsune dance	tag_group:dances	Meme dances	codex:dance
+kotatsu	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+wooden table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+under kotatsu	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+round table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+full-length mirror	naia:everyday_objects	Room textiles and decoration	claude:colon-fix
+broken mirror	naia:everyday_objects	Room textiles and decoration	claude:colon-fix
+poker table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+glass table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+coffee table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+pool table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+casino card table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+roulette table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+mahjong table	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+chabudai (table)	naia:everyday_objects	Tables and storage furniture	claude:colon-fix
+glitter	tag_group:theme	Materials and physical properties	claude:colon-fix
+sparkle	tag_group:image_composition	Camera and optical effects	claude:paren-fix
+sparkling aura	tag_group:theme	Magic and supernatural effects	claude:paren-fix
+cloudy sky	tag_group:locations	Astronomy and sky	claude:paren-fix
+cumulonimbus cloud	tag_group:locations	Astronomy and sky	claude:paren-fix
+above clouds	tag_group:locations	Astronomy and sky	claude:paren-fix
+bubble	tag_group:water	Misc / Actions, Objects, Containers, Etc.	claude:paren-fix
+air bubble	tag_group:water	Misc / Actions, Objects, Containers, Etc.	claude:paren-fix
+snowflakes	tag_group:locations	Weather and seasons	claude:paren-fix
+flag	tag_group:symbols	Flags and emblems	claude:paren-fix
+checkered flag	tag_group:symbols	Flags and emblems	claude:paren-fix
+war flag	tag_group:symbols	Flags and emblems	claude:paren-fix
+weapon on back	list_of_weapons	Other related tags	claude:paren-fix
+gun on back	list_of_weapons	Other related tags	claude:paren-fix
+multiple weapons	list_of_weapons	Other related tags	claude:paren-fix
+broken weapon	list_of_weapons	Other related tags	claude:paren-fix
+claw (weapon)	list_of_weapons	Melee	claude:paren-fix
+silk	tag_group:theme	Materials and physical properties	claude:paren-fix
+spider web	tag_group:theme	(intro)	claude:paren-fix
+string of fate	tag_group:handwear	Hand Accessories	claude:paren-fix
+swing	naia:everyday_objects	Toys and play objects	claude:paren-fix
+hanged	tag_group:bdsm_and_torture	Torture	claude:paren-fix
+petal censor	tag_group:censorship	Visual forms of censorship	claude:paren-fix
+simple background	tag_group:image_composition	Format	user:backgrounds
+transparent background	tag_group:image_composition	Format	user:backgrounds
+blurry background	tag_group:image_composition	Camera and optical effects	user:backgrounds
+dark background	tag_group:image_composition	Color palette and texture	user:backgrounds
+chibi inset	tag_group:image_composition	Insets borders and layouts	user:backgrounds
+chibi	tag_group:image_composition	Styles	user:backgrounds
+horizon	tag_group:locations	Outdoors	user:backgrounds
+outdoors	tag_group:locations	Outdoors	user:backgrounds
+gun	list_of_weapons	Firearms	review:guns
+rifle	list_of_weapons	Firearms	review:guns
+handgun	list_of_weapons	Firearms	review:guns
+assault rifle	list_of_weapons	Firearms	review:guns
+submachine gun	list_of_weapons	Firearms	review:guns
+revolver	list_of_weapons	Firearms	review:guns
+shotgun	list_of_weapons	Firearms	review:guns
+machine gun	list_of_weapons	Firearms	review:guns
+battle rifle	list_of_weapons	Firearms	review:guns
+light machine gun	list_of_weapons	Firearms	review:guns
+sniper rifle	list_of_weapons	Firearms	review:guns
+anti-materiel rifle	list_of_weapons	Firearms	review:guns
+antique firearm	list_of_weapons	Firearms	review:guns
+destroyer	tag_group:water	Vehicles	review:ships
+cruiser	tag_group:water	Vehicles	review:ships
+pirate ship	tag_group:water	Vehicles	review:ships
+battleship	tag_group:water	Vehicles	review:ships
+aircraft carrier	tag_group:water	Vehicles	review:ships
+submarine	tag_group:water	Vehicles	review:ships
+warship	tag_group:water	Vehicles	review:ships
+hetero	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+age difference	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+interracial	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+size difference	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+interspecies	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+furry with non-furry	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+furry with furry	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+harem	tag_group:sex_acts	Sexual relationships	rating:E>=35%
+fat man	tag_group:sex_acts	Fetishes · Body Types	rating:E>=35%
+muscular uke	tag_group:sex_acts	Fetishes · Body Types	rating:E>=35%
+giant	tag_group:body_parts	Age and physique	rating:E<35%
+giantess	tag_group:body_parts	Age and physique	rating:E<35%
+miniboy	tag_group:body_parts	Age and physique	rating:E<35%
+minigirl	tag_group:body_parts	Age and physique	rating:E<35%
+muscular	tag_group:body_parts	Age and physique	rating:E<35%
+muscular male	tag_group:body_parts	Age and physique	rating:E<35%
+muscular female	tag_group:body_parts	Age and physique	rating:E<35%
+muscular other	tag_group:body_parts	Age and physique	rating:E<35%
+plump	tag_group:body_parts	Age and physique	rating:E<35%
+curvy	tag_group:body_parts	Age and physique	rating:E<35%
+obese	tag_group:body_parts	Age and physique	rating:E<35%
+skinny	tag_group:body_parts	Age and physique	rating:E<35%
+mature female	tag_group:body_parts	Age and physique	rating:E<35%
+mature male	tag_group:body_parts	Age and physique	rating:E<35%
+shimaidon (sex)	tag_group:sex_acts	Group sex	rating:E>=35%
+oyakodon (sex)	tag_group:sex_acts	Group sex	rating:E>=35%
+kyoudaidon (sex)	tag_group:sex_acts	Group sex	rating:E>=35%
+against glass	tag_group:posture	Other rest points of the body	codex:rating-place
+aircraft	naia:vehicles	Aircraft	codex:rating-place
+animal bag	tag_group:accessories	Bags	codex:rating-place
+animal hands	tag_group:body_parts	Appendages	codex:rating-place
+animal hands	tag_group:handwear	Gloves	codex:rating-place
+animal helmet	tag_group:headwear	Helmets	codex:rating-place
+artificial eye	tag_group:technology	Prosthetics, cybernetics, robotics, bionics, and orthotics	codex:rating-place
+ass press	tag_group:ass	Anatomy of the ass	codex:rating-place
+assisted exposure	tag_group:nudity	Partial nudity · Misc / Specific exposures that could fit multiple categories below	codex:rating-place
+asymmetrical sleeves	tag_group:sleeves	Style	codex:rating-place
+bed sheet	naia:everyday_objects	Beds and bedding	codex:rating-place
+bound	tag_group:bdsm_and_torture	Bondage	codex:rating-place
+bright pupils	tag_group:eyes_tags	Pupils	codex:rating-place
+cast	injury	Coverings and bindings	codex:rating-place
+clock	naia:everyday_objects	Clocks and timekeeping	codex:rating-place
+clothes lift	tag_group:attire	Clothing states and adjustments	codex:rating-place
+clothes pull	tag_group:attire	Clothing states and adjustments	codex:rating-place
+cloud	tag_group:locations	Astronomy and sky	codex:rating-place
+concealed weapon	list_of_weapons	Design traits	codex:rating-place
+cross-laced clothes	tag_group:attire	Fit and garment construction	codex:rating-place
+crown (symbol)	tag_group:symbols	Misc symbols	codex:rating-place
+dirty	tag_group:theme	Materials and physical properties	codex:rating-place
+emoji	tag_group:symbols	Misc symbols	codex:rating-place
+energy barrier	tag_group:theme	Magic and supernatural effects	codex:rating-place
+explosive	list_of_weapons	Explosives	codex:rating-place
+facial mark	tag_group:body_parts	Body paint and markings	codex:rating-place
+fake facial hair	tag_group:hair	Facial hair	codex:rating-place
+fake horns	tag_group:headwear	Accessories	codex:rating-place
+family	tag_group:family_relationships	Family	codex:rating-place
+food bite	tag_group:food_tags	Actions, Activities, Misc.	codex:rating-place
+food in mouth	tag_group:food_tags	Actions, Activities, Misc.	codex:rating-place
+furry	tag_group:legendary_creatures	Humanoid hybrids	codex:rating-place
+gagged	tag_group:bdsm_and_torture	Bondage	codex:rating-place
+guiding hand	tag_group:hands	Hands on members	codex:rating-place
+hand under clothes	tag_group:hands	Hands somewhere else	codex:rating-place
+heavy machine gun	list_of_weapons	Firearms	codex:rating-place
+highleg	tag_group:attire	Fit and garment construction	codex:rating-place
+horns	tag_group:body_parts	Horns and head appendages	codex:rating-place
+hotpot	tag_group:food_tags	Meal Items / Misc. Tags	codex:rating-place
+impossible clothes	tag_group:attire	Fit and garment construction	codex:rating-place
+injury	injury	Visible signs of injury	codex:rating-place
+leather	tag_group:theme	Materials and physical properties	codex:rating-place
+light trail	tag_group:lighting	Types	codex:rating-place
+locker	naia:everyday_objects	Tables and storage furniture	codex:rating-place
+lowleg	tag_group:attire	Fit and garment construction	codex:rating-place
+magazine (object)	naia:everyday_objects	Books, stationery and art supplies	codex:rating-place
+military vehicle	tag_group:technology	Vehicles	codex:rating-place
+mine (weapon)	list_of_weapons	Explosives	codex:rating-place
+mole	tag_group:body_parts	Moles freckles and birthmarks	codex:rating-place
+mouth hold	tag_group:posture	Posture of the head	codex:rating-place
+multishot rocket launcher	list_of_weapons	Launchers & missile weaponry	codex:rating-place
+nipple stimulation	tag_group:sex_acts	Stimulation	codex:rating-place
+padlock	naia:everyday_objects	Household and hygiene goods	codex:rating-place
+pom pom (cheerleading)	tag_group:sports	Equipment and objects	codex:rating-place
+reflective water	tag_group:water	Water	codex:rating-place
+restrained	tag_group:bdsm_and_torture	Bondage	codex:rating-place
+road sign	tag_group:symbols	Road signs	codex:rating-place
+rope marks	injury	Visible signs of injury	codex:rating-place
+shared bathing	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-place
+shell	tag_group:body_parts	Body hair fur and armor	codex:rating-place
+snot	tag_group:body_parts	Bodily fluids and emissions	codex:rating-place
+soap bubbles	tag_group:water	Misc / Actions, Objects, Containers, Etc.	codex:rating-place
+strapless	tag_group:attire	Fit and garment construction	codex:rating-place
+sunburst	tag_group:symbols	Geometric shapes	codex:rating-place
+superman exposure	tag_group:nudity	Partial nudity · Exposed chest	codex:rating-place
+tape	naia:everyday_objects	Household and hygiene goods	codex:rating-place
+taur	tag_group:legendary_creatures	Humanoid hybrids	codex:rating-place
+teasing nipples	tag_group:sex_acts	Stimulation	codex:rating-place
+unworn jewelry	tag_group:accessories	Jewelry	codex:rating-place
+uppercut	tag_group:verbs_and_gerunds	Combat harm and defense	codex:rating-place
+veins	tag_group:body_parts	Skin texture and effects	codex:rating-place
+watercraft	naia:vehicles	Ships and naval	codex:rating-place
+weighing scale	naia:everyday_objects	Scientific instruments	codex:rating-place
+wind chime	naia:everyday_objects	Room textiles and decoration	codex:rating-place
+windsock	naia:everyday_objects	Scientific instruments	codex:rating-place
+x-ray vision	tag_group:theme	Magic and supernatural effects	codex:rating-place
+different reflection	tag_group:image_composition	Camera and optical effects	codex:rating-place
+closed mouth	tag_group:face_tags	Mouth and lip expressions	codex:rating-place
+eyelid pull	tag_group:eyes_tags	Misc / Actions	codex:rating-place
+nihongami	tag_group:hair_styles	Hairstyles · Elaborately-tied hair	codex:rating-place
+finger to mouth	tag_group:gestures	Gestures encompassing only one hand	codex:rating-place
+denim	tag_group:theme	Materials and physical properties	codex:rating-place
+shiny clothes	tag_group:attire	Clothing states and adjustments	codex:rating-place
+taut clothes	tag_group:attire	Fit and garment construction	codex:rating-place
+cutoffs	tag_group:attire	Pants and Bottomwear	codex:rating-place
+male swimwear	tag_group:attire	Swimsuits and Bodysuits	codex:rating-place
+shared clothes	tag_group:attire	Clothing states and adjustments	codex:rating-place
+asymmetrical legwear	tag_group:legwear	Additional Detail tags	codex:rating-place
+tinted eyewear	tag_group:eyewear	Eyewear	codex:rating-place
+lolita fashion	tag_group:fashion_style	J-Fashion	codex:rating-place
+clitoral stimulation	tag_group:sex_acts	Stimulation	codex:rating-place
+siblings	tag_group:family_relationships	Family	codex:rating-place
+food on face	tag_group:food_tags	Actions, Activities, Misc.	codex:rating-place
+dessert	tag_group:food_tags	Sweets, Snacks, and Desserts	codex:rating-place
+sweets	tag_group:food_tags	Sweets, Snacks, and Desserts	codex:rating-place
+food art	tag_group:food_tags	Actions, Activities, Misc.	codex:rating-place
+embers	tag_group:fire	Forms of fire	codex:rating-place
+looking away	tag_group:eyes_tags	Gazes	codex:rating-place
+oni horns	tag_group:body_parts	Horns and head appendages	codex:rating-place
+leg grab	tag_group:hands	Hands on lower body	codex:rating-place
+thigh grab	tag_group:hands	Hands on lower body	codex:rating-place
+foot up	tag_group:feet	Poses & Views	codex:rating-place
+in water	tag_group:water	Water	codex:rating-place
+holding person	tag_group:posture	Carrying someone	codex:rating-place
+leg hold	tag_group:hands	Hands on lower body	codex:rating-place
+ankle grab	tag_group:hands	Hands on members	codex:rating-place
+holding leg	tag_group:hands	Hands on lower body	codex:rating-place
+holding head	tag_group:holding_tags	Body Part	codex:rating-place
+shoulder grab	tag_group:holding_tags	Body Part	codex:rating-place
+face grab	tag_group:holding_tags	Body Part	codex:rating-place
+arm over shoulder	tag_group:posture	Arms	codex:rating-place
+volleyball	tag_group:sports	Sports	codex:rating-place
+volleyball	tag_group:sports	Equipment and objects	codex:rating-place
+baseball	tag_group:sports	Sports	codex:rating-place
+baseball	tag_group:sports	Equipment and objects	codex:rating-place
+basketball	tag_group:sports	Sports	codex:rating-place
+basketball	tag_group:sports	Equipment and objects	codex:rating-place
+ass grab	tag_group:sex_acts	Stimulation	codex:rating-audit
+precum	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+french kiss	tag_group:sex_acts	Stimulation	codex:rating-audit
+licking penis	tag_group:sex_acts	Stimulation	codex:rating-audit
+moaning	tag_group:sex_acts	Sexual responses	codex:rating-audit
+pee	tag_group:sex_acts	'Extreme' Fetishes	codex:rating-audit
+mixed-sex bathing	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+mixed-sex bathing	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+aroused	tag_group:sex_acts	Sexual responses	codex:rating-audit
+pussy juice trail	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+pussy juice stain	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+fertilization	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+licking nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+licking nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+surrounded by penises	tag_group:sex_acts	Before sex	codex:rating-audit
+pussy juice puddle	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+precum drip	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+dildo riding	tag_group:sex_acts	Penetration and Insertion	codex:rating-audit
+presenting ass	tag_group:sex_acts	Before sex	codex:rating-audit
+presenting pussy	tag_group:sex_acts	Before sex	codex:rating-audit
+projectile lactation	tag_group:sex_acts	Fetishes · Breasts	codex:rating-audit
+hand in panties	tag_group:sex_acts	Stimulation	codex:rating-audit
+nipple rub	tag_group:sex_acts	Stimulation	codex:rating-audit
+saliva on penis	tag_group:sex_acts	Stimulation	codex:rating-audit
+anal fluid	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+penis on ass	tag_group:sex_acts	Stimulation	codex:rating-audit
+humping	tag_group:sex_acts	Stimulation	codex:rating-audit
+vibrator on nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+vibrator on nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+chained wrists	tag_group:bdsm_and_torture	Bondage	codex:rating-audit
+licking ear	tag_group:sex_acts	Stimulation	codex:rating-audit
+licking ear	tag_group:sex_acts	Stimulation	codex:rating-audit
+penis on pussy	tag_group:sex_acts	Stimulation	codex:rating-audit
+breast milk	tag_group:sex_acts	Fetishes · Breasts	codex:rating-audit
+penis to breast	tag_group:sex_acts	Stimulation	codex:rating-audit
+penis measuring	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+face in ass	tag_group:sex_acts	Fetishes · Smother	codex:rating-audit
+nipple-to-nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+penis on stomach	tag_group:sex_acts	Stimulation	codex:rating-audit
+flat chastity cage	tag_group:sex_objects	BDSM / Bondage Gear	codex:rating-audit
+precum through clothes	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+egg laying	tag_group:sex_acts	Miscellaneous Fetishes	codex:rating-audit
+small chastity cage	tag_group:sex_objects	BDSM / Bondage Gear	codex:rating-audit
+sucking male nipple	tag_group:sex_acts	Stimulation	codex:rating-audit
+hand in another's panties	tag_group:sex_acts	Stimulation	codex:rating-audit
+licking breast	tag_group:sex_acts	Stimulation	codex:rating-audit
+penis on head	tag_group:sex_acts	Stimulation	codex:rating-audit
+precum string	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+presenting own pussy	tag_group:sex_acts	Before sex	codex:rating-audit
+ass smack	tag_group:bdsm_and_torture	BDSM Plays	codex:rating-audit
+hand milking	tag_group:sex_acts	Fetishes · Breasts	codex:rating-audit
+cum on legwear	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+tied to chair	tag_group:bdsm_and_torture	Bondage	codex:rating-audit
+censored with cum	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+female ejaculation through clothes	tag_group:sex_acts	Sexual responses	codex:rating-audit
+fellatio under mask	tag_group:sex_acts	Stimulation	codex:rating-audit
+sex toy pull	tag_group:sex_acts	Penetration and Insertion	codex:rating-audit
+flat chest grab	tag_group:sex_acts	Stimulation	codex:rating-audit
+flat chest grab	tag_group:sex_acts	Stimulation	codex:rating-audit
+feminization	tag_group:sex_acts	Fetishes · Gender Play and Intersex	codex:rating-audit
+implied prostitution	tag_group:sex_acts	Fetishes · Roles	codex:rating-audit
+cum in panties	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+cum in panties	tag_group:sex_acts	Fetishes · Cum Play	codex:rating-audit
+licking neck	tag_group:sex_acts	Stimulation	codex:rating-audit
+licking neck	tag_group:sex_acts	Stimulation	codex:rating-audit
+foreskin insertion	tag_group:sex_acts	Penetration and Insertion	codex:rating-audit
+breast milk in container	tag_group:sex_acts	Fetishes · Breasts	codex:rating-audit
+yuri	tag_group:groups	Relationships and contrasts	codex:rating-audit
+scar	injury	Visible signs of injury	codex:rating-audit
+empty eyes	tag_group:eyes_tags	More appearance	codex:rating-audit
+crossdressing	tag_group:gender_nonconformity	Appearance	codex:rating-audit
+crossdressing (mtf)	tag_group:gender_nonconformity	Appearance	codex:rating-audit
+extra arms	tag_group:body_parts	Appendages	codex:rating-audit
+in container	tag_group:posture	Other postures potentially involving the whole body	codex:rating-audit
+bruise	injury	Visible signs of injury	codex:rating-audit
+kicking	tag_group:verbs_and_gerunds	Combat harm and defense	codex:rating-audit
+sexually suggestive	tag_group:theme	(intro)	codex:rating-audit
+punching	tag_group:verbs_and_gerunds	Combat harm and defense	codex:rating-audit
+burn scar	injury	Visible signs of injury	codex:rating-audit
+cage	naia:everyday_objects	Containers and boxes	codex:rating-audit
+reverse trap	tag_group:gender_nonconformity	Appearance	codex:rating-audit
+implied yaoi	tag_group:groups	Relationships and contrasts	codex:rating-audit
+have to pee	tag_group:verbs_and_gerunds	Posture rest and body states	codex:rating-audit
+implied yuri	tag_group:groups	Relationships and contrasts	codex:rating-audit
+impaled	injury	Visible signs of injury	codex:rating-audit
+pain	tag_group:face_tags	Sadness tears and distress	codex:rating-audit
+crossdressing (ftm)	tag_group:gender_nonconformity	Appearance	codex:rating-audit
+missing limb	injury	Visible signs of injury	codex:rating-audit
+missing limb	injury	Visible signs of injury	codex:rating-audit
+frozen	tag_group:water	Ice	codex:rating-audit
+burnt	injury	Visible signs of injury	codex:rating-audit
+bust cup	tag_group:food_tags	Sexual Content	codex:rating-audit
+wakamezake	tag_group:food_tags	Sexual Content	codex:rating-audit
+face punch	tag_group:verbs_and_gerunds	Combat harm and defense	codex:rating-audit
+self exposure	tag_group:nudity	Partial nudity · Misc / Specific exposures that could fit multiple categories below	codex:rating-audit
+in cage	tag_group:posture	Other postures potentially involving the whole body	codex:rating-audit
+force-feeding	tag_group:food_tags	Actions, Activities, Misc.	codex:rating-audit
+conjoined	tag_group:body_parts	Age and physique	codex:rating-audit
+human chair	tag_group:posture	Basic positions	codex:rating-audit
+implied erection	tag_group:body_parts	Penis and erection	codex:rating-audit
+sky	tag_group:locations	Astronomy and sky	review:children-context
+chair	naia:everyday_objects	Seats and chairs	review:children-context
+table	naia:everyday_objects	Tables and storage furniture	review:children-context
+couch	naia:everyday_objects	Seats and chairs	review:children-context
+desk	naia:everyday_objects	Tables and storage furniture	review:children-context
+stool	naia:everyday_objects	Seats and chairs	review:children-context
+pillow	naia:everyday_objects	Beds and bedding	review:children-context
+blanket	naia:everyday_objects	Beds and bedding	review:children-context
+book	naia:everyday_objects	Books, stationery and art supplies	review:children-context
+bag	tag_group:accessories	Bags	review:children-context
+between legs	tag_group:posture	Legs	review:children-context
+architecture	tag_group:locations	Buildings	gemini
+east asian architecture	tag_group:locations	Buildings	gemini
+gothic architecture	tag_group:locations	Buildings	gemini
+greco-roman architecture	tag_group:locations	Buildings	gemini
+image macro (meme)	tag_group:image_composition	Format	gemini
+fang	tag_group:face_tags	Teeth and mouth anatomy	gemini
+skin fang	tag_group:face_tags	Teeth and mouth anatomy	gemini
+fang out	tag_group:face_tags	Teeth and mouth anatomy	gemini
+profile	tag_group:image_composition	Subject matter	gemini
+portrait	tag_group:image_composition	Subject matter	gemini
+turtleneck	tag_group:neck_and_neckwear	Collared clothes	gemini
+v-neck	tag_group:neck_and_neckwear	Collared clothes	gemini
+plunging neckline	tag_group:neck_and_neckwear	Collared clothes	gemini
+low neckline	tag_group:neck_and_neckwear	Collared clothes	gemini
+crew neck	tag_group:neck_and_neckwear	Collared clothes	gemini
+square neckline	tag_group:neck_and_neckwear	Collared clothes	gemini
+scoop neck	tag_group:neck_and_neckwear	Collared clothes	gemini
+wing collar	tag_group:neck_and_neckwear	Collared clothes	gemini
+sailor one-piece swimsuit	tag_group:attire	Swimsuits and Bodysuits	gemini
+bandages	injury	Coverings and bindings	gemini
+bandaid	injury	Coverings and bindings	gemini
+bandaged arm	injury	Coverings and bindings	gemini
+bandaged leg	injury	Coverings and bindings	gemini
+bandaged head	injury	Coverings and bindings	gemini
+bandaged neck	injury	Coverings and bindings	gemini
+bandaged wrist	injury	Coverings and bindings	gemini
+bandaid on head	injury	Coverings and bindings	gemini
+bandaged fingers	injury	Coverings and bindings	gemini
+bandaid on neck	injury	Coverings and bindings	gemini
+bandaged foot	injury	Coverings and bindings	gemini
+bandaid on shoulder	injury	Coverings and bindings	gemini
+bandages over eyes	injury	Coverings and bindings	gemini
+bandaid on foot	injury	Coverings and bindings	gemini
+bandaid on breast	injury	Coverings and bindings	gemini
+bandaid on clothes	injury	Coverings and bindings	gemini
+bandaid on ass	injury	Coverings and bindings	gemini
+ship turret	naia:vehicles	Ships and naval	gemini
+fighter jet	naia:vehicles	Aircraft	gemini
+seaplane	naia:vehicles	Aircraft	gemini
+flying boat	naia:vehicles	Aircraft	gemini
+reins	naia:vehicles	Vehicle parts and driving	gemini
+saddle	naia:vehicles	Vehicle parts and driving	gemini
+bridle	naia:vehicles	Vehicle parts and driving	gemini
+horseshoe	naia:vehicles	Vehicle parts and driving	gemini
+combat shotgun	list_of_weapons	Firearms	gemini
+moorish idol	list_of_animals	Types · Aquatic life	gemini
+buddhism	tag_group:theme	(intro)	gemini
+christianity	tag_group:theme	(intro)	gemini
+hikikomori	tag_group:theme	(intro)	gemini
+police uniform	tag_group:attire	Uniforms and Costumes	gemini
+maid leotard	tag_group:attire	Uniforms and Costumes	gemini
+maid one-piece swimsuit	tag_group:attire	Uniforms and Costumes	gemini

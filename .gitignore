@@ -284,3 +284,5 @@ build_tags_increment/
 
 # Danbooru 태그 스냅숏 (hlibr/danbooru-tag-metadata-snapshot, 2026-04-08) - 63MB, 로컬 참조 데이터. 배포 여부는 미정
 data/danbooru_tag_snapshot/
+# Danbooru 위키 스냅숏 (tag_groups 라이브 2026-10-14 + HF dartags/danbooru-wiki-2609) - 62MB, 이벤트 맵 계층 조사용. 배포 안 함
+data/danbooru_wiki_snapshot/

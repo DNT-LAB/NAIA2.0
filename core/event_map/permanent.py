@@ -5,18 +5,16 @@
 걸린 태그가 하나라도 달린 **게시물을 세지 않는다** - 그러면 그 조합 자체가 후보 · 실제 조합 · 랜덤에 나오지 않는다.
 걸린 태그는 후보로도 내지 않는다.
 
-문법은 Search 제외어와 같다(`core/search_engine._apply_filters`):
-  * 쉼표 목록.
-  * `*tag` = 태그 전체 일치.
-  * 그 밖은 **단어 첫머리 일치** - `loli` 는 `lolita fashion` · `oppai loli` · `lolicon` 을 막는다.
-    ⚠️ Search 는 순수 부분 일치라 `loli` 가 `hololive …` 를, `guro` 가 `ganguro` 를 같이 막는다(실측 2026-10-14,
-    포터블 색인). 여기서는 단어 중간에서 시작하는 일치는 받지 않는다(앞 글자가 영숫자면 아니다).
+항은 **언제나 태그 하나 전체 일치**다(사용자 지시 2026-10-14 - '* 없이 항상 고정 태그 제외'):
+  * 쉼표 목록. `*tag` 의 `*` 는 떼고 같은 뜻으로 읽는다(Search 에서 옮겨 온 글).
   * `{a|b}` 는 항 각각.
-태그 이름은 색인 규칙대로 소문자 · 밑줄 = 빈칸으로 맞춘다.
+  * 부분 일치는 하지 않는다 - 예전(단어 첫머리 일치)에는 `loli` 가 `lolita fashion` · `gothic lolita` 같은 패션까지
+    195개를 막았다. 입력 줄의 자동완성이 색인의 태그(58,406개)만 내므로 그대로 고르면 된다.
+  * ⚠️ Search 는 같은 글을 자기 규칙(`*` 없으면 부분 일치)으로 읽는다 - 이 파일은 이벤트 맵의 뜻만 정한다.
+태그 이름은 색인 규칙대로 소문자 · 밑줄 = 빈칸으로 맞춘다(`idx.resolve`).
 """
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -57,17 +55,10 @@ def build_block(idx, text: str) -> PermanentBlock | None:
     if not terms:
         return None
     tag_mask = np.zeros(int(idx.n_tags), dtype=bool)
-    for term, exact in terms:
-        if exact:
-            tid = idx.resolve(term)
-            if tid is not None:
-                tag_mask[int(tid)] = True
-    subs = [re.compile(r"(?:^|[^a-z0-9])" + re.escape(term)) for term, exact in terms if not exact]
-    if subs:
-        for tid, name in idx.by_id.items():
-            low = str(name).lower()
-            if any(p.search(low) for p in subs):
-                tag_mask[int(tid)] = True
+    for term, _exact in terms:
+        tid = idx.resolve(term)
+        if tid is not None:
+            tag_mask[int(tid)] = True
     hits = np.flatnonzero(tag_mask)
     if hits.size == 0:
         return None

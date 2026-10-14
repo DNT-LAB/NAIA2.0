@@ -10,7 +10,10 @@ function newUuid() {
   const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
-export function initEventMapLibrary({bar, panel, anchor, getSelection, applySelection, toast, resize, onOpen, onClose}) {
+export function initEventMapLibrary({bar, panel, anchor, getSelection, applySelection, toast, resize, onOpen, onClose,
+                                     onLoad = null, onChange = null}) {
+  // onLoad: [조합 불러오기] 를 S 창(저장된 조합 탭)이 대신한다(사용자 지시 2026-10-14 - 저장된 조합 개편).
+  // onChange: 저장 · 옮기기 · 삭제 뒤 - S 단추의 수를 고친다.
   let items = [], categories = [], query = '', category = '*', opened = false, busy = false, saving = false, ticket = 0;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   panel.className = 'em-overlay em-saved-panel'; document.body.append(panel);
@@ -66,7 +69,7 @@ export function initEventMapLibrary({bar, panel, anchor, getSelection, applySele
   async function save() {
     if(saving || !getSelection().pins.length)return;
     saving=true;update();
-    try {await request({id:newUuid(),selection:getSelection()});toast('저장됨','success');
+    try {await request({id:newUuid(),selection:getSelection()});toast('저장됨','success');onChange?.();
       if(opened){const data=await request();items=data.items;categories=data.categories||[];draw();}}
     catch(error){toast(error.message,'error');}finally{saving=false;update();}
   }
@@ -80,7 +83,7 @@ export function initEventMapLibrary({bar, panel, anchor, getSelection, applySele
       else {category=body.category;toast('분류를 추가했습니다.','success');}draw();
     }catch(error){toast(error.message,'error');if(opened)draw();}finally{busy=false;panel.inert=false;}
   }
-  bar.addEventListener('click',event=>{const mode=event.target.closest('[data-library-mode]')?.dataset.libraryMode;if(mode==='save')void save();else if(mode==='load')void open();});
+  bar.addEventListener('click',event=>{const mode=event.target.closest('[data-library-mode]')?.dataset.libraryMode;if(mode==='save')void save();else if(mode==='load'){if(typeof onLoad==='function')onLoad();else void open();}});
   panel.addEventListener('input',event=>{if(event.target.matches('[data-search]')){query=event.target.value;list();}});
   panel.addEventListener('change',event=>{if(event.target.matches('[data-filter]')){category=event.target.value;list();}
     if(event.target.matches('[data-move]'))void mutate({action:'move',id:event.target.closest('[data-item]').dataset.item,category:event.target.value});});

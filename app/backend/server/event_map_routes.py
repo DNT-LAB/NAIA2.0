@@ -38,7 +38,7 @@ from fastapi.responses import JSONResponse
 
 from core.event_map.pe_filter import MAX_TAGS as PE_MAX_TAGS, hidden_by_prompt_engineering
 from core.event_map.service import MapQueryError
-from core.event_map.random_link import ensure_event_map_service, link_state
+from core.event_map.random_link import ensure_event_map_service, link_state, staging_store
 from core.web_session_context import WebSessionContext
 
 AsyncRunner = Callable[..., Awaitable[Any]]
@@ -222,8 +222,20 @@ def register_event_map_routes(
         payload = await _read_json(req)
         if not isinstance(payload.get("enabled"), bool):
             return JSONResponse({"message": "enabled must be boolean"}, status_code=400)
+        # 연결은 한 갈래뿐이다: event(이벤트 맵의 지금 조합) 또는 staging(스테이징 풀). 한쪽을 켜면 다른 쪽은 꺼진다 -
+        # 상태가 하나라서 둘이 함께 켜질 수 없다(사용자 지시 2026-10-14). 둘 다 끌 수는 있다(enabled=false).
+        mode = payload.get("mode") or "event"
+        if mode not in ("event", "staging"):
+            return JSONResponse({"message": "mode must be event or staging"}, status_code=400)
         state = {"enabled": payload["enabled"]}
-        if state["enabled"]:
+        if state["enabled"] and mode == "staging":
+            items = (await run_in_thread(staging_store(session_context).list))["items"]
+            if not items:
+                return JSONResponse({"ok": False, "code": "staging_empty",
+                                     "message": "스테이징된 조합이 없습니다."}, status_code=409)
+            state["mode"] = "staging"
+        elif state["enabled"]:
+            state["mode"] = "event"
             for key in ("pins", "exclude", "ratings", "persons"):
                 value = payload.get(key, "")
                 if not isinstance(value, str) or len(value) > 8192:
@@ -256,6 +268,72 @@ def register_event_map_routes(
                               "message": "이벤트 맵의 랜덤 버튼 연결을 위해 WC Solo를 자동 해제했습니다."})
         await _broadcast({"type": "event_map_random_link", **state})
         return JSONResponse(state, headers=_no_store())
+
+    # -- 스테이징(사용자 지시 2026-10-14) ---------------------------------------------------
+    async def _staging_counts(items):
+        """조합마다 게시물 수 + 전체(겹침 제외). 색인이 없으면 None(화면은 수를 비워 둔다)."""
+        if not items:
+            return {"per": {}, "total": 0, "sum": 0}
+        try:
+            counts = await run_in_thread(ensure_event_map_service(session_context).count_selections,
+                                         [r["selection"] for r in items])
+        except MapQueryError:
+            return None
+        return {"per": {r["id"]: n for r, n in zip(items, counts["per"])}, "total": counts["total"], "sum": counts["sum"]}
+
+    async def _staging_reply(store, data):
+        """스테이징이 비면 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패하지 않게). 모든 창에 수를 알린다."""
+        items = data.get("items") or []
+        link = link_state(session_context)
+        if not items and link.get("enabled") and link.get("mode") == "staging":
+            state = {"enabled": False, "revision": link["revision"] + 1}
+            session_context.event_map_random_link = state
+            await _broadcast({"type": "event_map_random_link", **state})
+        await _broadcast({"type": "event_map_staging", "count": len(items)})
+        return JSONResponse({**data, "random_link": link_state(session_context), "counts": await _staging_counts(items)},
+                            headers=_no_store())
+
+    @app.get("/api/event-map/staging")
+    async def api_event_map_staging():
+        try:
+            data = await run_in_thread(staging_store(session_context).list)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse({**data, "random_link": link_state(session_context),
+                             "counts": await _staging_counts(data["items"])}, headers=_no_store())
+
+    @app.post("/api/event-map/staging")
+    async def api_event_map_staging_change(req: Request):
+        """add(selection) · stage_saved(저장된 조합 id - 묶음이면 전부) · remove(id) · clear ·
+        save_bundle(지금 스테이징을 통째로 저장된 조합의 묶음으로)."""
+        from core.event_map.library import EventMapLibrary
+        body = await _read_json(req)
+        action = body.get("action")
+        store = staging_store(session_context)
+        library = EventMapLibrary(session_context._save_path("event_map", "combinations.json"))
+        try:
+            if action == "add":
+                data = await run_in_thread(store.add_many, [body.get("selection")])
+            elif action == "stage_saved":
+                row = await run_in_thread(library.find, str(body.get("id") or ""))
+                if row is None:
+                    raise MapQueryError("not_found", "이미 삭제되었거나 존재하지 않는 조합입니다.")
+                data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]])
+            elif action == "remove":
+                data = await run_in_thread(store.remove, str(body.get("id") or ""))
+            elif action == "clear":
+                data = await run_in_thread(store.clear)
+            elif action == "save_bundle":
+                items = (await run_in_thread(store.list))["items"]
+                saved = await run_in_thread(library.save_bundle, {
+                    "id": body.get("id"), "name": body.get("name") or "", "category": body.get("category") or "",
+                    "selections": [r["selection"] for r in items]})
+                return JSONResponse({**saved, "items": items, "saved": saved["items"]}, headers=_no_store())
+            else:
+                raise MapQueryError("bad_request", "지원하지 않는 스테이징 작업입니다.")
+        except MapQueryError as exc:
+            return _error(exc)
+        return await _staging_reply(store, data)
 
     @app.get("/api/event-map/suggest")
     async def api_event_map_suggest(q: str = "", limit: int = 20):

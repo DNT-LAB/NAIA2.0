@@ -1449,15 +1449,24 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261014-nobs1')
+import('./js/features/eventMapPanel.mjs?v=20261014-stcount1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
+      insertAtCursor: text => insertTagAtLastPromptCursor(text),
       showToast,
       getPromptText: () => (promptEdit ? promptEdit.value : ''),
       // [적용+생성]: 적용된 프롬프트가 칸에 들어온 뒤 **Generate 버튼과 같은 길**로 낸다.
       generateNow: () => generateAction(),
-      onRandomLinkChange: () => updateGenerateButtonMode(),
+      onRandomLinkChange: () => { updateGenerateButtonMode(); window.eventStaging?.paint?.(); },
+      // S 창(스테이징 · 저장된 조합 - 사용자 지시 2026-10-14). 이벤트 맵 [⋯] 의 '스테이징에 넣기' · '저장된 조합'.
+      onStage: selection => window.eventStaging?.stage?.(selection),
+      onOpenSaved: () => window.eventStaging?.show?.('saved'),
+      onLibraryChange: () => window.eventStaging?.refreshCounts?.(),
+      isStaged: selection => Boolean(window.eventStaging?.isStaged?.(selection)),
+      // [스테이징] 옆 숫자 단추 = 스테이징 수 · 누르면 S 창의 스테이징 탭(S 단추를 숨겨도 여기서 연다).
+      getStagedCount: () => window.eventStaging?.stagedCount?.() || 0,
+      onOpenStaging: () => window.eventStaging?.show?.('stage'),
       // [PE설정] = 메인 프롬프트의 `/pe` **그 목록**을 연다. 베껴 그리지 않는다 -
       // ON/OFF 상태가 두 곳이 되면 반드시 어긋난다.
       openPeSlash: () => tagAssist?.openSlashCommandByName?.('pe', promptEdit) || false,
@@ -1471,6 +1480,18 @@ import('./js/features/eventMapPanel.mjs?v=20261014-nobs1')
     });
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
+// S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
+import('./js/features/eventMapStaging.mjs?v=20261014-stcount1')
+  .then(({initEventMapStaging}) => {
+    window.eventStaging = initEventMapStaging({
+      showToast,
+      getPromptText: () => (promptEdit ? promptEdit.value : ''),
+      generateNow: () => generateAction(),
+      confirmDialog: message => showConfirmDialog(message),
+      isTabHidden: () => getOptionChecked('hide_staging_button'),
+    });
+  })
+  .catch(error => console.error('Failed to initialize Staging', error));
 // Ctrl+O Assist - 말로 찾는 한국어 어시스트(docs/ASSIST_V2_DESIGN_2026_09_23.md). [생성] 은 가상 프롬프트로 뽑아
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
@@ -4456,6 +4477,7 @@ const optBoxes = {
   // 서버가 보낸 값이 화면에 안 붙어 새로고침 때마다 꺼진 것처럼 보인다.
   stop_autogen_on_tag_exhaust: $('optStopAutogenOnExhaust'),
   hide_event_map_button: $('optHideEventMapTab'),
+  hide_staging_button: $('optHideStagingTab'),
   hide_assist_button: $('optHideAssistTab'),
   show_comfyui_server_console: $('optShowComfyServerConsole'),
 };
@@ -4738,7 +4760,8 @@ function onInitComplete() {
 }
 
 function afterWsJsonMessage(m) {
-  if (m.type === 'event_map_random_link') window.eventMap?.receiveRandomLink?.(m);
+  if (m.type === 'event_map_random_link') { window.eventMap?.receiveRandomLink?.(m); window.eventStaging?.paint?.(); }
+  if (m.type === 'event_map_staging') window.eventStaging?.receiveCount?.(m);
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
     if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);
@@ -9718,10 +9741,12 @@ function stopRndTimer() {
   }
 }
 
-/** Random 버튼의 **기본 글자**. 이벤트 맵에 연결돼 있으면 EV Random 이다.
+/** Random 버튼의 **기본 글자**. 이벤트 맵의 지금 조합에 연결돼 있으면 EV Random, 스테이징 풀에 연결돼 있으면
+ *  ST Random(사용자 지시 2026-10-14).
  *  ⚠️ 버튼 글자를 쓰는 자리가 둘이다(여기 · 스트림 배지). 리터럴 'Random' 을 쓰면 연결 표시가 지워진다. */
 function randomButtonLabel() {
-  return window.eventMap?.isRandomLinked?.() ? 'EV Random' : 'Random';
+  if (!window.eventMap?.isRandomLinked?.()) return 'Random';
+  return window.eventMap.randomLinkMode?.() === 'staging' ? 'ST Random' : 'EV Random';
 }
 
 function randomButtonHtml() {
@@ -9777,6 +9802,11 @@ function applyOptionState(key, value, options = {}) {
     // ⚠️ `.em-tab` 이 display:inline-flex 라 [hidden] 만으로는 안 사라진다 - style.css 에 짝 규칙이 있다.
     const emTab = document.getElementById('eventMapTab');
     if (emTab) emTab.hidden = next;
+  }
+  if (key === 'hide_staging_button') {
+    // S 는 스테이징 · 저장된 조합이 있을 때만 보이므로 감추는 판단은 S 창이 한 곳에서 한다(paintTab 이 이 옵션을 읽는다).
+    // 숨겨도 이벤트 맵 [스테이징] 옆 숫자 단추로 연다(사용자 지시 2026-10-14).
+    window.eventStaging?.paintTab?.();
   }
   if (key === 'hide_assist_button') {
     // A 탭도 같은 뜻 - 단추만 감추고 Ctrl+O 는 그대로 둔다(사용자 지시 2026-09-30). A 도 `.em-tab` 이라 같은 짝 규칙이 감춘다.
@@ -14180,6 +14210,36 @@ function insertTagIntoPrompt(tag) {
 
 function insertTag(tag) {
   if (tagSearchController) tagSearchController.insertTag(tag);
+}
+
+// 이벤트 맵 단순 검색 모드의 [삽입](사용자 지시 2026-10-14): **마지막으로 초점이 있던 프롬프트 칸**(메인 · 캐릭터 · 네거티브
+// 같은 글 칸)의 커서 자리에 ', 태그'. 이벤트 맵 · S 창 안의 칸(검색 · 영구 제외)은 세지 않는다 - 단추를 누르면 초점이
+// 그쪽으로 가기 때문에 '지금 초점' 이 아니라 '마지막 프롬프트 칸' 을 쓴다.
+let lastPromptField = null;
+document.addEventListener('focusin', event => {
+  const el = event.target;
+  if (el instanceof HTMLTextAreaElement && !el.readOnly && !el.closest('.em-window, .st-window, .em-overlay')) lastPromptField = el;
+}, true);
+function insertTagAtLastPromptCursor(tag) {
+  const clean = String(tag || '').trim();
+  const field = lastPromptField && document.body.contains(lastPromptField) ? lastPromptField : promptEdit;
+  if (!clean || !field) return false;
+  const value = field.value;
+  const start = field.selectionStart != null ? field.selectionStart : value.length;
+  const end = field.selectionEnd != null ? field.selectionEnd : start;
+  const before = value.slice(0, start), after = value.slice(end);
+  const head = before.trim() && !/,\s*$/.test(before) ? `${before.replace(/\s+$/, '')}, ` : before;
+  const tail = after.trim() && !/^\s*,/.test(after) ? `, ${after.replace(/^\s+/, '')}` : after;
+  const st = field.scrollTop;
+  field.value = head + clean + tail;
+  const pos = head.length + clean.length;
+  field.focus({ preventScroll: true });
+  field.selectionStart = field.selectionEnd = pos;
+  field.scrollTop = st;
+  // 메인 칸은 insertTagIntoPrompt 와 같은 길(onPromptAuthoredEdit), 다른 칸은 input 이벤트로 제 상태를 고치게 한다.
+  if (field === promptEdit) onPromptAuthoredEdit();
+  else field.dispatchEvent(new Event('input', { bubbles: true }));
+  return true;
 }
 
 // ---- Tag tooltip + Autocomplete system ----

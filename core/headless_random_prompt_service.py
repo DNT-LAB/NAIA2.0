@@ -160,26 +160,34 @@ class HeadlessRandomPromptService:
         random_request_id: str = "",
         source_row_override: Any = None,
     ) -> HeadlessRandomPromptResult:
-        from core.event_map.random_link import ensure_event_map_service, link_state
+        from core.event_map.random_link import ensure_event_map_service, link_state, staging_store
         link = link_state(self.context)
         if link["enabled"]:
             from core.event_map.service import MapQueryError
             revision = link["revision"]
+            # 갈래: event = 이벤트 맵의 지금 조합(EV Random) · staging = 스테이징 풀에서 조합 하나(ST Random).
+            label = "ST Random" if link.get("mode") == "staging" else "EV Random"
             if link.get("pending"):
-                return HeadlessRandomPromptResult(False, error="EV Random: 선택 조건을 반영하는 중입니다.",
+                return HeadlessRandomPromptResult(False, error=f"{label}: 선택 조건을 반영하는 중입니다.",
                                                  event_map_revision=revision)
             stream = getattr(self.context, "event_stream_runtime", None)
             if getattr(stream, "is_active", False) or (overrides or {}).get("_storyteller_page"):
                 return HeadlessRandomPromptResult(False, error="Story 실행 중에는 랜덤 버튼 연결을 해제해주세요.",
                                                  event_map_revision=revision)
             try:
-                body = ensure_event_map_service(self.context).sample(
-                    **{k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}, n=1, permanent=True)
+                if link.get("mode") == "staging":
+                    item = staging_store(self.context).pick()
+                    if item is None:
+                        raise MapQueryError("no_match", f"{label}: 스테이징된 조합이 없습니다.")
+                    combo = {k: ",".join(item["selection"][k]) for k in ("pins", "exclude", "ratings", "persons")}
+                else:
+                    combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}
+                body = ensure_event_map_service(self.context).sample(**combo, n=1, permanent=True)
                 samples = body.get("samples") or []
                 if not samples:
-                    raise MapQueryError("no_match", "EV Random: 이 조건에 맞는 게시물이 없습니다.")
+                    raise MapQueryError("no_match", f"{label}: 이 조건에 맞는 게시물이 없습니다.")
                 if link_state(self.context)["revision"] != revision:
-                    raise MapQueryError("cancelled", "EV Random: 선택 조건이 변경되어 취소했습니다.")
+                    raise MapQueryError("cancelled", f"{label}: 선택 조건이 변경되어 취소했습니다.")
                 sample = samples[0]
                 row = {"general": ", ".join(sample["tags"]),
                        "rating": str(sample.get("partition") or "s")[:1],
@@ -187,7 +195,7 @@ class HeadlessRandomPromptService:
                        "event_map_combo": True}
                 result = self.generate_from_source_row(
                     row, overrides={**(overrides or {}), "wildcard_standalone": False},
-                    active_ratings=set(link.get("ratings", "").replace(",", "")) or set(DEFAULT_RATINGS),
+                    active_ratings=set(combo.get("ratings", "").replace(",", "")) or set(DEFAULT_RATINGS),
                     random_request_id=random_request_id, source="random", update_context=True)
                 result.event_map_revision = revision
                 return result

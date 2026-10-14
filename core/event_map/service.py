@@ -45,7 +45,7 @@ import numpy as np
 from core.event_map import categories as C
 from core.event_map.index import (SORT_MODES,
     MAX_EXCLUDE, MAX_PINS, MAX_SAMPLES, SCAN_CAP, EventMapIndex)
-from core.event_map.permanent import PermanentBlock, build_block
+from core.event_map.permanent import PermanentBlock, build_block, parse_terms
 from core.event_map.tree import BoundTree, EventMapTree, TreeError
 
 # 대분류 재료. `data/KR_tags.parquet` 의 category 를 접기 표로 접는다(사용자 결정 2026-09-12).
@@ -520,6 +520,34 @@ class EventMapService:
             self._block_key = key
         return self._block
 
+    def count_selections(self, selections: list[dict]) -> dict[str, Any]:
+        """스테이징 수 세기: 조합마다 맞는 게시물 수(`per`, 같은 순서) · 전체(`total` = 겹치는 게시물은 한 번) · 단순 합(`sum`).
+
+        조합 하나의 게시물 목록은 (조합 · 영구 제외 글 · 색인) 이 같으면 다시 세지 않는다 - 창을 열 때마다 묻는다.
+        """
+        idx = self.index()
+        block = self.permanent_block(idx)
+        key_base = (id(idx), self.permanent_text())
+        cache = getattr(self, "_count_cache", None)
+        if cache is None or cache.get("_base") != key_base:
+            cache = {"_base": key_base}
+            self._count_cache = cache
+        per, arrays = [], []
+        for s in selections:
+            key = json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")])
+            rids = cache.get(key)
+            if rids is None:
+                rids = idx.posts_for(s.get("pins") or [], exclude=s.get("exclude") or [],
+                                     ratings=set(s.get("ratings") or []), persons=set(s.get("persons") or []), block=block)
+                if len(cache) > 512:
+                    cache.clear()
+                    cache["_base"] = key_base
+                cache[key] = rids
+            per.append(int(rids.size))
+            arrays.append(rids)
+        total = int(np.unique(np.concatenate(arrays)).size) if arrays else 0
+        return {"per": per, "total": total, "sum": int(sum(per))}
+
     def permanent_state(self) -> dict[str, Any]:
         """영구 제외 글 + 색인에서 걸리는 태그(화면이 '걸린 태그 n개' 를 보여 준다). 색인이 없어도 글은 준다."""
         text = self.permanent_text()
@@ -528,7 +556,18 @@ class EventMapService:
         except MapQueryError:
             block = None
         names = list(block.names) if block else []
-        return {"ok": True, "text": text, "tag_count": len(names), "tags": names[:40]}
+        # 항마다 이벤트 맵에서 걸리는 태그(화면의 칩 - 걸리는 것이 없는 항은 흐리게: Search 전용 문법 `~x` · 없는 태그).
+        terms = []
+        idx = self._index
+        for raw in [t.strip() for t in text.split(",") if t.strip()]:
+            hits = []
+            if idx is not None:
+                for term, _exact in parse_terms(raw):
+                    tid = idx.resolve(term)
+                    if tid is not None:
+                        hits.append(idx.by_id[tid])
+            terms.append({"term": raw, "tags": hits})
+        return {"ok": True, "text": text, "tag_count": len(names), "tags": names[:40], "terms": terms}
 
     # -- 3단 지도(갈래 › 그룹 › 절 › 태그) -------------------------------------------------
     def tree(self) -> EventMapTree:

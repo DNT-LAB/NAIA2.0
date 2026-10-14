@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261014-row1">
+<link rel="stylesheet" href="style.css?v=20261014-stcount1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -968,6 +968,10 @@
                눌린 상태(aria-pressed)는 js/features/eventMapPanel.mjs 가 관리한다. -->
           <button type="button" class="em-tab" id="eventMapTab" aria-pressed="false" aria-label="이벤트 맵 (Ctrl+E)"
                   data-naia-title="이벤트 맵 · Ctrl+E 로도 열립니다">E</button>
+          <!-- S · 조합(스테이징 · 저장된 조합) — E 바로 아래, A 위(사용자 지시 2026-10-14). 스테이징이나 저장된 조합이 있을 때만
+               보인다. 배지 = 스테이징된 조합 수. js/features/eventMapStaging.mjs 가 관리한다. -->
+          <button type="button" class="em-tab" id="stagingTab" aria-pressed="false" hidden aria-label="S · 스테이징 · 저장된 조합"
+                  data-naia-title="S · 스테이징 · 저장된 조합">S<span class="st-badge" hidden></span></button>
           <!-- Assist(Ctrl+O) — E 바로 아래의 같은 반구(사용자 지정 2026-09-28: 도구 줄의 [Assist] 를 거두고 여기로).
                눌린 상태(aria-pressed)는 js/features/assistPanel.mjs 가 관리한다. -->
           <button type="button" class="em-tab" id="assistTab" aria-pressed="false" aria-label="Assist (Ctrl+O)"
@@ -1465,6 +1469,15 @@
                 <span class="opt-label">이벤트 맵 단추 숨기기</span>
               </button>
               <p class="settings-toggle-desc">결과 이미지 왼쪽 가장자리에 붙는 반구 단추(<b>E</b>)를 감춥니다. 숨겨도 <b>Ctrl+E</b> 로는 그대로 열립니다.</p>
+            </div>
+            <div class="settings-toggle-row">
+              <button type="button" class="opt-toggle settings-toggle" id="optHideStagingTab"
+                      data-option="hide_staging_button" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('hide_staging_button')">
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">스테이징 단추 숨기기</span>
+              </button>
+              <p class="settings-toggle-desc">E 바로 아래에 붙는 반구 단추(<b>S</b>)를 감춥니다. 숨겨도 이벤트 맵의 <b>[스테이징]</b> 옆 숫자 단추로 스테이징 창을 열 수 있습니다.</p>
             </div>
             <div class="settings-toggle-row">
               <button type="button" class="opt-toggle settings-toggle" id="optHideAssistTab"

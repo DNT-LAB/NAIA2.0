@@ -390,6 +390,16 @@ class EventMapIndex:
             acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
         return acc
 
+    def posts_for(self, pins, *, exclude=None, ratings=None, persons=None, block=None) -> np.ndarray:
+        """이 조합(핀 전부 · 제외 없음 · 고른 분면 · 영구 제외 밖)에 맞는 게시물 rid(오름차순). 스테이징의 수 세기용."""
+        wanted, unknown = self._resolve_many(pins)
+        if unknown or not wanted:
+            return np.empty(0, dtype=np.int64)
+        excluded, _ = self._resolve_many(exclude)
+        excluded = [t for t in excluded if t not in wanted]
+        rids = self._without(self._matching_posts(wanted, self._partition_filter(ratings, persons)), excluded)
+        return self._unblocked(rids, block)
+
     def _matching_posts_relaxed(self, tids: list[int], parts: set[int] | None) -> np.ndarray:
         """핀 n개 중 **n-1개 이상**이 달린 게시물([-1 허용], 사용자 지시 2026-09-13).
 

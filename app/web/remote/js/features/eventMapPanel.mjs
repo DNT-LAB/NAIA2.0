@@ -33,7 +33,7 @@
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
-import { initEventMapLibrary } from './eventMapLibrary.mjs?v=20260913-library3';
+import { initEventMapLibrary } from './eventMapLibrary.mjs?v=20261014-stage1';
 
 const DEBOUNCE_MS = 150;
 // 떠 있는 창의 크기. 폭의 바닥은 예전 창과 같은 400(조건 줄이 더 길면 그만큼 넓힌다 - panelMinimumWidth),
@@ -97,21 +97,29 @@ const SORT_MODES = [
   { id: 'mix', label: 'mix 순', title: '관측 × ln(lift) - 많이 나오면서 치우친 것(G² 기여분). 둘의 절충' },
 ];
 
-export function initEventMap({ insertTag, showToast, getPromptText, generateNow, onRandomLinkChange,
-                               openPeSlash = null, onPermanentExcludeChange = null } = {}) {
+export function initEventMap({ insertTag, insertAtCursor = null, showToast, getPromptText, generateNow, onRandomLinkChange,
+                               openPeSlash = null, onPermanentExcludeChange = null,
+                               onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null,
+                               getStagedCount = null, onOpenStaging = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
+  // 랜덤 연결은 한 갈래뿐이다(서버 상태 하나): event = 이 창의 지금 조합, staging = S 창의 스테이징 풀
+  // (사용자 지시 2026-10-14 - 한쪽을 켜면 다른 쪽이 꺼진다). 이 창의 체크박스 · 핀 동기화는 event 갈래일 때만.
+  const eventLinked = () => randomLink.enabled && randomLink.mode !== 'staging';
   let linkUncertain = false;
   let linkQueue = Promise.resolve(), linkKey = '';
   function paintRandomLink() {
     const checkbox = footEl?.querySelector('[data-em-random-link]');
-    if (checkbox) { checkbox.checked = randomLink.enabled; checkbox.disabled = linkPending > 0; }
+    if (checkbox) { checkbox.checked = eventLinked(); checkbox.disabled = linkPending > 0; }
     onRandomLinkChange?.(randomLink.enabled, linkPending > 0 || linkUncertain);
   }
   function receiveRandomLink(state) {
     if (!state || state.revision < randomLink.revision) return;
     randomLink = state;
     linkUncertain = false;
-    if (state.enabled && !linkPending) {
+    // 이 창의 조합이 연결된 것이 아니면(꺼짐 · 스테이징) 마지막으로 보낸 열쇠를 잊는다 - 안 그러면 다시 켤 때
+    // '보낸 것과 같다' 로 보고 요청을 건너뛴다.
+    if (!eventLinked()) linkKey = '';
+    if (eventLinked() && !linkPending) {
       pins = (state.pins || '').split(',').filter(Boolean);
       excludes = (state.exclude || '').split(',').filter(Boolean);
       ratings = new Set((state.ratings || RATING_OPTIONS.map(r => r.id).join(',')).split(','));
@@ -122,7 +130,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     }
     paintRandomLink();
   }
-  function syncRandomLink(enabled = randomLink.enabled) {
+  function syncRandomLink(enabled = eventLinked()) {
     const fp = filterParams();
     const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons };
     const key = JSON.stringify(payload);
@@ -188,12 +196,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let treeSel = { d1: String(viewPrefs.d1 || ''), d2: String(viewPrefs.d2 || ''), d3: '' };
   const treeLastD2 = new Map();   // 갈래 -> 마지막으로 본 그룹(이번 실행 동안)
   let treeData = null;            // 핀이 없을 때: 고른 절의 결과(쪽 단위 · 같은 그룹의 절마다 후보 수)
+  // 단순 검색 모드(사용자 지시 2026-10-14): 줄을 눌러도 핀을 꽂지 않는다(탐사 없이 보기만) · lift 자리에 [복사][삽입].
+  let simpleMode = Boolean(viewPrefs.simple);
   let treeAll = false;            // 나무 맨 위 [전체] - 갈래의 태그 전부(그룹 · 절로 가두지 않는다). 갈래를 바꿔도 유지
   let treeFilter = '';            // 핀이 있을 때: 갈래 탭(비면 전체). 그 안의 그룹 · 절은 treeSel 을 같이 쓴다
   let ttabsEl = null, actsEl = null, menuEl = null;
   // 영구 제외(Search 의 붉은 줄과 **같은 글**). 서버가 이 글로 게시물을 거른다 - 화면은 고치고 보여 줄 뿐이다.
   let permText = '', permInfo = null, permOpen = false, permSaving = 0;
-  let permEl = null, permInput = null, permStatus = null;
+  let permEl = null, permInput = null, permStatus = null, chipPanel = null;
+  // 영구 제외 입력 줄의 자동완성 - 이벤트 맵 색인의 태그(58,406개)만 낸다(/suggest). 항은 언제나 태그 하나 전체 일치다
+  // (사용자 지시 2026-10-14 - '* 없이 항상 고정 태그 제외'). 커서 앞 쉼표 뒤의 조각이 질의다.
+  let acEl = null, acItems = [], acActive = -1, acSeq = 0, acTimer = null;
   const isTree = () => viewMode === 'tree';
 
   const esc = value => String(value == null ? '' : value)
@@ -267,7 +280,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
 
   async function loadBrowse(keepWidenNote = false) {
     if (!keepWidenNote) widenNote = '';
-    if (randomLink.enabled) void syncRandomLink();
+    if (eventLinked()) void syncRandomLink();
     moreRequest = null; moreError = '';
     active = -1;
     browse = null;
@@ -291,7 +304,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
 
   // ── 영구 제외 ─────────────────────────────────────────────────────────────
-  const permTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean).length;
+  // 입력 줄 = 태그를 **하나씩** 더한다(자동완성 = 이벤트 맵 색인의 태그만 - 고른 것만 들어간다). 목록은 [상세 보기] 의
+  // 칩 창에서 보고 지운다(사용자 지시 2026-10-14 - 쉼표로 구분해 치던 칸을 없앴다). 글 자체는 Search 의 영구 제외와
+  // 같은 쉼표 목록이라 저장은 언제나 글 전체를 보낸다.
+  const splitTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean);
+  const normTerm = t => String(t || '').trim().replace(/^\*+/, '').toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
   async function loadPermanent() {
     try { permInfo = await getJson('/api/event-map/permanent-exclude', {}); permText = String(permInfo.text || ''); }
     catch { permInfo = null; }
@@ -299,43 +316,144 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   }
   function paintPermanent() {
     const btn = filtersEl?.querySelector('[data-emt-perm]');
-    const n = permTerms(permText);
+    const n = splitTerms(permText).length;
     if (btn) {
       btn.textContent = `영구 제외${n ? ` · ${n}` : ''}`;
       btn.classList.toggle('is-on', n > 0 || permOpen);
       btn.setAttribute('aria-expanded', String(permOpen));
     }
-    if (!permStatus) return;
-    const tags = permInfo?.tags || [];
-    permStatus.textContent = permSaving ? '저장 중…' : (permInfo ? `걸린 태그 ${fmt(permInfo.tag_count || 0)}` : '');
-    permStatus.title = tags.length ? `${tags.join(', ')}${permInfo.tag_count > tags.length ? ' …' : ''}` : '';
+    if (permStatus) {
+      const tags = permInfo?.tags || [];
+      permStatus.textContent = permSaving ? '저장 중…' : (permInfo ? `걸린 태그 ${fmt(permInfo.tag_count || 0)}` : '');
+      permStatus.title = tags.length ? `${tags.join(', ')}${permInfo.tag_count > tags.length ? ' …' : ''}` : '';
+    }
+    paintChips();
   }
+  function closeAc() {
+    clearTimeout(acTimer); ++acSeq;
+    acItems = []; acActive = -1;
+    if (acEl) { acEl.hidden = true; acEl.innerHTML = ''; }
+  }
+  const fmtK = n => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+  function paintAc() {
+    if (!acEl) {
+      acEl = document.createElement('div');
+      acEl.className = 'emt-ac';
+      acEl.setAttribute('role', 'listbox');
+      document.body.append(acEl);
+      acEl.addEventListener('mousedown', event => event.preventDefault());   // 입력 칸이 초점을 잃지 않게
+      acEl.addEventListener('click', event => {
+        const row = event.target.closest('[data-ac]');
+        if (row) chooseAc(Number(row.dataset.ac));
+      });
+    }
+    if (!acItems.length || !permOpen) { acEl.hidden = true; return; }
+    acEl.innerHTML = acItems.map((it, i) => `<div class="emt-ac-row${i === acActive ? ' is-active' : ''}${it.blocked === '영구 제외' ? ' is-off' : ''}" data-ac="${i}" role="option">
+        <span class="emt-ac-tag">${esc(it.tag)}</span><span class="emt-ac-kind">${esc(it.blocked === '영구 제외' ? '이미 제외' : (it.role_label || (it.group && it.group !== 'unsorted' ? roleLabel(it.group) : '')))}</span><span class="emt-ac-n">${fmtK(it.observed)}</span></div>`).join('');
+    acEl.hidden = false;
+    acEl.style.zIndex = String(Number(overlay.style.zIndex) + 2);
+    const r = permInput.getBoundingClientRect();
+    acEl.style.left = `${Math.round(r.left)}px`;
+    acEl.style.top = `${Math.round(r.bottom + 2)}px`;
+    acEl.style.width = `${Math.round(Math.max(260, Math.min(r.width, 380)))}px`;
+  }
+  function scheduleAc() {
+    clearTimeout(acTimer);
+    const q = permInput.value.trim();
+    if (!q) { closeAc(); return; }
+    acTimer = setTimeout(async () => {
+      const mine = ++acSeq;
+      try {
+        const body = await getJson('/api/event-map/suggest', { q, limit: 8 });
+        if (mine !== acSeq) return;
+        acItems = body.items || [];
+        acActive = acItems.findIndex(it => it.blocked !== '영구 제외');
+      } catch { if (mine === acSeq) { acItems = []; acActive = -1; } }
+      paintAc();
+    }, DEBOUNCE_MS);
+  }
+  /** 자동완성에서 고른 태그를 영구 제외에 더한다(곧바로 저장). 칸은 비워 다음 태그를 칠 수 있게. */
+  function chooseAc(i) {
+    const it = acItems[i];
+    if (!it) return;
+    closeAc();
+    if (it.blocked === '영구 제외') { toast(`이미 영구 제외에 있습니다 — ${it.tag}`, 'info'); return; }
+    permInput.value = '';
+    void savePermanentTerms([...splitTerms(permText), it.tag], `영구 제외에 더했습니다 — ${it.tag}`);
+  }
+
   function openPermanent(on) {
     if (!permEl) return;
     permOpen = !!on && isTree();
     permEl.hidden = !permOpen;
-    if (permOpen) { permInput.value = permText; permInput.focus({ preventScroll: true }); }
+    if (!permOpen) closeAc();
+    if (permOpen) { permInput.value = ''; permInput.focus({ preventScroll: true }); }
     paintPermanent();
     fitHeight();
   }
-  /** 입력 줄의 글을 저장한다. 바뀐 것이 없으면 묻지 않는다. 저장되면 Search 창의 붉은 줄도 같은 글로(같은 화면 안). */
-  async function savePermanent() {
-    const text = String(permInput?.value || '').split(/\r?\n/).join(', ').trim();
+  /** 영구 제외 글을 저장한다(항 목록 -> 쉼표 글). 저장되면 Search 창의 영구 제외 칸도 같은 글로(같은 화면 안). */
+  async function savePermanentTerms(terms, done) {
+    const text = terms.join(', ');
     if (text === permText.trim()) return;
     permSaving++; paintPermanent();
     try {
       permInfo = await postJson('/api/event-map/permanent-exclude', { text });
       permText = String(permInfo.text || '');
       if (typeof onPermanentExcludeChange === 'function') onPermanentExcludeChange(permText);
-      toast(permText ? `영구 제외를 저장했습니다 — 걸린 태그 ${fmt(permInfo.tag_count || 0)}개` : '영구 제외를 비웠습니다', 'success');
+      toast(done || (permText ? `영구 제외를 저장했습니다 — 걸린 태그 ${fmt(permInfo.tag_count || 0)}개` : '영구 제외를 비웠습니다'), 'success');
       if (open && mapState?.state === 'ready') void explore();   // 걸러지는 게시물이 바뀌었다 - 지금 화면을 다시 묻는다
     } catch (error) {
       toast(`영구 제외 저장 실패 — ${error.message}`, 'error');
     } finally { permSaving--; paintPermanent(); }
   }
 
+  // [상세 보기] = 영구 제외 칩 창. 칩의 × 로 하나씩 지운다. 이벤트 맵에서 걸리는 태그가 없는 항(Search 전용 문법
+  // `~x` · 없는 태그)은 흐리게 - 지우지 않아도 이벤트 맵에는 영향이 없다.
+  function ensureChips() {
+    if (chipPanel) return chipPanel;
+    chipPanel = createDraggablePanel({
+      document, window, id: 'permExcludeWindow', title: '영구 제외', variant: 'em-overlay em-window emt-chips-window',
+      storageKey: 'event-map-permanent', width: 340, height: 300, minWidth: 260, minHeight: 160, maxWidth: 700,
+      // 처음 자리 = 이벤트 맵 창 오른쪽(겹치면 입력 줄을 가린다). 그 뒤로는 옮긴 자리를 기억한다.
+      initial: (r => ({ x: Math.round(Math.min(r.right + 8, window.innerWidth - 348)), y: Math.round(r.top) }))(overlay.getBoundingClientRect()),
+      resizable: true,
+    });
+    chipPanel.body.innerHTML = `<div class="emt-chips-head"></div><div class="emt-chips"></div>
+      <div class="emt-chips-note">흐린 칩 = 이벤트 맵에서는 걸리는 태그가 없다(Search 전용 문법 · 없는 태그). 지우면 Search 의 영구 제외에서도 빠진다.</div>`;
+    chipPanel.body.addEventListener('click', event => {
+      const x = event.target.closest('[data-chip-x]');
+      if (!x || permSaving) return;
+      const terms = splitTerms(permText);
+      const gone = terms[Number(x.dataset.chipX)];
+      if (gone == null) return;
+      void savePermanentTerms(terms.filter((_, i) => i !== Number(x.dataset.chipX)), `영구 제외에서 뺐습니다 — ${gone}`);
+    });
+    return chipPanel;
+  }
+  function paintChips() {
+    if (!chipPanel || !chipPanel.isOpen()) return;
+    const terms = splitTerms(permText);
+    const hits = new Map((permInfo?.terms || []).map(t => [t.term, t.tags || []]));
+    chipPanel.setTitle(`영구 제외 · ${terms.length}`);
+    chipPanel.body.querySelector('.emt-chips-head').textContent = permInfo ? `이벤트 맵에서 걸린 태그 ${fmt(permInfo.tag_count || 0)}` : '';
+    chipPanel.body.querySelector('.emt-chips').innerHTML = terms.length ? terms.map((t, i) => {
+      const tags = hits.get(t);
+      const dead = Array.isArray(tags) && !tags.length;
+      return `<span class="emt-chip${dead ? ' is-dead' : ''}" title="${esc(dead ? '이벤트 맵에서는 걸리는 태그가 없다' : `걸리는 태그: ${(tags || [normTerm(t)]).join(', ')}`)}">${esc(t)}<button type="button" data-chip-x="${i}" aria-label="${esc(t)} 빼기">×</button></span>`;
+    }).join('') : '<div class="st-empty">영구 제외 태그가 없습니다. 입력 줄에서 태그를 쳐서 더한다.</div>';
+    chipPanel.body.inert = permSaving > 0;
+  }
+  function openChips() {
+    ensureChips();
+    if (chipPanel.isOpen()) { chipPanel.close(); return; }
+    chipPanel.open();
+    chipPanel.el.style.zIndex = String(Number(overlay.style.zIndex) + 1);
+    paintChips();
+    void loadPermanent();   // 항마다 걸리는 태그를 새로(색인이 열린 뒤라야 칩이 흐림을 안다)
+  }
+
   // ── 3단 지도 ──────────────────────────────────────────────────────────────
-  function rememberView() { saveViewPrefs({ mode: viewMode, d1: treeSel.d1, d2: treeSel.d2 }); }
+  function rememberView() { saveViewPrefs({ mode: viewMode, d1: treeSel.d1, d2: treeSel.d2, simple: simpleMode }); }
   const treeBranch = id => (treeMap?.d1 || []).find(b => b.id === id) || null;
   function treeGroupOf(d2) {
     for (const b of treeMap?.d1 || []) { const g = b.d2.find(x => x.id === d2); if (g) return g; }
@@ -381,7 +499,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
 
   /** 핀이 없을 때의 3단 지도: 고른 절 하나 · 그룹 전체(절 = '') · 갈래 전체([전체]) - 모두 쪽 단위. */
   async function loadTree() {
-    if (randomLink.enabled) void syncRandomLink();
+    if (eventLinked()) void syncRandomLink();
     moreRequest = null; moreError = '';
     active = -1;
     treeData = null;
@@ -478,7 +596,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   async function explore(keepWidenNote = false) {
     if (!keepWidenNote) widenNote = '';
     if (pins.length < 2 && roles.has('unsorted')) { roles.delete('unsorted'); subcategory = ''; }
-    if (randomLink.enabled) void syncRandomLink();
+    if (eventLinked()) void syncRandomLink();
     moreRequest = null; moreError = '';
     active = -1;
     ++seq; // 핀이 전부 사라져도 이전 응답을 무효화한다.
@@ -645,6 +763,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
+  const currentSelection = () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons] });
   /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
    *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
   /** [넣기] = 고른 핀으로 메인 프롬프트를 대치한다. [생성] = 같은 대치 뒤 Generate(사용자 지정 2026-10-08 -
@@ -718,7 +837,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         ${row.dataset.emPath ? `<div class="em-tip-path">${esc(row.dataset.emPath)}</div>` : ''}
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
         <div class="em-tip-stats">${row.dataset.emLift ? `lift ${esc(row.dataset.emLift)} · ` : ''}${info?.count ? `Danbooru ${fmt(info.count)}` : ''}</div>
-        <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : "클릭 꽂기 · 우클릭 제외"}</div></div>
+        <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : (simpleMode && row.classList.contains('emt-row') ? "단순 검색 모드 - [복사] · [삽입]" : "클릭 꽂기 · 우클릭 제외")}</div></div>
       </div>${thumb}</div>`;
     // 툴팁은 곁에 뜨는 창들(소분류 · 옆 패널 · 인원 팝업, 모두 overlay+1)보다 **한 칸 위**다. 같은 칸이면
     // body 에 나중에 붙은 쪽이 이겨, 창을 다시 열면 소분류 창이 툴팁을 덮었다(사용자 제보 2026-10-07).
@@ -895,6 +1014,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const tags = s.tags || String(s.prompt || '').split(', ');
     return tags.filter(t => t && !peHidden.has(t)).join(', ');
   }
+  /** [삽입] - 마지막으로 초점이 있던 프롬프트 칸의 커서 자리에 ', 태그'(앞이 비었거나 쉼표로 끝나면 쉼표는 안 붙인다). */
+  function insertOne(tag) {
+    const done = typeof insertAtCursor === 'function' ? insertAtCursor(tag) : insertTag?.(tag);
+    toast(done === false ? '프롬프트에 넣지 못했습니다.' : `프롬프트에 넣었습니다 — ${tag}`, done === false ? 'error' : 'success');
+  }
   function insertText(text) {
     const clean = String(text || '').trim();
     if (!clean) return;
@@ -981,6 +1105,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const rs = overlay.querySelector('[data-em-reset]');
     if (rs) rs.disabled = isTree() ? !(pins.length || excludes.length)
       : !(pins.length || excludes.length || subcategory || group);
+    // [스테이징] - 핀이 있고 아직 스테이징에 없는 조합일 때만(이미 있으면 미리 끈다 - 사용자 지시 2026-10-14).
+    const sg = overlay.querySelector('[data-emt-stage]');
+    if (sg) {
+      const staged = on && Boolean(isStaged?.(currentSelection()));
+      sg.disabled = !on || staged;
+      sg.title = staged ? '이미 스테이징에 있는 조합입니다' : '이 조합을 얼려 스테이징(S)에 넣는다 - 랜덤 버튼을 스테이징에 연결하면 그중 하나에서 뽑는다';
+    }
+    const so = overlay.querySelector('[data-emt-stage-open]');
+    if (so) {
+      const n = Number(getStagedCount?.()) || 0;
+      so.hidden = !n;
+      so.textContent = String(n);
+    }
     // 3단 지도: 넣기 · 생성 · 복사 · 실제 조합은 발줄 오른쪽에, **핀이 있을 때만** 보인다(목업).
     if (actsEl) actsEl.hidden = !(isTree() && on);
   }
@@ -1090,7 +1227,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     return `<div class="em-row emt-row${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
         data-em-est="${Number(est) || 0}" data-em-lift="${liftText}"${where ? ` data-em-path="${esc(where)}"` : ''} role="option">
       <span class="em-tag">${esc(c.tag)}</span>
-      <span class="em-lift">${liftText}</span>
+      ${simpleMode ? `<span class="emt-quick"><button type="button" data-emt-copy="${esc(c.tag)}" title="이 태그를 클립보드로">복사</button><button type="button" data-emt-insert="${esc(c.tag)}" title="프롬프트 커서 자리에 ', 태그'">삽입</button></span>`
+        : `<span class="em-lift">${liftText}</span>`}
       <span class="em-obs">${obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
       ${showPath && shown ? `<span class="emt-path">${shown}</span>` : ''}
@@ -1212,7 +1350,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     };
     ttabsEl.innerHTML = (pinned ? tab('', '전체', null, !treeFilter) : '')
       + treeMap.d1.map(b => tab(b.id, b.ko, counts ? (counts.get(b.id) || 0) : null,
-        pinned ? b.id === treeFilter : b.id === treeSel.d1)).join('');
+        pinned ? b.id === treeFilter : b.id === treeSel.d1)).join('')
+      + `<label class="emt-simple" title="켜면 줄을 눌러도 핀을 꽂지 않는다 - 고른 인원 · 등급의 태그를 보기만 하고 [복사] · [삽입] 으로 쓴다">
+          <input type="checkbox" data-emt-simple ${simpleMode ? 'checked' : ''}>단순 검색 모드</label>`;
   }
 
   function candidateRow(c, i) {
@@ -1587,7 +1727,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     menuEl.innerHTML = `
       <button type="button" role="menuitem" data-emt-act="pe">PE설정<small>메인 프롬프트의 /pe 와 같은 목록</small></button>
       <button type="button" role="menuitem" data-emt-act="save" ${pins.length ? '' : 'disabled'}>이 조합 저장하기</button>
-      <button type="button" role="menuitem" data-emt-act="load">조합 불러오기</button>`;
+      <button type="button" role="menuitem" data-emt-act="load">저장된 조합 (S)</button>`;
     menuEl.hidden = false;
     menuEl.style.zIndex = String(Number(overlay.style.zIndex) + 1);
     btn.setAttribute('aria-expanded', 'true');
@@ -1624,7 +1764,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     viewMode = mode;
     rememberView();
     closeTreeMenu(); closePersonPopup(); hideTip();
-    if (permOpen) { void savePermanent(); openPermanent(false); }
+    if (permOpen) openPermanent(false);
     if (library?.isOpen()) library.close();
     samples = null; widenNote = ''; result = null; browse = null; treeData = null;
     treeFilter = isTree() && pins.length ? treeSel.d1 : '';
@@ -1658,13 +1798,21 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         <span class="em-icon" aria-hidden="true">E</span>
         <input class="em-input" type="search" autocomplete="off" spellcheck="false"
                aria-label="태그 찾기" placeholder="태그 찾기…">
+        <!-- [스테이징] = 건수 바로 왼쪽(사용자 지시 2026-10-14 - 지금 보이는 조합을 얼린다는 것이 건수 곁에서 바로 읽힌다).
+             3단 지도 · 기존 두 화면 모두. 켜짐은 paintActions 가 정한다(핀이 있고 아직 스테이징에 없는 조합일 때만). -->
+        <button type="button" class="em-reset emt-stage-btn" data-emt-stage disabled
+                title="이 조합을 얼려 스테이징(S)에 넣는다 - 랜덤 버튼을 스테이징에 연결하면 그중 하나에서 뽑는다">스테이징</button>
+        <!-- 스테이징 수 = 스테이징 창 열기. 스테이징이 있으면 늘 누를 수 있다(S 단추를 숨겨도 여기서 연다 - 사용자 지시 2026-10-14). -->
+        <button type="button" class="emt-stage-count" data-emt-stage-open hidden
+                title="스테이징된 조합 - 눌러서 스테이징 창 열기"></button>
         <span class="em-status" role="status" aria-live="polite"></span>
       </div>
       <div class="emt-perm" hidden>
         <span class="em-icon emt-perm-icon" aria-hidden="true">−</span>
         <input class="em-input emt-perm-input" type="text" autocomplete="off" spellcheck="false"
-               aria-label="영구 제외 태그" placeholder="영구 제외 태그 · 쉼표로 구분 (*태그 = 그 태그만)">
+               aria-label="영구 제외에 더할 태그" placeholder="영구 제외에 더할 태그 - 치면 고를 태그가 뜬다">
         <span class="em-status emt-perm-status" role="status"></span>
+        <button type="button" class="em-mini emt-perm-detail" data-emt-perm-detail title="영구 제외 태그를 칩으로 보고 지운다">상세 보기</button>
       </div>
       <div class="em-trail"></div>
       <div class="em-filters"></div>
@@ -1699,16 +1847,40 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     permInput = overlay.querySelector('.emt-perm-input');
     permStatus = overlay.querySelector('.emt-perm-status');
     // Enter = 저장하고 닫기 · Esc = 되돌리고 닫기(창의 Esc 처리기가 먼저 받는다 - 거기서 이 줄을 닫는다) · 칸을 떠나면 저장.
+    permInput.addEventListener('input', scheduleAc);
     permInput.addEventListener('keydown', event => {
-      if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return;
+      if (event.isComposing || event.keyCode === 229) return;
+      const acOpen = acEl && !acEl.hidden && acItems.length;
+      if (acOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+        event.preventDefault();
+        acActive = (acActive + (event.key === 'ArrowDown' ? 1 : -1) + acItems.length) % acItems.length;
+        paintAc();
+        return;
+      }
+      if (acOpen && (event.key === 'Enter' || event.key === 'Tab') && acActive >= 0) {
+        event.preventDefault();
+        chooseAc(acActive);
+        return;
+      }
+      if (event.key !== 'Enter') return;
       event.preventDefault();
-      void savePermanent().then(() => { openPermanent(false); focusInput(); });
+      // 고를 태그가 없으면 더하지 않는다 - 이벤트 맵 색인의 태그만 들어간다(사용자 지시 2026-10-14).
+      if (permInput.value.trim()) toast('목록에서 태그를 골라 주세요 (이벤트 맵에 있는 태그만 더한다)', 'info');
+      else { openPermanent(false); focusInput(); }
     });
-    permInput.addEventListener('blur', () => { if (permOpen) void savePermanent(); });
+    permInput.addEventListener('blur', () => closeAc());
+    permEl.querySelector('[data-emt-perm-detail]').addEventListener('click', openChips);
     paintViewToggle();
     panel.slot.addEventListener('click', event => {
       const v = event.target.closest('[data-em-view]');
       if (v) setViewMode(v.dataset.emView);
+    });
+    ttabsEl.addEventListener('change', event => {
+      if (!event.target.matches('[data-emt-simple]')) return;
+      simpleMode = event.target.checked;
+      rememberView();
+      render(true);
+      focusInput();
     });
     ttabsEl.addEventListener('click', event => {
       const t = event.target.closest('[data-emt-d1]');
@@ -1739,9 +1911,9 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
         input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
         savePrefs(persons, ratings, sortMode);
-        if (randomLink.enabled) await syncRandomLink();
+        if (eventLinked()) await syncRandomLink();
         await explore();
-      }, toast, resize: fitHeight,
+      }, toast, resize: fitHeight, onLoad: onOpenSaved, onChange: onLibraryChange,
     });
     paintRandomLink();
     footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
@@ -1753,6 +1925,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       active = -1; scheduleSuggest();
     });
     input.addEventListener('keydown', onKeyDown);
+    overlay.querySelector('[data-emt-stage]').addEventListener('click', () => onStage?.(currentSelection()));
+    overlay.querySelector('[data-emt-stage-open]').addEventListener('click', () => onOpenStaging?.());
 
     trailEl.addEventListener('click', event => {
       const t = event.target;
@@ -1781,7 +1955,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     filtersEl.addEventListener('click', event => {
       const t = event.target;
-      if (t.closest('[data-emt-perm]')) { if (permOpen) { void savePermanent(); openPermanent(false); } else openPermanent(true); return; }
+      if (t.closest('[data-emt-perm]')) { openPermanent(!permOpen); return; }
       const menuBtn = t.closest('[data-emt-menu]');
       if (menuBtn) { if (menuEl && !menuEl.hidden) closeTreeMenu(); else openTreeMenu(menuBtn); return; }
       if (t.closest('[data-em-pe-settings]')) { openPeSettings(); return; }
@@ -1865,7 +2039,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         else if (id) pickGroup(id);
         return;
       }
+      const cp = t.closest('[data-emt-copy]');
+      if (cp) { event.stopPropagation(); void copyText(cp.dataset.emtCopy); return; }
+      const ins = t.closest('[data-emt-insert]');
+      if (ins) { event.stopPropagation(); insertOne(ins.dataset.emtInsert); return; }
       const row = t.closest('[data-em-pin]');
+      if (row && simpleMode && row.classList.contains('emt-row')) return;   // 단순 검색 모드 - 탐사하지 않는다
       if (row) pin(row.dataset.emPin);
     });
     overlay.addEventListener('pointerover', event => {
@@ -2127,7 +2306,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       event.preventDefault(); event.stopPropagation();
       if (personPopup && !personPopup.hidden) { closePersonPopup(); return; }
       if (menuEl && !menuEl.hidden) { closeTreeMenu(); return; }
-      if (permOpen) { permInput.value = permText; openPermanent(false); focusInput(); return; }
+      if (acEl && !acEl.hidden) { closeAc(); return; }
+      if (permOpen) { openPermanent(false); focusInput(); return; }
       if (library?.isOpen()) {
         library.close();
         overlay.querySelector('.em-library-bar button')?.focus();
@@ -2155,7 +2335,21 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
     input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
     savePrefs(persons, ratings, sortMode);
-    if (randomLink.enabled) await syncRandomLink();
+    if (eventLinked()) await syncRandomLink();
+    await explore();
+  }
+  /** S 창의 [맵에서 열기] - 저장 · 스테이징된 조합을 이 창에 그대로 편다(저장된 조합 불러오기와 같은 길). */
+  async function openSelection(selection) {
+    if (linkPending || linkUncertain) throw new Error('랜덤 연결 상태를 확인한 뒤 다시 열어주세요.');
+    if (!open) await show();
+    library?.close();
+    pins = selection.pins.slice(); excludes = selection.exclude.slice();
+    ratings = new Set(selection.ratings); persons = new Set(selection.persons);
+    group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
+    if (isTree()) { treeFilter = treeSel.d1; treeAll = false; }
+    input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
+    savePrefs(persons, ratings, sortMode);
+    if (eventLinked()) await syncRandomLink();
     await explore();
   }
 
@@ -2163,5 +2357,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   void refreshRandomLink();
   return { show, close, toggle, isOpen: () => open, pins: () => pins.slice(),
     isRandomLinked: () => randomLink.enabled, isRandomLinkPending: () => linkPending > 0 || linkUncertain,
-    receiveRandomLink, refreshRandomLink, searchCombination };
+    randomLinkMode: () => (randomLink.enabled ? (randomLink.mode || 'event') : ''),
+    /** 스테이징이 바뀌었다(S 창) - [스테이징] 단추의 켜짐을 다시 정한다. */
+    syncStaged: () => { if (overlay) paintActions(); },
+    receiveRandomLink, refreshRandomLink, searchCombination, openSelection };
 }

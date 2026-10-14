@@ -255,6 +255,7 @@
       "subcategories": "GET explore/browse accept subcategory with a single selected group. subcategories counts cover the entire matching group before the subcategory filter; unknown and pending tags remain accessible. Compact mapping is bundled as data/event_map_subcategories.json.",
       "tree_3depth": "New-version 3-level map (d1 section > d2 group > d3 section > tags) bundled as core/event_map/tree_3depth.json (names and hierarchy only; built by tools/export_event_map_tree.py from the curated Danbooru wiki tag_groups draft). GET tree returns the skeleton with Korean labels and tag counts even without the index (indexed=false). GET tree/browse returns, for the chosen ratings/persons, a section page (d2+d3, offset paging), per-section top candidates for a group (d2) or per-group top candidates for a branch (d1) from one counting pass. GET explore with tree=1 restricts candidates to map tags (optionally d1/d2/d3), attaches candidate path and tree_counts per d1, and ignores groups/subcategory.",
       "permanent_exclude": "The Search permanent exclusion (search_filter_state.exclude_permanent) also applies to the event map: posts carrying a matched tag are not counted in explore/browse/tree/sample (event map screen and random link only; Assist keeps its own rules) and matched tags are never candidates. Same syntax as Search exclusions except partial terms match only at a word start. GET permanent-exclude returns the text and matched tags; POST saves only that field.",
+      "staging": "Staging (save/event_map/staging.json) freezes event map selections into a random pool. GET/POST staging lists and changes it (add, stage_saved incl. bundles, remove, clear, save_bundle into the saved library as kind=bundle). The random link has one mode at a time: event (current map selection, EV Random) or staging (ST Random picks one staged selection uniformly, then one real post). Emptying staging disables a staging link.",
       "pagination": "GET explore/browse accept zero-based offset and bounded limit; return offset, next_offset and has_more. The panel appends 40 candidates on bottom scroll and resets on query changes.",
       "source_files": [
         "app/backend/server/event_map_routes.py",
@@ -272,6 +273,7 @@
         "core/event_map/pe_filter.py",
         "core/event_map/tree.py",
         "core/event_map/permanent.py",
+        "core/event_map/staging.py",
         "core/event_map/tree_3depth.json",
         "app/web/remote/js/features/eventMapPanel.mjs",
         "app/web/remote/js/features/draggablePanel.mjs"
@@ -292,6 +294,8 @@
         {"method": "GET", "path": "/api/event-map/tree", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/tree/browse", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/permanent-exclude", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/staging", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-map/staging", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/event-map/permanent-exclude", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/event-map/pe-filter", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-map/apply", "smoke": "state_mutation"},

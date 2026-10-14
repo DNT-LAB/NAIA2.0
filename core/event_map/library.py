@@ -1,4 +1,8 @@
-"""User-owned saved Event Map selections. Independent of the optional index."""
+"""User-owned saved Event Map selections. Independent of the optional index.
+
+묶음(kind = "bundle", 사용자 지시 2026-10-14): 스테이징을 통째로 저장한 것. `selections` 에 조합 전부를 담고,
+`selection` 에는 첫 조합을 그대로 둔다 - 묶음을 모르는 옛 판이 읽어도 파일 전체를 거부하지 않는다(첫 조합으로 보인다).
+"""
 from __future__ import annotations
 
 import json
@@ -15,6 +19,7 @@ from core.tag_combo.person import PERSON_GROUPS, normalize_tag
 _LOCK = threading.RLock()
 SCHEMA = "naia-event-map-library-v1"
 MAX_ENTRIES = 2000
+MAX_BUNDLE = 200
 
 
 def _text(value, label, limit, required=False):
@@ -68,6 +73,12 @@ class EventMapLibrary:
                 _text(row["category"], "분류", 60)
                 _text(row["created_at"], "생성 시각", 80, True)
                 selection(row["selection"])
+                if row.get("kind") == "bundle":
+                    bundle = row.get("selections")
+                    if not isinstance(bundle, list) or not 1 <= len(bundle) <= MAX_BUNDLE:
+                        raise ValueError("bundle")
+                    for item in bundle:
+                        selection(item)
             categories = data.get("categories", [])
             if not isinstance(categories, list) or len(categories) > 500:
                 raise ValueError("categories")
@@ -101,7 +112,7 @@ class EventMapLibrary:
                     if all(old[k] == v for k, v in row.items()):
                         return {"ok": True, "item": old}
                     raise MapQueryError("bad_request", "저장 요청이 중복되었습니다. 저장 창을 다시 열어주세요.")
-                if self._fingerprint(old["selection"]) == self._fingerprint(selected):
+                if old.get("kind") != "bundle" and self._fingerprint(old["selection"]) == self._fingerprint(selected):
                     raise MapQueryError("duplicate", "이미 저장된 조합입니다.")
             if len(items) >= MAX_ENTRIES:
                 raise MapQueryError("bad_request", "조합은 최대 2,000개까지 저장할 수 있습니다.")
@@ -109,6 +120,35 @@ class EventMapLibrary:
             items.insert(0, row)
             self._write(items)
             return {"ok": True, "item": row}
+
+    def save_bundle(self, payload):
+        """스테이징을 통째로 저장한다(묶음). 같은 묶음 검사는 하지 않는다 - 이름으로 가른다."""
+        try:
+            item_id = str(uuid.UUID(payload.get("id", "")))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise MapQueryError("bad_request", "저장 요청 ID가 잘못되었습니다.") from exc
+        bundle = payload.get("selections")
+        if not isinstance(bundle, list) or not 1 <= len(bundle) <= MAX_BUNDLE:
+            raise MapQueryError("bad_request", "묶을 조합이 없습니다.")
+        selected = [selection(s) for s in bundle]
+        default = f"스테이징 묶음 · {len(selected)}개 · " + ", ".join(selected[0]["pins"])
+        row = {"id": item_id, "name": _text(payload.get("name") or default[:100], "이름", 100, True),
+               "category": _text(payload.get("category", ""), "분류", 60),
+               "kind": "bundle", "selection": selected[0], "selections": selected}
+        with _LOCK:
+            items = self._read()
+            if any(old["id"] == item_id for old in items):
+                raise MapQueryError("bad_request", "저장 요청이 중복되었습니다.")
+            if len(items) >= MAX_ENTRIES:
+                raise MapQueryError("bad_request", "조합은 최대 2,000개까지 저장할 수 있습니다.")
+            row["created_at"] = datetime.now(timezone.utc).isoformat()
+            items.insert(0, row)
+            self._write(items)
+            return {"ok": True, "item": row, "items": items, "categories": self._categories}
+
+    def find(self, item_id):
+        with _LOCK:
+            return next((r for r in self._read() if r["id"] == item_id), None)
 
     @staticmethod
     def _fingerprint(selected):
@@ -143,12 +183,14 @@ class EventMapLibrary:
                     if len(self._categories) >= 500:
                         raise MapQueryError("bad_request", "분류는 500개까지 추가할 수 있습니다.")
                     self._categories.append(category)
-            elif action in ("move", "delete"):
+            elif action in ("move", "delete", "rename"):
                 row = next((r for r in items if r["id"] == payload.get("id")), None)
                 if row is None:
                     raise MapQueryError("not_found", "이미 삭제되었거나 존재하지 않는 조합입니다.")
                 if action == "delete":
                     items.remove(row)
+                elif action == "rename":
+                    row["name"] = _text(payload.get("name"), "이름", 100, True)
                 else:
                     category = _text(payload.get("category", ""), "분류", 60)
                     if category and category not in self._categories:

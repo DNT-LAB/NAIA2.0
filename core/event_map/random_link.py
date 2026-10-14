@@ -21,6 +21,12 @@ def ensure_event_map_service(context):
         return service
 
 
+def staging_store(context):
+    """스테이징(동결한 조합의 랜덤 풀) - `save/event_map/staging.json`."""
+    from core.event_map.staging import EventMapStaging
+    return EventMapStaging(context._save_path("event_map", "staging.json"))
+
+
 def link_state(context):
     return dict(getattr(context, "event_map_random_link", None) or {
         "enabled": False, "revision": 0,

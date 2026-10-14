@@ -28615,6 +28615,16 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* A(Assist, Ctrl+O) — E 와 같은 옷·같은 반구, 자리만 E 바로 아래(사용자 지정 2026-09-28). E 는 `top:50%` +
    `translateY(-50%)` 라 아래 가장자리가 `50% + 19px` 이고, 여기에 2px 만 띄운다. */
 #assistTab { top: calc(50% + 21px); transform: none; }
+/* S(스테이징 · 저장된 조합) - E 바로 아래, A 위(사용자 지시 2026-10-14). S 가 보이면 A 를 한 칸 내린다(S 는 스테이징이나
+   저장된 조합이 있을 때만 보인다 - 없으면 A 가 E 바로 아래 그대로). 배지(스테이징 수)는 반구 밖 오른쪽 위에 작게, 눈에 덜 띄게. */
+#stagingTab { top: calc(50% + 21px); transform: none; overflow: visible; }
+#stagingTab:not([hidden]) ~ #assistTab { top: calc(50% + 61px); }
+/* 스테이징이 랜덤 버튼에 연결된 동안은 S 를 밝게 둔다(눌린 단추와 같은 옷) - 지금 Random 이 스테이징에서 뽑는다는 표시. */
+#stagingTab.is-linked { opacity: 1; background: rgba(88,76,170,0.92); color: #fff; }
+.st-badge { position: absolute; top: -5px; right: -9px; min-width: 15px; padding: 0 4px; box-sizing: border-box;
+  border-radius: 5px; border: 1px solid rgba(15,15,23,0.95); background: #2b3c55; color: #b8c6d8;
+  font-family: var(--font-mono); font-size: 9px; line-height: 13px; text-align: center; pointer-events: none; }
+.st-badge[hidden] { display: none; }
 
 /* 이벤트 맵 = 공용 떠 있는 창(draggablePanel)의 뼈대 + **예전 컴팩트 창의 옷**.
    떠 있는 창으로 옮기면서 공용 창의 기본 옷(밝은 바탕 · 12px 모서리 · 줄 사이 8px · 제목줄)이 그대로 씌워져
@@ -28670,6 +28680,14 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-window.em-tree .em-library-bar, .em-window.em-tree .em-keys { display: none; }
 .em-window.em-tree .em-random-link { margin-left: 4px; }
 .em-cats.emt-tabs { position: static; flex: 0 0 auto; margin: 0; }
+/* 단순 검색 모드(사용자 지시 2026-10-14) - 갈래 탭 줄 오른쪽 끝. 켜면 줄의 lift 자리에 좁은 [복사][삽입]. */
+.emt-simple { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--text-muted);
+  white-space: nowrap; cursor: pointer; }
+.emt-simple input { width: 12px; height: 12px; margin: 0; accent-color: #9b88ee; }
+.emt-quick { display: inline-flex; gap: 2px; }
+.emt-quick button { border: 1px solid var(--border-dim); border-radius: 3px; background: transparent; color: var(--text-secondary);
+  font-family: var(--font-sans, inherit); font-size: 9.5px; line-height: 1.2; padding: 1px 4px; cursor: pointer; }
+.emt-quick button:hover { border-color: var(--accent); color: var(--text-primary); }
 .emt-tabs[hidden], .emt-acts[hidden], .emt-menu[hidden] { display: none; }
 /* 갈래 탭 색 = 기존 화면 대분류 색을 뜻이 가까운 것끼리 빌렸다(사용자 지시 2026-10-14 - '분류가 달라도 적당히').
    고른 탭은 기존 화면처럼 흰 글자. */
@@ -28688,12 +28706,32 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 /* 영구 제외(사용자 지시 2026-10-14): [⋯] 왼쪽 단추 · 누르면 태그 찾기 바로 아래 입력 줄. 걸린 게 있으면 붉게. */
 .emt-perm-btn { margin-left: auto; padding: 0 8px; white-space: nowrap; }
 .emt-perm-btn + .emt-menu-btn { margin-left: 0; }
+/* 검색 줄의 [스테이징] - 건수 바로 왼쪽, 검색 줄 높이에 맞춰 낮게. */
+.em-bar .emt-stage-btn { flex: 0 0 auto; height: 22px; padding: 0 8px; font-size: 10.5px; white-space: nowrap; }
+/* [스테이징] 바로 옆 숫자 단추 = 스테이징 수 · 누르면 스테이징 창(S 배지와 같은 옅은 옷 - 사용자 지시 2026-10-14). */
+.em-bar .emt-stage-count { flex: 0 0 auto; min-width: 20px; height: 18px; margin-left: -3px; padding: 0 5px; box-sizing: border-box;
+  border: 1px solid rgba(120,150,190,0.35); border-radius: 5px; background: #2b3c55; color: #b8c6d8; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px; line-height: 16px; text-align: center; }
+.em-bar .emt-stage-count:hover { border-color: rgba(184,198,216,0.7); color: #e2e9f2; }
+.em-bar .emt-stage-count[hidden] { display: none; }
 .emt-perm-btn.is-on { border-color: rgba(229,115,115,0.6); color: #ff9a9a; }
 .emt-perm { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 4px 0 10px;
   border-bottom: 1px solid var(--border-dim); background: rgba(44,22,28,0.92); }
 .emt-perm[hidden] { display: none; }
 .emt-perm-icon { background: rgba(229,115,115,0.35); color: #ffd0d0; }
 .emt-perm-status { color: #e57373; cursor: help; }
+.emt-perm .emt-perm-detail { margin-left: 0; flex: 0 0 auto; color: #ff9a9a; border-color: rgba(229,115,115,0.45); font-size: 10px; padding: 2px 6px; }
+/* 영구 제외 자동완성(이벤트 맵 어휘만) - 메인 프롬프트 자동완성처럼 태그 · 갈래 · 수. */
+.emt-ac { position: fixed; z-index: calc(var(--z-floating-module-aux) + 2); max-height: 260px; overflow-y: auto; padding: 3px;
+  border: 1px solid rgba(130,150,255,0.30); border-radius: 6px; background: rgba(18,18,28,0.99); box-shadow: 0 10px 28px rgba(0,0,0,0.5); }
+.emt-ac[hidden] { display: none; }
+.emt-ac-row { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.emt-ac-row.is-active, .emt-ac-row:hover { background: rgba(88,76,170,0.34); }
+.emt-ac-row.is-off { opacity: 0.5; }
+.emt-ac-tag { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono);
+  font-size: 11px; font-weight: 600; color: #ebe9ff; }
+.emt-ac-kind { flex: 0 0 auto; font-size: 9.5px; color: var(--text-dim); }
+.emt-ac-n { flex: 0 0 auto; min-width: 34px; text-align: right; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-muted); }
 .emt-menu {
   position: fixed; z-index: calc(var(--z-floating-module-aux) + 1); display: flex; flex-direction: column; min-width: 190px;
   padding: 4px; border: 1px solid rgba(130,150,255,0.30); border-radius: 6px; background: rgba(18,18,28,0.99);
@@ -28770,6 +28808,121 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
   .em-obs { display: none; }
   .em-person-list { grid-template-columns: 1fr; }
 }
+/* 영구 제외 칩 창([상세 보기] - 사용자 지시 2026-10-14). 칩 = 붉은 테두리 · × 로 뺀다 · 흐린 칩 = 이벤트 맵에서 걸리는 것이 없다. */
+.emt-chips-head { flex: 0 0 auto; padding: 6px 10px; border-bottom: 1px solid var(--border-dim); font-size: 10.5px; color: var(--text-muted); }
+.emt-chips { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; padding: 8px 10px; }
+.emt-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; border: 1px solid rgba(229,115,115,0.5);
+  border-radius: 5px; background: rgba(120,40,48,0.18); color: #f0b4b4; font-family: var(--font-mono); font-size: 11px; }
+.emt-chip button { border: 0; background: transparent; color: #e57373; font-size: 12px; line-height: 1; padding: 0 3px; cursor: pointer; }
+.emt-chip button:hover { color: #fff; }
+.emt-chip.is-dead { opacity: 0.45; border-style: dashed; }
+.emt-chips-note { flex: 0 0 auto; padding: 5px 10px 7px; border-top: 1px solid var(--border-dim); font-size: 9.5px; color: var(--text-dim); line-height: 1.4; }
+/* S · 조합 창(사용자 지시 2026-10-14) - 이벤트 맵 창과 같은 옷(.em-window). 이벤트 맵 창 규칙 구역 밖에 둔다 -
+   그 구역은 줄을 꺾지 않는다(test_event_map_window_design), S 창의 단추 줄은 꺾여야 한다. */
+.st-link { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 7px 10px; border-bottom: 1px solid var(--border-dim);
+  font-size: 11px; color: var(--text-secondary); cursor: pointer; }
+.st-link input { width: 13px; height: 13px; margin: 0; accent-color: #9b88ee; }
+.st-tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--border-dim); }
+.st-tabs button { flex: 1; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-dim);
+  font-size: 11px; padding: 6px 0; cursor: pointer; }
+.st-tabs button.is-on { color: var(--text-primary); border-bottom-color: rgba(139,118,255,0.8); font-weight: 600; }
+.st-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.st-foot { flex: 0 0 auto; display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border-dim); }
+.st-foot:empty { display: none; }
+.st-row { padding: 7px 10px; border-bottom: 1px solid var(--border-dim); }
+.st-tags { font-family: var(--font-mono); font-size: 11px; color: #ebe9ff; overflow-wrap: anywhere; }
+.st-meta { margin: 2px 0 5px; font-size: 9.5px; color: var(--text-dim); overflow-wrap: anywhere; }
+.st-cat { margin-right: 6px; padding: 0 5px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-muted);
+  font-family: var(--font-sans, inherit); font-size: 9.5px; }
+.st-acts, .st-edit { display: flex; flex-wrap: wrap; gap: 4px; }
+.st-edit { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-dim); }
+/* :where() = 빼는 조건이 굵기를 올리지 않게 - 안 그러면 아래 색 클래스(is-primary · is-danger)가 진다. */
+.st-window button:where(:not(.dragpanel-btn):not(.custom-select-button)), .st-search input, .st-rename {
+  border: 1px solid var(--border-dim); border-radius: 4px; background: transparent; color: var(--text-secondary);
+  font: inherit; font-size: 10.5px; padding: 2px 8px; cursor: pointer; }
+.st-tabs button { border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; }
+.st-tabs button.is-on { border-bottom-color: rgba(139,118,255,0.8) !important; }
+.st-window button:where(:not(.dragpanel-btn):not(.custom-select-button)):hover:not(:disabled) { border-color: var(--accent); color: var(--text-primary); }
+/* 단추 색(사용자 지시 2026-10-14 - 단조롭다): 주된 동작 = 보라 · 이미 스테이징 = 옅은 초록 · 지우기 = 빨강. */
+.st-window button.is-primary { color: #d7ccff; border-color: rgba(139,118,255,0.6); background: rgba(88,76,170,0.22); }
+.st-window button.is-done, .st-window button.is-done:disabled { opacity: 0.85; color: #9fd8a2; border-color: rgba(76,175,80,0.35); background: rgba(46,125,50,0.10); }
+/* 줄 모양(사용자 지시 2026-10-14 - 공간 비효율): [분류] 이름 ✎ ...... [분류 변경] / (실제 태그) / 칩 ...... 단추. */
+.st-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.st-name { min-width: 0; font-family: var(--font-mono); font-size: 11px; color: #ebe9ff; overflow-wrap: anywhere; }
+.st-window .st-pen { flex: 0 0 auto; border: 0; padding: 0 3px; background: transparent; color: var(--text-dim); font-size: 11px; line-height: 1; }
+.st-window .st-pen:hover:not(:disabled) { color: #c9bdff; }
+.st-window .st-catbtn { margin-left: auto; flex: 0 0 auto; padding: 1px 7px; font-size: 10px; color: var(--text-muted); }
+.st-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; }
+/* 스테이징 탭: 줄을 눌러야 단추가 나온다(사용자 지시 2026-10-14). */
+.st-pick { cursor: pointer; }
+/* 줄 오른쪽 끝 = 이 조합의 게시물 수 · 맨 위 = 전체 프롬프트 수(겹침 제외) - 사용자 지시 2026-10-14. */
+.st-count { margin-left: auto; flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
+.st-total { flex: 0 0 auto; padding: 4px 10px 6px 29px; border-bottom: 1px solid var(--border-dim); font-size: 10.5px; color: var(--text-secondary); }
+.st-total[hidden] { display: none; }
+.st-total b { color: #e6c98a; font-weight: 600; }
+.st-total span { color: var(--text-dim); }
+.st-pick:hover { background: rgba(255,255,255,0.03); }
+.st-pick.is-open { background: rgba(88,76,170,0.14); box-shadow: inset 2px 0 0 rgba(139,118,255,0.7); }
+.st-pick .st-meta { margin-bottom: 0; }
+.st-acts-open { justify-content: flex-end; margin-top: 6px; }
+.st-line .st-meta { margin: 0; flex: 1 1 auto; min-width: 0; }
+.st-line .st-acts { margin-left: auto; flex: 0 0 auto; }
+.st-search .custom-select { flex: 0 0 auto; min-width: 110px; }
+/* 분류 콤보 = NAIA 표준 드롭다운의 결(보기 드롭다운 custom-agw-view 와 같은 옷 - 11px 굵게 · 어두운 칸 · 좁은 줄).
+   공용 장치는 <select> 의 클래스를 custom- 을 달고 옮겨 입는다(st-filter -> custom-st-filter). 사용자 제보 2026-10-14. */
+.custom-select.custom-st-filter { height: 24px; }
+.custom-select.custom-st-filter .custom-select-button {
+  height: 100%; min-height: 0; padding: 0 8px; gap: 6px; border-radius: 5px;
+  border: 1px solid var(--border-dim); background: rgba(0, 0, 0, 0.26);
+  color: var(--text-primary); font-size: 11px; font-weight: 700; letter-spacing: 0.2px;
+}
+.custom-select.custom-st-filter .custom-select-button:hover { border-color: rgba(232, 232, 240, 0.44); }
+.custom-select.custom-st-filter.is-open .custom-select-button { border-color: var(--accent); }
+.custom-select.custom-st-filter .custom-select-label { line-height: 1; }
+.custom-select-menu.custom-st-filter { font-size: 11px; border-color: rgba(232, 232, 240, 0.28); }
+.st-search input { height: 24px; box-sizing: border-box; border-radius: 5px; background: rgba(0, 0, 0, 0.26); }
+/* 묶음 칩 - 분류 옆(분류 자리를 차지하지 않는다). */
+.st-chip.st-bundle { margin-right: 6px; color: #c9bdff; border-color: rgba(139,118,255,0.45); background: rgba(88,76,170,0.18); }
+.st-rename { flex: 1 1 auto; min-width: 0; cursor: text; font-family: var(--font-mono); font-size: 11px; color: #ebe9ff; }
+/* 저장된 조합 [⋯] 메뉴 - 이벤트 맵 [⋯] 와 같은 옷. */
+.st-menu { position: fixed; z-index: calc(var(--z-floating-module-aux) + 2); display: flex; flex-direction: column; min-width: 180px;
+  max-height: 60vh; overflow-y: auto; padding: 4px; border: 1px solid rgba(130,150,255,0.30); border-radius: 6px;
+  background: rgba(18,18,28,0.99); box-shadow: 0 10px 28px rgba(0,0,0,0.5); }
+.st-menu[hidden] { display: none; }
+.st-menu > button { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--text-primary); font-size: 11px; text-align: left; padding: 5px 8px; cursor: pointer; }
+.st-menu > button:hover { background: rgba(88,76,170,0.30); }
+.st-menu > button.is-danger { color: #e57373; }
+.st-menu-cat i { width: 12px; font-style: normal; color: #c9bdff; }
+.st-menu-cat.is-cur { color: #fff; }
+.st-menu-label { padding: 6px 8px 2px; font-size: 9.5px; color: var(--text-dim); }
+.st-menu-new { display: flex; gap: 4px; padding: 3px 4px 4px 22px; }
+.st-menu-new input { flex: 1 1 auto; min-width: 0; border: 1px solid var(--border-dim); border-radius: 4px; background: transparent;
+  color: var(--text-primary); font-size: 10.5px; padding: 2px 6px; }
+.st-menu-new button { border: 1px solid var(--border-dim); border-radius: 4px; background: transparent; color: var(--text-secondary);
+  font-size: 10.5px; padding: 2px 8px; cursor: pointer; }
+.st-menu-sep { height: 1px; margin: 4px 2px; background: var(--border-dim); }
+.st-window button:disabled { opacity: 0.4; cursor: default; }
+.st-window button.is-danger { color: #e57373; border-color: rgba(229,115,115,0.45); }
+.st-search { display: flex; gap: 5px; padding: 6px 10px; border-bottom: 1px solid var(--border-dim); }
+.st-search input { flex: 1; min-width: 0; cursor: text; }
+.st-edit input { cursor: text; min-width: 0; flex: 1 1 120px; }
+.st-empty { padding: 14px 10px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+/* 인원 · 등급 칩(사용자 지시 2026-10-14): 여성 연분홍 · 남성 연녹색 · 혼성 연노랑 · 기타 회색 / 등급은 G S Q E 단추 색을 옅게. */
+.st-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.st-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.st-chip { padding: 0 5px; border-radius: 4px; border: 1px solid; font-size: 9.5px; line-height: 15px; white-space: nowrap; }
+.st-p-f { color: #f6c6d6; border-color: rgba(246,166,196,0.45); background: rgba(246,166,196,0.12); }
+.st-p-m { color: #bfe8c4; border-color: rgba(150,220,160,0.45); background: rgba(150,220,160,0.10); }
+.st-p-x { color: #f1e3a8; border-color: rgba(236,214,130,0.45); background: rgba(236,214,130,0.10); }
+.st-p-o { color: var(--text-muted); border-color: var(--border-dim); }
+.st-r-g { color: #9fd8a2; border-color: rgba(76,175,80,0.5); background: rgba(46,125,50,0.18); }
+.st-r-s { color: #9ecbf2; border-color: rgba(33,150,243,0.5); background: rgba(21,101,192,0.18); }
+.st-r-q { color: #f6c48d; border-color: rgba(255,152,0,0.5); background: rgba(230,81,0,0.16); }
+.st-r-e { color: #f3a3a0; border-color: rgba(244,67,54,0.5); background: rgba(198,40,40,0.16); }
+.st-ex { color: var(--text-dim); font-size: 9.5px; }
+/* 이름을 바꾼 조합은 실제 태그를 이름 아래에 적는다(사용자 제보 2026-10-14 - 이름만으로는 무엇인지 모른다). 묶음의 조합 줄과 같은 옷. */
+.st-pins { margin-top: 1px; font-size: 9.5px; color: var(--text-dim); overflow-wrap: anywhere; }
 
 /* Event map subcategories: independent narrow rail, collapsible on small screens. */
 .em-subpanel { position: fixed; z-index: var(--z-floating-module-aux); display: flex; flex-direction: column;

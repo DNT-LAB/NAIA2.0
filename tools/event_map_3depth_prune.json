@@ -15218,6 +15218,26 @@
    ]
   },
   {
+   "id": "user_fixes",
+   "label": "사용자 제보로 고친 자리(2026-10-14~)",
+   "ops": [
+    {
+     "op": "reassign",
+     "d2": "tag_group:sex_acts",
+     "note": "big belly 는 몸의 생김새(plump 옆) - 위키 성행위 쪽 '삽입' 에 들어가 있었다(사용자 제보 2026-10-14)",
+     "rows": [
+      [
+       "big belly",
+       "tag_group:sex_acts",
+       "Penetration and Insertion",
+       "tag_group:body_parts",
+       "Age and physique"
+      ]
+     ]
+    }
+   ]
+  },
+  {
    "id": "final_tidy",
    "label": "나누기 뒤 남은 한두 개짜리 절 정리(맨 끝에 둔다)",
    "ops": [

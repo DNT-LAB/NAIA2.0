@@ -188,7 +188,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   let treeSel = { d1: String(viewPrefs.d1 || ''), d2: String(viewPrefs.d2 || ''), d3: '' };
   const treeLastD2 = new Map();   // 갈래 -> 마지막으로 본 그룹(이번 실행 동안)
   let treeData = null;            // 핀이 없을 때: 고른 절의 결과(쪽 단위 · 같은 그룹의 절마다 후보 수)
-  let treeAuto = false;           // 절을 사람이 고르지 않았다(그룹만 눌렀다) - 비면 다음 절로 옮겨도 된다
+  let treeAll = false;            // 나무 맨 위 [전체] - 갈래의 태그 전부(그룹 · 절로 가두지 않는다). 갈래를 바꿔도 유지
   let treeFilter = '';            // 핀이 있을 때: 갈래 탭(비면 전체). 그 안의 그룹 · 절은 treeSel 을 같이 쓴다
   let ttabsEl = null, actsEl = null, menuEl = null;
   // 영구 제외(Search 의 붉은 줄과 **같은 글**). 서버가 이 글로 게시물을 거른다 - 화면은 고치고 보여 줄 뿐이다.
@@ -345,11 +345,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   /** 핀 질의에 얹는 지도 조건. 대분류(groups · subcategory)는 기존 화면의 것이라 비운다. */
   function treeParams() {
     if (!isTree()) return {};
-    const here = treeFilter && treeSel.d1 === treeFilter;
+    const here = treeFilter && treeSel.d1 === treeFilter && !treeAll;
     return { groups: '', subcategory: '', tree: 1, d1: treeFilter, d2: here ? treeSel.d2 : '', d3: here ? treeSel.d3 : '' };
   }
   /** 핀 화면의 갈래 · 그룹 · 절을 고른다. 응답의 그룹 · 절별 수(가두기 전의 풀이라 어느 자리의 응답이든 같다)로
-   *  후보가 있는 자리만 고른다 - 바라는 자리(d2 · d3)가 비었으면 그 갈래 / 그룹의 첫 비지 않은 자리. 바뀌었으면 true. */
+   *  후보가 있는 자리만 고른다 - 바라는 그룹이 비었으면 그 갈래의 첫 비지 않은 그룹, 바라는 절이 비었으면 그 그룹 전체.
+   *  바뀌었으면 true. */
   function choosePinnedSlot(d1, d2 = treeSel.d2, d3 = treeSel.d3) {
     const b = treeBranch(d1);
     const counts = result?.tree_counts;
@@ -357,7 +358,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const c3 = (g, x) => counts.d3?.[`${g}\t${x}`] || 0;
     const g = b.d2.find(x => x.id === d2 && counts.d2[x.id]) || b.d2.find(x => counts.d2[x.id]);
     if (!g) return false;
-    const x = g.d3.find(r => r.id === d3 && c3(g.id, r.id)) || g.d3.find(r => c3(g.id, r.id));
+    // 절을 안 골랐거나 그 절이 비었으면 그룹 전체('') - 그룹을 누르면 그 그룹 전부다(사용자 지시 2026-10-14).
+    const x = g.id === d2 && d3 ? g.d3.find(r => r.id === d3 && c3(g.id, r.id)) : null;
     const next = { d1: b.id, d2: g.id, d3: x?.id || '' };
     if (next.d1 === treeSel.d1 && next.d2 === treeSel.d2 && next.d3 === treeSel.d3) return false;
     treeSel = next;
@@ -377,7 +379,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     treeSel = { d1: b.id, d2: g?.id || '', d3: g?.d3.some(x => x.id === treeSel.d3) ? treeSel.d3 : '' };
   }
 
-  /** 핀이 없을 때의 3단 지도: 고른 절 하나(쪽 단위). 절을 안 골랐으면 그 그룹의 첫 절이다. */
+  /** 핀이 없을 때의 3단 지도: 고른 절 하나 · 그룹 전체(절 = '') · 갈래 전체([전체]) - 모두 쪽 단위. */
   async function loadTree() {
     if (randomLink.enabled) void syncRandomLink();
     moreRequest = null; moreError = '';
@@ -391,12 +393,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mine !== seq) return;
     }
     if (!treeSel.d2) { render(); return; }
-    if (!treeSel.d3) { treeSel.d3 = treeGroupOf(treeSel.d2)?.d3[0]?.id || ''; treeAuto = true; }
     setStatus('찾는 중…', 'busy');
     setBusy(true);
     try {
-      const body = await getJson('/api/event-map/tree/browse', {
-        d2: treeSel.d2, d3: treeSel.d3, limit: CANDIDATE_LIMIT, ...treeFilterParams() });
+      const where = treeAll ? { d1: treeSel.d1, flat: 1 } : treeSel.d3 ? { d2: treeSel.d2, d3: treeSel.d3 }
+        : { d2: treeSel.d2, flat: 1 };
+      const body = await getJson('/api/event-map/tree/browse', { ...where, limit: CANDIDATE_LIMIT, ...treeFilterParams() });
       if (mine !== seq) return;
       treeData = body;
     } catch (error) {
@@ -405,14 +407,6 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       treeData = { status: 'error', candidates: [], sections: [],
         message: error instanceof TypeError ? '서버에 연결하지 못했습니다' : error.message };
     } finally { setBusy(false); }
-    // 그룹만 눌러 첫 절로 왔는데 이 조건에서 비었으면, 후보가 있는 첫 절로 한 번 옮긴다.
-    if (treeAuto && treeData?.status !== 'error') {
-      treeAuto = false;
-      const rows = treeData?.sections || [];
-      const here = rows.find(r => r.id === treeSel.d3);
-      const next = rows.find(r => r.live > 0);
-      if (here && here.live === 0 && next) { treeSel.d3 = next.id; void loadTree(); return; }
-    }
     render();
   }
   function pickTree(d1, d2 = '', d3 = '') {
@@ -420,10 +414,20 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (!b) return;
     const g = b.d2.find(x => x.id === d2) || b.d2.find(x => x.id === treeLastD2.get(d1)) || b.d2[0];
     treeSel = { d1: b.id, d2: g?.id || '', d3: g?.d3.some(x => x.id === d3) ? d3 : '' };
-    treeAuto = false;
     if (g) treeLastD2.set(b.id, g.id);
     rememberView();
     void loadTree();
+  }
+  /** 줄 아래 경로를 눌렀다 - 그 갈래 [전체] / 그룹 [전체] / 절로 간다. 핀이 있으면 그 자리의 핀 결과. */
+  function goToSlot(d1, d2 = '', d3 = '') {
+    const b = treeBranch(d1);
+    if (!b) return;
+    const g = b.d2.find(x => x.id === d2) || b.d2.find(x => x.id === treeLastD2.get(d1)) || b.d2[0];
+    treeAll = !d2;
+    treeSel = { d1: b.id, d2: g?.id || '', d3: d2 && g?.d3.some(x => x.id === d3) ? d3 : '' };
+    if (g) treeLastD2.set(b.id, g.id);
+    rememberView();
+    if (pins.length) { treeFilter = b.id; void explore(); } else void loadTree();
   }
   /** 고른 갈래 탭에 후보가 없으면 전체로(기존 화면의 widenEmptySelection 과 같은 규칙). */
   function widenTreeFilter(r) {
@@ -502,7 +506,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (mine !== seq) return;
       result = { status: 'error', message: error.message, code: error.code, candidates: [] };
     } finally { setBusy(false); }
-    if (mine === seq && (isTree() ? widenTreeFilter(result) || (result?.status === 'matched' && treeFilter
+    if (mine === seq && (isTree() ? widenTreeFilter(result) || (result?.status === 'matched' && treeFilter && !treeAll
         && choosePinnedSlot(treeFilter)) : widenEmptySelection(result))) { void explore(true); return; }
     render();
     // Open actual posts only when the whole candidate pool is exhausted,
@@ -518,7 +522,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
 
   function currentCandidates() {
     if (!open || mapState?.state !== 'ready' || input?.value.trim()) return null;
-    if (isTree()) return pins.length ? result : (treeData?.mode === 'section' ? treeData : null);
+    if (isTree()) return pins.length ? result : (['section', 'group_list', 'branch_list'].includes(treeData?.mode) ? treeData : null);
     return pins.length ? result : (group ? browse : null);
   }
 
@@ -543,7 +547,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (exploring) Object.assign(params, { pins: pins.join(','), exclude: excludes.join(','), sort: sortMode,
       relax: relaxOne && canRelax() ? 1 : 0 }, treeParams());
     else if (isTree()) params = { limit: CANDIDATE_LIMIT, offset: source.next_offset, ...treeFilterParams(),
-      d2: treeSel.d2, d3: treeSel.d3 };
+      ...(treeAll ? { d1: treeSel.d1, flat: 1 } : treeSel.d3 ? { d2: treeSel.d2, d3: treeSel.d3 } : { d2: treeSel.d2, flat: 1 }) };
     else Object.assign(params, { group, groups: '' });
     const route = exploring ? 'explore' : (isTree() ? 'tree/browse' : 'browse');
     try {
@@ -935,19 +939,19 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const groupCrumb = g ? `<span class="em-crumb em-crumb-group em-g-${esc(group)}"><button type="button" class="em-crumb-go" data-em-group-back
         title="이 대분류의 목록으로">${esc(g.label)}</button></span>${crumbs ? '<span class="em-sep">›</span>' : ''}` : '';
     trailEl.innerHTML = `
-      <button type="button" class="em-back" data-em-back ${(pins.length || group) ? '' : 'disabled'} title="한 단계 위로 (Backspace)">←</button>
+      <button type="button" class="em-back" data-em-back ${(pins.length || group) ? '' : 'disabled'} title="한 단계 위로">←</button>
       <div class="em-crumbs">${groupCrumb}${crumbs || (group ? '' : '<span class="em-crumb-empty">대분류를 고르거나 태그를 찾아 시작합니다</span>')}${ex}</div>`;
     paintActions();
   }
   function groupInfo(id) { return (mapState?.groups || []).find(g => g.id === id) || null; }
   /** 핀이 없을 때의 3단 지도 부스러기: 갈래 › 그룹 › 절(지금 보고 있는 자리 - 고르기는 왼쪽 나무에서). */
   function paintTreeTrail(ex) {
-    const b = treeBranch(treeSel.d1), g = treeGroupOf(treeSel.d2);
-    const s = treeSel.d3 ? treeSectionOf(treeSel.d2, treeSel.d3) : null;
+    const b = treeBranch(treeSel.d1), g = treeAll ? null : treeGroupOf(treeSel.d2);
+    const s = !treeAll && treeSel.d3 ? treeSectionOf(treeSel.d2, treeSel.d3) : null;
     const parts = [b && `<span class="emt-crumb">${esc(b.ko)}</span>`, g && `<span class="emt-crumb">${esc(g.ko)}</span>`,
-      s && `<b class="emt-crumb">${esc(s.ko)}</b>`].filter(Boolean);
+      s && `<b class="emt-crumb">${esc(s.ko)}</b>`, (treeAll || (g && !s)) && b && '<b class="emt-crumb">전체</b>'].filter(Boolean);
     trailEl.innerHTML = `
-      <button type="button" class="em-back" data-em-back disabled title="한 단계 위로 (Backspace)">←</button>
+      <button type="button" class="em-back" data-em-back disabled title="한 단계 위로">←</button>
       <div class="em-crumbs emt-crumbs">${parts.join('<span class="em-sep">›</span>')
         || `<span class="em-crumb-empty">${treeError ? '지도를 열지 못했습니다' : '지도를 여는 중…'}</span>`}${ex}</div>
       ${parts.length ? '<span class="em-note emt-hint">이 인원·등급에서 특징적인 순</span>' : ''}`;
@@ -975,7 +979,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const sb = overlay.querySelector('[data-em-samples]');
     if (sb) { sb.disabled = !on; sb.classList.toggle('is-on', !!samples); }
     const rs = overlay.querySelector('[data-em-reset]');
-    if (rs) rs.disabled = !(pins.length || excludes.length || subcategory || group);
+    if (rs) rs.disabled = isTree() ? !(pins.length || excludes.length)
+      : !(pins.length || excludes.length || subcategory || group);
     // 3단 지도: 넣기 · 생성 · 복사 · 실제 조합은 발줄 오른쪽에, **핀이 있을 때만** 보인다(목업).
     if (actsEl) actsEl.hidden = !(isTree() && on);
   }
@@ -993,14 +998,17 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         `<button type="button" class="em-rating-btn${ratings.has(r.id) ? ' active' : ''}" data-em-r="${r.id}"
                  aria-pressed="${ratings.has(r.id)}" title="${r.title}">${r.label}</button>`).join('')}</span>`;
   }
-  /** 3단 지도의 조건 줄: 인원 · 등급 · [⋯] 뿐이다. 초기화 · PE설정 · 조합 저장/불러오기는 [⋯] 안으로,
+  /** 3단 지도의 조건 줄: 인원 · 등급 · [초기화] · [영구 제외] · [⋯]. PE설정 · 조합 저장/불러오기는 [⋯] 안으로,
    *  넣기 · 생성 · 복사 · 실제 조합은 발줄로(목업 승인 2026-10-14). */
   function paintTreeFilters() {
+    // [초기화] 는 자주 누른다 - [⋯] 에서 꺼내 등급 오른쪽에 둔다(사용자 지시 2026-10-14, 기존 화면과 같은 자리).
     filtersEl.innerHTML = `${filterHeadHtml()}
+      <button type="button" class="em-reset" data-em-reset
+              title="핀 · 제외를 한 번에 비우고 지도로 돌아간다">초기화</button>
       <button type="button" class="em-reset emt-perm-btn" data-emt-perm aria-expanded="false"
               title="영구 제외 - 이 태그가 달린 게시물은 이벤트 맵이 세지 않는다(Search 의 영구 제외와 같은 목록)">영구 제외</button>
       <button type="button" class="em-reset emt-menu-btn" data-emt-menu aria-haspopup="menu" aria-expanded="false"
-              title="초기화 · PE설정 · 조합 저장/불러오기">⋯</button>`;
+              title="PE설정 · 조합 저장/불러오기">⋯</button>`;
     personBtn = filtersEl.querySelector('[data-em-person]');
     paintPersonButton();
     paintPermanent();
@@ -1064,13 +1072,28 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
   function treeRow(c, i, path = '', showPath = false) {
     const { liftText, obs, est } = rowNumbers(c);
     const where = c.path?.ko || path;
+    const here = treeFilter || treeSel.d1;
+    // 경로 조각마다 자리(갈래 · 그룹 · 절) - 누르면 그리로 간다. 보고 있는 갈래 · 그룹 이름은 뗀다.
+    const ids = c.path ? [c.path.d1, c.path.d2, c.path.d3] : [];
+    let parts = String(where || '').split(' › ').map((ko, level) => ({ ko, level }));
+    if (c.path && c.path.d1 === here) {
+      parts = parts.slice(1);
+      if (!treeAll && c.path.d2 === treeSel.d2) parts = parts.slice(1);
+    }
+    const link = p => {
+      if (!c.path || !ids[p.level]) return `<span>${esc(p.ko)}</span>`;
+      const at = `data-emt-go-d1="${esc(ids[0])}"${p.level >= 1 ? ` data-emt-go-d2="${esc(ids[1])}"` : ''}${p.level >= 2 ? ` data-emt-go-d3="${esc(ids[2])}"` : ''}`;
+      const what = ['갈래 전체', '그룹 전체', '절'][p.level];
+      return `<button type="button" class="emt-go" data-emt-go ${at} title="${esc(p.ko)} - ${what}로 가기">${esc(p.ko)}</button>`;
+    };
+    const shown = parts.map(link).join('<span class="emt-go-sep">›</span>');
     return `<div class="em-row emt-row${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
         data-em-est="${Number(est) || 0}" data-em-lift="${liftText}"${where ? ` data-em-path="${esc(where)}"` : ''} role="option">
       <span class="em-tag">${esc(c.tag)}</span>
       <span class="em-lift">${liftText}</span>
       <span class="em-obs">${obs}</span>
       <button type="button" class="em-row-x" data-em-exclude="${esc(c.tag)}" title="이 태그가 없는 게시물만">−</button>
-      ${showPath && where ? `<span class="emt-path">${esc(where)}</span>` : ''}
+      ${showPath && shown ? `<span class="emt-path">${shown}</span>` : ''}
     </div>`;
   }
   /** 핀이 없을 때의 3단 지도: 왼쪽 = 나무(갈래의 그룹 · 고른 그룹 아래로 그 절), 오른쪽 = 고른 절의 태그 전부.
@@ -1085,21 +1108,28 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     if (!b) return '<div class="em-empty">지도가 비었습니다</div>';
     const live = treeData?.d2 === treeSel.d2 && Array.isArray(treeData.sections)
       ? new Map(treeData.sections.map(r => [r.id, r.live])) : null;
-    return `<div class="emt-grid">${treeNavHtml(b, null, x => live?.get(x.id))}
+    const groupLive = g => (treeData?.mode === 'group_list' && treeData.d2 === g.id ? treeData.candidate_pool : null);
+    return `<div class="emt-grid">${treeNavHtml(b, null, x => live?.get(x.id), null, groupLive)}
       <div class="emt-right">${treeRightHtml()}</div></div>`;
   }
   /** 왼쪽 나무. 펼치는 것은 고른 그룹 하나다.
    *  · 핀이 없을 때(`pinned` = null): 그룹 = 태그 수, 절 = `이 조건의 후보 / 태그 수`(0 이면 흐리게).
    *  · 핀 화면(`pinned` = 그룹 id -> 후보 수): 그룹 · 절 = 핀과 함께 달린 후보 수, **0 은 숨긴다**(사용자 결정). */
-  function treeNavHtml(b, pinned, sectionCount) {
+  function treeNavHtml(b, pinned, sectionCount, allCount = null, groupLive = null) {
+    const all = `<button type="button" class="emt-d2 emt-all${treeAll ? ' is-on' : ''}" data-emt-all aria-pressed="${treeAll}"
+      title="${esc(b.ko)} 의 태그 전부 - 그룹 · 절을 가리지 않고 한 줄로"><span><i class="emt-caret">≡</i>전체</span>${allCount != null ? `<small>${fmt(allCount)}</small>` : ''}</button>`;
     const items = b.d2.map(g => {
       const gn = pinned ? (pinned[g.id] || 0) : g.tags;
       if (pinned && !gn) return '';
-      const openGroup = g.id === treeSel.d2;
+      const openGroup = !treeAll && g.id === treeSel.d2;
       const head = `<button type="button" class="emt-d2${openGroup ? ' is-open' : ''}" data-emt-d2="${esc(g.id)}"
-        aria-expanded="${openGroup}" title="${esc(g.ko)} · ${pinned ? `핀과 함께 달린 후보 ${fmt(gn)}` : `절 ${g.d3.length}개 · 태그 ${fmt(g.tags)}`}"><span><i class="emt-caret">${openGroup ? '▾' : '▸'}</i>${esc(g.ko)}</span><small>${fmt(gn)}</small></button>`;
+        aria-expanded="${openGroup}" title="${esc(g.ko)} 전부 보기 · ${pinned ? `핀과 함께 달린 후보 ${fmt(gn)}` : `절 ${g.d3.length}개 · 태그 ${fmt(g.tags)}`}"><span><i class="emt-caret">${openGroup ? '▾' : '▸'}</i>${esc(g.ko)}</span><small>${fmt(gn)}</small></button>`;
       if (!openGroup) return head;
-      return head + g.d3.map(x => {
+      const groupAllOn = !treeSel.d3;
+      const gl = groupLive?.(g);
+      const groupAll = `<button type="button" class="emt-d3i emt-gall${groupAllOn ? ' is-on' : ''}" data-emt-gall aria-pressed="${groupAllOn}"
+        title="${esc(g.ko)} 의 태그 전부 - 절을 가리지 않고 한 줄로"><span>전체</span><small>${pinned ? fmt(gn) : `${gl != null ? `${fmt(gl)} / ` : ''}${fmt(g.tags)}`}</small></button>`;
+      return head + groupAll + g.d3.map(x => {
         const n = sectionCount(x, g);
         if (pinned && !n) return '';
         const on = x.id === treeSel.d3;
@@ -1109,21 +1139,26 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
           aria-pressed="${on}" title="${esc(x.ko)}${empty ? ' · 이 인원·등급에 없음' : ''}"><span>${esc(x.ko)}</span><small>${label}</small></button>`;
       }).join('');
     }).join('');
-    return `<nav class="emt-left" aria-label="${esc(b.ko)} 그룹 · 절">${items}</nav>`;
+    return `<nav class="emt-left" aria-label="${esc(b.ko)} 그룹 · 절">${all}${items}</nav>`;
   }
   /** 핀 화면의 갈래 탭: 왼쪽 나무(빈 그룹 · 절은 숨김) + 오른쪽 고른 절의 후보(정렬 · -1 허용 · 더 보기 그대로). */
   function pinnedTreeHtml(cs) {
     const b = treeBranch(treeFilter);
     const counts = result?.tree_counts || {};
     if (!b || !counts.d2) return '';
-    const x = treeSectionOf(treeSel.d2, treeSel.d3);
+    const x = treeAll ? null : treeSectionOf(treeSel.d2, treeSel.d3);
     const n = x ? (counts.d3?.[`${treeSel.d2}\t${x.id}`] || 0) : 0;
-    const right = (x ? `<div class="emt-d3h"><span>${esc(x.ko)}</span><small>후보 ${fmt(n)}</small></div>` : '')
+    const d1n = (counts.d1 || []).find(r => r.id === b.id)?.count || 0;
+    const g = treeAll ? null : treeGroupOf(treeSel.d2);
+    const head = treeAll ? `<div class="emt-d3h"><span>${esc(b.ko)} 전체</span><small>후보 ${fmt(d1n)}</small></div>`
+      : x ? `<div class="emt-d3h"><span>${esc(x.ko)}</span><small>후보 ${fmt(n)}</small></div>`
+      : g ? `<div class="emt-d3h"><span>${esc(g.ko)} 전체</span><small>후보 ${fmt(counts.d2?.[g.id] || 0)}</small></div>` : '';
+    const right = head
       + candidateCapHtml(result, cs.length)
-      + (cs.length ? cs.map((c, i) => treeRow(c, i, '')).join('')
+      + (cs.length ? cs.map((c, i) => treeRow(c, i, '', !x)).join('')
         : `<div class="em-empty">${floorPhrase(result, '이 절에 함께 달린 태그가 없습니다.')}</div>`)
       + moreHtml();
-    return `<div class="emt-grid">${treeNavHtml(b, counts.d2, (r, g) => counts.d3?.[`${g.id}\t${r.id}`] || 0)}
+    return `<div class="emt-grid">${treeNavHtml(b, counts.d2, (r, g) => counts.d3?.[`${g.id}\t${r.id}`] || 0, d1n)}
       <div class="emt-right">${right}</div></div>`;
   }
   /** 나무를 다시 그려도 스크롤 자리를 지키고, 펼친 그룹(머리 + 절)이 칸 밖이면 보이게 민다 - 아래쪽 그룹을 펼치면
@@ -1153,9 +1188,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     const cs = d.candidates || [];
     rows = cs.map(c => c.tag);
     const path = (d.path || []).join(' › ');
-    return `<div class="emt-d3h"><span>${esc((d.path || [])[2] || treeSel.d3)}</span>
+    const flat = d.mode === 'branch_list' || d.mode === 'group_list';
+    const title = flat ? `${(d.path || []).slice(-1)[0] || ''} 전체` : (d.path || [])[2] || treeSel.d3;
+    return `<div class="emt-d3h"><span>${esc(title)}</span>
         <small>${fmt(d.candidate_pool ?? cs.length)} / ${fmt(d.tags)}</small></div>`
-      + (cs.length ? cs.map((c, i) => treeRow(c, i, path)).join('')
+      + (cs.length ? cs.map((c, i) => treeRow(c, i, path, flat)).join('')
         : `<div class="em-empty">이 인원·등급에 ${floorPhrase(d, '나온 태그가 없습니다.')}</div>`)
       + moreHtml();
   }
@@ -1542,15 +1579,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         if (!item || item.disabled) return;
         const act = item.dataset.emtAct;
         closeTreeMenu();
-        if (act === 'reset') resetSelection();
-        else if (act === 'pe') openPeSettings();
+        if (act === 'pe') openPeSettings();
         // 저장/불러오기는 기존 저장 줄의 단추를 그대로 누른다 - 저장 패널은 하나다(줄은 3단 지도에서 숨는다).
         else overlay.querySelector(`.em-library-bar [data-library-mode="${act}"]`)?.click();
       });
     }
-    const anything = pins.length || excludes.length || treeFilter;
     menuEl.innerHTML = `
-      <button type="button" role="menuitem" data-emt-act="reset" ${anything ? '' : 'disabled'}>초기화<small>핀 · 제외를 비우고 지도로</small></button>
       <button type="button" role="menuitem" data-emt-act="pe">PE설정<small>메인 프롬프트의 /pe 와 같은 목록</small></button>
       <button type="button" role="menuitem" data-emt-act="save" ${pins.length ? '' : 'disabled'}>이 조합 저장하기</button>
       <button type="button" role="menuitem" data-emt-act="load">조합 불러오기</button>`;
@@ -1642,7 +1676,7 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
         <span class="em-actions"><button type="button" class="em-random" data-em-random="select"
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
             title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span>
-        <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Backspace 위로 · Esc 닫기">우클릭 = 제외</span>
+        <span class="em-keys" title="↑↓ 이동 · Enter 꽂기 · − 제외 · Esc 닫기">우클릭 = 제외</span>
         <label class="em-random-link" title="메인 Random과 Auto Gen이 현재 핀·제외·인원·등급을 사용합니다. 패널을 닫아도 연결됩니다."><input type="checkbox" data-em-random-link><span class="em-link-long">랜덤 버튼 </span>연결</label>
         <span class="em-actions emt-acts" hidden></span>
       </div>`;
@@ -1683,7 +1717,11 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       if (pins.length) {
         if (id === treeFilter) return;
         treeFilter = id;
-        if (id) choosePinnedSlot(id, treeLastD2.get(id) || '', '');
+        if (id && treeAll) {
+          const b = treeBranch(id);
+          const g = b?.d2.find(x => x.id === treeLastD2.get(id)) || b?.d2[0];
+          if (b) treeSel = { d1: b.id, d2: g?.id || '', d3: '' };
+        } else if (id) choosePinnedSlot(id, treeLastD2.get(id) || '', '');
         void explore();
         return;
       }
@@ -1765,6 +1803,12 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
     });
     bodyEl.addEventListener('click', event => {
       if (event.target.closest('[data-em-more-retry]')) { void loadMore(); return; }
+      const go = event.target.closest('[data-emt-go]');
+      if (go) {   // 줄 아래 경로 조각 - 줄(핀 꽂기)보다 먼저 받는다
+        event.stopPropagation();
+        goToSlot(go.dataset.emtGoD1 || '', go.dataset.emtGoD2 || '', go.dataset.emtGoD3 || '');
+        return;
+      }
       const t = event.target;
       const ex = t.closest('[data-em-exclude]');
       if (ex) { event.stopPropagation(); exclude(ex.dataset.emExclude); return; }
@@ -1777,11 +1821,21 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       const gb = t.closest('[data-em-group]');
       if (gb) { pickGroup(gb.dataset.emGroup); return; }
       if (t.closest('[data-emt-retry]')) { void loadTree(); return; }
+      if (t.closest('[data-emt-all]')) {
+        if (treeAll) return;
+        treeAll = true;
+        if (pins.length) void explore(); else void loadTree();
+        return;
+      }
       const d2 = t.closest('[data-emt-d2]');
-      if (d2) {
-        if (d2.dataset.emtD2 === treeSel.d2) return;
-        if (pins.length) { if (choosePinnedSlot(treeFilter, d2.dataset.emtD2, '')) void explore(); return; }
-        pickTree(treeSel.d1, d2.dataset.emtD2); return;
+      const gall = t.closest('[data-emt-gall]');
+      if (d2 || gall) {
+        // 그룹 머리 = 단추 - 누르면 그 그룹 전부(펼친 그룹 맨 위 [전체] 와 같다).
+        const id = d2 ? d2.dataset.emtD2 : treeSel.d2;
+        if (!treeAll && id === treeSel.d2 && !treeSel.d3) return;
+        treeAll = false;
+        if (pins.length) { choosePinnedSlot(treeFilter, id, ''); treeSel.d3 = ''; void explore(); return; }
+        pickTree(treeSel.d1, id); return;
       }
       const d3 = t.closest('[data-emt-d3]');
       if (d3) {
@@ -1924,10 +1978,8 @@ export function initEventMap({ insertTag, showToast, getPromptText, generateNow,
       exclude(rows[active]);
       return;
     }
-    if (event.key === 'Backspace' && !input.value) {
-      event.preventDefault();
-      goBack();
-    }
+    // ⛔ 빈 검색 칸의 Backspace 로 핀을 하나씩 빼던 것은 회수했다(사용자 지시 2026-10-14 - 의도하지 않은 핀 해제).
+    //    핀은 부스러기의 × 나 ← 로만 뺀다.
   }
 
   /** 조건 줄([인원][G S Q E][초기화][PE설정] … [넣기 복사 실제 조합])이 **한 줄에** 들어가는 폭.

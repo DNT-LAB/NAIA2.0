@@ -150,9 +150,15 @@ class BoundTree:
     def paths(self, tid: int, limit: int = 3) -> list[list[str]]:
         return [self.tree.path_ko(s) for s in self.home.get(int(tid), [])[:limit]]
 
-    def first_path(self, tid: int) -> dict[str, str] | None:
+    def first_path(self, tid: int, d1: str = "", d2: str = "") -> dict[str, str] | None:
+        """태그가 사는 첫 절. `d1` · `d2` 를 주면 그 갈래 · 그룹 안의 절을 먼저 고른다(보고 있는 자리를 적는다 -
+        여러 그룹에 사는 태그가 다른 그룹의 경로로 나왔다)."""
         slots = self.home.get(int(tid))
         if not slots:
             return None
+        if d1:
+            slots = [s for s in slots if self.tree.slots[s][0] == d1] or slots
+        if d2:
+            slots = [s for s in slots if self.tree.slots[s][1] == d2] or slots
         d1, d2, d3, _ = self.tree.slots[slots[0]]
         return {"d1": d1, "d2": d2, "d3": d3, "ko": " › ".join(self.tree.path_ko(slots[0]))}

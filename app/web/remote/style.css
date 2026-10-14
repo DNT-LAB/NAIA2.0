@@ -28671,6 +28671,17 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-window.em-tree .em-random-link { margin-left: 4px; }
 .em-cats.emt-tabs { position: static; flex: 0 0 auto; margin: 0; }
 .emt-tabs[hidden], .emt-acts[hidden], .emt-menu[hidden] { display: none; }
+/* 갈래 탭 색 = 기존 화면 대분류 색을 뜻이 가까운 것끼리 빌렸다(사용자 지시 2026-10-14 - '분류가 달라도 적당히').
+   고른 탭은 기존 화면처럼 흰 글자. */
+.emt-tab:not(.is-on)[data-emt-d1="Image composition and style"] .em-tag { color: #d7a6ff; }   /* 인원·구도 */
+.emt-tab:not(.is-on)[data-emt-d1="Body"] .em-tag { color: #7fd1ff; }   /* 신체·외형 */
+.emt-tab:not(.is-on)[data-emt-d1="Attire and body accessories"] .em-tag { color: #ffb86b; }   /* 의상 */
+.emt-tab:not(.is-on)[data-emt-d1="Sex"] .em-tag { color: #ff7b9c; }   /* 성적 */
+.emt-tab:not(.is-on)[data-emt-d1="Objects"] .em-tag { color: #f0a884; }   /* 사물 */
+.emt-tab:not(.is-on)[data-emt-d1="Creatures"] .em-tag { color: #6fcf97; }   /* 동식물(생물 + 식물) - 새 색 초록 */
+.emt-tab:not(.is-on)[data-emt-d1="Games"] .em-tag { color: #ffe08a; }   /* 표정 색을 빌림 */
+.emt-tab:not(.is-on)[data-emt-d1="Real world"] .em-tag { color: #8fd3c8; }   /* 배경·장소 */
+.emt-tab:not(.is-on)[data-emt-d1="More"] .em-tag { color: #b5e07a; }   /* 행위·자세 */
 .em-foot .emt-acts { margin-left: auto; }
 .em-window.em-tree .em-foot > .em-actions:first-child { margin-left: 0; }   /* 랜덤 단추는 왼쪽(목업) */
 .emt-menu-btn { margin-left: auto; padding: 0 9px; font-size: 13px; line-height: 1; }
@@ -28707,6 +28718,19 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .emt-d2 small { flex: 0 0 auto; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; }
 .emt-d2:hover, .emt-d3i:hover { background: rgba(255,255,255,0.05); }
 .emt-d2.is-open { color: var(--text-primary); font-weight: 600; }
+/* 나무 맨 위 [전체](사용자 지시 2026-10-14) - 갈래의 태그 전부. 고르면 절처럼 칠한다. */
+.emt-all { border-bottom: 1px solid var(--border-dim); }
+.emt-all.is-on { background: rgba(88,76,170,0.34); color: #fff; }
+.emt-gall span { font-weight: 600; }   /* 펼친 그룹 맨 위 [전체] - 그 그룹 전부 */
+/* [전체] 두 곳(갈래 · 그룹)은 어두운 연노랑으로 칠해 그룹 · 절과 가른다(사용자 지시 2026-10-14). */
+.emt-all span, .emt-gall span, .emt-all .emt-caret { color: #d6c487; }
+.emt-all small, .emt-gall small { color: #9c8f63; }
+.emt-all.is-on span, .emt-gall.is-on span { color: #f2e2a6; }
+.emt-gall { border-left-color: rgba(214,196,135,0.45); }
+/* 줄 아래 경로 조각 = 그 자리로 가는 단추(사용자 지시 2026-10-14). 평소엔 글처럼, 마우스를 대면 밑줄. */
+.emt-go { border: 0; background: transparent; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; }
+.emt-go:hover { color: #c9bdff; text-decoration: underline; }
+.emt-go-sep { padding: 0 4px; }
 .emt-caret { display: inline-block; width: 12px; font-style: normal; color: var(--text-dim); }
 .emt-d3i { display: flex; width: calc(100% - 14px); margin-left: 14px; justify-content: space-between; align-items: baseline; gap: 6px;
   border: 0; border-left: 1px solid var(--border-dim); background: transparent; color: var(--text-secondary); font-size: 10.5px;
@@ -28715,6 +28739,11 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .emt-d3i small { flex: 0 0 auto; color: var(--text-dim); font-family: var(--font-mono); font-size: 9px; }
 .emt-d3i.is-on { background: rgba(88,76,170,0.34); color: #fff; border-left-color: rgba(139,118,255,0.8); }
 .emt-d3i.is-empty { opacity: 0.45; }
+/* 절 이름이 잘리지 않게(사용자 지시 2026-10-14): 이름은 넘치면 줄을 바꾸고(말줄임 대신), 수(14 / 26)는 오른쪽에 작게 -
+   두 줄이 되면 세로 가운데. 파일 순서로 위의 .emt-d3i 규칙을 덮는다. */
+.emt-d3i { align-items: center; line-height: 1.3; }
+.emt-d3i span { flex: 1 1 auto; overflow: visible; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+.emt-d3i small { font-size: 8.5px; }
 .emt-right { min-width: 0; padding-bottom: 4px; }
 .emt-d3h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-bottom: 1px solid var(--border-dim);
   color: var(--text-primary); font-size: 11px; font-weight: 600; padding: 3px 10px; }
@@ -28727,7 +28756,14 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .emt-right .em-sort { margin: 0; white-space: nowrap; }
 .emt-error { display: flex; align-items: center; gap: 8px; margin: 8px 10px; padding: 6px 8px; border: 1px solid rgba(229,115,115,0.45);
   border-radius: 5px; color: #e57373; font-size: 11px; }
-.emt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; column-gap: 8px; }
+/* 3단 지도의 줄(사용자 지시 2026-10-14 - '공간 비효율 · 괜히 가리기만'): 수 두 칸은 좁고 작게(줄끼리 맞도록 폭은 고정),
+   [−](제외)는 칸을 차지하지 않고 마우스를 댈 때만 오른쪽 끝에 뜬다, 태그 이름은 잘리지 않고 줄을 바꾼다. 기존 화면의 줄은 그대로. */
+.emt-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 6px; padding-right: 8px; }
+.emt-row .em-tag { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.emt-row .em-lift { min-width: 32px; font-size: 10px; }
+.emt-row .em-obs { min-width: 44px; font-size: 9px; }
+.emt-row .em-row-x { position: absolute; right: 0; top: 1px; width: 18px; height: 18px; background: rgba(15,15,23,0.92); border-radius: 3px; }
+.emt-row:not(:hover) .em-row-x { visibility: hidden; }
 .emt-path { grid-column: 1 / -1; min-width: 0; margin-top: -2px; line-height: 1.25; font-family: var(--font-sans, inherit); font-size: 9.5px; color: var(--text-dim);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 640px) {

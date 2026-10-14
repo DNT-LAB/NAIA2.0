@@ -578,13 +578,15 @@ class EventMapService:
 
     def tree_browse(self, *, d1: Any = "", d2: Any = "", d3: Any = "", ratings: Any = None,
                     persons: Any = None, limit: Any = DEFAULT_CANDIDATES, offset: Any = 0,
-                    per: Any = 5) -> dict[str, Any]:
+                    per: Any = 5, flat: Any = 0) -> dict[str, Any]:
         """핀 없이 지도의 한 자리에서 고른 인원 · 등급에 특징적인 태그.
 
         * 절(d2+d3) - 그 절 하나를 쪽 단위로(`offset` · `has_more`). 같은 셈에서 그 그룹의 절마다
           이 조건의 후보 수도 단다(`sections[].live` - 화면의 나무 목록이 빈 절을 흐리게 한다).
         * 그룹(d2)  - 절마다 상위 `per` 개(`sections`). 한 번 세고 절마다 줄만 다시 세운다.
         * 갈래(d1)  - 그룹마다 상위 `per` 개(`sections`).
+        * 갈래 / 그룹 전체(d1 또는 d2 + `flat`) - 그 자리의 태그 전부를 한 줄로, 쪽 단위(나무의 [전체] -
+          사용자 지시 2026-10-14). 후보마다 그 갈래 안의 경로 · 그룹이면 절마다 후보 수(`sections`).
         """
         idx = self.index()
         tree = self.tree()
@@ -594,6 +596,30 @@ class EventMapService:
         if not (d1 or d2 or d3):
             raise MapQueryError("bad_tree_slot", "갈래 · 그룹 · 절 중 하나는 골라야 한다.")
         slots = self._tree_slots(tree, d1, d2, d3)
+        if not d3 and str(flat or "").strip().lower() in ("1", "true", "on", "yes"):
+            # 나무의 [전체] - 갈래(d1) 또는 그룹(d2)의 태그 전부를 한 줄로, 쪽 단위(사용자 지시 2026-10-14).
+            # 후보마다 그 갈래 안의 경로. 그룹이면 그 그룹의 절마다 이 조건의 후보 수도 단다(절 화면과 같다).
+            home = d1 or tree.d2[d2]["d1"]
+            allowed = bound.mask(slots) if d2 else bound.d1_masks[d1]
+            off = self._page_offset(offset, idx.n_tags)
+            result = idx.browse(ratings=want_r, persons=want_p, allowed=allowed,
+                                limit=self._count(limit, DEFAULT_CANDIDATES, MAX_CANDIDATES), offset=off,
+                                block=self.permanent_block(idx))
+            pool = result.pop("_pool", None)
+            self._attach_page(result, off)
+            for c in result.get("candidates") or []:
+                tid = idx.by_name.get(c.get("tag"))
+                if tid is not None:
+                    c["path"] = bound.first_path(tid, d1=home, d2=d2)
+            result.update({"ok": True, "mode": "group_list" if d2 else "branch_list", "d1": home, "d2": d2,
+                           "path": [tree.d1_ko(home)] + ([tree.d2[d2]["ko"]] if d2 else []),
+                           "tags": int(allowed.sum())})
+            if d2:
+                result["sections"] = [{"id": tree.slots[s][2], "ko": tree.d3_ko(d2, tree.slots[s][2]),
+                                       "tags": bound.slot_size(s),
+                                       "live": int((pool & bound.mask([s])).sum()) if pool is not None else None}
+                                      for s in slots]
+            return result
         if d3:
             off = self._page_offset(offset, idx.n_tags)
             result = idx.browse(ratings=want_r, persons=want_p, allowed=bound.mask(slots),
@@ -629,7 +655,7 @@ class EventMapService:
                        "sections": sections})
         return result
 
-    def _attach_tree(self, result: dict, bound: BoundTree) -> None:
+    def _attach_tree(self, result: dict, bound: BoundTree, d1: str = "", d2: str = "") -> None:
         """핀 결과에 지도 정보를 단다: 후보마다 첫 자리(경로) · 갈래 / 그룹 / 절별 후보 수.
 
         수는 고른 자리(d1 · d2 · d3)로 가두기 **전의** 풀에서 센다 - 탭 · 나무가 다른 자리의 수도 보여 준다.
@@ -641,7 +667,7 @@ class EventMapService:
         for c in result.get("candidates") or []:
             tid = idx.by_name.get(c.get("tag"))
             if tid is not None:
-                c["path"] = bound.first_path(tid)
+                c["path"] = bound.first_path(tid, d1=d1, d2=d2)
         pool = result.get("_pool")
         if pool is None:
             return
@@ -713,7 +739,7 @@ class EventMapService:
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         if bound is not None:
-            self._attach_tree(result, bound)
+            self._attach_tree(result, bound, d1=str(d1 or "").strip(), d2=str(d2 or "").strip())
         self._attach_subcategories(result, want_groups, subcategory)
         self._attach_page(result, offset)
         self._attach_groups(result.get("candidates") or [], result)

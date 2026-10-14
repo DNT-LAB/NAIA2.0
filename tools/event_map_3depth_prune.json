@@ -15321,8 +15321,11 @@
   ]
  },
  "move_d2_to_d1": {
-  "note": "직업 · 기념일은 '장소·배경' 과 안 맞는다(리뷰)",
+  "note": "직업 · 기념일은 '장소·배경' 과 안 맞는다(리뷰) · 식물 갈래는 생물과 합쳐 '동식물'(사용자 2026-10-14 - 식물은 그룹 셋뿐)",
   "map": {
+   "plant": "Creatures",
+   "tree": "Creatures",
+   "tag_group:flowers": "Creatures",
    "tag_group:jobs": "More",
    "tag_group:holidays_and_celebrations": "More",
    "tag_group:neck_and_neckwear": "Attire and body accessories",

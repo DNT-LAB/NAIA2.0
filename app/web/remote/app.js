@@ -1520,7 +1520,7 @@ import('./js/features/assistPanel.mjs?v=20261001-agefix2')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20261015-pew1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20261015-pv2col2')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,

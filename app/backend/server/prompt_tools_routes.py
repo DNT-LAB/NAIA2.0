@@ -704,11 +704,16 @@ def register_prompt_tools_routes(
             negative = field(main, "negative")
             if negative is None:
                 negative = field(main, "negative_prompt")
+            # 전처리 옵션 - 미리보기의 제거 칩(사용자 지시 2026-10-15). `fields` 의 키 집합은 계약이라 밖에 둔다.
+            # 참 · 거짓 값만 싣는다(손으로 고친 파일의 다른 값은 버린다).
+            options = module.get("preprocessing_options") if isinstance(module, dict) else None
+            preprocessing = ({str(key): value for key, value in options.items() if isinstance(value, bool)}
+                             if isinstance(options, dict) else {})
             return {"name": name, "mode": mode_key, "source": source, "fields": {
                 "prefix": field(module, "pre_prompt"), "postfix": field(module, "post_prompt"),
                 "main": field(main, "prompt"), "negative": negative,
                 "auto_hide": field(module, "auto_hide_prompt"),
-            }}
+            }, "preprocessing": preprocessing}
 
         try:
             detail = await run_in_thread(read_detail)

@@ -558,14 +558,51 @@ export function createCustomSelectController({
     return pre;
   }
 
+  /* ── 전처리 칩(Quick Preset 미리보기 2단 - 사용자 지시 2026-10-15) ─────────────────────
+     켜진 것만, 묶음마다 색이 다르다(이름 제거 노랑 · 특징 제거 하늘 · 다듬기 연두 · 보강 연분홍).
+     이름은 PE 창의 이름을 줄인 것(사용자가 준 형태). 켜진 것이 없는 묶음은 줄째로 빠진다. */
+  const PRESET_CHIP_GROUPS = [
+    ['이름 제거', 'name', [['remove_author', '작가'], ['remove_work_title', '작품명'], ['remove_character_name', '캐릭터']]],
+    ['특징 제거', 'feature', [['remove_character_features', '캐릭터 특징'], ['remove_clothes', '의상'],
+      ['remove_clothing_event', '의상 이벤트'], ['remove_color', '색상'], ['remove_location_and_background_color', '장소 · 배경'],
+      ['remove_expression', '표정'], ['remove_pose_action', '포즈 · 동작'], ['remove_meta_tags', '메타'],
+      ['remove_object_tags', '사물'], ['remove_noise_tags', '저빈도']]],
+    ['다듬기', 'tidy', [['closed_eyes_sync', '눈 동기화'], ['tag_implication_compression', '태그 압축'],
+      ['category_annotation', '카테고리 주석']]],
+    ['보강', 'boost', [['e621_auto_boost', 'e621'], ['danbooru_auto_weight', '자동 가중치']]],
+  ];
+
+  /** 켜진 칩만 묶음 줄로 그린다. 하나도 없으면 false. innerHTML 을 쓰지 않는다. */
+  function paintPresetChips(host, preprocessing) {
+    host.textContent = '';
+    const options = preprocessing && typeof preprocessing === 'object' ? preprocessing : {};
+    let any = false;
+    PRESET_CHIP_GROUPS.forEach(([label, tone, items]) => {
+      const on = items.filter(([key]) => options[key] === true);
+      if (!on.length) return;
+      any = true;
+      const name = document.createElement('span');
+      name.className = 'custom-select-preview-chips-label';
+      name.textContent = label;
+      const row = document.createElement('span');
+      row.className = 'custom-select-preview-chips-row';
+      on.forEach(([, text]) => {
+        const chip = document.createElement('span');
+        chip.className = `custom-select-preview-chip is-${tone}`;
+        chip.textContent = text;
+        row.append(chip);
+      });
+      host.append(name, row);
+    });
+    return any;
+  }
+
   function renderPreview(state, item) {
     if (!hasPreview(state)) return;
     const option = optionForItem(state, item);
     if (!option) {
-      left = Math.min(
-        Math.max(viewportGap, menuRect.left),
-        Math.max(viewportGap, viewportWidth - previewRect.width - viewportGap),
-      );
+      hidePreview(state);
+      return;
     }
 
     const preview = ensurePreview(state);
@@ -642,12 +679,24 @@ export function createCustomSelectController({
 
     // 저장된 Main/Negative 는 비동기로 채운다. 자리를 **먼저** 만들어 두어야
     // 답이 왔을 때 판이 덜컥 커지지 않는다.
+    // Quick Preset(상세를 읽는 판)은 2단이다(사용자 지시 2026-10-15): 왼쪽 = Prefix · Postfix · 켜진 제거 칩,
+    // 오른쪽 = 큰 썸네일 · 썸네일 단추 · Main · Negative. 자리가 모자라면 positionPreview 가 1단으로 접는다.
     const identity = presetDetailWanted(state, option);
+    const side = identity ? document.createElement('div') : null;
+    preview.classList.toggle('has-side', !!side);
     if (identity) {
+      side.className = 'custom-select-preview-side';
+      const chipCap = document.createElement('div');
+      chipCap.className = 'custom-select-preview-cap';
+      chipCap.textContent = '전처리';
+      const chips = document.createElement('div');
+      chips.className = 'custom-select-preview-chips';
+      chipCap.hidden = true;
+      copy.append(chipCap, chips);
       const seq = ++detailSeq;
       const slots = [
-        ['Main', 'main', appendPreviewField(copy, 'Main')],
-        ['Negative', 'negative', appendPreviewField(copy, 'Negative')],
+        ['Main', 'main', appendPreviewField(side, 'Main')],
+        ['Negative', 'negative', appendPreviewField(side, 'Negative')],
       ];
       slots.forEach(([, , pre]) => {
         pre.classList.add('custom-select-preview-body', 'is-loading');
@@ -656,6 +705,7 @@ export function createCustomSelectController({
       loadPresetDetail(identity).then(detail => {
         // 늦게 온 답이 지금 짚은 프리셋을 덮으면 **다른 프리셋 본문**이 보인다.
         if (seq !== detailSeq) return;
+        if (chips.isConnected) chipCap.hidden = !paintPresetChips(chips, detail?.preprocessing);
         slots.forEach(([, key, pre]) => {
           if (!pre.isConnected) return;            // 그 사이에 다시 그렸다
           pre.classList.remove('is-loading');
@@ -670,6 +720,7 @@ export function createCustomSelectController({
     }
 
     preview.append(thumb, copy);
+    if (side) preview.append(side);
     if (state.select.dataset.previewActions !== 'none') {
       preview.append(buildPreviewActions(state, option));
     }
@@ -872,6 +923,10 @@ export function createCustomSelectController({
     }
   }
 
+  const TWO_COL_WIDTH = 680;
+  // 2단 오른쪽 칸: 패딩 24 + 썸네일 300 + 간격 8 + 단추 26 + 간격 8 = 366, 그 아래 Main/Negative 가 읽힐 만큼 약 190.
+  const TWO_COL_MIN_HEIGHT = 560;
+
   function positionPreview(state) {
     if (!state.preview || state.preview.hidden || state.menu.hidden) return;
     const menuRect = state.menu.getBoundingClientRect();
@@ -879,7 +934,16 @@ export function createCustomSelectController({
     const viewportGap = 8;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
-    const preferredWidth = Math.min(390, Math.max(280, viewportWidth - viewportGap * 2));
+    const singleWidth = Math.min(390, Math.max(280, viewportWidth - viewportGap * 2));
+    // 2단(Quick Preset)은 메뉴 옆에 680px 이 들어가고 **세로도 넉넉할 때만**. 낮은 화면에서 2단이면 오른쪽 칸의
+    // 썸네일(300) · 단추가 높이를 다 먹어 Main/Negative 칸이 0 으로 접힌다(Codex 리뷰: 360px 높이). 아니면 예전 1단.
+    const roomRight = viewportWidth - menuRect.right - gap - viewportGap;
+    const roomLeft = menuRect.left - gap - viewportGap;
+    const twoCol = state.preview.classList.contains('has-side')
+      && Math.max(roomRight, roomLeft) >= TWO_COL_WIDTH
+      && viewportHeight - viewportGap * 2 >= TWO_COL_MIN_HEIGHT;
+    state.preview.classList.toggle('is-two-col', twoCol);
+    const preferredWidth = twoCol ? TWO_COL_WIDTH : singleWidth;
     state.preview.style.width = `${Math.round(preferredWidth)}px`;
     state.preview.style.maxHeight = `${Math.max(180, viewportHeight - viewportGap * 2)}px`;
 

@@ -630,6 +630,49 @@ header {
   cursor: wait;
   opacity: 0.55;
 }
+/* ── Quick Preset 미리보기 2단(사용자 지시 2026-10-15 - "썸네일을 볼 수 없음") ─────────────────────────────
+   왼쪽 = 이름 · Prefix · Postfix · 켜진 제거 칩, 오른쪽 = 큰 썸네일 · 썸네일 단추 · Main · Negative.
+   `has-side` = 상세(Main/Negative)를 읽는 판(Quick Preset 만), `is-two-col` = 메뉴 옆에 680px 이 들어갔다(positionPreview).
+   자리가 모자라 1단으로 접히면 오른쪽 칸(.custom-select-preview-side)은 본문 아래 한 줄 더 - 행이 넷이다. */
+.custom-select-preview.has-side { grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto; }
+.custom-select-preview-side {
+  min-width: 0; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.custom-select-preview.is-two-col {
+  max-height: min(660px, calc(100dvh - 16px));
+  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-areas: "copy thumb" "copy actions" "copy side";
+  column-gap: 14px; row-gap: 8px;
+}
+.custom-select-preview.is-two-col > .custom-select-preview-copy { grid-area: copy; }
+.custom-select-preview.is-two-col > .custom-select-preview-thumb { grid-area: thumb; }
+.custom-select-preview.is-two-col > .custom-select-preview-actions { grid-area: actions; gap: 6px; }
+.custom-select-preview.is-two-col > .custom-select-preview-side { grid-area: side; }
+/* 썸네일을 크게 - 1단의 띠(78~108px)가 아니라 300px. 그림 전체를 보인다(1단의 세로 그림 확대 · 자르기를 쓰지 않는다). */
+.custom-select-preview.is-two-col > .custom-select-preview-thumb.has-image { height: 300px; }
+.custom-select-preview.is-two-col > .custom-select-preview-thumb.is-portrait img { transform: none; }
+.custom-select-preview.is-two-col .custom-select-preview-actions button { min-height: 26px; font-size: 10.5px; }
+/* 왼쪽 열은 Prefix · Postfix · 칩뿐이다 - 1단의 칸 상한(92px)을 두면 아래가 빈다. */
+.custom-select-preview.is-two-col > .custom-select-preview-copy .custom-select-preview-prefix { max-height: 210px; }
+/* 켜진 전처리 칩 - 묶음 이름 + 칩 줄. 묶음마다 색이 다르다(이름 제거 노랑 · 특징 제거 하늘 · 다듬기 연두 · 보강 연분홍). */
+.custom-select-preview-chips {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: start;
+}
+.custom-select-preview-chips:empty { display: none; }
+.custom-select-preview-chips-label {
+  padding-top: 2px; color: var(--text-dim); font-family: var(--font-mono); font-size: 9.5px; white-space: nowrap;
+}
+.custom-select-preview-chips-row { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.custom-select-preview-chip {
+  padding: 1px 6px; border: 1px solid; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 10px; line-height: 1.5; white-space: nowrap;
+}
+.custom-select-preview-chip.is-name { color: #f0c27a; border-color: rgba(230,168,74,0.45); background: rgba(230,168,74,0.12); }
+.custom-select-preview-chip.is-feature { color: #85b7eb; border-color: rgba(133,183,235,0.42); background: rgba(133,183,235,0.10); }
+.custom-select-preview-chip.is-tidy { color: #97c459; border-color: rgba(151,196,89,0.42); background: rgba(151,196,89,0.10); }
+.custom-select-preview-chip.is-boost { color: #ed93b1; border-color: rgba(237,147,177,0.45); background: rgba(237,147,177,0.11); }
 @media (max-width: 640px) {
   .custom-select-preview-thumb {
     height: clamp(64px, 10dvh, 88px);

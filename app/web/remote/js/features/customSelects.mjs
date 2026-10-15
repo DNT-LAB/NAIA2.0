@@ -946,6 +946,16 @@ export function createCustomSelectController({
     const preferredWidth = twoCol ? TWO_COL_WIDTH : singleWidth;
     state.preview.style.width = `${Math.round(preferredWidth)}px`;
     state.preview.style.maxHeight = `${Math.max(180, viewportHeight - viewportGap * 2)}px`;
+    // 2단에서 판이 화면 높이를 넘으면 아래 섬(Main | Negative)이 잘린다 - 위쪽 왼쪽 열만 줄여 그 안에서 구르게 한다.
+    // 답(Main/Negative · 칩)이 오면 다시 불리므로 그때 다시 잰다.
+    const copyEl = state.preview.querySelector(':scope > .custom-select-preview-copy');
+    if (copyEl) {
+      const keepScroll = copyEl.scrollTop;          // 다시 재는 동안 높이 제한을 풀면 스크롤 위치가 밀린다 - 되돌린다
+      copyEl.style.maxHeight = '';
+      const over = twoCol ? state.preview.scrollHeight - state.preview.clientHeight : 0;
+      if (over > 0) copyEl.style.maxHeight = `${Math.max(120, Math.floor(copyEl.getBoundingClientRect().height - over))}px`;
+      copyEl.scrollTop = keepScroll;
+    }
 
     const previewRect = state.preview.getBoundingClientRect();
     let left;
@@ -1151,7 +1161,11 @@ export function createCustomSelectController({
     });
   }
 
-  function onWindowLayoutChange() {
+  function onWindowLayoutChange(event) {
+    // 미리보기 판 **안의** 스크롤(2단의 왼쪽 열 · 아래 섬)은 자리와 상관없다 - 다시 재면 왼쪽 열의 높이 제한을 풀었다 거는
+    // 사이에 스크롤 위치가 밀린다(Codex 리뷰).
+    if (event?.type === 'scroll' && openState?.preview && event.target instanceof Node
+        && openState.preview.contains(event.target)) return;
     if (openState) positionMenu(openState);
   }
 

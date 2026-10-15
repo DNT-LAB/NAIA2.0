@@ -631,7 +631,8 @@ header {
   opacity: 0.55;
 }
 /* ── Quick Preset 미리보기 2단(사용자 지시 2026-10-15 - "썸네일을 볼 수 없음") ─────────────────────────────
-   왼쪽 = 이름 · Prefix · Postfix · 켜진 제거 칩, 오른쪽 = 큰 썸네일 · 썸네일 단추 · Main · Negative.
+   위: 왼쪽 = 이름 · Prefix · Postfix · 켜진 제거 칩, 오른쪽 = 썸네일 · 썸네일 단추.
+   아래 섬(판 폭 전체) = [Main | Negative] 나란히(사용자 지시 2026-10-15 "공간이 남는다 - 하단 island").
    `has-side` = 상세(Main/Negative)를 읽는 판(Quick Preset 만), `is-two-col` = 메뉴 옆에 680px 이 들어갔다(positionPreview).
    자리가 모자라 1단으로 접히면 오른쪽 칸(.custom-select-preview-side)은 본문 아래 한 줄 더 - 행이 넷이다. */
 .custom-select-preview.has-side { grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto; }
@@ -641,21 +642,31 @@ header {
 }
 .custom-select-preview.is-two-col {
   max-height: min(660px, calc(100dvh - 16px));
-  grid-template-columns: minmax(0, 1fr) 300px;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  grid-template-areas: "copy thumb" "copy actions" "copy side";
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-rows: auto auto auto;
+  grid-template-areas: "copy thumb" "copy actions" "side side";
   column-gap: 14px; row-gap: 8px;
 }
 .custom-select-preview.is-two-col > .custom-select-preview-copy { grid-area: copy; }
 .custom-select-preview.is-two-col > .custom-select-preview-thumb { grid-area: thumb; }
 .custom-select-preview.is-two-col > .custom-select-preview-actions { grid-area: actions; gap: 6px; }
 .custom-select-preview.is-two-col > .custom-select-preview-side { grid-area: side; }
-/* 썸네일을 크게 - 1단의 띠(78~108px)가 아니라 300px. 그림 전체를 보인다(1단의 세로 그림 확대 · 자르기를 쓰지 않는다). */
-.custom-select-preview.is-two-col > .custom-select-preview-thumb.has-image { height: 300px; }
+/* 썸네일을 크게 - 1단의 띠(78~108px)가 아니라 260px. 그림 전체를 보인다(1단의 세로 그림 확대 · 자르기를 쓰지 않는다). */
+.custom-select-preview.is-two-col > .custom-select-preview-thumb.has-image { height: 260px; }
+.custom-select-preview.is-two-col > .custom-select-preview-actions { align-self: start; }
+/* 아래 섬: 칸 넷(Main 이름 · 본문 · Negative 이름 · 본문)을 세로로 흘려 두 열로 - 오른쪽 열 앞에 구분선. */
+.custom-select-preview.is-two-col > .custom-select-preview-side {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto;
+  grid-auto-flow: column; row-gap: 3px; overflow: hidden;
+  padding: 8px 0; border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(255,255,255,0.02);
+}
+.custom-select-preview.is-two-col > .custom-select-preview-side > * { padding: 0 10px; }
+.custom-select-preview.is-two-col > .custom-select-preview-side > :nth-child(n+3) { border-left: 1px solid var(--border-dim); }
+.custom-select-preview.is-two-col > .custom-select-preview-side > .custom-select-preview-cap { margin-top: 0; }
 .custom-select-preview.is-two-col > .custom-select-preview-thumb.is-portrait img { transform: none; }
 .custom-select-preview.is-two-col .custom-select-preview-actions button { min-height: 26px; font-size: 10.5px; }
-/* 왼쪽 열은 Prefix · Postfix · 칩뿐이다 - 1단의 칸 상한(92px)을 두면 아래가 빈다. */
-.custom-select-preview.is-two-col > .custom-select-preview-copy .custom-select-preview-prefix { max-height: 210px; }
+/* 왼쪽 열은 Prefix · Postfix · 칩뿐이다 - 1단의 칸 상한(92px)보다 조금 넉넉히. 아래 섬이 판 안에 남도록 상한은 둔다. */
+.custom-select-preview.is-two-col > .custom-select-preview-copy .custom-select-preview-prefix { max-height: 130px; }
 /* 켜진 전처리 칩 - 묶음 이름 + 칩 줄. 묶음마다 색이 다르다(이름 제거 노랑 · 특징 제거 하늘 · 다듬기 연두 · 보강 연분홍). */
 .custom-select-preview-chips {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: start;

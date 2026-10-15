@@ -1092,9 +1092,15 @@ export function createCharacterPanel({
   function addDexToSlot() {
     const prompt = String(dexDetail?.prompt?.character_prompt || '').trim();
     if (!prompt) { showToastSafe('담을 프롬프트가 없습니다.'); return; }
+    // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켜고 그 말을 한다(2026-10-15) - 그때는
+    // 상한도 '담았습니다' 도 이 화면이 말하지 않는다. 판단은 서버가 하고 여기서는 문구만 고른다.
+    // (같은 잣대: 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시 - 서버 `_set_mark`)
+    const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
+    const duplicate = (newestState()?.characters || [])
+      .some(c => slotState(c) === 'active' && norm(c.prompt) === norm(prompt) && !norm(c.uc));
     const max = Number(lastState?.max_slots) || 0;
     const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
-    if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+    if (!duplicate && max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
     // ⚠️ **한 번**에 끝낸다. 예전처럼 빈 슬롯을 만들고 번호를 찾아 채우면, 그 사이
     //    다른 클라이언트의 에코가 끼어 남의 슬롯을 덮는다(Fable 조사).
     setModuleParam('character', 'add_character', JSON.stringify({
@@ -1102,7 +1108,7 @@ export function createCharacterPanel({
       uc: '',
       custom_name: String(dexPicked?.character || ''),
     }));
-    showToastSafe('슬롯 맨 아래에 담았습니다.');
+    if (!duplicate) showToastSafe('슬롯 맨 아래에 담았습니다.');
   }
 
   function renderDexRows() {

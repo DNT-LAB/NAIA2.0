@@ -929,7 +929,9 @@ export function createCharacterQuickPanel({
     // ⚠️ 머리 <button> **바깥**에 둔다. 안에 넣으면 마크업이 깨지고 안쪽을 눌러도
     //    바깥 토글이 먼저 먹는다(이 파일이 이미 두 번 밟은 함정).
     const muted = !!character.muted;
-    return `<div class="cq-slot${isOpen ? ' is-open' : ''}${muted ? ' is-muted' : ''}`
+    // 켜진 슬롯(✔)은 배경으로 드러낸다(사용자 지정 2026-10-15) - 꺼진 것과 글자 흐림만으로 가르면, 여럿 중
+    // 무엇이 이번 생성에 나가는지 한눈에 안 잡힌다.
+    return `<div class="cq-slot${isOpen ? ' is-open' : ''}${muted ? ' is-muted' : ' is-live'}`
       + `${linked ? ' is-linked' : ''}">`
       + `<div class="cq-slot-headrow">`
       + `<button type="button" class="cq-slot-en${muted ? '' : ' is-on'}"`
@@ -1259,7 +1261,8 @@ export function createCharacterQuickPanel({
     // ⚠️ 여기서 좁은 화면을 따로 막지 않는다. 모바일에서는 버튼을 아예 안 그리고,
     //    혹 넓혔다 좁히는 사이에 남은 버튼이 눌려도 `openModule` 이 **목에서** 막고
     //    이유까지 말해 준다. 여기서 조용히 삼키면 아무 일도 안 일어나 보인다.
-    if (event.target.closest('[data-cq-manage]')) { openCharacterModule(); return; }
+    if (event.target.closest('[data-cq-manage]')) { closeFind(); openCharacterModule(); return; }
+    if (event.target.closest('[data-cq-find]')) { if (findEl) closeFind(); else openFind(); return; }
     if (event.target.closest('[data-cq-add]')) {
       // 지금 활성 슬롯 수를 적어 둔다 - 에코가 이보다 늘면 그게 새 슬롯이다.
       pendingAddOpen = activeSlots(lastState).length;
@@ -1338,6 +1341,282 @@ export function createCharacterQuickPanel({
     requestAnimationFrame(() => showRefreshTip(index, entry));
   }
 
+  // ── Find(패널 바깥의 빠른 불러오기) ───────────────────────────────────────
+  // Manage 를 열지 않고 캐릭터를 슬롯에 담는다(사용자 지정 2026-10-15). 두 갈래:
+  //   [캐릭터 · 작품]       Manage 의 검색 탭과 같은 캐릭터 사전(`/api/character-viewer/*`) - 누르면 기본 변형을 담는다
+  //   [히스토리 · 즐겨찾기] 보관함(히스토리 · ★ · 그룹) - 누르면 Manage 의 ↩ 와 같은 길(`char_slot_state_N=active`)
+  // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켠다(`_active_duplicate`) - 화면은 그 사실을
+  // 줄의 `C3` 표로 미리 보여 줄 뿐 판단은 서버가 한다.
+  //
+  // ⚠️ 창은 **body 에 fixed 로** 붙인다(Connect 메뉴와 같은 까닭 - 패널 상자는 overflow 로 자른다).
+  // ⚠️ 목록만 갈아 끼운다. 창 전체를 다시 그리면 검색칸이 새로 생겨 한 글자마다 캐럿을 잃는다.
+  const FIND_PER_PAGE = 30;
+  let findEl = null;
+  let findTab = 'dex';
+  const findQuery = {dex: '', lib: ''};
+  let findDexRows = [];
+  let findDexSeq = 0;
+  let findDexTimer = 0;
+  let findDexLoading = false;
+  let findDexError = '';
+  let findPicking = '';            // 사전 상세를 받는 중인 줄(두 번 눌러 두 번 담지 않게)
+  let findDismiss = null;
+
+  /** 서버 `_set_mark` 와 같은 잣대 - 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시. 둘 다 비면 ''. */
+  function setMark(prompt, uc) {
+    const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
+    const p = norm(prompt), u = norm(uc);
+    return (p || u) ? `${p}\u0000${u}` : '';
+  }
+
+  /** 이 글을 가진 활성 슬롯의 표시 번호(C{n}). 없으면 0. */
+  function duplicateOrdinal(prompt, uc) {
+    const mark = setMark(prompt, uc);
+    if (!mark) return 0;
+    const slots = activeSlots(lastState);
+    const at = slots.findIndex(({character}) => setMark(character.prompt, character.uc) === mark);
+    return at + 1;
+  }
+
+  function slotsAreFull() {
+    const max = Number(lastState && lastState.max_slots) || 0;
+    return !!max && activeSlots(lastState).length >= max;
+  }
+
+  function findAvailable(state) {
+    return !!(visible && open && !posEditing && state && !state.virtual && !isNarrowViewport());
+  }
+
+  function closeFind() {
+    if (findDismiss) {
+      document.removeEventListener('mousedown', findDismiss, true);
+      document.removeEventListener('keydown', findDismiss, true);
+      findDismiss = null;
+    }
+    findEl?.remove();
+    findEl = null;
+    mount?.querySelector('[data-cq-find]')?.classList.remove('is-on');
+  }
+
+  function openFind() {
+    closeConnectMenu();
+    closeFind();
+    findEl = document.createElement('div');
+    findEl.className = 'cq-find-pop';
+    findEl.setAttribute('role', 'dialog');
+    findEl.setAttribute('aria-label', '캐릭터 찾기');
+    findEl.innerHTML =
+      `<div class="cq-find-seg">`
+      + `<button type="button" data-cqf-tab="dex">캐릭터 · 작품</button>`
+      + `<button type="button" data-cqf-tab="lib">히스토리 · 즐겨찾기</button></div>`
+      + `<input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
+      + `<div class="cq-find-list" data-cqf-list="1"></div>`;
+    document.body.appendChild(findEl);
+    findEl.addEventListener('click', onFindClick);
+    findEl.addEventListener('input', event => {
+      const input = event.target.closest('[data-cqf-q]');
+      if (!input) return;
+      findQuery[findTab] = input.value;
+      if (findTab === 'dex') scheduleFindDex(); else renderFindList();
+    });
+    mount?.querySelector('[data-cq-find]')?.classList.add('is-on');
+    setFindTab(findTab);
+    positionFind();
+    findEl.querySelector('[data-cqf-q]')?.focus();
+    findDismiss = event => {
+      if (event.type === 'keydown') { if (event.key === 'Escape') closeFind(); return; }
+      // 창 안 · 패널(Find 단추 포함 - 단추는 스스로 열고 닫는다)은 바깥이 아니다. 패널의 ✔ 를 누르며 여러 명을
+      // 담는 동안 창이 닫히면 매번 다시 열어야 한다.
+      if (findEl?.contains(event.target) || mount?.contains(event.target)) return;
+      closeFind();
+    };
+    document.addEventListener('mousedown', findDismiss, true);
+    document.addEventListener('keydown', findDismiss, true);
+  }
+
+  /** Find 단추 바로 위로 띄운다(단추는 패널 오른쪽 아래 바깥) - 위에 자리가 없으면 화면 안으로 당긴다. */
+  function positionFind() {
+    const button = mount?.querySelector('[data-cq-find]');
+    if (!findEl || !button) return;
+    const rect = button.getBoundingClientRect();
+    const margin = 8;
+    const width = findEl.offsetWidth, height = findEl.offsetHeight;
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+    // 위에 자리가 모자라면 단추 **아래**로 연다 - 위로 당겨 붙이면 창이 Find 단추를 덮어 닫을 길이 가려진다(실측:
+    // 슬롯이 적어 패널이 짧을 때).
+    const above = rect.top - height - 6;
+    const top = above >= margin
+      ? above
+      : Math.max(margin, Math.min(rect.bottom + 6, window.innerHeight - height - margin));
+    findEl.style.left = `${Math.round(left)}px`;
+    findEl.style.top = `${Math.round(top)}px`;
+  }
+
+  function setFindTab(tab) {
+    findTab = tab === 'lib' ? 'lib' : 'dex';
+    if (!findEl) return;
+    findEl.querySelectorAll('[data-cqf-tab]').forEach(el =>
+      el.classList.toggle('is-on', el.dataset.cqfTab === findTab));
+    const input = findEl.querySelector('[data-cqf-q]');
+    if (input) {
+      input.value = findQuery[findTab];
+      input.placeholder = findTab === 'dex' ? '캐릭터 · 작품 이름' : '이름 · 프롬프트 · 그룹';
+    }
+    if (findTab === 'dex' && !findDexRows.length && !findDexLoading) void loadFindDex();
+    renderFindList();
+  }
+
+  function scheduleFindDex() {
+    clearTimeout(findDexTimer);
+    // 180ms - Manage 검색 탭과 같은 값(사람이 한 글자 치는 사이).
+    findDexTimer = setTimeout(() => { findDexTimer = 0; void loadFindDex(); }, 180);
+  }
+
+  async function loadFindDex() {
+    const seq = ++findDexSeq;
+    findDexLoading = true;
+    renderFindList();
+    try {
+      const parts = [
+        'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
+        'page=0', `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
+        'recent_only=false', 'favorites_only=false',
+      ];
+      const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
+      const data = await res.json().catch(() => ({}));
+      // 낡은 응답은 버린다 - 한 글자마다 요청이 나가면 순서가 뒤집힌다.
+      if (seq !== findDexSeq) return;
+      if (!res.ok) throw new Error(data.error || '캐릭터를 불러오지 못했습니다.');
+      findDexRows = Array.isArray(data.items) ? data.items : [];
+      findDexError = '';
+    } catch (error) {
+      if (seq !== findDexSeq) return;
+      findDexRows = [];
+      findDexError = error.message || String(error);
+    }
+    findDexLoading = false;
+    renderFindList();
+  }
+
+  /** 보관함(활성이 아닌 것) - ★ 먼저, 그다음 그룹, 그다음 히스토리(최근 순). 검색은 이름 · 프롬프트 · 그룹. */
+  function findLibRows() {
+    const query = findQuery.lib.trim().toLowerCase();
+    const rank = character => (character.favorite ? 0 : (String(character.group || '').trim() ? 1 : 2));
+    return ((lastState && lastState.characters) || [])
+      .map((character, index) => ({character, index}))
+      .filter(({character}) => character && String(character.slot_state || '') !== 'active'
+        && (String(character.prompt || '').trim() || String(character.uc || '').trim()
+            || String(character.custom_name || '').trim()))
+      .filter(({character}) => !query || [character.custom_name, character.prompt, character.group]
+        .some(text => String(text || '').toLowerCase().includes(query)))
+      .sort((a, b) => rank(a.character) - rank(b.character)
+        || (Number(b.character.used_at) || 0) - (Number(a.character.used_at) || 0))
+      .slice(0, 80);
+  }
+
+  function findTagHtml(ordinal) {
+    return ordinal
+      ? `<span class="cq-find-tag is-dup" title="이미 슬롯에 있습니다 - 누르면 C${ordinal} 을 켭니다">C${ordinal}</span>`
+      : '<span class="cq-find-tag">+ 슬롯</span>';
+  }
+
+  function renderFindList() {
+    const list = findEl && findEl.querySelector('[data-cqf-list]');
+    if (!list) return;
+    const keepScroll = list.scrollTop;
+    const empty = text => `<div class="cq-find-empty">${escHtml(text)}</div>`;
+    if (findTab === 'lib') {
+      const rows = findLibRows();
+      list.innerHTML = rows.length ? rows.map(({character, index}) => {
+        const name = String(character.custom_name || '').trim();
+        const title = name || String(character.prompt || '').split(',').map(part => part.trim())
+          .filter(Boolean).slice(0, 3).join(', ') || '(네거티브만)';
+        const group = String(character.group || '').trim();
+        const sub = character.favorite ? `★ 즐겨찾기${group ? ` · ${group}` : ''}`
+          : group ? `그룹 · ${group}` : '히스토리';
+        return `<button type="button" class="cq-find-row" data-cqf-lib="${index}"`
+          + ` data-cqf-uuid="${escAttr(character.slot_uuid || '')}"`
+          + ` title="${escAttr(String(character.prompt || ''))}">`
+          + `<span class="cq-find-text"><b>${escHtml(title)}</b><span>${escHtml(sub)}</span></span>`
+          + `${findTagHtml(duplicateOrdinal(character.prompt, character.uc))}</button>`;
+      }).join('') : empty(findQuery.lib.trim() ? '맞는 캐릭터가 없습니다.' : '보관함이 비어 있습니다.');
+    } else if (findDexError && !findDexRows.length) {
+      list.innerHTML = empty(findDexError);
+    } else if (!findDexRows.length) {
+      list.innerHTML = empty(findDexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.');
+    } else {
+      // 사전의 줄은 아직 프롬프트를 모른다(상세를 받아야 안다) - 중복 표는 이름으로 짐작하지 않는다. 서버가 판단한다.
+      list.innerHTML = findDexRows.map(row => {
+        const key = `${row.group}\u0000${row.character}`;
+        const busy = findPicking === key;
+        return `<button type="button" class="cq-find-row${busy ? ' is-busy' : ''}"`
+          // title 을 두지 않는다 - 앱이 자체 툴팁으로 바꿔 띄우는데, 줄에 이미 보이는 이름 · 작품을 그대로 되풀이하며
+          // 아래 줄을 덮는다(실측).
+          + ` data-cqf-group="${escAttr(row.group)}" data-cqf-char="${escAttr(row.character)}">`
+          + (row.thumbnail_url
+            ? `<img class="cq-find-img" loading="lazy" decoding="async" alt="" src="${escAttr(row.thumbnail_url)}">`
+            : `<span class="cq-find-img is-initial">${escHtml(String(row.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
+          + `<span class="cq-find-text"><b>${escHtml(row.character)}</b>`
+          + `<span>${escHtml(row.group)} · ${Number(row.count) || 0}</span></span>`
+          + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
+      }).join('');
+    }
+    list.scrollTop = keepScroll;
+    positionFind();
+  }
+
+  function onFindClick(event) {
+    const tab = event.target.closest('[data-cqf-tab]');
+    if (tab) { setFindTab(tab.dataset.cqfTab); findEl?.querySelector('[data-cqf-q]')?.focus(); return; }
+    const lib = event.target.closest('[data-cqf-lib]');
+    if (lib) { pickFindLib(Number(lib.dataset.cqfLib), lib.dataset.cqfUuid || ''); return; }
+    const dex = event.target.closest('[data-cqf-char]');
+    if (dex) void pickFindDex(dex.dataset.cqfGroup || '', dex.dataset.cqfChar || '');
+  }
+
+  /** 보관함 -> 슬롯. Manage 의 ↩ 와 같은 명령이다(★ · 그룹은 사본, 히스토리는 옮김 - 서버 규칙). */
+  function pickFindLib(index, uuid) {
+    const character = ((lastState && lastState.characters) || [])[index];
+    if (!character) return;
+    const dup = duplicateOrdinal(character.prompt, character.uc);
+    if (!dup && slotsAreFull()) { showToast(`활성 캐릭터 슬롯은 최대 ${lastState.max_slots}개입니다.`, 'info'); return; }
+    // 번호는 이 목록을 그릴 때의 것이다 - uuid 를 함께 보내 서버가 그 캐릭터가 **지금 있는 자리**를 찾게 한다.
+    setModuleParam('character', `char_slot_state_${index}`, 'active', {slotUuid: uuid});
+    // 중복이면 서버가 'C{n} 을 켰습니다' 를 말한다 - 여기서 또 말하지 않는다.
+    if (!dup) showToast('슬롯 맨 아래에 담았습니다.', 'info');
+  }
+
+  /** 사전 -> 슬롯. Manage 검색 탭의 [+ 슬롯] 과 같다(기본 변형 · 이름 = 캐릭터 이름). */
+  async function pickFindDex(group, character) {
+    const key = `${group}\u0000${character}`;
+    if (!character || findPicking) return;
+    findPicking = key;
+    renderFindList();
+    try {
+      const res = await fetch('/api/character-viewer/detail', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        // 옵션을 못 박는다 - 안 넘기면 Characters 탭에 저장된 값(이름 숨김 등)을 읽는다(Manage 와 같은 까닭).
+        body: JSON.stringify({group, character, variant: '',
+                              options: {hide_charname: false, cosplay_enabled: false}}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '상세를 불러오지 못했습니다.');
+      const prompt = String(data.prompt?.character_prompt || '').trim();
+      if (!prompt) { showToast('담을 프롬프트가 없습니다.', 'info'); return; }
+      const dup = duplicateOrdinal(prompt, '');
+      if (!dup && slotsAreFull()) { showToast(`활성 캐릭터 슬롯은 최대 ${lastState.max_slots}개입니다.`, 'info'); return; }
+      // 한 번에 끝낸다(빈 슬롯을 만들고 번호를 찾아 채우면 그 사이 남의 에코가 끼어 남의 슬롯을 덮는다).
+      setModuleParam('character', 'add_character', JSON.stringify({prompt, uc: '', custom_name: character}));
+      if (!dup) showToast(`${character} 을(를) 슬롯 맨 아래에 담았습니다.`, 'info');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      findPicking = '';
+      renderFindList();
+    }
+  }
+
   function setVisible(next) {
     visible = !!next;
     // 보이기로 했으면 **다시 그린다.**
@@ -1352,6 +1631,7 @@ export function createCharacterQuickPanel({
     if (mount) mount.classList.toggle('open', visible && !posEditing);
     // 패널이 사라지면 편집도 끝난다 - 무대만 남으면 나갈 문이 없다.
     if (!visible && posEditing) setPosEditing(false);
+    if (!visible) closeFind();
     syncViewerShift();
   }
 
@@ -1471,8 +1751,20 @@ export function createCharacterQuickPanel({
           ? `<button type="button" class="cq-pos cq-pos-edit" data-cq-posedit="1">POS</button>`
           : '')
       + `<span class="cq-count">${slots.length}</span>`
-      + `</div><div class="cq-body">${body}</div></div>`;
+      + `</div><div class="cq-body">${body}</div></div>`
+      // [Find] - 패널 **바깥**, Manage 옆(오른쪽 아래 모서리)에 뜬다(사용자 지정 2026-10-15). 상자는 overflow 로
+      // 자르므로 상자의 형제로 둔다. 가상(인페인트 세션) · 좁은 화면 · 접힘에는 내지 않는다.
+      + (findAvailable(current)
+          ? `<button type="button" class="cq-find${findEl ? ' is-on' : ''}" data-cq-find="1"`
+            + ` aria-label="캐릭터 찾기 - 캐릭터 · 작품 · 히스토리 · 즐겨찾기">`
+            + `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.5 10.5 14 14"/></svg>`
+            + `Find</button>`
+          : '');
     lastSignature = nextSignature;
+    // Find 창은 body 에 떠 있다 - 단추가 사라졌으면 닫고, 남았으면 새 상태로 목록(중복 표)을 고치고 다시 붙인다.
+    if (findEl) {
+      if (findAvailable(current)) renderFindList(); else closeFind();
+    }
     syncValues(current);
     bindAssist();          // 렌더가 칸을 새로 만들었다 - 반드시 다시 건다
     fitGridHeight();
@@ -1491,7 +1783,7 @@ export function createCharacterQuickPanel({
   // ⚠️ 무대도 함께 다시 그린다. 띠의 폭은 px 로 넣으므로 창이 좁아져도 스스로
   //    줄지 않는다 - 다시 그려야 칩이 접히고 그만큼 무대가 내려간다(실측).
   // 미는 양은 뷰어 상자에서 나온다 - 창이 바뀌면 그것도 같이 다시 재야 한다.
-  window.addEventListener('resize', () => { fitGridHeight(); syncViewerShift(); renderStage(); });
+  window.addEventListener('resize', () => { fitGridHeight(); syncViewerShift(); renderStage(); positionFind(); });
   // ⚠️ resize 만으로는 모자란다. GENERATION INFO 패널은 **창과 무관하게** 높이가
   //    변한다(히스토리 항목을 고르면 내용이 늘어난다) - 그때 경계가 올라오는데
   //    창은 그대로라 resize 가 오지 않는다. 그 요소를 직접 지켜본다.

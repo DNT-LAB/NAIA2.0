@@ -1665,6 +1665,8 @@ class HeadlessCharacterAssetService:
         return {
             "ok": True,
             "state": state,
+            # 같은 캐릭터가 이미 슬롯에 있어 그 슬롯을 켰으면 그 말(화면이 '적용됨' 대신 띄운다 - 2026-10-15).
+            "dedupe_notice": str(state.get("dedupe_notice") or ""),
             "character_prompt": prompt,
             "character_uc": uc,
             "reference_attached": reference_attached,
@@ -1816,6 +1818,7 @@ class HeadlessCharacterAssetService:
             )
         return {
             "ok": True, "state": state, "character_prompt": prompt,
+            "dedupe_notice": str(state.get("dedupe_notice") or ""),
             "references_disabled": references_disabled, "reference_inset": reference_inset,
         }
 

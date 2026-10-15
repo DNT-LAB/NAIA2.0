@@ -682,9 +682,10 @@ function renderCharacterQuickPanel() {
 }
 
 /** 퀵 패널이 `character` 로 쓰려는 것을 인페인트 세션으로 돌린다. */
-function virtualSetModuleParam(moduleId, key, value) {
+function virtualSetModuleParam(moduleId, key, value, options) {
   const session = virtualCharacterSession();
-  if (moduleId !== 'character' || !session) return setModuleParam(moduleId, key, value);
+  // `options.slotUuid` 도 넘긴다 - 퀵 패널의 Find 가 보관함 줄을 올릴 때 그 캐릭터의 uuid 를 싣는다(번호는 낡을 수 있다).
+  if (moduleId !== 'character' || !session) return setModuleParam(moduleId, key, value, options);
   const w = Number(session.canvas_width) || 0;
   const h = Number(session.canvas_height) || 0;
 
@@ -995,7 +996,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261012-cb5s')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261015-find1')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1022,7 +1023,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
     if (assetSpecTab === 'v5') characterAssetControl?.load?.();      // 구 사양 화면으로 떨어진다 - 목록을 채운다
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261012-cb5h')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261015-find1')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -2781,7 +2782,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261011-cmt6')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261015-find1')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2799,7 +2800,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261011-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261011-cmt6')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261015-find1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,

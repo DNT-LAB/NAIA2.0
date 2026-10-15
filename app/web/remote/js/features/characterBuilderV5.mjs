@@ -1543,11 +1543,13 @@ export function createCharacterBuilderV5({
       const result = await postJson('/api/character-asset/apply', {
         id: detail.id, variation: selectedVar, mode: 'c1', with_inset: withInset, strip_outfit: stripOutfit(),
       });
+      // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켠다(2026-10-15).
+      const dedupe = String(result?.dedupe_notice || '');
       if (withInset) {
-        showToast('C1 에 적용하고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다', 'success');
+        showToast(`${dedupe ? `${dedupe} ` : 'C1 에 적용하고 '}레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다`, 'success');
         if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
       } else {
-        showToast('C1 에 적용했습니다', 'success');
+        showToast(dedupe || 'C1 에 적용했습니다', dedupe ? 'info' : 'success');
       }
     } catch (error) {
       showToast(`적용 실패: ${error.message}`, 'error');
@@ -1568,7 +1570,8 @@ export function createCharacterBuilderV5({
       const result = await postJson('/api/character-asset/v5/candidate/apply', {
         history_id: candidate.historyId, builder: candidate.builder, with_inset: true,
       });
-      showToast('C1 에 적용하고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다', 'success');
+      const dedupe = String(result?.dedupe_notice || '');
+      showToast(`${dedupe ? `${dedupe} ` : 'C1 에 적용하고 '}레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다`, 'success');
       if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
     } catch (error) {
       showToast(`적용 실패: ${error.message}`, 'error');

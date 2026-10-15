@@ -210,6 +210,38 @@ def _active_slot_count(frames: Any) -> int:
                and str(frame.get("slot_state") or "").strip().lower() == "active")
 
 
+def _set_mark(prompt: Any, uc: Any) -> tuple[str, str] | None:
+    """'같은 캐릭터인가' 의 잣대 - 프롬프트 + 네거티브(사용자 지정 2026-10-15). 이름 · 좌표는 안 본다 -
+    같은 캐릭터를 다른 이름으로 담아도 같은 것이다. 쉼표 앞뒤 공백 차이는 무시한다. 둘 다 비면 None
+    (빈 칸은 자리표시자라 무엇과도 같지 않다).
+
+    ⚠️ `_content_fingerprint` 와 다르다 - 그쪽은 '사본이 원본과 같아 소멸해도 되는가' 라 이름 · 좌표까지 본다.
+    """
+    def norm(text: Any) -> str:
+        return ", ".join(part.strip() for part in str(text or "").split(",") if part.strip())
+
+    mark = (norm(prompt), norm(uc))
+    return mark if any(mark) else None
+
+
+def _active_duplicate(frames: Any, prompt: Any, uc: Any) -> tuple[int, dict[str, Any]] | None:
+    """이 글을 이미 가진 **활성 슬롯**(켜졌든 꺼졌든)과 그 표시 번호(C{n}). 없으면 None.
+
+    ⚠️ 표시 번호는 활성 무리 안의 차례다 - 정규화가 활성을 앞에 모으고 무리 안 순서를 지키므로 배열 차례와 같다.
+    """
+    mark = _set_mark(prompt, uc)
+    if mark is None:
+        return None
+    ordinal = 0
+    for frame in frames or []:
+        if not isinstance(frame, dict) or _state_of(frame) != "active":
+            continue
+        ordinal += 1
+        if _set_mark(frame.get("prompt"), frame.get("uc")) == mark:
+            return ordinal, frame
+    return None
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -377,6 +409,34 @@ class HeadlessCharacterService:
             if source is not None and not still_used:
                 source["prompt"] = strip_connect_markers(source.get("prompt", ""))
 
+    def _wake_duplicate(self, frames: list[dict[str, Any]], hit: tuple[int, dict[str, Any]],
+                        *, solo: bool = False) -> tuple[str, bool]:
+        """같은 캐릭터가 들어왔다 - 새로 넣지 않고 **이미 있는 슬롯을 켠다**(사용자 지정 2026-10-15).
+        `(알림 문구, 무엇이 바뀌었나)` 를 돌려준다.
+
+        - 보통: 그 슬롯과 그 Connect 자식을 켠다(화면의 ✔ 와 같다 - `char_muted_`).
+        - `solo`(Assets 의 [C1 로 적용]): 그 슬롯만 켜고 나머지 활성 슬롯은 끈다. 'C1 적용 = 이것만 쓴다' 는
+          뜻을 지키되 자리는 옮기지 않는다(사용자 결정).
+        """
+        ordinal, frame = hit
+        changed = False
+
+        def set_muted(target: dict[str, Any], muted: bool) -> None:
+            nonlocal changed
+            if bool(target.get("is_muted")) != muted:
+                changed = True
+            target["is_muted"] = muted
+            target["is_enabled"] = _state_of(target) == "active" and not muted
+
+        if solo:
+            for other in frames:
+                if isinstance(other, dict) and _state_of(other) == "active":
+                    set_muted(other, other is not frame)
+            return f"이미 C{ordinal} 에 있는 캐릭터라 C{ordinal} 만 켰습니다.", changed
+        for target in [frame, *self._connected_children(frames, frame)]:
+            set_muted(target, False)
+        return f"이미 C{ordinal} 에 있는 캐릭터라 C{ordinal} 을 켰습니다.", changed
+
     @staticmethod
     def ensure_frame(frames: list[dict[str, Any]], index: int) -> dict[str, Any]:
         while len(frames) <= index:
@@ -529,7 +589,15 @@ class HeadlessCharacterService:
         settings = self.settings_cache()
         frames = settings.setdefault("character_frames", [])
         apply_mode = str(mode or "c1").strip().lower()
-        if apply_mode == "add_slot":
+        if apply_mode not in {"add_slot", "c1"}:
+            raise ValueError(f"unknown apply mode: {apply_mode}")
+        # 같은 캐릭터가 이미 슬롯에 있으면 새로 넣지 않고 그 슬롯을 켠다(사용자 지정 2026-10-15). 상한 검사보다
+        # 먼저 본다 - 슬롯이 가득해도 이미 있는 것을 켜는 일은 자리를 안 먹는다.
+        duplicate = _active_duplicate(frames, prompt, uc)
+        dedupe_notice = ""
+        if duplicate is not None:
+            dedupe_notice, _changed = self._wake_duplicate(frames, duplicate, solo=apply_mode == "c1")
+        elif apply_mode == "add_slot":
             # ⚠️ **여기도 상한을 본다**(Codex BLOCK 1). `add_character` 만 막고 있어서
             #    에셋 [새 슬롯으로 추가] 로 26번째가 들어갔다. 조용히 넘기지 말고
             #    말하고 멈춘다 - 라우트가 400 으로 되돌린다.
@@ -584,8 +652,6 @@ class HeadlessCharacterService:
                 # **제자리에서 끈다**(화면의 ✔/✘ 와 같은 것 - `char_muted_`). 슬롯에 남으므로 번호만 하나씩 밀린다.
                 other["is_muted"] = True
                 other["is_enabled"] = False
-        else:
-            raise ValueError(f"unknown apply mode: {apply_mode}")
         settings["is_active"] = True
         prompt_context = getattr(context, "current_prompt_context", None)
         metadata = getattr(prompt_context, "metadata", None)
@@ -597,7 +663,13 @@ class HeadlessCharacterService:
         from core.character_settings import clear_character_roll_snapshot
 
         clear_character_roll_snapshot(context, api_mode)
-        return self.state()
+        state = self.state()
+        if duplicate is not None:
+            # 라우트가 이 둘을 응답에 옮겨 화면이 '적용됨' 대신 이 문구를 띄운다(상태는 모두에게 가는 것이 아니다 -
+            # REST 응답이라 부른 창만 본다).
+            state["deduped_into"] = duplicate[0]
+            state["dedupe_notice"] = dedupe_notice
+        return state
 
     def set_param(self, key: str, value: Any, *, slot_uuid: str = "") -> dict[str, Any] | None:
         """`slot_uuid` = 화면이 그 명령을 **어느 칸에 대고** 보냈는가(그 칸을 그릴 때의 uuid).
@@ -652,6 +724,8 @@ class HeadlessCharacterService:
         # 이번 회에 조건부 규칙이 정해 둔 캐릭터(프롬프트 컨텍스트의 override)를 그대로 둘 것인가. 보관함의 글만
         # 고친 명령은 다음 생성에 닿지 않으므로 둔다 - 기본은 예전처럼 버린다.
         keep_round = False
+        # 같은 캐릭터가 들어와 이미 있는 슬롯을 켰을 때 명령을 보낸 창에 알릴 말(사용자 지정 2026-10-15).
+        dedupe_notice = ""
         if key == "activated":
             settings["is_active"] = context._coerce_bool(value)
         elif key == "reroll_on_generate":
@@ -725,7 +799,11 @@ class HeadlessCharacterService:
                     parsed = None
                 if isinstance(parsed, dict):
                     seed = parsed
-            if _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
+            duplicate = _active_duplicate(frames, seed.get("prompt"), seed.get("uc"))
+            if duplicate is not None:
+                # 같은 캐릭터가 이미 슬롯에 있다 - 넣지 않고 그 슬롯을 켠다. 상한보다 먼저 본다(자리를 안 먹는다).
+                dedupe_notice, invalidate_snapshot = self._wake_duplicate(frames, duplicate)
+            elif _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
                 muted = bool(seed.get("muted"))
                 made = {
                     "prompt": str(seed.get("prompt") or ""),
@@ -833,6 +911,14 @@ class HeadlessCharacterService:
                     target = int(str(value).strip())
                 except (TypeError, ValueError):
                     target = -1
+                duplicate = (_active_duplicate(frames, frames[index].get("prompt"), frames[index].get("uc"))
+                             if target >= 0 and isinstance(frames[index], dict)
+                             and _state_of(frames[index]) != "active" else None)
+                if duplicate is not None:
+                    # 보관함에서 끌어 넣었는데 같은 캐릭터가 이미 슬롯에 있다 - 옮기지(사본을 만들지) 않고 그 슬롯을
+                    # 켠다(사용자 지정 2026-10-15). 끌어 온 것은 보관함에 그대로 남는다.
+                    dedupe_notice, invalidate_snapshot = self._wake_duplicate(frames, duplicate)
+                    target = -1
                 if target >= 0:
                     # ⚠️ target 은 **지금 보이는 목록**의 자리다. 자기보다 아래로 옮기면
                     #    자기가 빠지면서 뒤가 한 칸 당겨지므로 그만큼 빼 준다. 안 그러면
@@ -881,6 +967,14 @@ class HeadlessCharacterService:
                 requested = str(value or "").strip().lower()
                 if requested == "restore":
                     requested = str(frame.get("return_slot_state") or "inactive")
+                if requested == "active" and _state_of(frame) != "active":
+                    duplicate = _active_duplicate(frames, frame.get("prompt"), frame.get("uc"))
+                    if duplicate is not None:
+                        # 보관함에서 ↩ 했는데 같은 캐릭터가 이미 슬롯에 있다 - 올리지 않고 그 슬롯을 켠다(사용자 지정
+                        # 2026-10-15). 상한보다 먼저 본다 - 가득 차 있어도 이미 있는 것을 켜는 일은 자리를 안 먹는다.
+                        # 보관함 쪽은 그대로 남는다(그냥 히스토리면 다음 내림 때 중복 정리가 걷는다). 아래 블록은 건너뛴다.
+                        dedupe_notice, invalidate_snapshot = self._wake_duplicate(frames, duplicate)
+                        requested = ""
                 if requested in {"active", "inactive", "cold"}:
                     # ⚠️ **복원도 상한을 넘을 수 없다**(Codex BLOCK 1 · 실측 25 -> 26).
                     #    `add_character` 만 막고 있었는데 히스토리의 ↩ 는 이 길로
@@ -1092,4 +1186,11 @@ class HeadlessCharacterService:
             # The panel edits the active mode's frames — invalidate only that mode's
             # snapshot so an unrelated mode's valid roll is preserved.
             clear_character_roll_snapshot(context, mode)
+        if dedupe_notice:
+            from core.headless_payload_utils import toast
+
+            state = self.state()
+            # 명령을 보낸 창에만 간다(`module_commands` 가 떼어 그 소켓에만 보낸다 - 상태는 모두에게 간다).
+            state["_headless_extra_messages"] = [toast(dedupe_notice, level="info")]
+            return state
         return self.state()

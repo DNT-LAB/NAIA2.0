@@ -447,13 +447,17 @@ export function createCharacterAssetTabController({
         with_inset: withInset,
         strip_outfit: stripOutfit,
       });
-      if (withInset) {
-        showToast('C1 슬롯 적용 + 레퍼런스 인셋 고정됨 - 해제 전까지 인셋으로 생성됩니다', 'success');
+      // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켠다(2026-10-15) - 그 말을 먼저 한다.
+      const dedupe = String(result?.dedupe_notice || '');
+      if (dedupe && !withInset && !withReference) {
+        showToast(dedupe, 'info');
+      } else if (withInset) {
+        showToast(`${dedupe ? `${dedupe} ` : 'C1 슬롯 적용 + '}레퍼런스 인셋 고정됨 - 해제 전까지 인셋으로 생성됩니다`, 'success');
         // Result 탭 좌상단 핀 배지 갱신(앱 셸 소유)
         if (result.reference_inset) onReferenceInsetPin(result.reference_inset);
       } else if (withReference) {
         if (result.reference_attached) {
-          showToast('C1 슬롯 + Character Reference 적용됨', 'success');
+          showToast(dedupe ? `${dedupe} Character Reference 적용됨` : 'C1 슬롯 + Character Reference 적용됨', 'success');
         } else {
           showToast('C1 슬롯은 적용됐지만 Character Reference 등록에 실패했습니다', 'warning');
         }

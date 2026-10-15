@@ -204,6 +204,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // 영구 제외(Search 의 붉은 줄과 **같은 글**). 서버가 이 글로 게시물을 거른다 - 화면은 고치고 보여 줄 뿐이다.
   let permText = '', permInfo = null, permOpen = false, permSaving = 0;
   let permEl = null, permInput = null, permStatus = null, chipPanel = null;
+  let permQueue = Promise.resolve();   // 영구 제외 조회 · 저장은 한 줄로(늦은 응답이 새 글을 덮지 않게)
   // 영구 제외 입력 줄의 자동완성 - 이벤트 맵 색인의 태그(58,406개)만 낸다(/suggest). 항은 언제나 태그 하나 전체 일치다
   // (사용자 지시 2026-10-14 - '* 없이 항상 고정 태그 제외'). 커서 앞 쉼표 뒤의 조각이 질의다.
   let acEl = null, acItems = [], acActive = -1, acSeq = 0, acTimer = null;
@@ -309,10 +310,15 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // 같은 쉼표 목록이라 저장은 언제나 글 전체를 보낸다.
   const splitTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean);
   const normTerm = t => String(t || '').trim().replace(/^\*+/, '').toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
-  async function loadPermanent() {
-    try { permInfo = await getJson('/api/event-map/permanent-exclude', {}); permText = String(permInfo.text || ''); }
-    catch { permInfo = null; }
-    paintPermanent();
+  function loadPermanent() {
+    // 저장과 같은 줄에 선다 - 따로 가면 늦게 온 조회가 방금 저장한 글을 옛 글로 되돌리고, 다음 더하기가 그 옛 글에서
+    // 만들어져 앞의 것이 사라졌다(재리뷰 2026-10-15).
+    permQueue = permQueue.then(async () => {
+      try { permInfo = await getJson('/api/event-map/permanent-exclude', {}); permText = String(permInfo.text || ''); }
+      catch { permInfo = null; }
+      paintPermanent();
+    }).catch(() => {});
+    return permQueue;
   }
   function paintPermanent() {
     const btn = filtersEl?.querySelector('[data-emt-perm]');
@@ -379,7 +385,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     closeAc();
     if (it.blocked === '영구 제외') { toast(`이미 영구 제외에 있습니다 — ${it.tag}`, 'info'); return; }
     permInput.value = '';
-    void savePermanentTerms([...splitTerms(permText), it.tag], `영구 제외에 더했습니다 — ${it.tag}`);
+    queuePermanent(() => [...splitTerms(permText), it.tag], `영구 제외에 더했습니다 — ${it.tag}`);
   }
 
   function openPermanent(on) {
@@ -390,6 +396,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (permOpen) { permInput.value = ''; permInput.focus({ preventScroll: true }); }
     paintPermanent();
     fitHeight();
+  }
+  // 저장은 한 줄로 선다. 목록은 **차례가 왔을 때** 그때의 글에서 만든다 - 앞 저장의 응답 전에 다음 태그를 고르면
+  // 둘 다 옛 글에서 만들어 앞의 것이 사라졌다(리뷰 2026-10-14).
+  function queuePermanent(makeTerms, done) {
+    permQueue = permQueue.then(() => savePermanentTerms(makeTerms(), done)).catch(() => {});
   }
   /** 영구 제외 글을 저장한다(항 목록 -> 쉼표 글). 저장되면 Search 창의 영구 제외 칸도 같은 글로(같은 화면 안). */
   async function savePermanentTerms(terms, done) {
@@ -423,10 +434,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     chipPanel.body.addEventListener('click', event => {
       const x = event.target.closest('[data-chip-x]');
       if (!x || permSaving) return;
-      const terms = splitTerms(permText);
-      const gone = terms[Number(x.dataset.chipX)];
+      const gone = splitTerms(permText)[Number(x.dataset.chipX)];
       if (gone == null) return;
-      void savePermanentTerms(terms.filter((_, i) => i !== Number(x.dataset.chipX)), `영구 제외에서 뺐습니다 — ${gone}`);
+      // 차례가 왔을 때의 글에서 그 항을 뺀다(번호가 아니라 글자로 - 그 사이에 목록이 바뀌어도 맞는 것을 뺀다).
+      queuePermanent(() => { const terms = splitTerms(permText); const at = terms.indexOf(gone);
+        return at < 0 ? terms : terms.filter((_, i) => i !== at); }, `영구 제외에서 뺐습니다 — ${gone}`);
     });
     return chipPanel;
   }
@@ -746,6 +758,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (!clean || excludes.includes(clean)) return;
     excludes.push(clean);
     pins = pins.filter(t => t !== clean);
+    // 꽂기와 같이 검색을 닫는다 - 글자가 남으면 결과가 와도 검색 목록만 그려 창이 멈춘 것처럼 보였다(사용자 제보 2026-10-14).
+    input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
     void explore();
   }
   function goTo(depth) {
@@ -1580,6 +1594,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       //    `is-active` 를 박는다. 뒤에 정하면 값은 맞는데 화면에는 안 보인다.
       if (active < 0) active = exactRowIndex();
       html += suggestHtml();
+      // 이 갈래는 상태 글을 안 쓴다 - 검색 중에 다시 찾은(조건 칩 · 제외) 요청이 끝났으면 '찾는 중…' 을 걷는다.
+      if (!busyCount && statusEl?.classList.contains('is-busy')) {
+        const n = pins.length && result?.status === 'matched' ? Number(result.observed_posts) || 0 : 0;
+        setStatus(n ? `${fmt(n)}건` : '', n ? 'ok' : '');
+      }
     } else if (!pins.length && isTree()) {
       html += treeBodyHtml();
       treeBody = true;
@@ -2149,6 +2168,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (event.key === 'Enter') {
       event.preventDefault();
       if (!rows.length) return;
+      if (simpleMode && isTree() && !input.value.trim()) return;   // 단순 검색 모드 - 탐사하지 않는다(클릭과 같다)
       pin(rows[active >= 0 ? active : exactRowIndex()]);
       return;
     }
@@ -2265,6 +2285,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (!overlay) return;
     closePersonPopup();
     closeTreeMenu();
+    if (chipPanel?.isOpen()) chipPanel.close();
+    if (permOpen) { permOpen = false; if (permEl) permEl.hidden = true; closeAc(); }
     open = false;
     if (panel.isOpen()) panel.close();
     if (subEl) subEl.hidden = true;

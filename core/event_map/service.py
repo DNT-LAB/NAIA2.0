@@ -140,8 +140,7 @@ class EventMapService:
         self._sorted_names: list[str] = []
         # 영구 제외(Search 의 붉은 줄). 글은 세션이 쥐고 있다 - ensure_event_map_service 가 읽는 함수를 단다.
         self.permanent_source: Callable[[], str] | None = None
-        self._block_key: tuple | None = None
-        self._block: PermanentBlock | None = None
+        self._block_cache: tuple[tuple, PermanentBlock | None] | None = None   # ((글, 색인 id), 막을 것)
 
     # -- 개방 ----------------------------------------------------------------
     def _candidates(self) -> list[Path]:
@@ -303,13 +302,14 @@ class EventMapService:
         """내려받기·마이그레이션 뒤에 다시 찾게 한다."""
         with self._lock:
             idx, self._index = self._index, None
+            self._count_cache = None   # 스테이징 수 세기 - 옛 색인의 게시물 번호다
             self._state, self._message, self._path = "unknown", "", None
             self._sorted_names = []
             self._group_arr, self._group_rows = None, []
             self._candidate_excluded = None
             self._sub_arr, self._sub_names = None, []
             self._bound = None   # 다른 색인이면 태그 id 가 다르다
-            self._block_key, self._block = None, None
+            self._block_cache = None
         if idx is not None:
             try:
                 idx.close()
@@ -510,15 +510,21 @@ class EventMapService:
         except Exception:
             return ""
 
-    def permanent_block(self, idx: EventMapIndex | None = None) -> PermanentBlock | None:
-        """지금 영구 제외 글로 막을 태그 · 게시물. 글이 바뀔 때만 다시 만든다(색인을 한 번 훑는다)."""
+    def permanent_block(self, idx: EventMapIndex | None = None, text: str | None = None) -> PermanentBlock | None:
+        """지금 영구 제외 글로 막을 태그 · 게시물. 글이 바뀔 때만 다시 만든다(색인을 한 번 훑는다).
+
+        `text` 를 주면 그 글로 만든다 - 글을 한 번 읽어 다른 열쇠(수 세기 캐시)와 같이 쓰는 쪽이 준다(리뷰 2026-10-14:
+        두 번 읽는 사이에 글이 바뀌면 옛 글로 센 수가 새 글의 열쇠로 남았다). 열쇠와 값은 한 덩어리로 바꾼다.
+        """
         idx = idx or self.index()
-        text = self.permanent_text()
+        text = self.permanent_text() if text is None else text
         key = (text, id(idx))
-        if key != self._block_key:
-            self._block = build_block(idx, text) if text.strip() else None
-            self._block_key = key
-        return self._block
+        cached = self._block_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        block = build_block(idx, text) if text.strip() else None
+        self._block_cache = (key, block)
+        return block
 
     def count_selections(self, selections: list[dict]) -> dict[str, Any]:
         """스테이징 수 세기: 조합마다 맞는 게시물 수(`per`, 같은 순서) · 전체(`total` = 겹치는 게시물은 한 번) · 단순 합(`sum`).
@@ -526,26 +532,39 @@ class EventMapService:
         조합 하나의 게시물 목록은 (조합 · 영구 제외 글 · 색인) 이 같으면 다시 세지 않는다 - 창을 열 때마다 묻는다.
         """
         idx = self.index()
-        block = self.permanent_block(idx)
-        key_base = (id(idx), self.permanent_text())
+        text = self.permanent_text()            # 한 번만 읽는다 - 막을 것과 캐시 열쇠가 같은 글이어야 한다
+        block = self.permanent_block(idx, text)
         cache = getattr(self, "_count_cache", None)
-        if cache is None or cache.get("_base") != key_base:
-            cache = {"_base": key_base}
+        # 색인은 객체 그대로 비교한다 - id() 는 옛 색인이 풀린 뒤 새 색인에 다시 쓰일 수 있다(리뷰 2026-10-14).
+        if cache is None or cache.get("_idx") is not idx or cache.get("_text") != text:
+            cache = {"_idx": idx, "_text": text}
             self._count_cache = cache
+        keys = [json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")])
+                for s in selections]
+        whole = ("total", tuple(sorted(keys)))
         per, arrays = [], []
-        for s in selections:
-            key = json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")])
+        for key, s in zip(keys, selections):
             rids = cache.get(key)
             if rids is None:
                 rids = idx.posts_for(s.get("pins") or [], exclude=s.get("exclude") or [],
                                      ratings=set(s.get("ratings") or []), persons=set(s.get("persons") or []), block=block)
                 if len(cache) > 512:
                     cache.clear()
-                    cache["_base"] = key_base
+                    cache.update({"_idx": idx, "_text": text})
                 cache[key] = rids
             per.append(int(rids.size))
             arrays.append(rids)
-        total = int(np.unique(np.concatenate(arrays)).size) if arrays else 0
+        total = cache.get(whole)
+        if total is None:
+            # 겹침 제외 = 게시물 표시 배열(정렬 없이 O(합)) - 흔한 핀 조합 여럿이면 np.unique(concat) 은 정렬이라 느리다.
+            if arrays:
+                mask = np.zeros(int(idx.offsets.size), dtype=bool)
+                for rids in arrays:
+                    mask[rids] = True
+                total = int(np.count_nonzero(mask))
+            else:
+                total = 0
+            cache[whole] = total
         return {"per": per, "total": total, "sum": int(sum(per))}
 
     def permanent_state(self) -> dict[str, Any]:

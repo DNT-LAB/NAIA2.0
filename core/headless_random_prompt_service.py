@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,6 +153,44 @@ class HeadlessRandomPromptService:
                 ])
         return ready
 
+    @staticmethod
+    def _combo_ratings(value: Any) -> set[str]:
+        """조합의 등급 - 이벤트 맵 연결은 'g,s' 글, 스테이징은 ['g', 's'] 목록이다."""
+        if isinstance(value, (list, tuple, set)):
+            return {str(v).strip()[:1] for v in value if str(v).strip()}
+        return set(str(value or "").replace(",", "").replace(" ", ""))
+
+    @staticmethod
+    def _staging_sample(service: Any, store: Any, label: str) -> tuple[list, dict]:
+        """[ST Random] - 스테이징 조합 중 **맞는 게시물이 있는 것** 하나를 같은 확률로 골라 그 게시물 하나.
+
+        조합을 섞어 차례로 해 보고 처음 나온 것을 쓴다(= 게시물이 있는 조합들 사이에서 같은 확률). 넣은 뒤 영구 제외가
+        늘었거나 색인이 바뀌어 0건이 된 조합을 뽑아도 실패로 끝내지 않는다 - 실패하면 Auto Gen 이 꺼진다(리뷰 2026-10-14).
+        조합은 **목록 그대로** 넘긴다 - 쉼표로 이었다 다시 자르면 쉼표가 든 태그가 갈라진다.
+        """
+        from core.event_map.service import MapQueryError
+        items = list(store.list()["items"])
+        if not items:
+            raise MapQueryError("no_match", f"{label}: 스테이징된 조합이 없습니다.")
+        random.shuffle(items)
+        for item in items:
+            combo = {k: list(item["selection"].get(k) or []) for k in ("pins", "exclude", "ratings", "persons")}
+            try:
+                body = service.sample(**combo, n=1, permanent=True)
+            except MapQueryError as exc:
+                if exc.code in ("bad_rating", "bad_person", "too_many_pins", "too_many_exclude", "bad_request"):
+                    continue   # 이 조합만 못 쓴다 - 다음 조합
+                raise          # 색인이 없다 등 - 어느 조합으로도 안 된다
+            samples = body.get("samples") or []
+            if not samples:
+                continue
+            # 뽑는 사이에 이 조합을 [제외] 했으면 버리고 다음 조합으로(리뷰 2026-10-14). 연결 판 번호를 올려 취소하면
+            # 실패로 끝나 Auto Gen 이 꺼지므로 그 길은 쓰지 않는다.
+            if not any(r["id"] == item["id"] for r in store.list()["items"]):
+                continue
+            return samples, combo
+        raise MapQueryError("no_match", f"{label}: 스테이징된 조합 모두 맞는 게시물이 없습니다.")
+
     def generate(
         self,
         *,
@@ -175,15 +214,13 @@ class HeadlessRandomPromptService:
                 return HeadlessRandomPromptResult(False, error="Story 실행 중에는 랜덤 버튼 연결을 해제해주세요.",
                                                  event_map_revision=revision)
             try:
+                service = ensure_event_map_service(self.context)
                 if link.get("mode") == "staging":
-                    item = staging_store(self.context).pick()
-                    if item is None:
-                        raise MapQueryError("no_match", f"{label}: 스테이징된 조합이 없습니다.")
-                    combo = {k: ",".join(item["selection"][k]) for k in ("pins", "exclude", "ratings", "persons")}
+                    samples, combo = self._staging_sample(service, staging_store(self.context), label)
                 else:
                     combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}
-                body = ensure_event_map_service(self.context).sample(**combo, n=1, permanent=True)
-                samples = body.get("samples") or []
+                    body = service.sample(**combo, n=1, permanent=True)
+                    samples = body.get("samples") or []
                 if not samples:
                     raise MapQueryError("no_match", f"{label}: 이 조건에 맞는 게시물이 없습니다.")
                 if link_state(self.context)["revision"] != revision:
@@ -195,7 +232,7 @@ class HeadlessRandomPromptService:
                        "event_map_combo": True}
                 result = self.generate_from_source_row(
                     row, overrides={**(overrides or {}), "wildcard_standalone": False},
-                    active_ratings=set(combo.get("ratings", "").replace(",", "")) or set(DEFAULT_RATINGS),
+                    active_ratings=self._combo_ratings(combo.get("ratings")) or set(DEFAULT_RATINGS),
                     random_request_id=random_request_id, source="random", update_context=True)
                 result.event_map_revision = revision
                 return result

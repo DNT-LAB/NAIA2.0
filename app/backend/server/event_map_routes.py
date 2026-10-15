@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -217,6 +218,12 @@ def register_event_map_routes(
     async def api_event_map_random_link_state():
         return JSONResponse(link_state(session_context), headers=_no_store())
 
+    # 스테이징 연결 켜기와 스테이징 바꾸기는 한 줄로 선다(리뷰 2026-10-14): 연결 쪽이 '비어 있지 않다' 를 읽고 기다리는
+    # 사이에 비우기가 끝나면, 비우기는 풀 연결이 없고 연결은 옛 목록으로 켜져 빈 풀에 연결이 남았다.
+    # 잠금은 **풀 읽기 · 바꾸기 + 연결 상태 쓰기** 만 감싼다 - 수 세기 · 알림 보내기는 밖에서(재리뷰 2026-10-15: 느린 수
+    # 세기나 막힌 소켓이 연결 끄기까지 붙잡았다). 이벤트 맵 갈래 · 끄기는 풀과 상관없어 잠그지 않는다.
+    staging_gate = asyncio.Lock()
+
     @app.post("/api/event-map/random-link")
     async def api_event_map_random_link(req: Request):
         payload = await _read_json(req)
@@ -229,11 +236,18 @@ def register_event_map_routes(
             return JSONResponse({"message": "mode must be event or staging"}, status_code=400)
         state = {"enabled": payload["enabled"]}
         if state["enabled"] and mode == "staging":
-            items = (await run_in_thread(staging_store(session_context).list))["items"]
-            if not items:
-                return JSONResponse({"ok": False, "code": "staging_empty",
-                                     "message": "스테이징된 조합이 없습니다."}, status_code=409)
-            state["mode"] = "staging"
+            async with staging_gate:
+                try:
+                    items = (await run_in_thread(staging_store(session_context).list))["items"]
+                except MapQueryError as exc:
+                    return _error(exc)
+                if not items:
+                    return JSONResponse({"ok": False, "code": "staging_empty",
+                                         "message": "스테이징된 조합이 없습니다."}, status_code=409)
+                state["mode"] = "staging"
+                # 잠금 안에서 쓴다 - 풀이 비지 않았음을 본 그 상태로 켠다
+                state["revision"] = link_state(session_context)["revision"] + 1
+                session_context.event_map_random_link = state
         elif state["enabled"]:
             state["mode"] = "event"
             for key in ("pins", "exclude", "ratings", "persons"):
@@ -256,8 +270,9 @@ def register_event_map_routes(
                 return _error(exc)
             if link_state(session_context)["revision"] != revision:
                 return JSONResponse({"message": "다른 연결 설정이 적용되었습니다."}, status_code=409)
-        state["revision"] = link_state(session_context)["revision"] + 1
-        session_context.event_map_random_link = state
+        if "revision" not in state:
+            state["revision"] = link_state(session_context)["revision"] + 1
+            session_context.event_map_random_link = state
         from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
         invalidate_auto_gen_prefetch(session_context)
         if state["enabled"] and session_context._coerce_bool(
@@ -281,26 +296,37 @@ def register_event_map_routes(
             return None
         return {"per": {r["id"]: n for r, n in zip(items, counts["per"])}, "total": counts["total"], "sum": counts["sum"]}
 
-    async def _staging_reply(store, data):
-        """스테이징이 비면 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패하지 않게). 모든 창에 수를 알린다."""
-        items = data.get("items") or []
+    def _unlink_if_empty(data):
+        """스테이징이 비면 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패하지 않게). 잠금 안에서 부른다 - 바꾼 상태를 돌려준다."""
         link = link_state(session_context)
-        if not items and link.get("enabled") and link.get("mode") == "staging":
+        if not (data.get("items") or []) and link.get("enabled") and link.get("mode") == "staging":
             state = {"enabled": False, "revision": link["revision"] + 1}
             session_context.event_map_random_link = state
-            await _broadcast({"type": "event_map_random_link", **state})
+            return state
+        return None
+
+    async def _staging_reply(data, with_counts=True, unlinked=None):
+        """잠금 밖: 풀린 연결 · 스테이징 수를 모든 창에 알리고, 청하면 수를 센다."""
+        items = data.get("items") or []
+        if unlinked:
+            await _broadcast({"type": "event_map_random_link", **unlinked})
         await _broadcast({"type": "event_map_staging", "count": len(items)})
-        return JSONResponse({**data, "random_link": link_state(session_context), "counts": await _staging_counts(items)},
-                            headers=_no_store())
+        reply = {**data, "random_link": link_state(session_context)}
+        if with_counts:
+            reply["counts"] = await _staging_counts(items)
+        return JSONResponse(reply, headers=_no_store())
 
     @app.get("/api/event-map/staging")
-    async def api_event_map_staging():
+    async def api_event_map_staging(counts: int = 1):
+        """counts=0 = 수를 세지 않는다(S 단추 배지 · 다른 창의 알림 - 색인을 열지 않는다. 첫 기동 lazy 를 지킨다)."""
         try:
             data = await run_in_thread(staging_store(session_context).list)
         except MapQueryError as exc:
             return _error(exc)
-        return JSONResponse({**data, "random_link": link_state(session_context),
-                             "counts": await _staging_counts(data["items"])}, headers=_no_store())
+        reply = {**data, "random_link": link_state(session_context)}
+        if counts:
+            reply["counts"] = await _staging_counts(data["items"])
+        return JSONResponse(reply, headers=_no_store())
 
     @app.post("/api/event-map/staging")
     async def api_event_map_staging_change(req: Request):
@@ -311,29 +337,33 @@ def register_event_map_routes(
         action = body.get("action")
         store = staging_store(session_context)
         library = EventMapLibrary(session_context._save_path("event_map", "combinations.json"))
+        unlinked = None
         try:
-            if action == "add":
-                data = await run_in_thread(store.add_many, [body.get("selection")])
-            elif action == "stage_saved":
-                row = await run_in_thread(library.find, str(body.get("id") or ""))
-                if row is None:
-                    raise MapQueryError("not_found", "이미 삭제되었거나 존재하지 않는 조합입니다.")
-                data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]])
-            elif action == "remove":
-                data = await run_in_thread(store.remove, str(body.get("id") or ""))
-            elif action == "clear":
-                data = await run_in_thread(store.clear)
-            elif action == "save_bundle":
+            if action == "save_bundle":   # 풀을 읽기만 한다 - 잠그지 않는다
                 items = (await run_in_thread(store.list))["items"]
                 saved = await run_in_thread(library.save_bundle, {
                     "id": body.get("id"), "name": body.get("name") or "", "category": body.get("category") or "",
                     "selections": [r["selection"] for r in items]})
                 return JSONResponse({**saved, "items": items, "saved": saved["items"]}, headers=_no_store())
-            else:
-                raise MapQueryError("bad_request", "지원하지 않는 스테이징 작업입니다.")
+            if action == "stage_saved":
+                row = await run_in_thread(library.find, str(body.get("id") or ""))
+                if row is None:
+                    raise MapQueryError("not_found", "이미 삭제되었거나 존재하지 않는 조합입니다.")
+            async with staging_gate:   # 풀 바꾸기 + (비었으면) 연결 풀기만
+                if action == "add":
+                    data = await run_in_thread(store.add_many, [body.get("selection")])
+                elif action == "stage_saved":
+                    data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]])
+                elif action == "remove":
+                    data = await run_in_thread(store.remove, str(body.get("id") or ""))
+                elif action == "clear":
+                    data = await run_in_thread(store.clear)
+                else:
+                    raise MapQueryError("bad_request", "지원하지 않는 스테이징 작업입니다.")
+                unlinked = _unlink_if_empty(data)
         except MapQueryError as exc:
             return _error(exc)
-        return await _staging_reply(store, data)
+        return await _staging_reply(data, with_counts=body.get("counts", True) is not False, unlinked=unlinked)
 
     @app.get("/api/event-map/suggest")
     async def api_event_map_suggest(q: str = "", limit: int = 20):

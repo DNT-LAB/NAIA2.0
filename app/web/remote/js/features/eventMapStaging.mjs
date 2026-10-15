@@ -22,6 +22,15 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   let staged = [], saved = [], categories = [], stagedCount = 0, savedCount = 0;
   let category = '*', query = '', renaming = '';
   let openRow = '';                 // 스테이징 탭에서 펼친 줄(단추가 보이는 줄) - 한 번에 하나
+  let reloadSeq = 0;
+  let stagingRev = -1, stagingGen = null;   // 서버 스테이징 판 번호 · 세대 - 같은 세대의 옛 응답은 버린다(늦게 온 POST · GET 이 새 목록을 덮었다)
+  const fresh = data => {
+    if (typeof data?.rev !== 'number') return true;
+    // 세대가 바뀌면(깨진 파일을 비우기로 되살림 · 파일이 새로 생김) 번호가 다시 낮아진다 - 번호와 상관없이 받는다.
+    if (data.gen === stagingGen && data.rev < stagingRev) return false;
+    stagingGen = data.gen; stagingRev = data.rev;
+    return true;
+  };
   let counts = null;                // 서버가 센 게시물 수: { per: {id: n}, total(겹침 제외), sum }
   let menuEl = null, menuFor = '';   // 저장된 조합 [분류 변경] 메뉴(분류 · 삭제). 이름은 이름 뒤 ✎ 로(사용자 지시 2026-10-14)
 
@@ -70,7 +79,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     getEventMap()?.syncStaged?.();   // 이벤트 맵 [스테이징] 옆 숫자 단추
   }
   async function refreshCounts() {
-    try { staged = (await request('/api/event-map/staging')).items; stagedCount = staged.length; } catch { /* 서버가 없으면 그대로 */ }
+    // counts=0 - 배지는 개수만 있으면 된다. 수를 세면 서버가 색인을 연다(첫 기동 lazy - 리뷰 2026-10-14).
+    try {
+      const s = await request('/api/event-map/staging?counts=0');
+      if (fresh(s)) { staged = s.items; stagedCount = staged.length; }
+    } catch { /* 서버가 없으면 그대로 */ }
     try { savedCount = (await request('/api/event-map/library')).items.length; } catch { /* 같은 이유 */ }
     paintTab();
   }
@@ -92,7 +105,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('change', onChange);
     panel.body.addEventListener('input', event => {
-      if (event.target.matches('[data-st-search]')) { query = event.target.value; paintBody(); }
+      // 칸은 두고 목록만 - 칸까지 갈아 끼우면 첫 글자에서 초점이 나가 연속 입력 · 한글 조합이 끊긴다(리뷰 2026-10-14).
+      if (event.target.matches('[data-st-search]')) { query = event.target.value; paintSavedList(); }
     });
     panel.body.addEventListener('keydown', event => {
       event.stopPropagation();
@@ -122,9 +136,12 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     paintTab();
   }
   async function reload() {
+    const mine = ++reloadSeq;   // 늦게 온 옛 응답이 새 결과(빼기 등)를 덮지 않게
     try {
       const [s, l] = await Promise.all([request('/api/event-map/staging'), request('/api/event-map/library')]);
-      staged = s.items; saved = l.items; categories = l.categories || []; counts = s.counts || null;
+      if (mine !== reloadSeq) return;
+      if (fresh(s)) { staged = s.items; counts = s.counts || null; }
+      saved = l.items; categories = l.categories || [];
       stagedCount = staged.length; savedCount = saved.length;
       if (s.random_link) getEventMap()?.receiveRandomLink?.(s.random_link);
     } catch (error) { toast(`조합을 불러오지 못했습니다 — ${error.message}`, 'error'); }
@@ -166,15 +183,30 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         <button type="button" data-st-clear ${staged.length ? '' : 'disabled'}>비우기</button>`;
       return;
     }
-    const q = query.trim().toLowerCase();
-    const rows = saved.filter(r => (category === '*' || r.category === category)
-      && (!q || [r.name, ...(r.selections || [r.selection]).flatMap(s => [...s.pins, ...s.exclude])].join(' ').toLowerCase().includes(q)));
     const options = (selected, all) => (all ? `<option value="*">전체 분류</option>` : '')
       + `<option value="" ${selected === '' ? 'selected' : ''}>미분류</option>`
       + categories.map(c => `<option value="${esc(c)}" ${selected === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
+    // 다시 그려도 검색 칸에 치던 중이면 초점 · 커서를 돌려준다(다른 창의 알림으로 다시 받은 경우).
+    const typing = document.activeElement?.matches?.('[data-st-search]') ? document.activeElement : null;
+    const caret = typing ? [typing.selectionStart, typing.selectionEnd] : null;
     body.innerHTML = `<div class="st-search"><select class="st-filter" data-st-filter aria-label="분류">${options(category, true)}</select>
-        <input data-st-search placeholder="이름 · 태그 검색…" value="${esc(query)}" aria-label="저장된 조합 검색"></div>`
-      + (rows.length ? rows.map(r => {
+        <input data-st-search placeholder="이름 · 태그 검색…" value="${esc(query)}" aria-label="저장된 조합 검색"></div>
+      <div class="st-list"></div>`;
+    paintSavedList();
+    if (caret) {
+      const field = body.querySelector('[data-st-search]');
+      field.focus({ preventScroll: true });
+      field.setSelectionRange(...caret);
+    }
+    foot.innerHTML = '';
+  }
+  function paintSavedList() {
+    const list = panel?.body.querySelector('.st-list');
+    if (!list) return;
+    const q = query.trim().toLowerCase();
+    const rows = saved.filter(r => (category === '*' || r.category === category)
+      && (!q || [r.name, ...(r.selections || [r.selection]).flatMap(s => [...s.pins, ...s.exclude])].join(' ').toLowerCase().includes(q)));
+    list.innerHTML = rows.length ? rows.map(r => {
         const bundle = r.kind === 'bundle';
         const sel = r.selections || [r.selection];
         const inStage = sel.every(isStaged);   // 묶음은 전부 들어가 있어야 '스테이징됨'
@@ -188,8 +220,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
           <div class="st-line"><div class="st-meta">${bundle ? `${esc(sel.slice(0, 3).map(s => s.pins.join(', ')).join(' / '))}${sel.length > 3 ? ' …' : ''}` : metaHtml(r.selection)}</div>
             <div class="st-acts"><button type="button" class="${inStage ? 'is-done' : 'is-primary'}" data-st-stage-saved ${inStage ? 'disabled title="이미 스테이징에 있는 조합입니다"' : ''}>${inStage ? '✓ 스테이징됨' : '스테이징 +'}</button>${bundle ? '' : '<button type="button" data-st-open-saved>맵에서 열기</button>'}</div></div>
         </div>`;
-      }).join('') : '<div class="st-empty">저장된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>이 조합 저장하기</b>.</div>');
-    foot.innerHTML = '';
+      }).join('') : saved.length ? '<div class="st-empty">맞는 조합이 없습니다.</div>'
+      : '<div class="st-empty">저장된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>이 조합 저장하기</b>.</div>';
   }
 
   // ── 동작 ───────────────────────────────────────────────────────────────────
@@ -198,8 +230,15 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     try { await task(); } catch (error) { toast(error.message, 'error'); } finally { busy--; paint(); }
   }
   function applyStaging(data) {
+    if (!fresh(data)) return;   // 더 새 목록을 이미 받았다
+    ++reloadSeq;                // 이 결과가 더 새것이다 - 진행 중인 reload 응답은 버린다
     staged = data.items; stagedCount = staged.length;
     if ('counts' in data) counts = data.counts;
+    else {
+      // 수 없이 바뀌었다(창이 닫혀 있을 때 보낸 [스테이징]) - 옛 수는 지금 목록과 안 맞는다(재리뷰 2026-10-15).
+      counts = null;
+      if (open) void reload();
+    }
     getEventMap()?.syncStaged?.();   // 이벤트 맵 [스테이징] 단추의 켜짐(이미 들어간 조합이면 끈다)
     if (data.random_link) getEventMap()?.receiveRandomLink?.(data.random_link);
   }
@@ -370,7 +409,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   /** 이벤트 맵 [⋯] 의 '스테이징에 넣기' - 지금 조합을 얼려 넣는다. */
   async function stage(selection) {
     try {
-      const data = await request('/api/event-map/staging', { action: 'add', selection });
+      const data = await request('/api/event-map/staging', { action: 'add', selection, counts: open });
       applyStaging(data);
       toast(data.added ? `스테이징에 넣었습니다 — ${staged.length}개` : '이미 스테이징에 있는 조합입니다', data.added ? 'success' : 'info');
       paint();

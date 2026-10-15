@@ -1449,7 +1449,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261015-codex2')
+import('./js/features/eventMapPanel.mjs?v=20261015-toggle1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1466,6 +1466,7 @@ import('./js/features/eventMapPanel.mjs?v=20261015-codex2')
       isStaged: selection => Boolean(window.eventStaging?.isStaged?.(selection)),
       // [스테이징] 옆 숫자 단추 = 스테이징 수 · 누르면 S 창의 스테이징 탭(S 단추를 숨겨도 여기서 연다).
       getStagedCount: () => window.eventStaging?.stagedCount?.() || 0,
+      getStagedTotal: () => window.eventStaging?.stagedTotal?.() || 0,
       onOpenStaging: () => window.eventStaging?.show?.('stage'),
       // [PE설정] = 메인 프롬프트의 `/pe` **그 목록**을 연다. 베껴 그리지 않는다 -
       // ON/OFF 상태가 두 곳이 되면 반드시 어긋난다.
@@ -1481,7 +1482,7 @@ import('./js/features/eventMapPanel.mjs?v=20261015-codex2')
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
 // S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
-import('./js/features/eventMapStaging.mjs?v=20261015-codex2')
+import('./js/features/eventMapStaging.mjs?v=20261015-restart1')
   .then(({initEventMapStaging}) => {
     window.eventStaging = initEventMapStaging({
       showToast,
@@ -5180,6 +5181,8 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
       },
       onOpen: socket => {
         void window.eventMap?.refreshRandomLink?.();
+        // 스테이징도 다시 받는다 - 서버가 늦게 떴거나 다시 켜졌으면 첫 조회가 실패해 S 단추 · 배지가 비어 있다(재실행 점검 2026-10-15).
+        void window.eventStaging?.reconnected?.();
         _initDone = false;
         setBootIndicator('Loading state…', 60, false);
         if (setupController) setupController.resetInitialProbe();

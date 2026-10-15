@@ -46,6 +46,7 @@ class EventMapStaging:
             for row in items:
                 uuid.UUID(row["id"])
                 row["selection"] = selection(row["selection"])
+                row["enabled"] = row.get("enabled") is not False   # 옛 줄 = 켜짐
             rev = data.get("rev", 0)
             self._gen = str(data.get("gen") or "")
             return items, rev if isinstance(rev, int) and rev >= 0 else 0
@@ -76,22 +77,27 @@ class EventMapStaging:
             items, rev = self._load()
             return {"ok": True, "items": items, "rev": rev, "gen": self._gen}
 
-    def add_many(self, selections: list) -> dict:
-        """얼려 넣는다. 이미 있는 조합(같은 지문)은 건너뛴다 - `added` 가 실제로 들어간 수."""
+    def add_many(self, selections: list, enabled: list | None = None) -> dict:
+        """얼려 넣는다. 이미 있는 조합(같은 지문)은 건너뛴다 - `added` 가 실제로 들어간 수.
+
+        `enabled` = 조합마다 켜짐(묶음을 다시 스테이징할 때 저장해 둔 상태). 없으면 전부 켜짐.
+        """
         clean = [selection(s) for s in selections]
+        enabled = enabled if isinstance(enabled, list) else None
+        flags = [bool(enabled[i]) if enabled and i < len(enabled) else True for i in range(len(clean))]
         if any(not s["pins"] for s in clean):
             raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
         with _LOCK:
             items, rev = self._load()
             seen = {EventMapLibrary._fingerprint(r["selection"]) for r in items}
             added = 0
-            for s in clean:
+            for s, on in zip(clean, flags):
                 key = EventMapLibrary._fingerprint(s)
                 if key in seen:
                     continue
                 if len(items) >= MAX_ITEMS:
                     raise MapQueryError("bad_request", f"스테이징은 {MAX_ITEMS}개까지입니다.")
-                items.append({"id": str(uuid.uuid4()), "selection": s,
+                items.append({"id": str(uuid.uuid4()), "selection": s, "enabled": on,
                               "added_at": datetime.now(timezone.utc).isoformat()})
                 seen.add(key)
                 added += 1
@@ -109,6 +115,19 @@ class EventMapStaging:
             self._write(kept, rev + 1)
             return {"ok": True, "items": kept, "rev": rev + 1, "gen": self._gen}
 
+    def toggle(self, item_id: str, enabled: bool) -> dict:
+        """줄 켜기 · 끄기 - 꺼진 조합은 ST Random 후보 · 전체 수에서 빠진다(사용자 지시 2026-10-15)."""
+        with _LOCK:
+            items, rev = self._load()
+            row = next((r for r in items if r["id"] == item_id), None)
+            if row is None:
+                raise MapQueryError("not_found", "이미 빠졌거나 없는 조합입니다.")
+            if row["enabled"] == bool(enabled):
+                return {"ok": True, "items": items, "rev": rev, "gen": self._gen}
+            row["enabled"] = bool(enabled)
+            self._write(items, rev + 1)
+            return {"ok": True, "items": items, "rev": rev + 1, "gen": self._gen}
+
     def clear(self) -> dict:
         with _LOCK:
             try:
@@ -119,8 +138,8 @@ class EventMapStaging:
             return {"ok": True, "items": [], "rev": rev + 1, "gen": self._gen}
 
     def pick(self, rng: random.Random | None = None) -> dict | None:
-        """[ST Random] - 조합 하나를 같은 확률로."""
-        items = self.list()["items"]
+        """[ST Random] - 켜진 조합 하나를 같은 확률로."""
+        items = [r for r in self.list()["items"] if r["enabled"]]
         if not items:
             return None
         return (rng or random).choice(items)

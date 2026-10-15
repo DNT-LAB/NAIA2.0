@@ -100,7 +100,7 @@ const SORT_MODES = [
 export function initEventMap({ insertTag, insertAtCursor = null, showToast, getPromptText, generateNow, onRandomLinkChange,
                                openPeSlash = null, onPermanentExcludeChange = null,
                                onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null,
-                               getStagedCount = null, onOpenStaging = null } = {}) {
+                               getStagedCount = null, getStagedTotal = null, onOpenStaging = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   // 랜덤 연결은 한 갈래뿐이다(서버 상태 하나): event = 이 창의 지금 조합, staging = S 창의 스테이징 풀
   // (사용자 지시 2026-10-14 - 한쪽을 켜면 다른 쪽이 꺼진다). 이 창의 체크박스 · 핀 동기화는 event 갈래일 때만.
@@ -1128,9 +1128,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     }
     const so = overlay.querySelector('[data-emt-stage-open]');
     if (so) {
+      // 숫자 = 켜진 조합 수. 스테이징에 무엇이든 있으면 보인다 - 전부 꺼져도 여기서 열어 다시 켠다(흐린 0).
       const n = Number(getStagedCount?.()) || 0;
-      so.hidden = !n;
+      const all = Number(getStagedTotal?.()) || n;
+      so.hidden = !all;
       so.textContent = String(n);
+      so.classList.toggle('is-off', !n);
     }
     // 3단 지도: 넣기 · 생성 · 복사 · 실제 조합은 발줄 오른쪽에, **핀이 있을 때만** 보인다(목업).
     if (actsEl) actsEl.hidden = !(isTree() && on);

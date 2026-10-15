@@ -241,9 +241,9 @@ def register_event_map_routes(
                     items = (await run_in_thread(staging_store(session_context).list))["items"]
                 except MapQueryError as exc:
                     return _error(exc)
-                if not items:
+                if not any(r.get("enabled", True) for r in items):
                     return JSONResponse({"ok": False, "code": "staging_empty",
-                                         "message": "스테이징된 조합이 없습니다."}, status_code=409)
+                                         "message": "켜진 스테이징 조합이 없습니다."}, status_code=409)
                 state["mode"] = "staging"
                 # 잠금 안에서 쓴다 - 풀이 비지 않았음을 본 그 상태로 켠다
                 state["revision"] = link_state(session_context)["revision"] + 1
@@ -291,15 +291,17 @@ def register_event_map_routes(
             return {"per": {}, "total": 0, "sum": 0}
         try:
             counts = await run_in_thread(ensure_event_map_service(session_context).count_selections,
-                                         [r["selection"] for r in items])
+                                         [r["selection"] for r in items], [r.get("enabled", True) for r in items])
         except MapQueryError:
             return None
         return {"per": {r["id"]: n for r, n in zip(items, counts["per"])}, "total": counts["total"], "sum": counts["sum"]}
 
     def _unlink_if_empty(data):
-        """스테이징이 비면 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패하지 않게). 잠금 안에서 부른다 - 바꾼 상태를 돌려준다."""
+        """켜진 조합이 없으면(비움 · 전부 끔) 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패해 Auto Gen 이 꺼지지 않게).
+        잠금 안에서 부른다 - 바꾼 상태를 돌려준다."""
         link = link_state(session_context)
-        if not (data.get("items") or []) and link.get("enabled") and link.get("mode") == "staging":
+        live = any(r.get("enabled", True) for r in (data.get("items") or []))
+        if not live and link.get("enabled") and link.get("mode") == "staging":
             state = {"enabled": False, "revision": link["revision"] + 1}
             session_context.event_map_random_link = state
             return state
@@ -310,7 +312,8 @@ def register_event_map_routes(
         items = data.get("items") or []
         if unlinked:
             await _broadcast({"type": "event_map_random_link", **unlinked})
-        await _broadcast({"type": "event_map_staging", "count": len(items)})
+        await _broadcast({"type": "event_map_staging", "count": sum(1 for r in items if r.get("enabled", True)),
+                          "total": len(items)})
         reply = {**data, "random_link": link_state(session_context)}
         if with_counts:
             reply["counts"] = await _staging_counts(items)
@@ -343,7 +346,8 @@ def register_event_map_routes(
                 items = (await run_in_thread(store.list))["items"]
                 saved = await run_in_thread(library.save_bundle, {
                     "id": body.get("id"), "name": body.get("name") or "", "category": body.get("category") or "",
-                    "selections": [r["selection"] for r in items]})
+                    "selections": [r["selection"] for r in items],
+                    "enabled": [r.get("enabled", True) for r in items]})   # 켜고 끈 상태도(사용자 지정 2026-10-15)
                 return JSONResponse({**saved, "items": items, "saved": saved["items"]}, headers=_no_store())
             if action == "stage_saved":
                 row = await run_in_thread(library.find, str(body.get("id") or ""))
@@ -353,7 +357,10 @@ def register_event_map_routes(
                 if action == "add":
                     data = await run_in_thread(store.add_many, [body.get("selection")])
                 elif action == "stage_saved":
-                    data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]])
+                    data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]],
+                                               row.get("enabled"))
+                elif action == "toggle":
+                    data = await run_in_thread(store.toggle, str(body.get("id") or ""), body.get("enabled") is not False)
                 elif action == "remove":
                     data = await run_in_thread(store.remove, str(body.get("id") or ""))
                 elif action == "clear":

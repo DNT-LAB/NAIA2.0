@@ -79,6 +79,11 @@ class EventMapLibrary:
                         raise ValueError("bundle")
                     for item in bundle:
                         selection(item)
+                    # 켜짐 목록(2026-10-15)이 이상하면 버린다 - 다시 스테이징하면 전부 켜짐. 목록 하나로 파일 전체를 못 읽게 하지 않는다.
+                    flags = row.get("enabled")
+                    if flags is not None and not (isinstance(flags, list) and len(flags) == len(bundle)
+                                                  and all(isinstance(f, bool) for f in flags)):
+                        row.pop("enabled", None)
             categories = data.get("categories", [])
             if not isinstance(categories, list) or len(categories) > 500:
                 raise ValueError("categories")
@@ -131,10 +136,14 @@ class EventMapLibrary:
         if not isinstance(bundle, list) or not 1 <= len(bundle) <= MAX_BUNDLE:
             raise MapQueryError("bad_request", "묶을 조합이 없습니다.")
         selected = [selection(s) for s in bundle]
+        flags = payload.get("enabled")
+        flags = [bool(f) for f in flags][:len(selected)] if isinstance(flags, list) else []
         default = f"스테이징 묶음 · {len(selected)}개 · " + ", ".join(selected[0]["pins"])
         row = {"id": item_id, "name": _text(payload.get("name") or default[:100], "이름", 100, True),
                "category": _text(payload.get("category", ""), "분류", 60),
                "kind": "bundle", "selection": selected[0], "selections": selected}
+        if len(flags) == len(selected) and not all(flags):
+            row["enabled"] = flags   # 꺼진 조합이 있을 때만 - 다시 스테이징하면 그 상태로 들어간다
         with _LOCK:
             items = self._read()
             if any(old["id"] == item_id for old in items):

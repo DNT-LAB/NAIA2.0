@@ -526,7 +526,7 @@ class EventMapService:
         self._block_cache = (key, block)
         return block
 
-    def count_selections(self, selections: list[dict]) -> dict[str, Any]:
+    def count_selections(self, selections: list[dict], active: list[bool] | None = None) -> dict[str, Any]:
         """스테이징 수 세기: 조합마다 맞는 게시물 수(`per`, 같은 순서) · 전체(`total` = 겹치는 게시물은 한 번) · 단순 합(`sum`).
 
         조합 하나의 게시물 목록은 (조합 · 영구 제외 글 · 색인) 이 같으면 다시 세지 않는다 - 창을 열 때마다 묻는다.
@@ -541,9 +541,10 @@ class EventMapService:
             self._count_cache = cache
         keys = [json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")])
                 for s in selections]
-        whole = ("total", tuple(sorted(keys)))
+        on = [True] * len(selections) if active is None else [bool(a) for a in active]
+        whole = ("total", tuple(sorted(k for k, a in zip(keys, on) if a)))   # 전체 = 켜진 조합만
         per, arrays = [], []
-        for key, s in zip(keys, selections):
+        for key, s, a in zip(keys, selections, on):
             rids = cache.get(key)
             if rids is None:
                 rids = idx.posts_for(s.get("pins") or [], exclude=s.get("exclude") or [],
@@ -553,7 +554,8 @@ class EventMapService:
                     cache.update({"_idx": idx, "_text": text})
                 cache[key] = rids
             per.append(int(rids.size))
-            arrays.append(rids)
+            if a:
+                arrays.append(rids)
         total = cache.get(whole)
         if total is None:
             # 겹침 제외 = 게시물 표시 배열(정렬 없이 O(합)) - 흔한 핀 조합 여럿이면 np.unique(concat) 은 정렬이라 느리다.
@@ -565,7 +567,7 @@ class EventMapService:
             else:
                 total = 0
             cache[whole] = total
-        return {"per": per, "total": total, "sum": int(sum(per))}
+        return {"per": per, "total": total, "sum": int(sum(n for n, a in zip(per, on) if a))}
 
     def permanent_state(self) -> dict[str, Any]:
         """영구 제외 글 + 색인에서 걸리는 태그(화면이 '걸린 태그 n개' 를 보여 준다). 색인이 없어도 글은 준다."""

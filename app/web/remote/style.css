@@ -28855,6 +28855,20 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .st-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; }
 /* 스테이징 탭: 줄을 눌러야 단추가 나온다(사용자 지시 2026-10-14). */
 .st-pick { cursor: pointer; }
+/* 줄 맨 앞 켜기 · 끄기 스위치(사용자 지시 2026-10-15). 꺼진 줄은 내용만 흐리게 - 스위치는 또렷하게 둔다. */
+.st-pick { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 8px; }
+.st-pick .st-bd { flex: 1 1 0; min-width: 0; }
+.st-pick .st-acts-open { flex: 1 0 100%; }
+.st-window button.st-sw { flex: 0 0 auto; position: relative; width: 26px; height: 14px; margin-top: 1px; padding: 0;
+  border: 0; border-radius: 8px; background: #584caa; cursor: pointer; }
+.st-window button.st-sw::after { content: ""; position: absolute; top: 2px; left: 14px; width: 10px; height: 10px;
+  border-radius: 50%; background: #fff; transition: left 0.12s; }
+.st-window button.st-sw[aria-checked="false"] { background: #3a3a4a; }
+.st-window button.st-sw[aria-checked="false"]::after { left: 2px; background: #8a8aa0; }
+.st-pick.is-off .st-bd { opacity: 0.42; }
+.st-off-n { color: var(--text-dim); }
+.st-badge.is-off { opacity: 0.5; }
+.em-bar .emt-stage-count.is-off { opacity: 0.5; }
 /* 줄 오른쪽 끝 = 이 조합의 게시물 수 · 맨 위 = 전체 프롬프트 수(겹침 제외) - 사용자 지시 2026-10-14. */
 .st-count { margin-left: auto; flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .st-total { flex: 0 0 auto; padding: 4px 10px 6px 29px; border-bottom: 1px solid var(--border-dim); font-size: 10.5px; color: var(--text-secondary); }

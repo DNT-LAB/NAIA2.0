@@ -34,6 +34,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   let counts = null;                // 서버가 센 게시물 수: { per: {id: n}, total(겹침 제외), sum }
   let menuEl = null, menuFor = '';   // 저장된 조합 [분류 변경] 메뉴(분류 · 삭제). 이름은 이름 뒤 ✎ 로(사용자 지시 2026-10-14)
 
+  // 켜진 조합 수 = 배지 · 이벤트 맵 숫자 단추(사용자 지정 2026-10-15). 꺼진 조합은 ST Random 후보가 아니다.
+  const activeCount = () => staged.filter(r => r.enabled !== false).length;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const toast = (message, kind = 'info') => { if (typeof showToast === 'function') showToast(message, kind); };
   const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
@@ -75,7 +77,12 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     tabBtn.hidden = Boolean(isTabHidden()) || !(stagedCount || savedCount);
     tabBtn.setAttribute('aria-pressed', String(open));
     tabBtn.classList.toggle('is-linked', getEventMap()?.randomLinkMode?.() === 'staging');
-    if (badge) { badge.hidden = !stagedCount; badge.textContent = String(stagedCount); }
+    if (badge) {
+      const on = staged.length ? activeCount() : stagedCount;
+      badge.hidden = !stagedCount;
+      badge.textContent = String(on);
+      badge.classList.toggle('is-off', !on);   // 전부 꺼짐 - 흐린 0
+    }
     getEventMap()?.syncStaged?.();   // 이벤트 맵 [스테이징] 옆 숫자 단추
   }
   async function refreshCounts() {
@@ -152,17 +159,21 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (!panel || !open) return;
     const linkBox = panel.body.querySelector('[data-st-link]');
     linkBox.checked = getEventMap()?.randomLinkMode?.() === 'staging';
-    linkBox.disabled = !staged.length && !linkBox.checked;
+    linkBox.disabled = !activeCount() && !linkBox.checked;
     // 전체 프롬프트 수 = 스테이징 조합들에 맞는 게시물(겹치는 게시물은 한 번만) - 사용자 지시 2026-10-14
     const total = panel.body.querySelector('.st-total');
     total.hidden = !staged.length;
     total.innerHTML = counts ? `총 프롬프트 <b>${Number(counts.total).toLocaleString('en-US')}</b>건${counts.sum !== counts.total
       ? ` <span title="여러 조합에 함께 걸리는 게시물은 한 번만 셉니다">· 중복 ${Number(counts.sum - counts.total).toLocaleString('en-US')}건 제외</span>` : ''}`
       : '<span>이벤트 맵 색인이 열리면 프롬프트 수를 셉니다</span>';
+    const offN = staged.length - activeCount();
+    if (offN) total.insertAdjacentHTML('beforeend', ` <span class="st-off-n" title="꺼진 조합은 랜덤 후보와 전체 수에서 빠집니다">· 꺼짐 ${offN}</span>`);
     panel.body.querySelectorAll('[data-st-tab]').forEach(b => {
       const on = b.dataset.stTab === tab;
       b.classList.toggle('is-on', on); b.setAttribute('aria-selected', String(on));
-      b.textContent = b.dataset.stTab === 'stage' ? `스테이징 ${staged.length}` : `저장된 조합 ${saved.length}`;
+      const live = activeCount();
+      b.textContent = b.dataset.stTab === 'stage' ? `스테이징 ${live === staged.length ? live : `${live}/${staged.length}`}`
+        : `저장된 조합 ${saved.length}`;
     });
     paintBody();
   }
@@ -171,11 +182,15 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.inert = busy > 0;
     if (tab === 'stage') {
       // 줄은 태그 · 칩만. 누르면 펼쳐져 단추가 아래 줄에 나온다(마우스를 대면 펼치면 줄이 밀려 다른 줄을 집는다).
-      body.innerHTML = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}" data-st-id="${esc(r.id)}" data-st-pick
+      // 맨 앞 스위치 = 켜기 · 끄기(사용자 지시 2026-10-15). 꺼진 줄은 흐리게 - 랜덤 후보 · 전체 수에서 빠진다.
+      body.innerHTML = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}" data-st-id="${esc(r.id)}" data-st-pick
           aria-expanded="${openRow === r.id}" title="${openRow === r.id ? '' : '눌러서 랜덤 · 랜덤+생성 · 맵에서 열기 · 제외'}">
-          <div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}</span>${counts?.per?.[r.id] != null
+          <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
+            title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
+          <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}</span>${counts?.per?.[r.id] != null
             ? `<span class="st-count" title="이 조합에 맞는 게시물(프롬프트) 수">${Number(counts.per[r.id]).toLocaleString('en-US')}</span>` : ''}</div>
           <div class="st-meta">${metaHtml(r.selection)}</div>
+          </div>
           ${openRow === r.id ? `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button><button type="button" class="is-danger" data-st-remove>제외</button></div>` : ''}
         </div>`).join('')
         : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
@@ -273,6 +288,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (t.closest('[data-st-random]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, false)); return; }
     if (t.closest('[data-st-random-gen]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, true)); return; }
     if (t.closest('[data-st-open]') && stagedRow) { await run(() => openInMap(stagedRow.selection)); return; }
+    if (t.closest('[data-st-toggle]') && stagedRow) {
+      await run(async () => applyStaging(await request('/api/event-map/staging',
+        { action: 'toggle', id, enabled: stagedRow.enabled === false })));
+      return;
+    }
     if (t.closest('[data-st-remove]') && stagedRow) {
       await run(async () => applyStaging(await request('/api/event-map/staging', { action: 'remove', id })));
       return;
@@ -423,8 +443,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   void refreshCounts();
   return {
     show, close, toggle: () => (open ? close() : void show()), isOpen: () => open,
-    stage, refreshCounts, paint, isStaged, paintTab, stagedCount: () => stagedCount,
+    stage, refreshCounts, paint, isStaged, paintTab,
+    /** 소켓이 다시 열렸다(서버 재실행 · 늦은 기동) - 열려 있으면 통째로, 아니면 수만 다시 받는다. */
+    reconnected: () => (open ? reload() : refreshCounts()),
+    stagedCount: () => (staged.length ? activeCount() : stagedCount), stagedTotal: () => stagedCount,
     /** 다른 창이 스테이징을 바꿨다(WS event_map_staging) - 수만 고치고, 열려 있으면 다시 받는다. */
-    receiveCount: message => { stagedCount = Number(message?.count) || 0; if (open) void reload(); else void refreshCounts(); },
+    receiveCount: message => { stagedCount = Number(message?.total ?? message?.count) || 0; if (open) void reload(); else void refreshCounts(); },
   };
 }

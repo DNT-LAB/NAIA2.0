@@ -15420,6 +15420,14 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
 }
 .pe-opt-gear:hover { border-color: var(--border-dim); color: var(--text-primary); }
+/* Prefix · Postfix 는 넓게(사용자 지시 2026-10-15 - Auto-Hide 는 그대로 88px). 초점이 들어간 칸은 더 커지고, 다른 칸이
+   초점을 쥐면 예전처럼 42px 로 접힌다(.pe-prompt-stack:focus-within 규칙 - 그쪽이 더 구체적이라 이긴다). */
+.pe-layout .pe-prompt-field--tall .pe-textarea { height: 136px; min-height: 136px; max-height: 320px; }
+.pe-layout .pe-prompt-stack:focus-within .pe-prompt-field--tall:focus-within .pe-textarea { height: 220px; min-height: 220px; }
+/* 입력칸 모서리를 줄인다(사용자 지시 2026-10-15 - 모던하게). PE 창 안의 글칸 · 검색칸 · 프리셋 셀렉트만. */
+.pe-layout .pe-textarea,
+.pe-layout .pe-preset-search,
+.pe-layout .custom-select-button { border-radius: 3px; }
 .pe-popup-body {
   flex: 1;
   overflow-y: auto;

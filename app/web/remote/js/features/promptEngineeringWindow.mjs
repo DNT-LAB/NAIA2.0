@@ -46,7 +46,7 @@ export function createPromptEngineeringWindow({
   const vh = win?.innerHeight || doc.documentElement.clientHeight || 800;
   const width = Math.max(300, Math.min(START_WIDTH, vw - 12));
   // 2단의 내용 높이(왼쪽 프롬프트 칸 넷)에 맞춘다 - 예전 팝업 높이(760)로 열면 아래가 비었다. 1단이면 본문이 구른다.
-  const height = Math.max(260, Math.min(600, vh - 70));
+  const height = Math.max(260, Math.min(620, vh - 70));
 
   const panel = createDraggablePanel({
     document: doc,

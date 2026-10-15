@@ -11448,7 +11448,7 @@ let lastPromptEngineeringState = null;
 // 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
 const promptEngineeringHost = document.createElement('div');
 const promptEngineeringWindowReady = peUsesWindow
-  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew2')
+  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew3')
     .then(({createPromptEngineeringWindow}) => {
       promptEngineeringWindow = createPromptEngineeringWindow({
         document,
@@ -11479,7 +11479,7 @@ const promptEngineeringWindowReady = peUsesWindow
       console.error('Failed to initialize prompt engineering window', error);
     })
   : Promise.resolve();
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew2')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew3')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

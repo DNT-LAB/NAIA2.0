@@ -598,11 +598,11 @@ export function createPromptEngineeringPanel({
     ${presetControlHtml}
     ${rolledHtml}
     <div class="pe-prompt-stack">
-      <div class="pe-prompt-field">
+      <div class="pe-prompt-field pe-prompt-field--tall">
         <div class="mod-section-label has-actions"><span>Prefix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
         <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea>
       </div>
-      <div class="pe-prompt-field">
+      <div class="pe-prompt-field pe-prompt-field--tall">
         <div class="mod-section-label has-actions"><span>Postfix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_POSTFIX_GUIDE)}">ⓘ 가이드</button></span></div>
         <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea>
       </div>

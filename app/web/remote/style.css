@@ -15401,10 +15401,11 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .pe-opt-row {
   position: relative; flex: 1 1 auto; min-width: 0;
   display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 0 7px;
-  padding: 5px 6px; border: 1px solid transparent; border-radius: 6px;
+  padding: 5px 6px; border: 1px solid rgba(255,255,255,0.09); border-radius: 6px; background: rgba(255,255,255,0.045);
   color: var(--text-primary); font-size: 11px; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
 }
-.pe-opt-row:hover { background: rgba(255,255,255,0.05); }
+/* 꺼진 행도 단추로 보이게 옅은 바탕 · 테두리를 깐다(사용자 지시 2026-10-15 "버튼과 배경색을 구분") - 켜진 행은 노랑 그대로. */
+.pe-opt-row:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); }
 .pe-opt-row:has(.pe-opt-input:checked) { background: rgba(230,168,74,0.12); border-color: rgba(230,168,74,0.45); }
 .pe-opt-row:has(.pe-opt-input:focus-visible) { outline: 1px solid var(--accent); outline-offset: 1px; }
 .pe-opt-row.is-disabled { opacity: 0.4; cursor: not-allowed; }
@@ -15416,10 +15417,10 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .pe-opt-hint[hidden] { display: none; }
 .pe-opt-gear {
   flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
-  border: 1px solid transparent; border-radius: 5px; background: transparent;
+  border: 1px solid rgba(255,255,255,0.09); border-radius: 5px; background: rgba(255,255,255,0.045);
   color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
 }
-.pe-opt-gear:hover { border-color: var(--border-dim); color: var(--text-primary); }
+.pe-opt-gear:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: var(--text-primary); }
 /* Prefix · Postfix 는 넓게(사용자 지시 2026-10-15 - Auto-Hide 는 그대로 88px). 초점이 들어간 칸은 더 커지고, 다른 칸이
    초점을 쥐면 예전처럼 42px 로 접힌다(.pe-prompt-stack:focus-within 규칙 - 그쪽이 더 구체적이라 이긴다). */
 .pe-layout .pe-prompt-field--tall .pe-textarea { height: 136px; min-height: 136px; max-height: 320px; }

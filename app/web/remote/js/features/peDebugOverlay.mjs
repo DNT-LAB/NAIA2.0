@@ -10,12 +10,21 @@
 // '적용된 와일드카드' 와 같은 데이터, 같은 주소다. 서버는 고치지 않는다.
 // 어느 그림인가는 메인 뷰어의 #preview 가 말한다(data-source = current | saved · data-path · src) - 그것을 지켜본다.
 // 꺼져 있으면 아무것도 읽지 않는다.
+//
+// 두 단계로 채운다(사용자 지시 2026-10-15 "이미지가 없어도 랜덤 프롬프트시 1차 반영 · 2차는 생성 단계에 개봉하여 업데이트"):
+//   1차 - Random 이 오면(그림이 없어도) 그 응답의 debug_snapshot: 출처 · 원본 → 남은 수 · 카테고리별 제거 · 함의 · e621.
+//         와일드카드는 생성 때 펼쳐지므로 아직 없다.
+//   2차 - 그 프롬프트로 만든 그림이 오면 그림의 기록(와일드카드 · 단계)을 더한다. 어느 Random 의 것인가는 서버가 이미 잇는다:
+//         Random 과 같은 글로 생성하면 그 Random 의 prompt_run_id 가 그림 메타에 실린다(runIdOf) - 글을 고쳐 생성했으면
+//         다른 id 라 1차 줄을 붙이지 않는다(그 그림의 것이 아니다).
 
 const STORAGE_KEY = 'naia.pe.debugOverlay';
 const MAX_WC_ROWS = 8;
 const MAX_STAGE_ROWS = 6;
 const MAX_TAGS = 8;
 const MAX_ADDED_NAMES = 4;
+const MAX_CATEGORY_ROWS = 6;
+const MAX_SNAPSHOTS = 30;           // prompt_run_id -> 1차 기록(이번 실행 안에서만)
 const MAX_VALUE = 80;
 // 와일드카드 줄이 따로 보이므로 그 단계의 추가 / 제거(키 -> 값 바꿔치기)는 단계 줄에 다시 적지 않는다.
 const SKIP_STAGES = new Set(['wildcard_expand']);
@@ -50,6 +59,10 @@ export function createPeDebugOverlay({
   let shownKey = '';      // 본문이 지금 그리고 있는 그림
   let pendingKey = '';    // 지금 읽고 있는 그림(답을 기다리는 중)
   let timer = 0;
+  // 1차 기록: 마지막 Random 의 것과, 그림에 다시 붙이려고 prompt_run_id 로 모아 둔 것.
+  let lastSnapshot = null;           // {snapshot, runId}
+  let snapshotNewer = false;         // 마지막 Random 이 마지막 그림 바뀜보다 나중이다 - 1차 화면을 보인다
+  const snapshots = new Map();
 
   /** 지금 보이는 그림의 메타 주소. 없으면(빈 화면 · 생성 중 중간 그림) ''. */
   function currentTarget() {
@@ -84,6 +97,12 @@ export function createPeDebugOverlay({
     timer = 0;
     if (!on) return;
     const target = currentTarget();
+    // 1차: Random 이 그림 바뀜보다 나중이면 그 기록을 보인다(그림이 없어도). 생성 중 중간 그림 동안에도 그대로 둔다 -
+    // 결과 그림이 오면(#preview 의 주소가 바뀌면) 지켜보던 쪽이 이 표식을 내리고 2차로 넘어간다.
+    if (snapshotNewer && lastSnapshot) {
+      showSnapshotView();
+      return;
+    }
     if (!target) {
       seq += 1;                                          // 날아오는 답은 버린다 - 보일 그림이 없다
       box.hidden = true;
@@ -112,8 +131,36 @@ export function createPeDebugOverlay({
     if (mine !== seq || !on) return;                     // 그 사이 그림이 바뀌었거나 꺼졌다
     pendingKey = '';
     shownKey = target.key;
-    body.innerHTML = renderBody(promptContextOf(data));
+    const runId = runIdOf(data);
+    body.innerHTML = renderBody(promptContextOf(data), runId ? snapshots.get(runId) : null);
     place();
+  }
+
+  function showSnapshotView() {
+    seq += 1;                                            // 읽고 있던 그림의 답은 버린다 - 지금은 1차 화면이다
+    pendingKey = '';
+    shownKey = '';
+    box.hidden = false;
+    body.innerHTML = renderSnapshotOnly(lastSnapshot.snapshot);
+    place();
+  }
+
+  /** Random 응답의 debug_snapshot(1차). 꺼져 있어도 모아 둔다 - 켜면 바로 보이고, 나중에 그 그림에 붙는다.
+   *  newer=false: 모아 두기만 한다(그림에 붙일 때 쓴다) - 이 모듈이 뜨기 전에 온 것을 다시 넣는데 그 뒤에 그림이 바뀌었을 때. */
+  function showSnapshot(snapshot, {runId = '', newer = true} = {}) {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    const id = String(runId || '');
+    lastSnapshot = {snapshot, runId: id};
+    if (id) {
+      snapshots.delete(id);
+      snapshots.set(id, snapshot);
+      while (snapshots.size > MAX_SNAPSHOTS) snapshots.delete(snapshots.keys().next().value);
+    }
+    if (!newer) return;
+    snapshotNewer = true;
+    clearTimeout(timer);
+    timer = 0;
+    if (on) showSnapshotView();
   }
 
   function schedule() {
@@ -138,10 +185,66 @@ export function createPeDebugOverlay({
     onChange(on);
   }
 
-  function renderBody(promptContext) {
-    const rows = [...wildcardRows(promptContext.wildcards), ...stageRows(promptContext.pipeline_trace)];
+  function renderBody(promptContext, snapshot = null) {
+    const rows = [
+      ...snapshotRows(snapshot),
+      ...wildcardRows(promptContext.wildcards),
+      ...stageRows(promptContext.pipeline_trace),
+    ];
     if (!rows.length) return '<div class="pe-dbg-dim">이 그림에는 PE 기록이 없습니다</div>';
     return rows.join('');
+  }
+
+  function renderSnapshotOnly(snapshot) {
+    const rows = snapshotRows(snapshot);
+    if (!rows.length) return '<div class="pe-dbg-dim">이 랜덤에는 PE 기록이 없습니다</div>';
+    // 와일드카드 · 단계는 생성 때 생긴다 - 비어 있는 까닭을 한 줄로 말한다.
+    rows.push(row('', '<span class="pe-dbg-dim">생성하면 와일드카드 · 단계가 더해집니다</span>'));
+    return rows.join('');
+  }
+
+  /** 1차(Random) 줄: 원본 → 남은 수 · 출처 · 켜진 카테고리의 제거 · 함의 · e621. */
+  function snapshotRows(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return [];
+    const rows = [];
+    const original = Number(snapshot.original_count || 0);
+    const remaining = Number(snapshot.remaining_count || 0);
+    if (original > 0) {
+      const removed = Math.max(0, original - remaining);
+      rows.push(row('랜덤', `원본 ${original} → 남음 ${remaining}`
+        + (removed ? ` <span class="pe-dbg-rm">−${removed}</span>` : '')));
+    }
+    const source = snapshot.source_info && typeof snapshot.source_info === 'object' ? snapshot.source_info : {};
+    const parts = ['character', 'copyright', 'artist']
+      .map(key => String(source[key] ?? '').trim())
+      .filter(Boolean)
+      .map(value => escHtml(clip(value, 40)));
+    const id = String(source.id ?? '').trim();
+    if (parts.length || id) {
+      rows.push(row(rows.length ? '출처' : '랜덤', parts.join(' · ')
+        + (id ? ` <span class="pe-dbg-dim">#${escHtml(clip(id, 20))}</span>` : '')));
+    }
+    const filterLog = Array.isArray(snapshot.filter_log) ? snapshot.filter_log : [];
+    const hit = filterLog.filter(entry => entry && entry.enabled && Array.isArray(entry.removed) && entry.removed.length);
+    for (const entry of hit.slice(0, MAX_CATEGORY_ROWS)) {
+      rows.push(row(clip(entry.name || entry.key || '카테고리', 12),
+        `<span class="pe-dbg-rm">−${entry.removed.length} ${escHtml(tagList(entry.removed))}</span>`));
+    }
+    if (hit.length > MAX_CATEGORY_ROWS) {
+      rows.push(row('', `<span class="pe-dbg-dim">… 외 ${hit.length - MAX_CATEGORY_ROWS} 카테고리</span>`));
+    }
+    const implication = Array.isArray(snapshot.implication_info) ? snapshot.implication_info : [];
+    if (implication.length) {
+      const names = implication.map(item => String(item?.removed ?? '')).filter(Boolean);
+      rows.push(row('함의', `<span class="pe-dbg-rm">−${implication.length} ${escHtml(tagList(names))}</span>`));
+    }
+    const e621 = Array.isArray(snapshot.e621_info?.results) ? snapshot.e621_info.results : [];
+    if (e621.length) {
+      const names = e621.map(item => String(item?.tag ?? '')).filter(Boolean);
+      const shown = e621.length <= MAX_ADDED_NAMES ? ` ${escHtml(tagList(names))}` : '';
+      rows.push(row('e621', `<span class="pe-dbg-add">+${e621.length}${shown}</span>`));
+    }
+    return rows;
   }
 
   function row(key, valueHtml) {
@@ -204,6 +307,11 @@ export function createPeDebugOverlay({
         seq += 1;          // 진행 중인 요청도 바로 무효로 - 그 답이 묶음 대기(120ms) 사이에 와서 옛 기록을 다시 채우지 않게(Codex 리뷰)
         shownKey = '';
         pendingKey = '';
+        // 그림이 바뀌었다 - 1차 화면을 내린다. 단 생성 중 중간 그림은 아직 결과가 아니다: 1차를 그대로 둔다.
+        // ⚠️ data-path 만 바뀐 알림은 그림이 그대로다 - 결과의 히스토리 경로가 늦게 붙는다(app.js 의 자산 갱신). 그것으로
+        //    1차를 내리면 Random 뒤에 옛 그림의 기록으로 돌아간다(Codex 리뷰).
+        const imageChanged = !records || records.some(record => record.attributeName === 'src' || record.attributeName === 'data-source');
+        if (imageChanged && preview.dataset.source !== 'preview') snapshotNewer = false;
       }
       schedule();
     }).observe(preview, {
@@ -225,6 +333,7 @@ export function createPeDebugOverlay({
     isOn: () => on,
     setOn,
     toggle: () => setOn(!on),
+    showSnapshot,
     refresh: () => { shownKey = ''; pendingKey = ''; return refresh(); },
   };
 }
@@ -233,6 +342,27 @@ function promptContextOf(data) {
   const raw = data && typeof data === 'object' && 'raw' in data ? data.raw : data;
   const context = raw && typeof raw === 'object' ? raw.prompt_context : null;
   return context && typeof context === 'object' ? context : {};
+}
+
+/**
+ * 이 모듈이 뜨기 전에 온 Random 기록(app.js 가 {snapshot, runId, src} 로 쌓아 둔 것)을 차례대로 넣는다(Codex 리뷰).
+ * 마지막 것만 1차 화면이 될 수 있고, 그것도 그 뒤에 그림이 바뀌지 않았을 때뿐이다 - 단 생성 중 중간 그림은 바뀜으로 치지
+ * 않는다(지켜보기의 규칙과 같다 - 그 Random 의 결과가 아직 안 왔다). 나머지는 그 런의 그림에 붙이려고 모아 두기만 한다.
+ */
+export function replayPeDebugSnapshots(overlay, backlog, preview) {
+  const shownSrc = preview?.getAttribute?.('src') || '';
+  const streaming = preview?.dataset?.source === 'preview';
+  backlog.forEach((entry, index) => overlay.showSnapshot(entry.snapshot, {
+    runId: entry.runId,
+    newer: index === backlog.length - 1 && (entry.src === shownSrc || streaming),
+  }));
+}
+
+/** 그림을 만든 프롬프트 런. 주소마다 싣는 자리가 다르다(실측): 히스토리 메타 = 최상위, 현재 결과 = raw 의 생성 인자. */
+function runIdOf(data) {
+  if (!data || typeof data !== 'object') return '';
+  const raw = data.raw && typeof data.raw === 'object' ? data.raw : {};
+  return String(data.prompt_run_id || raw.generation_params?.prompt_run_id || raw.image_meta?.prompt_run_id || '');
 }
 
 function pathFromSrc(src) {

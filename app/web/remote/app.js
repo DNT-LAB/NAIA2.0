@@ -5774,6 +5774,11 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     applyPromptHighlightState();
     applyPromptTokenPayload(message);
     applyPromptEngineeringDebugSnapshot(message.debug_snapshot);
+    // PE 디버그 오버레이 1차 - 그림이 없어도 이 Random 의 기록을 보인다. 그 프롬프트로 생성한 그림이 오면 prompt_run_id 로
+    // 다시 붙는다(2차 - 와일드카드 · 단계가 더해진다).
+    if (message.debug_snapshot) {
+      forwardPeDebugSnapshot(message.debug_snapshot, message.prompt_run_id || message.promptRunId || '');
+    }
     // Show new-content dot if drawer is closed
     if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }
@@ -11446,8 +11451,19 @@ let lastPromptEngineeringState = null;
 // PE 디버그 오버레이(사용자 지시 2026-10-15 - PE 개편 3단계 · docs/PE_WINDOW_REDESIGN_2026_10_15.md §4). Result 화면 오른쪽 위의
 // 읽기 전용 글 상자 - 지금 보이는 그림(#preview)의 와일드카드 전개 · 단계별 제거. PE 창의 [디버그] 로 켜고 끈다(기기별 기억).
 let peDebugOverlay = null;
-import('./js/features/peDebugOverlay.mjs?v=20261015-pedbg5')
-  .then(({createPeDebugOverlay}) => {
+// 오버레이 모듈이 뜨기 전에 온 Random 기록(1차) - 버리면 그 Random 의 화면도, 나중에 그 그림에 붙는 것도 잃는다(Codex 리뷰).
+// 뜨면 차례대로 다시 넣는다. 그 사이 보이는 그림이 바뀌었으면 마지막 것도 '모아 두기' 만 한다(그림이 더 나중이다).
+const peDebugSnapshotBacklog = [];
+function forwardPeDebugSnapshot(snapshot, runId) {
+  if (peDebugOverlay) {
+    peDebugOverlay.showSnapshot(snapshot, {runId});
+    return;
+  }
+  peDebugSnapshotBacklog.push({snapshot, runId, src: document.getElementById('preview')?.getAttribute('src') || ''});
+  if (peDebugSnapshotBacklog.length > 30) peDebugSnapshotBacklog.shift();
+}
+import('./js/features/peDebugOverlay.mjs?v=20261015-pedbg9')
+  .then(({createPeDebugOverlay, replayPeDebugSnapshots}) => {
     const viewerEl = document.getElementById('resultViewer');
     if (!viewerEl) return;
     peDebugOverlay = createPeDebugOverlay({
@@ -11457,6 +11473,7 @@ import('./js/features/peDebugOverlay.mjs?v=20261015-pedbg5')
       escHtml,
       onChange: on => syncPeDebugToggles(on),
     });
+    replayPeDebugSnapshots(peDebugOverlay, peDebugSnapshotBacklog.splice(0), document.getElementById('preview'));
     syncPeDebugToggles(peDebugOverlay.isOn());
   })
   .catch(error => {

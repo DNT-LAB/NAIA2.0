@@ -1361,6 +1361,24 @@ export function createCharacterQuickPanel({
   let findDexError = '';
   let findPicking = '';            // 사전 상세를 받는 중인 줄(두 번 눌러 두 번 담지 않게)
   let findDismiss = null;
+  // 창 안을 누르고 있는 동안에는 목록을 갈아 끼우지 않는다 - 눌린 줄이 떼기 전에 사라지면 크롬은 click 을 안 보낸다
+  // (CHARACTER_WORKSPACE_CLAUDE.md 법 0). 그사이 온 갱신은 뗀 뒤(click 이 먼저 지나간 다음) 한 번 그린다(Codex 2차 리뷰).
+  let findHeld = false;
+  let findHeldRender = false;
+  let findHeldTimer = 0;
+
+  function settleFindHeld() {
+    clearTimeout(findHeldTimer);
+    findHeldTimer = 0;
+    if (!findHeld) return;
+    findHeld = false;
+    if (findHeldRender) { findHeldRender = false; renderFindList(); }
+  }
+
+  /** 뗐다 - click 이 먼저 지나가게 0ms 뒤에 푼다. 창 밖에서 뗀 경우(mouseup 이 안 오는 경우)는 1초 뒤에 푼다. */
+  function onFindPointerUp() {
+    if (findHeld) setTimeout(settleFindHeld, 0);
+  }
 
   /** 서버 `_set_mark` 와 같은 잣대 - 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시. 둘 다 비면 ''. */
   function setMark(prompt, uc) {
@@ -1391,8 +1409,14 @@ export function createCharacterQuickPanel({
     if (findDismiss) {
       document.removeEventListener('mousedown', findDismiss, true);
       document.removeEventListener('keydown', findDismiss, true);
+      document.removeEventListener('mouseup', onFindPointerUp, true);
+      window.removeEventListener('blur', onFindPointerUp);
       findDismiss = null;
     }
+    clearTimeout(findHeldTimer);
+    findHeldTimer = 0;
+    findHeld = false;
+    findHeldRender = false;
     findEl?.remove();
     findEl = null;
     mount?.querySelector('[data-cq-find]')?.classList.remove('is-on');
@@ -1413,6 +1437,11 @@ export function createCharacterQuickPanel({
       + `<div class="cq-find-list" data-cqf-list="1"></div>`;
     document.body.appendChild(findEl);
     findEl.addEventListener('click', onFindClick);
+    findEl.addEventListener('mousedown', () => {
+      findHeld = true;
+      clearTimeout(findHeldTimer);
+      findHeldTimer = setTimeout(settleFindHeld, 1000);
+    });
     findEl.addEventListener('input', event => {
       const input = event.target.closest('[data-cqf-q]');
       if (!input) return;
@@ -1432,6 +1461,8 @@ export function createCharacterQuickPanel({
     };
     document.addEventListener('mousedown', findDismiss, true);
     document.addEventListener('keydown', findDismiss, true);
+    document.addEventListener('mouseup', onFindPointerUp, true);
+    window.addEventListener('blur', onFindPointerUp);
   }
 
   /** Find 단추 바로 위로 띄운다(단추는 패널 오른쪽 아래 바깥) - 위에 자리가 없으면 화면 안으로 당긴다. */
@@ -1523,6 +1554,7 @@ export function createCharacterQuickPanel({
   function renderFindList() {
     const list = findEl && findEl.querySelector('[data-cqf-list]');
     if (!list) return;
+    if (findHeld) { findHeldRender = true; return; }     // 누르는 중 - 뗀 뒤에 그린다(위 `findHeld`)
     const keepScroll = list.scrollTop;
     let html = '';
     const empty = text => `<div class="cq-find-empty">${escHtml(text)}</div>`;

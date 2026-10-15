@@ -11443,6 +11443,36 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
   });
 
 let lastPromptEngineeringState = null;
+// PE 디버그 오버레이(사용자 지시 2026-10-15 - PE 개편 3단계 · docs/PE_WINDOW_REDESIGN_2026_10_15.md §4). Result 화면 오른쪽 위의
+// 읽기 전용 글 상자 - 지금 보이는 그림(#preview)의 와일드카드 전개 · 단계별 제거. PE 창의 [디버그] 로 켜고 끈다(기기별 기억).
+let peDebugOverlay = null;
+import('./js/features/peDebugOverlay.mjs?v=20261015-pedbg5')
+  .then(({createPeDebugOverlay}) => {
+    const viewerEl = document.getElementById('resultViewer');
+    if (!viewerEl) return;
+    peDebugOverlay = createPeDebugOverlay({
+      document,
+      viewer: viewerEl,
+      preview: document.getElementById('preview'),
+      escHtml,
+      onChange: on => syncPeDebugToggles(on),
+    });
+    syncPeDebugToggles(peDebugOverlay.isOn());
+  })
+  .catch(error => {
+    console.error('Failed to initialize PE debug overlay', error);
+  });
+
+/** PE 창의 [디버그] - 오버레이를 켜고 끈다. */
+function togglePeDebugOverlay() {
+  if (peDebugOverlay) peDebugOverlay.toggle();
+}
+
+/** [디버그] 단추의 눌림 표시를 오버레이 상태에 맞춘다(패널이 다시 그려지기 전에도 바로 보이게). */
+function syncPeDebugToggles(on) {
+  document.querySelectorAll('[data-pe-debug-toggle]').forEach(button => button.setAttribute('aria-pressed', on ? 'true' : 'false'));
+}
+
 // PE 창(사용자 지시 2026-10-15 - PE 개편 1단계 · docs/PE_WINDOW_REDESIGN_2026_10_15.md). 패널과 창에 **같은 요소**를
 // 넘긴다 - 창은 품고, 패널은 그 안에 그린다(조건부 · E621 창과 같은 방식). 칸 id(modPrePrompt 등)는 그대로다 -
 // 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
@@ -11479,7 +11509,7 @@ const promptEngineeringWindowReady = peUsesWindow
       console.error('Failed to initialize prompt engineering window', error);
     })
   : Promise.resolve();
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew3')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pedbg1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -11490,6 +11520,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
       setOllamaAutoBoost: (checked) => {
         if (promptEngineeringActions) promptEngineeringActions.setOllamaAutoBoost(checked);
       },
+      isDebugOverlayOn: () => Boolean(peDebugOverlay && peDebugOverlay.isOn()),
     });
   })
   .catch(error => {

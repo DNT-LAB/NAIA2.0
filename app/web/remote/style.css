@@ -15424,6 +15424,8 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
    초점을 쥐면 예전처럼 42px 로 접힌다(.pe-prompt-stack:focus-within 규칙 - 그쪽이 더 구체적이라 이긴다). */
 .pe-layout .pe-prompt-field--tall .pe-textarea { height: 136px; min-height: 136px; max-height: 320px; }
 .pe-layout .pe-prompt-stack:focus-within .pe-prompt-field--tall:focus-within .pe-textarea { height: 220px; min-height: 220px; }
+/* [디버그] - Result 우상단 PE 디버그 오버레이를 켜고 끈다(3단계). 켜져 있으면 눌린 모양. */
+.pe-debug-toggle[aria-pressed="true"] { border-color: var(--accent); background: rgba(124,106,239,0.24); color: var(--text-primary); }
 /* 입력칸 모서리를 줄인다(사용자 지시 2026-10-15 - 모던하게). PE 창 안의 글칸 · 검색칸 · 프리셋 셀렉트만. */
 .pe-layout .pe-textarea,
 .pe-layout .pe-preset-search,
@@ -20033,6 +20035,39 @@ select.setup-input { cursor: pointer; }
   border-color: rgba(120,140,255,0.55);
   color: #dfe4ff;
 }
+
+/* PE 디버그 오버레이(PE 개편 3단계 2026-10-15 · js/features/peDebugOverlay.mjs). 결과 뷰어 우상단 - 사용량 배지 아래
+   (top 은 스크립트가 배지 · 모바일 통계 섬 아래로 잡는다). 동영상 플레이어의 통계 창처럼: 반투명 검정 바탕, 라벨은 회색,
+   값은 흰색, 와일드카드 값은 노랑(결정 D7), 지워진 태그는 산호색, 더해진 태그는 초록. 마우스는 통과한다 - 닫기만 눌린다.
+   배지(15) 아래 층 - 배지를 누르면 뜨는 계정 팝오버를 가리지 않는다. */
+.pe-dbg {
+  position: absolute; top: 10px; right: 10px; z-index: 14;
+  width: min(360px, calc(100% - 20px)); max-height: calc(100% - 60px); overflow: hidden;
+  box-sizing: border-box; padding: 6px 10px 8px; border-radius: 6px;
+  background: rgba(8,9,13,0.78); color: #fff;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+  pointer-events: none;
+}
+.pe-dbg[hidden] { display: none; }
+/* 인페인트 편집 중에는 결과 그림이 숨는다(.viewer.ic-editing #preview) - 숨은 그림의 기록을 보이지 않고, 오른쪽 위의 레이어
+   목록도 덮지 않게 함께 숨는다(Codex 리뷰). 결과 보기로 돌아오면 다시 보인다. */
+.viewer.ic-editing .pe-dbg { display: none; }
+.pe-dbg-head { display: flex; align-items: center; justify-content: space-between; color: #9aa0b2; margin-bottom: 2px; }
+.pe-dbg-x {
+  pointer-events: auto; padding: 0 3px; border: 0; background: none;
+  color: #9aa0b2; font-size: 13px; line-height: 1; cursor: pointer;
+}
+.pe-dbg-x:hover { color: #fff; }
+.pe-dbg-row { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 0 8px; }
+.pe-dbg-k { color: #9aa0b2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pe-dbg-v {
+  min-width: 0; overflow: hidden; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.pe-dbg-wc { color: #fac775; }
+.pe-dbg-rm { color: #f0997b; }
+.pe-dbg-add { color: #97c459; }
+.pe-dbg-dim { color: #9aa0b2; }
 
 /* V5 Opus 사용량 한도 배지. 히스토리 레일 **왼쪽**, 결과 뷰어 우상단(사용자가
    지정한 자리).

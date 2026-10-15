@@ -8,8 +8,10 @@
 // ⚠️ draggablePanel 은 다른 창과 같은 URL(?v=)로 불러온다(다르면 창끼리 겹침 순서가 깨진다).
 // ⚠️ 별도 브라우저 창으로 떼어 낸 모듈(?detached=module&module=prompt_engineering)은 그 창 전체가 모듈 팝업이다 - 그 길은
 //    이 창을 만들지 않고 예전 배치를 그대로 쓴다(app.js 의 peUsesWindow).
-// ⚠️ 보조 창 여섯(프리셋 추가 · 관리 · e621 · Danbooru · Auto Boost 설정 · Setting & Preview)은 예전처럼 **붙는 팝업**이고
-//    붙는 기준만 이 창이다(결정 D4 = A). 창을 끌거나 크기를 바꾸면 onMove 로 다시 앉히고, 접거나 닫으면 onAuxClose 로 닫는다.
+// ⚠️ 보조 창 여섯(프리셋 추가 · 관리 · e621 · Danbooru · AI 부스트 설정 · Setting & Preview)은 **떠 있는 창**이다(사용자 지시
+//    2026-10-15 - 결정 D4 를 A '붙는 팝업' 에서 바꿨다). 이벤트 맵 창과 같은 껍데기(`em-overlay em-window` - 얇은 핸들 줄)이고
+//    이 창의 자식이라 이 창을 끌면 따라온다(draggablePanel 의 부모 따라가기 · 핀으로 풀 수 있다). 내용은 예전 `.pe-popup`
+//    요소를 통째로 옮겨 담는다 - id · `.pe-popup-body` 를 그리는 렌더러는 그대로다(openAux). 접거나 닫으면 onAuxClose 로 닫는다.
 //
 // 머리줄에는 예전 모듈 팝업 머리줄의 단추를 그대로 옮긴다: [추천 설정 적용](모드가 받을 때만) · ⓘ 가이드 · ↗(떼어 내기).
 
@@ -18,6 +20,15 @@ import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign
 const STYLE_ID = 'pew-style';
 // 2단이 들어가는 폭(왼쪽 프롬프트 칸 · 오른쪽 전처리 2열). 본문이 680px 아래면 1단이 된다(style.css .pe-layout).
 const START_WIDTH = 780;
+// 보조 창의 id - 이벤트 맵의 보조 창(`permExcludeWindow`)처럼 창마다 하나.
+const AUX_IDS = {
+  presetAdd: 'pePresetAddWindow',
+  presetManage: 'pePresetManageWindow',
+  e621: 'peE621Window',
+  danbooru: 'peDanbooruWindow',
+  ollamaBoost: 'peAiBoostWindow',
+  debug: 'peDebugWindow',
+};
 
 export function createPromptEngineeringWindow({
   document: doc,
@@ -111,6 +122,51 @@ export function createPromptEngineeringWindow({
     panel.slot.appendChild(detachBtn);
   }
 
+  // ── 보조 창 ───────────────────────────────────────────────────────────
+  const auxWindows = new Map();
+
+  /** 보조 창을 연다(처음이면 만든다). popupEl = 예전 `.pe-popup` 요소 - 머리줄은 숨기고 ⓘ 가이드만 핸들 줄로 옮긴다.
+   *  onClose = 창의 × (app.js 의 닫기 함수 - 상태 · 보류 중인 값을 정리한다). */
+  function openAux(key, popupEl, { title = '', width: auxWidth = 420, height: auxHeight = 620, onClose = () => {} } = {}) {
+    if (!popupEl) return false;
+    let aux = auxWindows.get(key);
+    if (!aux) {
+      const viewH = win?.innerHeight || doc.documentElement.clientHeight || 800;
+      aux = createDraggablePanel({
+        document: doc,
+        window: win,
+        parentPanel: panel,
+        id: AUX_IDS[key] || '',
+        title,
+        variant: 'em-overlay em-window pe-aux-window',
+        storageKey: `prompt-engineering-aux-${key}`,
+        width: auxWidth,
+        height: Math.max(200, Math.min(auxHeight, viewH - 70)),
+        minWidth: 300,
+        maxWidth: 900,
+        minHeight: 160,
+        resizable: true,
+        escHtml,
+        onClose: () => onClose(),
+      });
+      const guide = popupEl.querySelector('.module-popup-header .header-guide-btn');
+      if (guide) aux.slot.appendChild(guide);
+      // 붙는 팝업 시절에 positionFloatingPanel 이 박아 둔 자리 · 크기를 걷는다 - 이제 창이 정한다.
+      ['left', 'top', 'right', 'bottom', 'width', 'maxWidth', 'maxHeight'].forEach(prop => { popupEl.style[prop] = ''; });
+      popupEl.classList.add('pe-popup--in-window');
+      aux.body.appendChild(popupEl);
+      auxWindows.set(key, aux);
+    }
+    aux.open();
+    if (aux.isCollapsed()) aux.expand();
+    return true;
+  }
+
+  function closeAux(key) {
+    const aux = auxWindows.get(key);
+    if (aux && aux.isOpen()) aux.close();
+  }
+
   /** [추천 설정 적용] 은 그 모드가 추천 프리셋을 가질 때만(NAI · WEBUI · ComfyUI ANIMA - app.js 가 판단한다). */
   function setRecommended(visible) {
     recommendBtn.hidden = !visible;
@@ -140,6 +196,8 @@ export function createPromptEngineeringWindow({
     isOpen: () => panel.isOpen(),
     isShown: () => panel.isOpen() && !panel.isCollapsed(),
     setRecommended,
+    openAux,
+    closeAux,
   };
 }
 
@@ -161,4 +219,8 @@ const PEW_CSS = `
   color:var(--text-muted);font-family:var(--font-display);font-size:11px;white-space:nowrap;cursor:pointer}
 .pew-head-btn:hover{background:var(--bg-hover);color:var(--text-primary)}
 .pew-head-btn[hidden]{display:none}
+.dragpanel.pe-aux-window .pe-popup{position:static;display:flex;flex:1 1 auto;min-height:0;width:auto!important;max-width:none!important;max-height:none!important;border:0;border-radius:0;box-shadow:none;background:transparent;z-index:auto}
+.dragpanel.pe-aux-window .pe-popup>.module-popup-header{display:none}
+.dragpanel.pe-aux-window .dragpanel-slot{justify-content:flex-end}
+.dragpanel.pe-aux-window .dragpanel-slot .header-guide-btn{height:16px;padding:0 6px;font-size:10px;line-height:14px}
 `;

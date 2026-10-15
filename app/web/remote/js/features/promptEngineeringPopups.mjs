@@ -11,6 +11,9 @@ export function createPromptEngineeringPopups({
   refreshDebug,
   getLastState,
   renderers,
+  // 떠 있는 창으로 연다(PE 창이 있을 때 - app.js). true 면 붙는 자리를 잡지 않는다. 없거나 false 면 예전 붙는 팝업.
+  openWindow = null,
+  closeWindow = null,
 }) {
   const openState = {
     presetAdd: false,
@@ -43,7 +46,7 @@ export function createPromptEngineeringPopups({
     closeAuxiliaryPopups(panel);
     openState[key] = true;
     panel.classList.add('open');
-    positionFloatingPanel(panel, modulePopup);
+    if (!(typeof openWindow === 'function' && openWindow(key, panel))) positionFloatingPanel(panel, modulePopup);
     setLoading(panel);
     sync(getLastState());
     if (refreshOnly) refreshDebug();
@@ -54,6 +57,7 @@ export function createPromptEngineeringPopups({
     const panel = panels[key];
     openState[key] = false;
     if (panel) panel.classList.remove('open');
+    if (typeof closeWindow === 'function') closeWindow(key, panel);
   }
 
   function closeAll() {

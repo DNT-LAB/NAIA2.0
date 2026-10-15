@@ -11495,7 +11495,7 @@ function syncPeDebugToggles(on) {
 // 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
 const promptEngineeringHost = document.createElement('div');
 const promptEngineeringWindowReady = peUsesWindow
-  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew3')
+  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-peaux3')
     .then(({createPromptEngineeringWindow}) => {
       promptEngineeringWindow = createPromptEngineeringWindow({
         document,
@@ -12195,7 +12195,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering popup renderers module', error);
   });
-const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs?v=20260620-emphframing1')
+const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopups.mjs?v=20261015-peaux1')
   .then(({createPromptEngineeringPopups}) => {
     promptEngineeringPopups = createPromptEngineeringPopups({
       getWs: () => ws,
@@ -12209,8 +12209,10 @@ const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopu
         ollamaBoost: peOllamaBoostPanel,
         debug: peDebugPanel,
       },
-      // 붙는 기준은 PE 창이다(결정 D4 = A) - 떼어 낸 창에서는 모듈 팝업.
-      positionFloatingPanel: panel => positionFloatingPanel(panel, peAuxAnchor()),
+      // 떼어 낸 창(모듈 팝업)에서만 붙는 팝업이다 - PE 창이 있으면 떠 있는 창으로 연다(openPeAuxWindow).
+      positionFloatingPanel: panel => { if (!peAuxInWindow(panel)) positionFloatingPanel(panel, peAuxAnchor()); },
+      openWindow: (key, panel) => openPeAuxWindow(key, panel),
+      closeWindow: key => { if (promptEngineeringWindow) promptEngineeringWindow.closeAux(key); },
       relayoutFloatingPanels,
       closeAuxiliaryPopups,
       refreshDebug: refreshPromptEngineeringDebug,
@@ -14252,11 +14254,46 @@ function peAuxAnchor() {
 }
 
 /** PE 보조 창 여섯을 기준 옆에 다시 앉힌다(열린 것만 - 닫힌 것은 positionFloatingPanel 이 건너뛴다).
- *  PE 창을 끄는 동안 프레임마다 불린다. */
+ *  떠 있는 창에 담긴 것은 건너뛴다 - 그 창이 PE 창을 스스로 따라간다(draggablePanel 의 부모 따라가기). */
 function relayoutPromptEngineeringPopups() {
   const anchor = peAuxAnchor();
   [pePresetAddPanel, pePresetManagePanel, peE621Panel, peDanbooruPanel, peOllamaBoostPanel, peDebugPanel]
-    .forEach(panel => positionFloatingPanel(panel, anchor));
+    .forEach(panel => { if (!peAuxInWindow(panel)) positionFloatingPanel(panel, anchor); });
+}
+
+/** 이 보조 팝업이 떠 있는 창에 담겨 있나(openPeAuxWindow 가 옮겨 담는다). */
+function peAuxInWindow(panel) {
+  return Boolean(panel && panel.closest && panel.closest('.dragpanel'));
+}
+
+// 보조 창의 처음 높이 - 내용 높이(실측 2026-10-15: Add 251 · e621 344 · AI 부스트 439 · Danbooru 515)에 맞춘다.
+// Setting & Preview · Manage 는 내용이 길어(879 · 972) 창 안에서 구른다. 크기는 사용자가 잡을 수 있다.
+const PE_AUX_HEIGHTS = {presetAdd: 300, e621: 400, ollamaBoost: 480, danbooru: 560, presetManage: 620, debug: 620};
+// 처음 너비 - 다른 창은 420. Setting & Preview 도 420(사용자 지시 2026-10-15 "너무 넓다" - 붙는 팝업 시절 520 은 행 오른쪽이
+// 비었다. 420 아래로는 Auto Hide 칩 줄이 한 줄 더 접힌다 - 실측). Manage 는 프리셋 표라 520 그대로.
+const PE_AUX_WIDTHS = {presetManage: 520};
+
+// 보조 창의 × = 그 창의 닫기 함수(상태 정리 - 프리셋 추가는 보류해 둔 모델 변경도 버린다).
+const PE_AUX_CLOSERS = {
+  presetAdd: () => closePePresetAddPanel(),
+  presetManage: () => closePePresetManagePanel(),
+  e621: () => closePeE621Panel(),
+  danbooru: () => closePeDanbooruPanel(),
+  ollamaBoost: () => closePeOllamaBoostPanel(),
+  debug: () => closePeDebugPanel(),
+};
+
+/** PE 보조 창을 떠 있는 창으로 연다(사용자 지시 2026-10-15 - 이벤트 맵 창과 같은 껍데기 · PE 창을 따라간다).
+ *  떼어 낸 창(peUsesWindow = false)이나 PE 창이 아직 없으면 false - 예전 붙는 팝업으로 간다. */
+function openPeAuxWindow(key, panel) {
+  if (!peUsesWindow || !promptEngineeringWindow || !panel) return false;
+  const title = panel.querySelector('.module-popup-title')?.textContent?.trim() || '';
+  return promptEngineeringWindow.openAux(key, panel, {
+    title,
+    width: PE_AUX_WIDTHS[key] || 420,
+    height: PE_AUX_HEIGHTS[key] || 620,
+    onClose: () => { if (promptEngineeringPopups?.isOpen(key)) PE_AUX_CLOSERS[key]?.(); },
+  });
 }
 
 function relayoutFloatingPanels() {

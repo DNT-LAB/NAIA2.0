@@ -15377,6 +15377,49 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   overflow: hidden;
 }
 .pe-popup.open { display: flex; }
+
+/* ── PE 2단 · 전처리 행 (PE 개편 2단계 2026-10-15 · docs/PE_WINDOW_REDESIGN_2026_10_15.md §3.2 · §3.3) ──────────────
+   왼쪽 = 프리셋 · Prefix · Postfix · Auto-Hide, 오른쪽 = 전처리. 화면 폭이 아니라 **본문의 폭**을 본다(.pe-layout 이
+   컨테이너) - 떠 있는 창을 좁히거나 폰이면 1단이다. 떼어 낸 창의 모듈 팝업 본문(약 610px)도 같은 규칙이라 1단이다
+   (2단 기준을 600 으로 두었더니 그 폭에서 이름 · 프리셋이 잘렸다 - 실측).
+   전처리 행은 이벤트 맵 인원 구성 팝업(.em-person-*)의 양식: 묶음 머리는 작은 회색 글 + 위 구분선, 켜진 행은 노란 테두리 · ✓.
+   진짜 체크박스는 행 안에 숨어 있다(.pe-opt-input) - 켜짐 표시는 그 상태를 읽는다(:has). */
+.pe-layout { container-type: inline-size; min-width: 0; }
+.pe-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.pe-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+@container (min-width: 680px) {
+  .pe-cols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .pe-col-opts { border-left: 1px solid var(--border-dim); padding-left: 14px; }
+}
+.pe-opt-list { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 4px; }
+.pe-opt-group {
+  grid-column: 1 / -1; font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.6px;
+  padding: 7px 6px 3px; margin-top: 3px; border-top: 1px solid var(--border-dim);
+}
+.pe-opt-list > .pe-opt-group:first-child { margin-top: 0; border-top: 0; padding-top: 2px; }
+.pe-opt-cell { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.pe-opt-row {
+  position: relative; flex: 1 1 auto; min-width: 0;
+  display: grid; grid-template-columns: 14px minmax(0, 1fr); align-items: center; gap: 0 7px;
+  padding: 5px 6px; border: 1px solid transparent; border-radius: 6px;
+  color: var(--text-primary); font-size: 11px; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.pe-opt-row:hover { background: rgba(255,255,255,0.05); }
+.pe-opt-row:has(.pe-opt-input:checked) { background: rgba(230,168,74,0.12); border-color: rgba(230,168,74,0.45); }
+.pe-opt-row:has(.pe-opt-input:focus-visible) { outline: 1px solid var(--accent); outline-offset: 1px; }
+.pe-opt-row.is-disabled { opacity: 0.4; cursor: not-allowed; }
+.pe-opt-input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.pe-opt-check { color: #e6a84a; font-size: 11px; line-height: 1; text-align: center; }
+.pe-opt-input:checked + .pe-opt-check::before { content: '✓'; }
+.pe-opt-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pe-opt-hint { margin-left: 6px; color: var(--text-dim); font-size: 10px; }
+.pe-opt-hint[hidden] { display: none; }
+.pe-opt-gear {
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+  border: 1px solid transparent; border-radius: 5px; background: transparent;
+  color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
+}
+.pe-opt-gear:hover { border-color: var(--border-dim); color: var(--text-primary); }
 .pe-popup-body {
   flex: 1;
   overflow-y: auto;

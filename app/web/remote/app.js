@@ -11176,7 +11176,7 @@ const MODULE_OVERVIEW_GUIDES = {
     'NAIA의 프롬프트 생성은 이 프롬프트 엔지니어링 모듈을 통해 진행됩니다.',
     '일반적인 프롬프트 구조: [랜덤 프롬프트 인원 수] · {Prefix Prompts} · [랜덤 프롬프트] · {Postfix Prompts}',
     'Auto-Hide에 입력한 프롬프트는 랜덤 프롬프트가 Prefix·Postfix와 결합되는 과정에서 소거됩니다.',
-    'Preprocessing Options에서는 랜덤 프롬프트에 포함될 요소를 결정할 수 있습니다. 각 기능을 확인해 보세요.',
+    '전처리에서는 랜덤 프롬프트에 포함될 요소를 결정할 수 있습니다. 각 기능을 확인해 보세요.',
     '※ WC Solo 모드에서는 Auto-Hide와 Preprocessing Option이 적용되지 않고, {Prefix Prompt}·{Postfix Prompt}와 와일드카드만으로 구성됩니다.',
   ].join('\n\n'),
   search: [
@@ -11448,7 +11448,7 @@ let lastPromptEngineeringState = null;
 // 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
 const promptEngineeringHost = document.createElement('div');
 const promptEngineeringWindowReady = peUsesWindow
-  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew1')
+  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew2')
     .then(({createPromptEngineeringWindow}) => {
       promptEngineeringWindow = createPromptEngineeringWindow({
         document,
@@ -11479,7 +11479,7 @@ const promptEngineeringWindowReady = peUsesWindow
       console.error('Failed to initialize prompt engineering window', error);
     })
   : Promise.resolve();
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew2')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,

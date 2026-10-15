@@ -2,7 +2,8 @@
 //
 // 예전에는 왼쪽 모듈 팝업(#modulePopup)에 그렸다. 이제는 조건부 프롬프트 · E621 창과 같은 draggablePanel 에 산다:
 // 끌기 · 크기 조절 · 접기 · 자리 기억, 그리고 다른 모듈과 함께 열어 둘 수 있다.
-// 이 단계는 **옮기기만** 한다 - 본문(1단)은 promptEngineeringPanel 이 그대로 그린다(본문 = `host`). 폭도 예전 팝업 폭이다.
+// 본문은 promptEngineeringPanel 이 그린다(본문 = `host`). 2단계(2026-10-15)부터 2단이다 - 창이 좁으면 1단으로 접힌다
+// (패널의 .pe-layout 컨테이너 질의 - 화면 폭이 아니라 창 폭을 본다).
 //
 // ⚠️ draggablePanel 은 다른 창과 같은 URL(?v=)로 불러온다(다르면 창끼리 겹침 순서가 깨진다).
 // ⚠️ 별도 브라우저 창으로 떼어 낸 모듈(?detached=module&module=prompt_engineering)은 그 창 전체가 모듈 팝업이다 - 그 길은
@@ -15,8 +16,8 @@
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const STYLE_ID = 'pew-style';
-// 예전 모듈 팝업의 폭(`.module-popup { width: min(420px, 92vw) }`) + 테두리. 1단계는 모양을 바꾸지 않는다.
-const START_WIDTH = 422;
+// 2단이 들어가는 폭(왼쪽 프롬프트 칸 · 오른쪽 전처리 2열). 본문이 680px 아래면 1단이 된다(style.css .pe-layout).
+const START_WIDTH = 780;
 
 export function createPromptEngineeringWindow({
   document: doc,
@@ -44,7 +45,8 @@ export function createPromptEngineeringWindow({
   const vw = win?.innerWidth || doc.documentElement.clientWidth || 1280;
   const vh = win?.innerHeight || doc.documentElement.clientHeight || 800;
   const width = Math.max(300, Math.min(START_WIDTH, vw - 12));
-  const height = Math.max(260, Math.min(760, vh - 70));
+  // 2단의 내용 높이(왼쪽 프롬프트 칸 넷)에 맞춘다 - 예전 팝업 높이(760)로 열면 아래가 비었다. 1단이면 본문이 구른다.
+  const height = Math.max(260, Math.min(600, vh - 70));
 
   const panel = createDraggablePanel({
     document: doc,
@@ -149,7 +151,7 @@ function ensureStyle(doc) {
   doc.head.appendChild(style);
 }
 
-// 창 본문은 예전 모듈 팝업 본문(`.module-popup-body`)과 같은 여백 · 간격 · 바탕이다 - 1단계는 모양을 바꾸지 않는다.
+// 창 본문은 예전 모듈 팝업 본문(`.module-popup-body`)과 같은 여백 · 간격 · 바탕이다.
 // 머리줄 단추는 E621 창의 [작게 보기] 와 같은 옷.
 const PEW_CSS = `
 .dragpanel.pew .dragpanel-body{padding:0;gap:0;overflow:hidden;background:var(--bg-surface)}

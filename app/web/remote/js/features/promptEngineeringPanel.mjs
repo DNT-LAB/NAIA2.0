@@ -1,33 +1,42 @@
+// 전처리 옵션의 키 · 이름. 키는 서버와 같다 - 이름만 한글이다(PE 개편 2단계 2026-10-15 · 사용자 지시 '특징 제거 계열 한글화').
+// 이름은 묶음(PP_GROUPS) 머리가 '이름 제거' · '특징 제거' 를 말하므로 '작가' · '의상' 처럼 짧게 쓴다.
 const PP_OPTIONS = [
-  ['remove_author', 'Remove Artist'],
-  ['remove_work_title', 'Remove Work Title'],
-  ['remove_character_name', 'Remove Character Name'],
-  ['remove_character_features', 'Remove Char Features'],
-  ['remove_clothes', 'Remove Clothing'],
-  ['remove_clothing_event', 'Remove Clothing Events'],
-  ['remove_color', 'Remove Color Tags'],
-  ['remove_location_and_background_color', 'Remove Location/BG'],
-  ['remove_expression', 'Remove Expression'],
-  ['remove_pose_action', 'Remove Pose/Action'],
-  ['remove_meta_tags', 'Remove Meta Tags'],
-  ['remove_object_tags', 'Remove Object Tags'],
-  ['remove_noise_tags', 'Remove Low-freq Tags'],
-  ['closed_eyes_sync', 'Closed Eyes Sync'],
-  ['e621_auto_boost', 'e621 Auto-Boost'],
-  ['danbooru_auto_weight', 'Danbooru Auto-Weight'],
-  ['tag_implication_compression', 'Tag Implication'],
-  ['category_annotation', 'Category Annotation'],
+  ['remove_author', '작가'],
+  ['remove_work_title', '작품명'],
+  ['remove_character_name', '캐릭터 이름'],
+  ['remove_character_features', '캐릭터 특징'],
+  ['remove_clothes', '의상'],
+  ['remove_clothing_event', '의상 이벤트'],
+  ['remove_color', '색상'],
+  ['remove_location_and_background_color', '장소 · 배경'],
+  ['remove_expression', '표정'],
+  ['remove_pose_action', '포즈 · 동작'],
+  ['remove_meta_tags', '메타 태그'],
+  ['remove_object_tags', '사물'],
+  ['remove_noise_tags', '저빈도 태그'],
+  ['closed_eyes_sync', '감은 눈 맞추기'],
+  ['e621_auto_boost', 'e621 자동 보강'],
+  ['danbooru_auto_weight', 'Danbooru 자동 가중치'],
+  ['tag_implication_compression', '함의 태그 압축'],
+  ['category_annotation', '카테고리 주석'],
 ];
 
-const PP_OPTION_TONES = {
-  remove_author: 'pe-tone-yellow',
-  remove_work_title: 'pe-tone-yellow',
-  remove_character_name: 'pe-tone-yellow',
-  closed_eyes_sync: 'pe-tone-pink',
-  e621_auto_boost: 'pe-tone-pink',
-  danbooru_auto_weight: 'pe-tone-teal',
-  tag_implication_compression: 'pe-tone-teal',
-  category_annotation: 'pe-tone-teal',
+// 행의 묶음(docs/PE_WINDOW_REDESIGN_2026_10_15.md §3.3). 여기 없는 키(서버가 새로 준 옵션)는 맨 뒤 '기타' 에 영문 그대로.
+// 'AI 부스트'(세션 토글 - 전처리 옵션이 아니다)는 '가중치 · 보강' 의 끝에 붙는다.
+const PP_GROUPS = [
+  ['이름 제거', ['remove_author', 'remove_work_title', 'remove_character_name']],
+  ['특징 제거', ['remove_character_features', 'remove_clothes', 'remove_clothing_event', 'remove_color',
+    'remove_location_and_background_color', 'remove_expression', 'remove_pose_action', 'remove_meta_tags',
+    'remove_object_tags', 'remove_noise_tags']],
+  ['다듬기', ['closed_eyes_sync', 'tag_implication_compression', 'category_annotation']],
+  ['가중치 · 보강', ['e621_auto_boost', 'danbooru_auto_weight']],
+];
+const PP_BOOST_GROUP = '가중치 · 보강';
+
+// 행 끝의 ⚙ - 예전 Tools 줄의 설정 단추를 그 기능의 행으로 옮겼다(결정 D2). [여는 함수, 이름].
+const PP_GEARS = {
+  e621_auto_boost: ['openPeE621Panel()', 'e621 자동 보강 설정'],
+  danbooru_auto_weight: ['openPeDanbooruPanel()', 'Danbooru 자동 가중치 설정'],
 };
 
 // Preprocessing Options 각 항목의 700ms 호버 툴팁(간단 기능 설명).
@@ -51,7 +60,7 @@ const PP_DESCRIPTIONS = {
   tag_implication_compression: '상위 태그가 함의하는 중복 하위 태그를 압축(제거)합니다.',
   category_annotation: '랜덤 프롬프트를 카테고리별로 묶고 #특징: #의상: #표정: 같은 주석을 줄마다 붙여 보여줍니다. 주석은 생성에 나가지 않습니다.',
 };
-const PE_PREPROCESSING_GUIDE = 'Preprocessing Options — 랜덤(Danbooru) 프롬프트에서 원치 않는 카테고리 태그를 자동으로 걸러내거나, 가중치·태그 정합을 적용해 프롬프트를 다듬습니다.\\n\\n각 항목에 마우스를 올리면 기능 설명이 나옵니다. (WC Solo 모드에서는 적용되지 않습니다)';
+const PE_PREPROCESSING_GUIDE = '전처리 — 랜덤(Danbooru) 프롬프트에서 원치 않는 카테고리 태그를 자동으로 걸러내거나, 가중치·태그 정합을 적용해 프롬프트를 다듬습니다.\\n\\n각 항목에 마우스를 올리면 기능 설명이 나옵니다. (WC Solo 모드에서는 적용되지 않습니다)';
 
 const PE_QUICK_PRESET_GUIDE = [
   'Quick Preset — 프롬프트 엔지니어링 설정과 생성 파라미터를 하나로 묶어 저장/불러옵니다. 드롭다운에서 고르면 즉시 적용됩니다.',
@@ -92,7 +101,7 @@ const PE_TAG_ASSIST_IDS = ['modPrePrompt', 'modPostPrompt', 'modAutoHide'];
 // Auto Boost — readiness gating. "ready" = 앱 내장 엔진과 고른 모델이 있다(/api/boost-v2/status).
 // Ollama 백엔드는 회수했다(사용자 지정 2026-09-26). 변수 이름의 ollama 는 옛 토글 이름을 따른 것이다.
 const PE_OLLAMA_POLL_MS = 5000;
-const PE_OLLAMA_BOOST_GUIDE = 'Random 때마다 프롬프트를 자연어로 보강 · 앱 내장 AI 모델(API 설정 › AI 모델)이 준비됐을 때만 켤 수 있음 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)';
+const PE_OLLAMA_BOOST_GUIDE = 'AI 부스트 — Random 때마다 프롬프트를 자연어로 보강 · 앱 내장 AI 모델(API 설정 › AI 모델)이 준비됐을 때만 켤 수 있음 · 저장/프리셋에 기록되지 않음(항상 OFF로 시작)\\n\\n⚙ = AI 부스트 설정';
 
 // 섹션 헤더 우측 [ⓘ 가이드] 버튼 문구. \n\n 은 단락 구분 (툴팁 엔진이 변환).
 const PE_PREFIX_GUIDE = [
@@ -160,21 +169,12 @@ export function createPromptEngineeringPanel({
     if (!checkbox) return;
     const hint = document.getElementById('peOllamaBoostHint');
     checkbox.disabled = !ollamaReady;
-    // When Ollama is down the toggle can never be armed.
+    // When the model is not ready the toggle can never be armed.
     checkbox.checked = ollamaReady && ollamaBoostOn;
-    // Grey out the whole row inline (no style.css dependency) so it reads as
-    // disabled and is not clickable while Ollama is not ready.
-    checkbox.style.cursor = ollamaReady ? '' : 'not-allowed';
-    const item = checkbox.closest('.mod-checkbox-item');
-    if (item) {
-      item.classList.toggle('mod-checkbox-disabled', !ollamaReady);
-      item.style.opacity = ollamaReady ? '' : '0.4';
-      item.style.cursor = ollamaReady ? '' : 'not-allowed';
-    }
-    if (hint) {
-      hint.style.display = ollamaReady ? 'none' : '';
-      hint.textContent = '(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)';
-    }
+    // 행 전체를 흐리게 · 누를 수 없게(.pe-opt-row.is-disabled). 무엇이 필요한지는 행의 툴팁이 말한다.
+    const item = checkbox.closest('.pe-opt-row');
+    if (item) item.classList.toggle('is-disabled', !ollamaReady);
+    if (hint) hint.hidden = ollamaReady;
   }
 
   async function pollOllamaStatus() {
@@ -513,14 +513,20 @@ export function createPromptEngineeringPanel({
       .join('');
 
     const preprocessing = m.preprocessing || {};
-    const preprocessingHtml = buildPreprocessingOptions(preprocessing).map(([key, label]) => {
+    const preprocessingOptions = buildPreprocessingOptions(preprocessing);
+    const optionLabels = new Map(preprocessingOptions);
+    const optionRowHtml = (key, label) => {
       const desc = PP_DESCRIPTIONS[key] || '';
       const guideAttr = desc ? ` data-naia-guide="${escHtml(desc)}"` : '';
-      return `<label class="mod-checkbox-item ${PP_OPTION_TONES[key] || ''}"${guideAttr}>
-      <input type="checkbox" ${preprocessing[key] ? 'checked' : ''} oninput="setPromptEngineeringOption('${key}', this.checked)">
-      <span class="mod-checkbox-label">${label}</span>
-    </label>`;
-    }).join('');
+      const gear = PP_GEARS[key];
+      const gearHtml = gear
+        ? `<button type="button" class="pe-opt-gear" onclick="${gear[0]}" title="${escHtml(gear[1])}" aria-label="${escHtml(gear[1])}">⚙</button>`
+        : '';
+      return `<div class="pe-opt-cell"><label class="pe-opt-row"${guideAttr}>
+      <input type="checkbox" class="pe-opt-input" ${preprocessing[key] ? 'checked' : ''} oninput="setPromptEngineeringOption('${key}', this.checked)">
+      <span class="pe-opt-check" aria-hidden="true"></span><span class="pe-opt-label">${escHtml(label)}</span>
+    </label>${gearHtml}</div>`;
+    };
 
     // Ollama Auto Boost — a SESSION-ONLY toggle rendered separately from the
     // preprocessing grid (it is NOT a preprocessing option). Backend resets it to
@@ -529,13 +535,22 @@ export function createPromptEngineeringPanel({
     ollamaBoostOn = !!m.ollama_auto_boost;
     const boostChecked = ollamaReady && ollamaBoostOn;
     const boostDisabled = ollamaReady ? '' : ' disabled';
-    const boostItemStyle = ollamaReady ? '' : ' style="opacity:0.4;cursor:not-allowed"';
-    const boostInputStyle = ollamaReady ? '' : ' style="cursor:not-allowed"';
-    const ollamaBoostHtml = `
-    <label class="mod-checkbox-item pe-tone-teal${ollamaReady ? '' : ' mod-checkbox-disabled'}"${boostItemStyle} data-naia-guide="${escHtml(PE_OLLAMA_BOOST_GUIDE)}">
-      <input type="checkbox" id="peOllamaBoostCheckbox" ${boostChecked ? 'checked' : ''}${boostDisabled}${boostInputStyle} oninput="setPromptEngineeringOllamaAutoBoost(this.checked)">
-      <span class="mod-checkbox-label">Auto Boost <span id="peOllamaBoostHint" style="margin-left:6px;color:var(--text-dim)${ollamaReady ? ';display:none' : ''}">(모델 준비 시 활성화 — API 설정 › AI 모델에서 받기)</span></span>
-    </label>`;
+    // 이름은 'AI 부스트'(결정 D3). 모델이 없으면 행이 흐려지고 '모델 필요' 가 붙는다 - 받는 곳은 툴팁이 말한다.
+    const ollamaBoostHtml = `<div class="pe-opt-cell"><label class="pe-opt-row${ollamaReady ? '' : ' is-disabled'}" data-naia-guide="${escHtml(PE_OLLAMA_BOOST_GUIDE)}">
+      <input type="checkbox" class="pe-opt-input" id="peOllamaBoostCheckbox" ${boostChecked ? 'checked' : ''}${boostDisabled} oninput="setPromptEngineeringOllamaAutoBoost(this.checked)">
+      <span class="pe-opt-check" aria-hidden="true"></span><span class="pe-opt-label">AI 부스트<span class="pe-opt-hint" id="peOllamaBoostHint"${ollamaReady ? ' hidden' : ''}>모델 필요</span></span>
+    </label><button type="button" class="pe-opt-gear" onclick="openPeOllamaBoostPanel()" title="AI 부스트 설정" aria-label="AI 부스트 설정">⚙</button></div>`;
+
+    // 묶음마다 머리 + 행. 묶음 밖의 키(서버가 새로 준 옵션)는 '기타' 로.
+    const grouped = new Set(PP_GROUPS.flatMap(([, keys]) => keys));
+    const groupHtml = (title, rows) => (rows ? `<div class="pe-opt-group">${escHtml(title)}</div>${rows}` : '');
+    const optionSections = PP_GROUPS.map(([title, keys]) => {
+      const rows = keys.filter(key => optionLabels.has(key)).map(key => optionRowHtml(key, optionLabels.get(key))).join('');
+      return groupHtml(title, title === PP_BOOST_GROUP ? rows + ollamaBoostHtml : rows);
+    });
+    const otherRows = preprocessingOptions.filter(([key]) => !grouped.has(key))
+      .map(([key, label]) => optionRowHtml(key, label)).join('');
+    optionSections.push(groupHtml('기타', otherRows));
 
     // 갈래 필터 바는 **NAI 모드에서만** 뜬다 — 백엔드가 그때만 목록을 준다.
     // 마지막 선택은 기억한다(사용자 지정 2026-08-21). 저장된 갈래가 이번 목록에
@@ -560,17 +575,6 @@ export function createPromptEngineeringPanel({
     </div>
   `;
 
-    const advancedHtml = `
-    <div>
-      <div class="mod-section-label">Tools</div>
-      <div class="mod-inline-row">
-        <button class="mod-btn-secondary" onclick="openPeE621Panel()">e621 Auto-Boost Settings</button>
-        <button class="mod-btn-secondary" onclick="openPeDanbooruPanel()">Danbooru Auto-Weight Settings</button>
-        <button class="mod-btn-secondary" onclick="openPeOllamaBoostPanel()">Auto Boost Settings</button>
-      </div>
-    </div>
-  `;
-
     // 랜덤 프리셋을 고른 동안 Prefix · Postfix 는 **이번에 뽑힌 프리셋의 글**이다(사용자 지정 2026-10-05: 읽기 전용).
     // 고쳐도 저장되지 않고 다음 Random 이 덮는다 - 고칠 수 있게 두면 랜덤 프리셋의 자기 글처럼 읽힌다. 서버도 받지 않는다.
     const rolled = !!m.randomized_active;
@@ -589,6 +593,8 @@ export function createPromptEngineeringPanel({
     const rolledAttrs = rolled ? ' readonly aria-readonly="true" title="랜덤 프리셋에서는 고칠 수 없습니다 — 풀의 프리셋을 고치세요"' : '';
 
     moduleBody.innerHTML = `
+    <div class="pe-layout"><div class="pe-cols">
+    <div class="pe-col pe-col-main">
     ${presetControlHtml}
     ${rolledHtml}
     <div class="pe-prompt-stack">
@@ -605,12 +611,12 @@ export function createPromptEngineeringPanel({
         <textarea class="mod-textarea pe-textarea" id="modAutoHide" data-preset="${escHtml(m.preset || '')}" placeholder="tags to filter out..." oninput="onModTextEdit('prompt_engineering','auto_hide',this.value,this.dataset.preset)">${escHtml(m.auto_hide)}</textarea>
       </div>
     </div>
-    <div>
-      <div class="mod-section-label has-actions"><span>Preprocessing Options</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Setting &amp; Preview</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
-      <!-- Auto Boost 를 그리드 마지막 셀로 — Tag Implication(좌) 우측 칸을 채워 균일하게. -->
-      <div class="mod-checkbox-grid">${preprocessingHtml}${ollamaBoostHtml}</div>
     </div>
-    ${advancedHtml}
+    <div class="pe-col pe-col-opts">
+      <div class="mod-section-label has-actions"><span>전처리</span><span class="mod-head-actions"><button type="button" class="header-action-btn" onclick="openPeDebugPanel()">Setting &amp; Preview</button><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREPROCESSING_GUIDE)}">ⓘ 가이드</button></span></div>
+      <div class="pe-opt-list">${optionSections.join('')}</div>
+    </div>
+    </div></div>
   `;
 
     // 태그 자동완성은 **프롬프트 칸에만** 건다. 프리셋 검색창은 태그를 치는 자리가

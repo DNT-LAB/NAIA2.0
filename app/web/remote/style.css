@@ -15360,10 +15360,13 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   padding: 14px 16px;
   display: flex; flex-direction: column; gap: 10px;
 }
+/* PE 보조 창 여섯(프리셋 추가 · 관리 · e621 · Danbooru · Auto Boost · Setting & Preview). PE 가 떠 있는 창이 된 뒤로
+   (2026-10-15) 그 창 옆에 붙는다 - 떠 있는 창들(--z-drag-panel 10150~) 위여야 한다. 좁은 화면에서는 창 위에 겹쳐 뜨는데,
+   예전 층(--z-floating-module-aux)이면 PE 창 **밑에** 깔려 안 보인다. */
 .pe-popup {
   display: none;
   position: fixed;
-  z-index: var(--z-floating-module-aux);
+  z-index: var(--z-drag-panel-side);
   width: min(420px, 92vw);
   max-height: 72dvh;
   background: var(--bg-surface);
@@ -16249,6 +16252,11 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-chip-info-tooltip.drag-panel-target,
 .result-info-tag-popup.drag-panel-target {
   z-index: calc(var(--z-drag-panel-assist) + 1);
+}
+/* 프리셋 미리보기 판도 같다 - 셀렉트가 떠 있는 창(PE 창) · PE 보조 창 안이면 그 창들 위로(2026-10-15).
+   API 설정 모달(10300) 아래다. */
+.custom-select-preview.drag-panel-target {
+  z-index: var(--z-drag-panel-assist);
 }
 .tag-ac-list {
   display: flex;

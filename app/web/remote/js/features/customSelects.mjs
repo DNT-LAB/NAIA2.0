@@ -673,6 +673,9 @@ export function createCustomSelectController({
     if (state.select.dataset.previewActions !== 'none') {
       preview.append(buildPreviewActions(state, option));
     }
+    // 셀렉트가 떠 있는 창(PE 창 등) · PE 보조 창 안이면 미리보기를 그 창들 위 층으로 올린다 - 기본 층(10110)이면
+    // 창(10150~) 밑에 깔려 창과 겹치는 부분이 안 보인다(2026-10-15 PE 가 떠 있는 창이 된 뒤 - Codex 리뷰).
+    preview.classList.toggle('drag-panel-target', !!state.select.closest?.('.dragpanel, .pe-popup'));
     preview.hidden = false;
     positionPreview(state);
   }

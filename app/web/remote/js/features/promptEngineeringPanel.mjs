@@ -632,5 +632,8 @@ export function createPromptEngineeringPanel({
 
   return {
     render,
+    // PE 창을 닫을 때 부른다 - 창의 본문은 닫혀도 문서에 남아(isConnected) 폴링이 스스로 멈추지 않는다.
+    // 다음에 열면 render 가 다시 시작한다.
+    stopPolling: stopOllamaPolling,
   };
 }

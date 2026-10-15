@@ -525,6 +525,10 @@ let conditionalPromptWindow = null;
 // 모듈 화면(?detached=module)은 그 창 전체가 모듈 팝업이라 예전 배치를 그대로 쓴다.
 const e621UsesWindow = !isDetachedModule;
 let e621Window = null;
+// 프롬프트 엔지니어링도 떠 있는 창이다(promptEngineeringWindow.mjs, 사용자 지시 2026-10-15 - PE 개편 1단계).
+// 떼어 낸 모듈 화면(?detached=module)은 그 창 전체가 모듈 팝업이라 예전 배치를 그대로 쓴다(E621 과 같다).
+const peUsesWindow = !isDetachedModule;
+let promptEngineeringWindow = null;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
@@ -1516,7 +1520,7 @@ import('./js/features/assistPanel.mjs?v=20261001-agefix2')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20261004-snapshot')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20261015-pew1')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -4741,6 +4745,7 @@ function onInitComplete() {
   // 없으면 연결 전·재연결 중에 연 창이 영영 빈 채로 남는다.
   if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) requestModuleState('conditional_prompt');
   if (e621Window && e621Window.isOpen()) requestModuleState('e621_event');
+  if (promptEngineeringWindow && promptEngineeringWindow.isOpen()) requestModuleState('prompt_engineering');
   // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
   // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
@@ -7742,7 +7747,7 @@ function guardTransferredModuleState(moduleId, delayMs = 900) {
   transferredModuleStateGuard.moduleId = moduleId;
   transferredModuleStateGuard.until = Date.now() + delayMs;
   transferredModuleStateGuard.timer = setTimeout(() => {
-    if (currentModuleId === moduleId) requestModuleState(moduleId);
+    if (currentModuleId === moduleId || isWindowModuleOpen(moduleId)) requestModuleState(moduleId);
     if (transferredModuleStateGuard.moduleId === moduleId) {
       transferredModuleStateGuard = {moduleId: '', until: 0, timer: null};
     }
@@ -11438,11 +11443,47 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
   });
 
 let lastPromptEngineeringState = null;
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261005-rolled')
+// PE 창(사용자 지시 2026-10-15 - PE 개편 1단계 · docs/PE_WINDOW_REDESIGN_2026_10_15.md). 패널과 창에 **같은 요소**를
+// 넘긴다 - 창은 품고, 패널은 그 안에 그린다(조건부 · E621 창과 같은 방식). 칸 id(modPrePrompt 등)는 그대로다 -
+// 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
+const promptEngineeringHost = document.createElement('div');
+const promptEngineeringWindowReady = peUsesWindow
+  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-pew1')
+    .then(({createPromptEngineeringWindow}) => {
+      promptEngineeringWindow = createPromptEngineeringWindow({
+        document,
+        window,
+        host: promptEngineeringHost,
+        escHtml,
+        overviewGuide: MODULE_OVERVIEW_GUIDES.prompt_engineering || '',
+        // 닫혀 있던 동안에는 그리지 않았다(onModuleState) - 받아 둔 상태로 먼저 그리고 서버에 한 번 더 묻는다.
+        onShow: () => {
+          const cached = moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState;
+          if (cached) renderPromptEngineering(cached);
+          requestModuleState('prompt_engineering');
+        },
+        // 닫을 때 0.5초 대기 중인 편집과 칸의 글을 보낸다(예전 closeModule 이 하던 일). 창은 이미 닫힌 뒤라 force.
+        onHide: () => {
+          flushPromptEngineeringEdits({force: true});
+          if (promptEngineeringPanelControl) promptEngineeringPanelControl.stopPolling();
+        },
+        onVisibilityChange: () => updateModuleBtnState(),
+        onMove: () => relayoutPromptEngineeringPopups(),
+        onAuxClose: () => closeAllPePanels(),
+        onApplyRecommended: () => applyRecommendedPromptPreset(),
+        onDetach: () => detachPromptEngineeringWindow(),
+      });
+      promptEngineeringWindow.setRecommended(peRecommendedAvailable());
+    })
+    .catch(error => {
+      console.error('Failed to initialize prompt engineering window', error);
+    })
+  : Promise.resolve();
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pew1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
-      moduleBody,
+      moduleBody: peUsesWindow ? promptEngineeringHost : moduleBody,
       escHtml,
       bindTagAssist,
       // Lazily resolve the action so panel/actions module import order doesn't matter.
@@ -11490,12 +11531,10 @@ function updateModuleHeaderAction(moduleId) {
       );
     }
   }
+  // PE 창의 머리줄에도 같은 단추가 있다 - 모드가 바뀌면 이 함수가 불린다.
+  if (promptEngineeringWindow) promptEngineeringWindow.setRecommended(peRecommendedAvailable());
   if (!modulePopupAction) return;
-  if (moduleId === 'prompt_engineering' && (
-    (currentMode || modeSelect.value) === 'NAI'
-    || (currentMode || modeSelect.value) === 'WEBUI'
-    || isComfyUiAnimaMode()
-  )) {
+  if (moduleId === 'prompt_engineering' && peRecommendedAvailable()) {
     modulePopupAction.textContent = '추천 설정 적용';
     modulePopupAction.style.display = '';
     modulePopupAction.onclick = applyRecommendedPromptPreset;
@@ -11504,6 +11543,12 @@ function updateModuleHeaderAction(moduleId) {
   modulePopupAction.style.display = 'none';
   modulePopupAction.onclick = null;
   modulePopupAction.textContent = '';
+}
+
+/** [추천 설정 적용] 을 보일 모드인가 - 추천 프리셋이 있는 모드(NAI · WEBUI · ComfyUI ANIMA). */
+function peRecommendedAvailable() {
+  const mode = currentMode || modeSelect.value;
+  return mode === 'NAI' || mode === 'WEBUI' || isComfyUiAnimaMode();
 }
 
 function isComfyUiAnimaMode() {
@@ -11846,6 +11891,24 @@ function openModule(moduleId, options = {}) {
     });
     return;
   }
+  // 프롬프트 엔지니어링도 떠 있는 창이다(사용자 지시 2026-10-15). 모듈 단추 · 우클릭 · /pe · 떼어 낸 창 붙이기가
+  // 전부 여기를 지난다. 모듈 팝업을 거치지 않으므로 다른 모듈과 함께 열어 둘 수 있다.
+  if (moduleId === 'prompt_engineering' && peUsesWindow) {
+    Promise.all([promptEngineeringWindowReady, promptEngineeringPanelReady]).then(() => {
+      if (!promptEngineeringWindow) return;
+      const wasOpen = promptEngineeringWindow.isOpen();
+      // 떼어 낸 창을 다시 붙이면 그 창의 상태가 함께 온다 - 그대로 그리고 서버에 다시 묻지 않는다.
+      const initial = options.initialState && options.initialState.module_id === moduleId ? options.initialState : null;
+      if (initial) {
+        moduleStateCache.set(moduleId, initial);
+        renderModuleState(initial);
+        if (options.guardInitialState) guardTransferredModuleState(moduleId);
+      }
+      promptEngineeringWindow.show({toggle: !options.forceOpen && !initial, requestState: !initial && !options.skipStateRequest});
+      if (wasOpen && options.forceOpen && !initial && !options.skipStateRequest) requestModuleState(moduleId);
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
     showToast('This module is only available in NAI mode', 'error');
@@ -11975,7 +12038,24 @@ function closeModule(options = {}) {
 /** 모듈 팝업이 아니라 떠 있는 창으로 사는 모듈이 지금 열려 있나(단추 눌림 표시용). */
 function isWindowModuleOpen(moduleId) {
   return (moduleId === 'conditional_prompt' && Boolean(conditionalPromptWindow && conditionalPromptWindow.isOpen()))
-    || (moduleId === 'e621_event' && Boolean(e621Window && e621Window.isOpen()));
+    || (moduleId === 'e621_event' && Boolean(e621Window && e621Window.isOpen()))
+    || (moduleId === 'prompt_engineering' && Boolean(promptEngineeringWindow && promptEngineeringWindow.isOpen()));
+}
+
+/** PE 화면(떠 있는 창 · 떼어 낸 창에서는 모듈 팝업)이 지금 열려 있나. 칸의 글을 믿고 보낼지 · 읽을지 가른다.
+ *  ⚠️ 닫힌 창의 칸도 문서에 남아 있다 - 닫혀 있는 동안은 다시 그리지 않으므로 옛 글일 수 있다. */
+function isPromptEngineeringOpen() {
+  return peUsesWindow
+    ? Boolean(promptEngineeringWindow && promptEngineeringWindow.isOpen())
+    : currentModuleId === 'prompt_engineering';
+}
+
+/** PE 창의 ↗ - 별도 브라우저 창으로 뗀다(모듈 팝업의 ↗ 와 같은 일). 밀린 편집과 칸의 글을 먼저 보내고, 칸의 글로
+ *  사본을 만든 뒤 창을 닫는다(닫기가 한 번 더 보내는 것은 같은 글이다). */
+function detachPromptEngineeringWindow() {
+  flushPromptEngineeringEdits();
+  const popup = openDetachedModule('prompt_engineering');
+  if (popup && promptEngineeringWindow) promptEngineeringWindow.close();
 }
 
 function closeOpenModulesForModeSwitch() {
@@ -11983,6 +12063,8 @@ function closeOpenModulesForModeSwitch() {
   // 조건부 설정은 API 모드마다 따로다 - 창에 옛 모드의 규칙이 남아 있지 않게 닫는다
   // (예전에는 모듈 팝업이라 아래 closeModule 로 함께 닫혔다). 닫기가 대기 중인 편집을 보낸다.
   if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) conditionalPromptWindow.close();
+  // PE 프리셋도 API 모드마다 따로다 - 예전 모듈 팝업처럼 닫는다(닫기가 대기 중인 편집을 지금 모드에서 보낸다).
+  if (promptEngineeringWindow && promptEngineeringWindow.isOpen()) promptEngineeringWindow.close();
   const hasPrimaryModule = Boolean(currentModuleId) || modulePopup.classList.contains('open');
   if (hasPrimaryModule) {
     closeModule({ keepChunk: false });
@@ -12029,7 +12111,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpus
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261005-rolled')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261015-pew1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -12079,7 +12161,8 @@ const promptEngineeringPopupsReady = import('./js/features/promptEngineeringPopu
         ollamaBoost: peOllamaBoostPanel,
         debug: peDebugPanel,
       },
-      positionFloatingPanel,
+      // 붙는 기준은 PE 창이다(결정 D4 = A) - 떼어 낸 창에서는 모듈 팝업.
+      positionFloatingPanel: panel => positionFloatingPanel(panel, peAuxAnchor()),
       relayoutFloatingPanels,
       closeAuxiliaryPopups,
       refreshDebug: refreshPromptEngineeringDebug,
@@ -12548,6 +12631,14 @@ function onModuleState(m) {
     wildcardChunkPopup.onState(m);
   }
 
+  // 프롬프트 엔지니어링도 떠 있는 창이다(떼어 낸 브라우저 창에서는 예전 모듈 팝업이라 아래 관문을 탄다).
+  // ⚠️ 닫혀 있으면 그리지 않는다 - 본문이 문서에 붙어 있어서, 그리면 Auto Boost 준비 확인(5초 폴링)이 닫힌 창에서
+  //    계속 돈다. 다음에 열 때 받아 둔 상태로 그린다(창의 onShow).
+  if (m.module_id === 'prompt_engineering' && peUsesWindow) {
+    if (promptEngineeringWindow && promptEngineeringWindow.isOpen()) renderPromptEngineering(m);
+    return;
+  }
+
   // E621 연구모듈도 떠 있는 창이다(떼어 낸 브라우저 창에서는 예전 모듈 팝업이라 아래 관문을 탄다).
   // 창이 닫혀 있어도 흘려 넣는다 - 다음에 열 때 이미 최신이다(조건부 창과 같은 원칙).
   if (m.module_id === 'e621_event' && e621UsesWindow) {
@@ -12770,12 +12861,14 @@ function renderPeDebugPanel(m) {
   if (promptEngineeringPopupRenderers) promptEngineeringPopupRenderers.renderDebugPanel(m);
 }
 
-function flushPromptEngineeringEdits() {
+function flushPromptEngineeringEdits({force = false} = {}) {
   // ⚠️ **밀린 편집은 화면이 어느 모듈이든 먼저 내보낸다.** 예전에는 아래 조기 반환이
   //    이 줄까지 건너뛰어, 다른 모듈을 보는 동안 걸려 있던 500ms 타이머가 프리셋을
   //    바꾼 **뒤에** 터졌다 - 앞 프리셋의 글이 새 프리셋에 얹혔다.
   flushPendingModuleEdit('prompt_engineering');
-  if (currentModuleId !== 'prompt_engineering') return;
+  // 칸의 글은 PE 화면이 열려 있을 때만 믿는다 - 닫힌 창의 칸은 다시 그려지지 않아 옛 글일 수 있다.
+  // `force` = PE 창이 방금 닫혔다(닫기 신호는 창이 닫힌 뒤에 온다 - 그 순간의 칸은 아직 최신이다).
+  if (!force && !isPromptEngineeringOpen()) return;
   const pre = document.getElementById('modPrePrompt');
   const post = document.getElementById('modPostPrompt');
   const autoHide = document.getElementById('modAutoHide');
@@ -14070,9 +14163,10 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
     return;
   }
 
-  const anchorRect = anchorEl && anchorEl.classList.contains('open')
-    ? anchorEl.getBoundingClientRect()
-    : null;
+  // 기준은 모듈 팝업(.open) 이거나 떠 있는 창(.dragpanel - hidden 으로 여닫는다, PE 창)이다.
+  const anchorShown = anchorEl && (anchorEl.classList.contains('open')
+    || (anchorEl.classList.contains('dragpanel') && !anchorEl.hidden));
+  const anchorRect = anchorShown ? anchorEl.getBoundingClientRect() : null;
   const fallbackWidth = Math.min(preferredWidth, viewportWidth - sideMargin * 2);
 
   if (!anchorRect) {
@@ -14104,14 +14198,22 @@ function positionFloatingPanel(panel, anchorEl = modulePopup) {
   panel.style.maxHeight = `${Math.max(220, viewportHeight - (top - viewportTop) - sideMargin)}px`;
 }
 
+/** PE 보조 창 여섯이 붙는 자리 - PE 창(떠 있는 창, 결정 D4 = A). 떼어 낸 창에서는 예전처럼 모듈 팝업. */
+function peAuxAnchor() {
+  return peUsesWindow && promptEngineeringWindow ? promptEngineeringWindow.el : modulePopup;
+}
+
+/** PE 보조 창 여섯을 기준 옆에 다시 앉힌다(열린 것만 - 닫힌 것은 positionFloatingPanel 이 건너뛴다).
+ *  PE 창을 끄는 동안 프레임마다 불린다. */
+function relayoutPromptEngineeringPopups() {
+  const anchor = peAuxAnchor();
+  [pePresetAddPanel, pePresetManagePanel, peE621Panel, peDanbooruPanel, peOllamaBoostPanel, peDebugPanel]
+    .forEach(panel => positionFloatingPanel(panel, anchor));
+}
+
 function relayoutFloatingPanels() {
   if (chunkPanelControl) chunkPanelControl.relayout();
-  positionFloatingPanel(pePresetAddPanel, modulePopup);
-  positionFloatingPanel(pePresetManagePanel, modulePopup);
-  positionFloatingPanel(peE621Panel, modulePopup);
-  positionFloatingPanel(peDanbooruPanel, modulePopup);
-  positionFloatingPanel(peOllamaBoostPanel, modulePopup);
-  positionFloatingPanel(peDebugPanel, modulePopup);
+  relayoutPromptEngineeringPopups();
   if (wildcardManagerPanel) wildcardManagerPanel.relayout();
   if (imageModulePanels) imageModulePanels.relayoutVibeClusterPanel();
 }
@@ -14461,7 +14563,7 @@ import('./js/features/peFieldHub.mjs?v=20261010-review5')
       //    그 밖에는 서버 상태가 진실이다. 조건 없이 믿으면, 서버가 새 글을 알려 온 순간 **아직 다시 그려지지 않은**
       //    칸의 옛 글을 읽어 다른 창들이 한 박자 늦는다(다른 탭이 같은 프리셋을 고쳤을 때 - Codex 리뷰 2026-10-10).
       getLiveBox: key => {
-        if (currentModuleId === 'prompt_engineering') {
+        if (isPromptEngineeringOpen()) {
           const el = document.getElementById(PE_FIELD_ELEMENTS[key]);
           const unsent = el === document.activeElement
             || (pendingModuleEdit?.moduleId === 'prompt_engineering' && pendingModuleEdit.key === key);
@@ -14663,7 +14765,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261001-slashpop2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261015-pew1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

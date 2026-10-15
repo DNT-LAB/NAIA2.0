@@ -217,7 +217,8 @@ export function createPromptEngineeringPopupRenderers({
   function ensureRandomizedPreview() {
     if (randomizedPreview) return randomizedPreview;
     const preview = document.createElement('div');
-    preview.className = 'custom-select-preview custom-select-preview-prompt-preset pe-randomized-preview';
+    // 이 미리보기는 Manage(PE 보조 창, --z-drag-panel-side) 안의 단추에서만 뜬다 - 그 창 위 층으로(drag-panel-target).
+    preview.className = 'custom-select-preview custom-select-preview-prompt-preset pe-randomized-preview drag-panel-target';
     preview.hidden = true;
     preview.addEventListener('pointerenter', cancelRandomizedPreviewHide);
     preview.addEventListener('pointerleave', () => scheduleRandomizedPreviewHide());

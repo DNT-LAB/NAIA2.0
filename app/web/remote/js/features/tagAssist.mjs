@@ -487,7 +487,8 @@ export function createTagAssistController({
   function syncTooltipLayer() {
     if (!tagTooltip) return;
     const host = acTarget || document.activeElement;
-    const on = !!host?.closest?.('.rctl-side, .dragpanel');
+    // .pe-popup = PE 보조 창(프리셋 관리 · Setting & Preview ...). 떠 있는 창들 위 층(--z-drag-panel-side)에 산다(2026-10-15).
+    const on = !!host?.closest?.('.rctl-side, .dragpanel, .pe-popup');
     tagTooltip.classList.toggle('drag-panel-target', on);
     tagChipInfoTooltip?.classList.toggle('drag-panel-target', on);
     promptInfoTooltip?.classList.toggle('drag-panel-target', on);
@@ -1528,7 +1529,7 @@ export function createTagAssistController({
     // 층은 **올린 칩이 어디 사는가**로 정한다. 말풍선은 처음 올릴 때 만들어져서, 카드를 그릴 때 돈
     // syncTooltipLayer 는 그것을 못 봤다 - 창(리모컨·Search 창) 안 카드의 칩 설명이 기본 층(2230)에 떠
     // 창 **뒤에** 깔렸다(사용자 제보 2026-09-25). 떠 있는 카드의 칩이면 초점 칸이 창 안인지 본다.
-    const inPanel = '.rctl-side, .dragpanel';
+    const inPanel = '.rctl-side, .dragpanel, .pe-popup';
     chipTooltip.classList.toggle('drag-panel-target', !!anchor.closest?.(inPanel)
       || !!(acTarget || document.activeElement)?.closest?.(inPanel));
     chipTooltip.innerHTML =

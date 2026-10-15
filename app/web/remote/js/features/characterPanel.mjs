@@ -348,7 +348,10 @@ export function createCharacterPanel({
     }
     const max = Number(lastState?.max_slots) || 0;
     const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
-    if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+    if (!hasActiveDuplicate(seed.prompt, seed.uc) && max && used >= max) {
+      showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
+      return;
+    }
     const payload = {prompt: seed.prompt, uc: seed.uc || '',
                      custom_name: seed.custom_name || ''};
     if (at !== undefined) payload.at = Number(at);
@@ -382,6 +385,17 @@ export function createCharacterPanel({
 
   function escAttr(value) {
     return escHtml(String(value ?? '')).replace(/"/g, '&quot;');
+  }
+
+  /** 이 글을 가진 활성 슬롯이 있나 - 있으면 서버가 새로 넣지 않고 그 슬롯을 켠다(2026-10-15). 그때는 자리를 안
+   *  먹으므로 화면의 상한 검사도 '담았습니다' 도 건너뛴다. 잣대는 서버 `_set_mark` 와 같다(프롬프트 + 네거티브,
+   *  쉼표 앞뒤 공백 무시 · 둘 다 비면 중복 아님). 내용으로 정하는 일이라 가장 새 상태를 본다(법 0). */
+  function hasActiveDuplicate(prompt, uc) {
+    const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
+    const p = norm(prompt), u = norm(uc);
+    if (!p && !u) return false;
+    return (newestState()?.characters || [])
+      .some(c => slotState(c) === 'active' && norm(c.prompt) === p && norm(c.uc) === u);
   }
 
   function slotState(character) {
@@ -1094,10 +1108,7 @@ export function createCharacterPanel({
     if (!prompt) { showToastSafe('담을 프롬프트가 없습니다.'); return; }
     // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켜고 그 말을 한다(2026-10-15) - 그때는
     // 상한도 '담았습니다' 도 이 화면이 말하지 않는다. 판단은 서버가 하고 여기서는 문구만 고른다.
-    // (같은 잣대: 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시 - 서버 `_set_mark`)
-    const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
-    const duplicate = (newestState()?.characters || [])
-      .some(c => slotState(c) === 'active' && norm(c.prompt) === norm(prompt) && !norm(c.uc));
+    const duplicate = hasActiveDuplicate(prompt, '');
     const max = Number(lastState?.max_slots) || 0;
     const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
     if (!duplicate && max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
@@ -2222,9 +2233,15 @@ export function createCharacterPanel({
       if (load) {
         // 백엔드가 이제 상한에서 거절한다(Codex BLOCK 1) - 조용히 아무 일도 안 나면
         // 사용자는 이유를 모른다. 여기서 먼저 말해 준다.
+        // ⚠️ 같은 캐릭터가 이미 슬롯에 있으면 서버가 그 슬롯을 켠다 - 자리를 안 먹으니 상한으로 막지 않는다
+        //    (막으면 꽉 찬 슬롯에서 꺼 둔 그 캐릭터를 켤 길이 없다 - Codex 리뷰 2026-10-15).
+        const stored = (newestState()?.characters || [])[Number(load.dataset.cwLoad)];
         const max = Number(lastState?.max_slots) || 0;
         const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
-        if (max && used >= max) { showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`); return; }
+        if (!hasActiveDuplicate(stored?.prompt, stored?.uc) && max && used >= max) {
+          showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
+          return;
+        }
         setSlotState(Number(load.dataset.cwLoad), 'active');
         return;
       }
@@ -2380,7 +2397,9 @@ export function createCharacterPanel({
         // ⚠️ 이미 활성인 것을 **자리만 옮기는** 경우는 개수가 안 늘어나니 막지 않는다.
         const max = Number(lastState?.max_slots) || 0;
         const used = (lastState?.characters || []).filter(c => slotState(c) === 'active').length;
-        if (!already && max && used >= max) {
+        // 같은 캐릭터가 이미 슬롯에 있으면 서버가 그 슬롯을 켠다(자리를 안 먹는다 - 위 ↩ 와 같다).
+        const dragged = (newestState()?.characters || [])[index];
+        if (!already && !hasActiveDuplicate(dragged?.prompt, dragged?.uc) && max && used >= max) {
           showToastSafe(`활성 캐릭터 슬롯은 최대 ${max}개입니다.`);
           return;
         }

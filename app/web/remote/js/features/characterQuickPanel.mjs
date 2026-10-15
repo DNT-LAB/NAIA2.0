@@ -1524,10 +1524,11 @@ export function createCharacterQuickPanel({
     const list = findEl && findEl.querySelector('[data-cqf-list]');
     if (!list) return;
     const keepScroll = list.scrollTop;
+    let html = '';
     const empty = text => `<div class="cq-find-empty">${escHtml(text)}</div>`;
     if (findTab === 'lib') {
       const rows = findLibRows();
-      list.innerHTML = rows.length ? rows.map(({character, index}) => {
+      html = rows.length ? rows.map(({character, index}) => {
         const name = String(character.custom_name || '').trim();
         const title = name || String(character.prompt || '').split(',').map(part => part.trim())
           .filter(Boolean).slice(0, 3).join(', ') || '(네거티브만)';
@@ -1541,12 +1542,12 @@ export function createCharacterQuickPanel({
           + `${findTagHtml(duplicateOrdinal(character.prompt, character.uc))}</button>`;
       }).join('') : empty(findQuery.lib.trim() ? '맞는 캐릭터가 없습니다.' : '보관함이 비어 있습니다.');
     } else if (findDexError && !findDexRows.length) {
-      list.innerHTML = empty(findDexError);
+      html = empty(findDexError);
     } else if (!findDexRows.length) {
-      list.innerHTML = empty(findDexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.');
+      html = empty(findDexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.');
     } else {
       // 사전의 줄은 아직 프롬프트를 모른다(상세를 받아야 안다) - 중복 표는 이름으로 짐작하지 않는다. 서버가 판단한다.
-      list.innerHTML = findDexRows.map(row => {
+      html = findDexRows.map(row => {
         const key = `${row.group}\u0000${row.character}`;
         const busy = findPicking === key;
         return `<button type="button" class="cq-find-row${busy ? ' is-busy' : ''}"`
@@ -1561,7 +1562,13 @@ export function createCharacterQuickPanel({
           + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
       }).join('');
     }
-    list.scrollTop = keepScroll;
+    // 같은 내용이면 갈아 끼우지 않는다 - 보관함 목록은 서버 에코마다 다시 그려 보는데(빠른 길 포함), 누르는 도중에
+    // 줄이 새 요소로 바뀌면 크롬은 click 을 보내지 않는다(CHARACTER_WORKSPACE_CLAUDE.md 법 0).
+    if (list._cqfHtml !== html) {
+      list._cqfHtml = html;
+      list.innerHTML = html;
+      list.scrollTop = keepScroll;
+    }
     positionFind();
   }
 
@@ -1575,9 +1582,17 @@ export function createCharacterQuickPanel({
   }
 
   /** 보관함 -> 슬롯. Manage 의 ↩ 와 같은 명령이다(★ · 그룹은 사본, 히스토리는 옮김 - 서버 규칙). */
-  function pickFindLib(index, uuid) {
-    const character = ((lastState && lastState.characters) || [])[index];
-    if (!character) return;
+  function pickFindLib(shownIndex, uuid) {
+    // ⚠️ 줄에 적힌 번호는 그릴 때의 것이다 - 그 사이 다른 창이 보관함을 고쳤으면 그 번호에는 다른 캐릭터가 있다.
+    //    **uuid 로 지금 자리를 찾는다**(Codex 리뷰 2026-10-15). 사라졌으면 목록을 새로 그리고 멈춘다.
+    const chars = (lastState && lastState.characters) || [];
+    const index = uuid ? chars.findIndex(item => String(item && item.slot_uuid || '') === uuid) : shownIndex;
+    const character = chars[index];
+    if (!character || String(character.slot_state || '') === 'active') {
+      showToast('그 캐릭터는 보관함에 더 없습니다.', 'info');
+      renderFindList();
+      return;
+    }
     const dup = duplicateOrdinal(character.prompt, character.uc);
     if (!dup && slotsAreFull()) { showToast(`활성 캐릭터 슬롯은 최대 ${lastState.max_slots}개입니다.`, 'info'); return; }
     // 번호는 이 목록을 그릴 때의 것이다 - uuid 를 함께 보내 서버가 그 캐릭터가 **지금 있는 자리**를 찾게 한다.
@@ -1659,6 +1674,9 @@ export function createCharacterQuickPanel({
     const nextSignature = signature(current);
     if (!force && nextSignature === lastSignature) {
       syncValues(current); bindAssist(); fitGridHeight();
+      // 보관함은 서명에 없다(활성 슬롯 구조만 본다) - 다른 창이 보관함을 고친 상태도 이 길로 온다. Find 의 보관함
+      // 목록은 여기서도 고친다(Codex 리뷰 2026-10-15). 내용이 같으면 `renderFindList` 가 갈아 끼우지 않는다.
+      if (findEl && findTab === 'lib') renderFindList();
       // ⚠️ 여기서도 무대를 다시 그린다. 프롬프트를 고쳐도 서명은 그대로라(내용은
       //    서명에 없다) 이 경로로 빠지는데, 칩 이름은 프롬프트에서 나온다 -
       //    빼먹으면 편집 중 칩이 옛 이름에 굳는다(실측).

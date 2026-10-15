@@ -420,6 +420,12 @@ class HeadlessCharacterService:
         """
         ordinal, frame = hit
         changed = False
+        # ⚠️ 사용자가 이 캐릭터를 골라 넣은 것이다 - 씬이 만든 칸이었어도 이제 사용자의 칸이다(`char_prompt_` ·
+        #    C1 적용과 같다). 표식이 남으면 다음 씬을 불러올 때 '이전 씬이 남긴 칸' 으로 보고 버린다 - 중복 처리가
+        #    없었다면 새 칸(표식 없음)이 생겨 살아남았을 입력이다(Codex 리뷰 2026-10-15).
+        if frame.get("from_scene"):
+            frame["from_scene"] = False
+            changed = True
 
         def set_muted(target: dict[str, Any], muted: bool) -> None:
             nonlocal changed

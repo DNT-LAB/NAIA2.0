@@ -20060,10 +20060,14 @@ select.setup-input { cursor: pointer; }
 }
 
 /* 목록 **맨 위**에 붙어 스크롤과 무관하게 남는다 — 아래로 내려가서 갈래를 바꾸려고
-   다시 올라오는 일이 없게 한다. */
+   다시 올라오는 일이 없게 한다.
+   ⚠️ sticky 는 스크롤 영역의 **안쪽 여백만큼 들어간 곳**에 붙는다. 목록 판(.custom-select-menu)의 padding 4px 만큼
+   줄 위 · 좌우에 띠가 남아, 스크롤하면 그 띠로 옵션이 비쳤다(사용자 제보 2026-10-15 - 목록이 길 때만 보인다).
+   여백만큼 바깥으로 넓히고(margin) 붙는 자리도 그만큼 올린다(top) - 판의 padding 을 바꾸면 이 둘도 같이 바꾼다. */
 .custom-select-filterbar {
   position: sticky;
-  top: 0;
+  top: -4px;
+  margin: -4px -4px 0;
   z-index: 2;
   display: flex;
   gap: 4px;

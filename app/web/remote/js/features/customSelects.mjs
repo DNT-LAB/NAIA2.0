@@ -663,6 +663,8 @@ export function createCustomSelectController({
       ['Postfix', option.dataset.previewPostfix, null],
     ];
     const terms = highlightTerms(state.select);
+    // Quick Preset(상세를 읽는 판)은 Prefix · Postfix 를 각자 상자(섬)로 감싼다(사용자 지시 2026-10-15) - 아래 섬과 같은 옷.
+    const identity = presetDetailWanted(state, option);
     body.forEach(([label, text, fallback]) => {
       if (text === undefined) return;                 // 이 select 는 그 칸을 안 쓴다
       const value = String(text || '');
@@ -674,14 +676,20 @@ export function createCustomSelectController({
       pre.className = 'custom-select-preview-prefix';
       if (value) paintPromptBody(pre, value, terms);
       else pre.textContent = fallback;
-      copy.append(cap, pre);
+      if (identity) {
+        const field = document.createElement('div');
+        field.className = 'custom-select-preview-field';
+        field.append(cap, pre);
+        copy.append(field);
+      } else {
+        copy.append(cap, pre);
+      }
     });
 
     // 저장된 Main/Negative 는 비동기로 채운다. 자리를 **먼저** 만들어 두어야
     // 답이 왔을 때 판이 덜컥 커지지 않는다.
     // Quick Preset(상세를 읽는 판)은 2단이다(사용자 지시 2026-10-15): 왼쪽 = Prefix · Postfix · 켜진 제거 칩,
     // 오른쪽 = 큰 썸네일 · 썸네일 단추 · Main · Negative. 자리가 모자라면 positionPreview 가 1단으로 접는다.
-    const identity = presetDetailWanted(state, option);
     const side = identity ? document.createElement('div') : null;
     preview.classList.toggle('has-side', !!side);
     if (identity) {

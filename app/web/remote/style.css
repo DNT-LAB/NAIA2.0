@@ -643,7 +643,8 @@ header {
 .custom-select-preview.is-two-col {
   max-height: min(660px, calc(100dvh - 16px));
   grid-template-columns: minmax(0, 1fr) 260px;
-  grid-template-rows: auto auto auto;
+  /* 왼쪽 열이 썸네일보다 길면 남는 높이를 둘째 줄(단추 줄)이 흡수한다 - auto 끼리면 첫째 줄에도 나뉘어 썸네일과 단추 사이가 벌어졌다. */
+  grid-template-rows: auto 1fr auto;
   grid-template-areas: "copy thumb" "copy actions" "side side";
   column-gap: 14px; row-gap: 8px;
 }
@@ -664,6 +665,15 @@ header {
 .custom-select-preview.is-two-col > .custom-select-preview-side > :nth-child(n+3) { border-left: 1px solid var(--border-dim); }
 .custom-select-preview.is-two-col > .custom-select-preview-side > .custom-select-preview-cap { margin-top: 0; }
 .custom-select-preview.is-two-col > .custom-select-preview-thumb.is-portrait img { transform: none; }
+/* 썸네일이 없으면 띠(22px)가 아니라 같은 크기의 정사각형 자리 - 단추가 판 가운데로 떠오르지 않고, 그림이 생겨도 배치가
+   흔들리지 않는다(사용자 지시 2026-10-15). */
+.custom-select-preview.is-two-col > .custom-select-preview-thumb:not(.has-image) { height: 260px; font-size: 11px; letter-spacing: 0.08em; }
+/* Prefix · Postfix 를 각자 섬으로(사용자 지시 2026-10-15) - 아래 섬(Main | Negative)과 같은 옷. Quick Preset 판에만 감싼다. */
+.custom-select-preview-field {
+  min-width: 0; padding: 8px 10px;
+  border: 1px solid var(--border-dim); border-radius: 8px; background: rgba(255,255,255,0.02);
+}
+.custom-select-preview-field > .custom-select-preview-cap { margin-top: 0; }
 .custom-select-preview.is-two-col .custom-select-preview-actions button { min-height: 26px; font-size: 10.5px; }
 /* 왼쪽 열은 Prefix · Postfix · 칩뿐이다 - 1단의 칸 상한(92px)보다 조금 넉넉히. 아래 섬이 판 안에 남도록 상한은 둔다. */
 .custom-select-preview.is-two-col > .custom-select-preview-copy .custom-select-preview-prefix { max-height: 130px; }

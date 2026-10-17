@@ -452,9 +452,15 @@ export function createViewpointControlWindow({
     if (event.target.closest('[data-vpc-copy]')) copy();
   });
 
-  function status(text) {
+  // 알림 줄. hideAfterMs 를 주면 그만큼 뒤에 비운다(성공 알림 - 사용자 지시 2026-10-17: 2초 뒤 사라지게).
+  // 안내 · 오류는 읽을 시간이 필요해 남긴다. 새 알림이 오면 앞 타이머는 버린다(앞 것이 새 글을 지우지 않게).
+  let statusTimer = 0;
+  function status(text, hideAfterMs = 0) {
     const el = $('.vpc-status');
-    if (el) el.textContent = text;
+    clearTimeout(statusTimer);
+    if (!el) return;
+    el.textContent = text;
+    if (hideAfterMs > 0) statusTimer = setTimeout(() => { el.textContent = ''; }, hideAfterMs);
   }
   // 복사가 이 창의 유일한 내보내기다 - 클립보드 API 가 막힌 곳(권한 · 브라우저 창)에서는 글 칸을 골라 execCommand 로
   // (이벤트 맵 · Fast Search 와 같은 예비 길). 그것도 막히면 글을 골라 둔 채 Ctrl+C 를 안내한다.
@@ -468,7 +474,7 @@ export function createViewpointControlWindow({
     let result = false;
     try { result = await instantGenerate(text); } catch { result = false; } finally { instantBusy = false; }
     // true = 보냈다 · 글 = 보내지 않은 까닭(Auto Gen · Interactive …) · false = 연결 · 생성 중 · 연타.
-    if (result === true) status('생성을 보냈습니다 - 프롬프트 뒤에 이 글을 붙여 한 장');
+    if (result === true) status('생성을 보냈습니다 - 프롬프트 뒤에 이 글을 붙여 한 장', 2000);
     else status(typeof result === 'string' && result ? result : '지금은 생성할 수 없습니다(연결 · 생성 중)');
   }
   async function copy() {
@@ -480,7 +486,7 @@ export function createViewpointControlWindow({
     if (!ok) {
       try { ta.focus(); ta.select(); ok = doc.execCommand('copy'); } catch { ok = false; }
     }
-    if (ok) { status('복사했습니다'); return; }
+    if (ok) { status('복사했습니다', 2000); return; }
     ta.focus(); ta.select();
     status('복사가 막혔습니다 - 글을 골라 두었으니 Ctrl+C 하세요');
     notify('클립보드에 쓰지 못했습니다', 'error');

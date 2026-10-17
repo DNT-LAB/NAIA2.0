@@ -416,14 +416,14 @@ def register_event_map_routes(
     @app.get("/api/event-map/tree/browse")
     async def api_event_map_tree_browse(d1: str = "", d2: str = "", d3: str = "", ratings: str = "",
                                         persons: str = "", limit: int = 40, offset: int = 0, per: int = 5,
-                                        flat: int = 0):
+                                        flat: int = 0, rest: int = 0):
         """핀 없이 지도의 한 자리: 절(d2+d3) = 그 절을 쪽 단위로 · 그룹(d2) = 절마다 상위 `per` ·
         갈래(d1) = 그룹마다 상위 `per`. 고른 인원 · 등급에서 특징적인 순(browse 와 같은 점수)."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.tree_browse, d1=d1, d2=d2, d3=d3, ratings=ratings, persons=persons,
-                limit=limit, offset=offset, per=per, flat=flat)
+                limit=limit, offset=offset, per=per, flat=flat, rest=rest)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

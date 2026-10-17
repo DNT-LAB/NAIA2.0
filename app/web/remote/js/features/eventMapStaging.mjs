@@ -233,7 +233,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
             <button type="button" class="st-catbtn" data-st-more aria-haspopup="menu" aria-expanded="${menuFor === r.id}" title="분류 옮기기 · 삭제">분류 변경</button></div>
           ${!bundle && r.name !== r.selection.pins.join(', ') ? `<div class="st-pins">${esc(r.selection.pins.join(', '))}</div>` : ''}
           <div class="st-line"><div class="st-meta">${bundle ? `${esc(sel.slice(0, 3).map(s => s.pins.join(', ')).join(' / '))}${sel.length > 3 ? ' …' : ''}` : metaHtml(r.selection)}</div>
-            <div class="st-acts"><button type="button" class="${inStage ? 'is-done' : 'is-primary'}" data-st-stage-saved ${inStage ? 'disabled title="이미 스테이징에 있는 조합입니다"' : ''}>${inStage ? '✓ 스테이징됨' : '스테이징 +'}</button>${bundle ? '' : '<button type="button" data-st-open-saved>맵에서 열기</button>'}</div></div>
+            <div class="st-acts"><button type="button" class="${inStage ? 'is-done' : 'is-primary'}" data-st-stage-saved ${inStage ? 'disabled title="이미 스테이징에 있는 조합입니다"' : ''}>${inStage ? '✓ 스테이징됨' : '스테이징 +'}</button>${bundle ? '' : '<button type="button" data-st-open-saved>맵에서 열기</button>'}<button type="button" data-st-random-saved title="${bundle ? '묶음의 켜진 조합 하나에서 ' : ''}실제 게시물 하나를 프롬프트로">랜덤</button><button type="button" data-st-random-gen-saved title="랜덤 뒤 바로 생성">랜덤+생성</button></div></div>
         </div>`;
       }).join('') : saved.length ? '<div class="st-empty">맞는 조합이 없습니다.</div>'
       : '<div class="st-empty">저장된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>이 조합 저장하기</b>.</div>';
@@ -320,6 +320,16 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       return;
     }
     if (t.closest('[data-st-open-saved]') && savedRow) { await run(() => openInMap(savedRow.selection)); return; }
+    // 저장된 조합의 [랜덤] · [랜덤+생성](사용자 지시 2026-10-17). 묶음은 켜진 조합 중 하나(전부 꺼졌으면 아무거나).
+    const savedRandom = t.closest('[data-st-random-saved], [data-st-random-gen-saved]');
+    if (savedRandom && savedRow) {
+      const sel = savedRow.selections || [savedRow.selection];
+      const flags = Array.isArray(savedRow.enabled) && savedRow.enabled.length === sel.length ? savedRow.enabled : null;
+      const pool = flags && flags.some(Boolean) ? sel.filter((_, i) => flags[i]) : sel;
+      const pick = pool[Math.floor(Math.random() * pool.length)];
+      await run(() => randomFrom(pick, savedRandom.hasAttribute('data-st-random-gen-saved')));
+      return;
+    }
     // 스테이징 줄 펼치기 · 접기(단추를 누른 것이 아닐 때)
     const pick = t.closest('[data-st-pick]');
     if (pick && !t.closest('button')) { openRow = openRow === id ? '' : id; paintBody(); return; }

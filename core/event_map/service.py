@@ -84,6 +84,9 @@ PERSON_LABELS = {
 }
 
 
+REST_CAP = 600   # 단순 검색 모드 '검색 결과 외' 를 한 번에 보내는 수(갈래 [전체] 는 수천 개일 수 있다)
+
+
 class MapQueryError(Exception):
     """검증 실패. `code` 는 프론트가 분기하는 안정 문자열이다."""
 
@@ -636,9 +639,23 @@ class EventMapService:
                 "indexed": bound is not None, "unresolved": bound.unresolved if bound else None,
                 "d1": d1_rows}
 
+    def _rest_of(self, idx: EventMapIndex, allowed: np.ndarray, pool: np.ndarray | None) -> dict[str, Any]:
+        """단순 검색 모드의 '검색 결과 외'(사용자 지시 2026-10-17): 그 자리의 태그 중 이 조건(인원 · 등급)에서 후보로
+        안 나온 것 - 코퍼스에 흔한 순. 영구 제외 · 색상은 넣지 않는다(어디서도 안 보이는 태그다). 많으면 앞의 REST_CAP 개."""
+        rest = allowed.copy()
+        if pool is not None:
+            rest &= ~pool
+        rest &= ~idx.color_arr
+        block = self.permanent_block(idx)
+        if block is not None:
+            rest &= ~block.tags
+        tids = np.flatnonzero(rest)
+        order = tids[np.argsort(-idx.obs_arr[tids], kind="stable")][:REST_CAP]
+        return {"tags": [idx.by_id[int(t)] for t in order], "total": int(tids.size)}
+
     def tree_browse(self, *, d1: Any = "", d2: Any = "", d3: Any = "", ratings: Any = None,
                     persons: Any = None, limit: Any = DEFAULT_CANDIDATES, offset: Any = 0,
-                    per: Any = 5, flat: Any = 0) -> dict[str, Any]:
+                    per: Any = 5, flat: Any = 0, rest: Any = 0) -> dict[str, Any]:
         """핀 없이 지도의 한 자리에서 고른 인원 · 등급에 특징적인 태그.
 
         * 절(d2+d3) - 그 절 하나를 쪽 단위로(`offset` · `has_more`). 같은 셈에서 그 그룹의 절마다
@@ -647,7 +664,9 @@ class EventMapService:
         * 갈래(d1)  - 그룹마다 상위 `per` 개(`sections`).
         * 갈래 / 그룹 전체(d1 또는 d2 + `flat`) - 그 자리의 태그 전부를 한 줄로, 쪽 단위(나무의 [전체] -
           사용자 지시 2026-10-14). 후보마다 그 갈래 안의 경로 · 그룹이면 절마다 후보 수(`sections`).
+        * `rest` (절 · [전체], 첫 쪽만) - 그 자리의 태그 중 이 조건에서 안 나온 것(`rest = {tags, total}`) - 단순 검색 모드.
         """
+        want_rest = str(rest or "").strip().lower() in ("1", "true", "on", "yes")
         idx = self.index()
         tree = self.tree()
         bound = self._bound_tree(idx)
@@ -667,6 +686,8 @@ class EventMapService:
                                 block=self.permanent_block(idx))
             pool = result.pop("_pool", None)
             self._attach_page(result, off)
+            if want_rest and off == 0:
+                result["rest"] = self._rest_of(idx, allowed, pool)
             for c in result.get("candidates") or []:
                 tid = idx.by_name.get(c.get("tag"))
                 if tid is not None:
@@ -687,6 +708,8 @@ class EventMapService:
                                 block=self.permanent_block(idx))
             pool = result.pop("_pool", None)
             self._attach_page(result, off)
+            if want_rest and off == 0:
+                result["rest"] = self._rest_of(idx, bound.mask(slots), pool)
             siblings = tree.select(d2=d2)
             result.update({"ok": True, "mode": "section", "d2": d2, "d3": d3,
                            "path": tree.path_ko(slots[0]), "tags": bound.slot_size(slots[0]),

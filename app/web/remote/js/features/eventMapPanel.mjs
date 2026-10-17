@@ -528,7 +528,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     try {
       const where = treeAll ? { d1: treeSel.d1, flat: 1 } : treeSel.d3 ? { d2: treeSel.d2, d3: treeSel.d3 }
         : { d2: treeSel.d2, flat: 1 };
-      const body = await getJson('/api/event-map/tree/browse', { ...where, limit: CANDIDATE_LIMIT, ...treeFilterParams() });
+      const body = await getJson('/api/event-map/tree/browse', { ...where, limit: CANDIDATE_LIMIT, ...treeFilterParams(),
+        ...(simpleMode ? { rest: 1 } : {}) });
       if (mine !== seq) return;
       treeData = body;
     } catch (error) {
@@ -1241,7 +1242,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       return `<button type="button" class="emt-go" data-emt-go ${at} title="${esc(p.ko)} - ${what}로 가기">${esc(p.ko)}</button>`;
     };
     const shown = parts.map(link).join('<span class="emt-go-sep">›</span>');
-    return `<div class="em-row emt-row${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
+    return `<div class="em-row emt-row${simpleMode ? ' emt-hit' : ''}${i === active ? ' is-active' : ''}" data-em-row="${i}" data-em-pin="${esc(c.tag)}"
         data-em-est="${Number(est) || 0}" data-em-lift="${liftText}"${where ? ` data-em-path="${esc(where)}"` : ''} role="option">
       <span class="em-tag">${esc(c.tag)}</span>
       ${simpleMode ? `<span class="emt-quick"><button type="button" data-emt-copy="${esc(c.tag)}" title="이 태그를 클립보드로">복사</button><button type="button" data-emt-insert="${esc(c.tag)}" title="프롬프트 커서 자리에 ', 태그'">삽입</button></span>`
@@ -1349,7 +1350,21 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
         <small>${fmt(d.candidate_pool ?? cs.length)} / ${fmt(d.tags)}</small></div>`
       + (cs.length ? cs.map((c, i) => treeRow(c, i, path, flat)).join('')
         : `<div class="em-empty">이 인원·등급에 ${floorPhrase(d, '나온 태그가 없습니다.')}</div>`)
-      + moreHtml();
+      + moreHtml() + restHtml(d);
+  }
+  /** 단순 검색 모드의 '검색 결과 외'(사용자 지시 2026-10-17): 이 자리의 태그 중 고른 인원 · 등급에서 안 나온 것.
+   *  검색 결과를 다 내린 뒤에만(쪽이 더 남았으면 그 사이에 끼지 않게) · 한 칸 띄워 · 아주 약간 덜 밝게.
+   *  줄을 눌러도 꽂지 않는다(이 조건에서는 게시물이 없다) - [복사] · [삽입] 만. */
+  function restHtml(d) {
+    const rest = d?.rest;
+    if (!simpleMode || !rest || d.has_more || !rest.total) return '';
+    const more = rest.total - rest.tags.length;
+    return `<div class="emt-d3h emt-rest-h"><span>검색 결과 외</span><small title="이 인원·등급에서는 후보로 나오지 않은 태그 - 코퍼스에 흔한 순">${fmt(rest.total)}</small></div>`
+      + rest.tags.map(tag => `<div class="em-row emt-row emt-rest" title="이 인원·등급에서는 후보로 나오지 않았습니다">
+          <span class="em-tag">${esc(tag)}</span>
+          <span class="emt-quick"><button type="button" data-emt-copy="${esc(tag)}" title="이 태그를 클립보드로">복사</button><button type="button" data-emt-insert="${esc(tag)}" title="프롬프트 커서 자리에 ', 태그'">삽입</button></span>
+        </div>`).join('')
+      + (more > 0 ? `<div class="em-empty emt-rest-more">… 외 ${fmt(more)}개 (흔한 순으로 ${fmt(rest.tags.length)}개까지)</div>` : '');
   }
   /** 갈래 탭. 핀이 없으면 = 갈래 바꾸기, 핀이 있으면 = 후보 필터(갈래별 후보 수 · 0 이면 흐림). */
   function paintTreeTabs() {
@@ -1901,7 +1916,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       if (!event.target.matches('[data-emt-simple]')) return;
       simpleMode = event.target.checked;
       rememberView();
-      render(true);
+      // 핀 없는 3단 지도는 다시 받는다 - '검색 결과 외' 는 단순 검색 모드에서만 청한다.
+      if (isTree() && !pins.length && treeSel.d2 && !input.value.trim()) void loadTree();
+      else render(true);
       focusInput();
     });
     ttabsEl.addEventListener('click', event => {

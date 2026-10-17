@@ -1454,7 +1454,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261015-toggle1')
+import('./js/features/eventMapPanel.mjs?v=20261017-rest1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1487,7 +1487,7 @@ import('./js/features/eventMapPanel.mjs?v=20261015-toggle1')
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
 // S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
-import('./js/features/eventMapStaging.mjs?v=20261015-restart1')
+import('./js/features/eventMapStaging.mjs?v=20261017-savedrnd1')
   .then(({initEventMapStaging}) => {
     window.eventStaging = initEventMapStaging({
       showToast,

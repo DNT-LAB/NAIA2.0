@@ -29077,6 +29077,12 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
    [−](제외)는 칸을 차지하지 않고 마우스를 댈 때만 오른쪽 끝에 뜬다, 태그 이름은 잘리지 않고 줄을 바꾼다. 기존 화면의 줄은 그대로. */
 .emt-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 6px; padding-right: 8px; }
 .emt-row .em-tag { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+/* 단순 검색 모드(사용자 지시 2026-10-17): 검색 결과 = 약간 밝게 · 한 칸 띄운 '검색 결과 외' = 아주 약간 덜 밝게. */
+.emt-row.emt-hit .em-tag { color: #fbfaff; }
+.emt-d3h.emt-rest-h { margin-top: 12px; border-top: 1px solid var(--border-dim); color: var(--text-secondary); }
+.emt-row.emt-rest { cursor: default; }
+.emt-row.emt-rest .em-tag { color: #c6c4da; }
+.emt-rest-more { padding: 6px 10px; font-size: 10px; text-align: left; }
 .emt-row .em-lift { min-width: 32px; font-size: 10px; }
 .emt-row .em-obs { min-width: 44px; font-size: 9px; }
 .emt-row .em-row-x { position: absolute; right: 0; top: 1px; width: 18px; height: 18px; background: rgba(15,15,23,0.92); border-radius: 3px; }

@@ -12,8 +12,8 @@
 // 꺼져 있으면 아무것도 읽지 않는다.
 //
 // 두 단계로 채운다(사용자 지시 2026-10-15 "이미지가 없어도 랜덤 프롬프트시 1차 반영 · 2차는 생성 단계에 개봉하여 업데이트"):
-//   1차 - Random 이 오면(그림이 없어도) 그 응답의 debug_snapshot: 출처 · 원본 → 남은 수 · 카테고리별 제거 · 함의 · e621.
-//         와일드카드는 생성 때 펼쳐지므로 아직 없다.
+//   1차 - Random 이 오면(그림이 없어도) 그 응답의 debug_snapshot: 출처 · 원본 → 남은 수 · 카테고리별 제거 · 함의 · e621
+//         + Random 이 펼친 와일드카드(`wildcards` - `<와일드카드>` 는 Random 에서도 펼쳐진다, 사용자 제보 2026-10-17).
 //   2차 - 그 프롬프트로 만든 그림이 오면 그림의 기록(와일드카드 · 단계)을 더한다. 어느 Random 의 것인가는 서버가 이미 잇는다:
 //         Random 과 같은 글로 생성하면 그 Random 의 prompt_run_id 가 그림 메타에 실린다(runIdOf) - 글을 고쳐 생성했으면
 //         다른 id 라 1차 줄을 붙이지 않는다(그 그림의 것이 아니다).
@@ -196,10 +196,15 @@ export function createPeDebugOverlay({
   }
 
   function renderSnapshotOnly(snapshot) {
-    const rows = snapshotRows(snapshot);
+    // `<와일드카드>` 는 Random 에서도 펼쳐진다 - 서버가 1차에 그 기록을 싣는다(`debug_snapshot.wildcards` - 그림 메타와
+    // 같은 모양, 사용자 제보 2026-10-17). 2차(renderBody)에서는 그림의 것을 쓰므로 거기서는 이것을 그리지 않는다.
+    const wcRows = wildcardRows(snapshot && snapshot.wildcards);
+    const rows = [...snapshotRows(snapshot), ...wcRows];
     if (!rows.length) return '<div class="pe-dbg-dim">이 랜덤에는 PE 기록이 없습니다</div>';
-    // 와일드카드 · 단계는 생성 때 생긴다 - 비어 있는 까닭을 한 줄로 말한다.
-    rows.push(row('', '<span class="pe-dbg-dim">생성하면 와일드카드 · 단계가 더해집니다</span>'));
+    // 단계는 생성 때 생기고, 와일드카드는 생성 때 다시 굴리는 것이 있다(캐릭터 슬롯 등) - 그 사실을 한 줄로 말한다.
+    rows.push(row('', `<span class="pe-dbg-dim">${wcRows.length
+      ? '생성하면 단계가 더해지고 와일드카드는 그 그림의 것으로 바뀝니다'
+      : '생성하면 와일드카드 · 단계가 더해집니다'}</span>`));
     return rows.join('');
   }
 

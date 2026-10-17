@@ -83,6 +83,13 @@ class HeadlessRandomPromptResult:
             from core.headless_prompt_engineering_service import HeadlessPromptEngineeringService
 
             payload["debug_snapshot"] = HeadlessPromptEngineeringService._debug_snapshot_from_metadata(context_metadata)
+            # `<와일드카드>` 는 Random 에서도 펼쳐진다 - 디버그 1차에 실어 생성 전에도 보이게 한다(사용자 제보 2026-10-17).
+            # 생성하면 그림의 기록(같은 모양)이 이것을 대신한다 - 생성 때 다시 굴리는 캐릭터 슬롯은 거기서 바뀐다.
+            from core.headless_prompt_engineering_service import wildcard_trace_from_context
+
+            wildcards = wildcard_trace_from_context(self.context)
+            if wildcards:
+                payload["debug_snapshot"]["wildcards"] = wildcards
         return payload
 
 

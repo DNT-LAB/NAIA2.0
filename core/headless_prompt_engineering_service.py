@@ -37,6 +37,84 @@ ANIMA_MODE_DEFAULT_PRE_PROMPT = "newest, year2024, (best quality), highres, absu
 ANIMA_MODE_DEFAULT_POST_PROMPT = "(sketch, thin jaggy lines:0.42)"
 
 
+def wildcard_trace_from_context(ctx: Any) -> dict[str, Any]:
+    """프롬프트 컨텍스트에서 이번에 펼쳐진 와일드카드 - `{history: [{name, value, location?, slot?, slot_label?}],
+    state: [{name, current, total, dependent?, master?}]}`. 없으면 `{}`.
+
+    생성 추적(`HeadlessGenerationService._build_generation_trace` - 그림 메타의 `prompt_context.wildcards`)과
+    Random 응답의 PE 디버그 1차(`debug_snapshot.wildcards`)가 **함께 쓴다**. `<와일드카드>` 는 Random 의 파이프라인에서도
+    펼쳐지는데, 1차가 이것을 안 실어 디버그 창은 생성한 뒤에야 와일드카드를 보였다(사용자 제보 2026-10-17).
+
+    JSON-safe 만 담고 항목 수 · 길이를 자른다(매 PNG 청크에 실린다). 실패해도 raise 하지 않는다.
+    """
+    _MAX_ITEMS = 60
+    _MAX_LEN = 200
+    _cap = lambda s: (s[:_MAX_LEN] + "…") if len(s) > _MAX_LEN else s
+    if ctx is None:
+        return {}
+    try:
+        history: list[dict[str, Any]] = []
+        rolls = getattr(ctx, "wildcard_rolls", None)
+        if isinstance(rolls, list) and rolls:
+            # 위치 인식 롤(블록별 뷰/위치 스코핑 freeze). (location, key, slot) 단위로 마지막
+            # 값을 유지해 같은 키가 prefix·postfix 등 다른 블록에 있어도 따로 표시된다.
+            seen: dict = {}
+            for roll in rolls:
+                if not isinstance(roll, dict):
+                    continue
+                key = str(roll.get("key", ""))
+                if not key:
+                    continue
+                seen[(roll.get("location"), key, roll.get("slot"))] = roll
+            for (loc, key, slot), roll in seen.items():
+                entry = {"name": _cap(key), "value": _cap(str(roll.get("value", "")))}
+                if loc is not None:
+                    entry["location"] = str(loc)
+                if slot is not None:
+                    entry["slot"] = slot
+                slot_label = roll.get("slot_label")
+                if slot_label is not None:
+                    entry["slot_label"] = slot_label
+                history.append(entry)
+                if len(history) >= _MAX_ITEMS:
+                    break
+        else:
+            # 폴백: 위치 인식 롤이 없으면(구 경로/캐릭터 스냅샷 재사용) 키-only 히스토리.
+            wc_history = getattr(ctx, "wildcard_history", None)
+            if isinstance(wc_history, dict):
+                for name, values in wc_history.items():
+                    if not values:
+                        continue
+                    chosen = values[-1] if isinstance(values, (list, tuple)) else values
+                    history.append({"name": _cap(str(name)), "value": _cap(str(chosen))})
+                    if len(history) >= _MAX_ITEMS:
+                        break
+
+        state: list[dict[str, Any]] = []
+        wc_state = getattr(ctx, "wildcard_state", None)
+        if isinstance(wc_state, dict):
+            for name, info in wc_state.items():
+                if not isinstance(info, dict):
+                    continue
+                entry: dict[str, Any] = {
+                    "name": _cap(str(name)),
+                    "current": int(info.get("current", 0) or 0),
+                    "total": int(info.get("total", 0) or 0),
+                }
+                if "master_name" in info:
+                    entry["dependent"] = True
+                master = info.get("master_name")
+                if master and str(master) not in {"", "unknown"}:
+                    entry["master"] = _cap(str(master))
+                state.append(entry)
+                if len(state) >= _MAX_ITEMS:
+                    break
+
+        return {"history": history, "state": state} if (history or state) else {}
+    except Exception:
+        return {}
+
+
 class HeadlessPromptEngineeringService:
     def __init__(self, context: Any):
         self.context = context

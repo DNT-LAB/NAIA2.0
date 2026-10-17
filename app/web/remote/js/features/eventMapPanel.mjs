@@ -1346,7 +1346,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const path = (d.path || []).join(' › ');
     const flat = d.mode === 'branch_list' || d.mode === 'group_list';
     const title = flat ? `${(d.path || []).slice(-1)[0] || ''} 전체` : (d.path || [])[2] || treeSel.d3;
-    return `<div class="emt-d3h"><span>${esc(title)}</span>
+    // 단순 검색 모드: 검색 결과 머리 = 어두운 겨자색 · '검색 결과 외' 머리 = 연보라(왼쪽 나무의 고른 절과 같은 색) - 사용자 지시 2026-10-17
+    return `<div class="emt-d3h${simpleMode ? ' emt-hit-h' : ''}"><span>${esc(title)}</span>
         <small>${fmt(d.candidate_pool ?? cs.length)} / ${fmt(d.tags)}</small></div>`
       + (cs.length ? cs.map((c, i) => treeRow(c, i, path, flat)).join('')
         : `<div class="em-empty">이 인원·등급에 ${floorPhrase(d, '나온 태그가 없습니다.')}</div>`)

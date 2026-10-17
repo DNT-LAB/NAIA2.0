@@ -124,6 +124,7 @@ export function createArtistThumbController({
   let listRequestId = 0;
   let optionsTimer = null;
   let currentPage = 0;
+  let lastRemovedCard = null;   // [제외] 로 격자에서 지운 카드 {artist, card, next} - 바로 해제하면 그 자리에 되돌린다
   let totalPages = 1;
   let currentListTotal = 0;
   let currentListFilterName = '전체 목록';
@@ -928,6 +929,7 @@ export function createArtistThumbController({
 
   function renderGrid(items) {
     if (!gridEl) return;
+    lastRemovedCard = null;   // 격자를 새로 그렸다 - 지운 카드를 되돌릴 자리가 없다
     if (!items.length) {
       gridEl.innerHTML = '<div class="artist-thumb-empty">No matching artists.</div>';
       return;
@@ -1699,25 +1701,37 @@ export function createArtistThumbController({
     if (shouldRemoveFromGrid) {
       gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
         if (card.dataset.artist === artist) {
+          // 지운 카드를 기억한다 - 바로 [제외 해제] 하면 그 자리에 되돌린다(아래).
+          lastRemovedCard = {artist, card, next: card.nextElementSibling};
           card.remove();
           removedCount += 1;
         }
       });
+    } else if (lastRemovedCard?.artist === artist && gridEl
+        && ![...gridEl.querySelectorAll('.artist-thumb-card')].some(card => card.dataset.artist === artist)) {
+      // 방금 지운 카드를 되돌린다(실수로 누른 [제외] 를 바로 풀 때). 페이지를 다시 불러오지 않는다 -
+      // 랜덤 보기는 다시 부르면 목록이 새로 섞인다.
+      const {card, next} = lastRemovedCard;
+      if (next && next.parentNode === gridEl) gridEl.insertBefore(card, next);
+      else gridEl.appendChild(card);
+      removedCount -= 1;
     }
-    if (removedCount > 0) {
+    if (!shouldRemoveFromGrid && lastRemovedCard?.artist === artist) lastRemovedCard = null;
+    if (removedCount !== 0) {
       currentListTotal = Math.max(0, currentListTotal - removedCount);
       totalPages = Math.max(1, Math.ceil(currentListTotal / PAGE_SIZE));
       if (currentPage >= totalPages) currentPage = Math.max(0, totalPages - 1);
       updatePager();
       updateListStatus();
     }
-    if (shouldRemoveFromGrid && selected?.artist === artist) {
-      clearSelectedArtist();
-    } else {
-      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
-        if (card.dataset.artist === artist) card.classList.toggle('banned', banned);
-      });
-    }
+    // 고른 작가는 격자에서 빠져도 **고른 채로 둔다**(사용자 제보 2026-10-17) - 예전에는 선택을 비워 단추만
+    // '제외 해제' 로 남고 가리키는 작가가 없어, 실수로 누른 제외를 되돌릴 수 없었다. 다른 작가를 고르면 바뀐다.
+    gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+      if (card.dataset.artist === artist) {
+        card.classList.toggle('banned', banned);
+        if (selected?.artist === artist) card.classList.add('active');
+      }
+    });
     showToast?.(banned ? '제외 작가에 추가했습니다.' : '제외 작가에서 뺐습니다.', 'success');
   }
 

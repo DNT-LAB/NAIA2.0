@@ -29162,6 +29162,11 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .st-total span { color: var(--text-dim); }
 .st-pick:hover { background: rgba(255,255,255,0.03); }
 .st-pick.is-open { background: rgba(88,76,170,0.14); box-shadow: inset 2px 0 0 rgba(139,118,255,0.7); }
+/* 저장된 조합 줄도 누르면 펼친다(사용자 지시 2026-10-17) - 스테이징 줄과 같은 옷. 펼침 = 왼쪽 이름 · 분류, 오른쪽 맵 · 랜덤. */
+.st-saved-pick { cursor: pointer; }
+.st-saved-pick:hover { background: rgba(255,255,255,0.03); }
+.st-saved-pick.is-open { background: rgba(88,76,170,0.14); box-shadow: inset 2px 0 0 rgba(139,118,255,0.7); }
+.st-saved-acts .st-acts-gap { flex: 1 1 auto; }
 .st-pick .st-meta { margin-bottom: 0; }
 .st-acts-open { justify-content: flex-end; margin-top: 6px; }
 .st-line .st-meta { margin: 0; flex: 1 1 auto; min-width: 0; }

@@ -225,15 +225,19 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         const bundle = r.kind === 'bundle';
         const sel = r.selections || [r.selection];
         const inStage = sel.every(isStaged);   // 묶음은 전부 들어가 있어야 '스테이징됨'
-        return `<div class="st-row" data-st-id="${esc(r.id)}">
+        // 줄 = 분류 · 이름 · 칩 + [스테이징 +](지금 자리). 누르면 펼쳐져 나머지 단추가 아래 줄에(사용자 지시 2026-10-17 -
+        // 줄마다 단추 다섯이 정신없다 · 스테이징 탭과 같은 손버릇). 한 번에 한 줄만.
+        const opened = openRow === r.id;
+        return `<div class="st-row st-saved-pick${opened ? ' is-open' : ''}" data-st-id="${esc(r.id)}" data-st-pick aria-expanded="${opened}"
+            title="${opened ? '' : '눌러서 이름 · 분류 변경 · 맵에서 열기 · 랜덤'}">
           <div class="st-head"><span class="st-cat">${esc(r.category || '미분류')}</span>${bundle
             ? `<span class="st-chip st-bundle" title="조합 ${sel.length}개를 묶은 것 - 스테이징하면 전부 들어갑니다">묶음 ${sel.length}</span>` : ''}${renaming === r.id
             ? `<input class="st-rename" data-st-name maxlength="100" value="${esc(r.name)}" aria-label="새 이름 - Enter 저장 · Esc 취소">`
-            : `<span class="st-name">${esc(r.name)}</span><button type="button" class="st-pen" data-st-pen title="이름 바꾸기" aria-label="이름 바꾸기">✎</button>`}
-            <button type="button" class="st-catbtn" data-st-more aria-haspopup="menu" aria-expanded="${menuFor === r.id}" title="분류 옮기기 · 삭제">분류 변경</button></div>
+            : `<span class="st-name">${esc(r.name)}</span>`}</div>
           ${!bundle && r.name !== r.selection.pins.join(', ') ? `<div class="st-pins">${esc(r.selection.pins.join(', '))}</div>` : ''}
           <div class="st-line"><div class="st-meta">${bundle ? `${esc(sel.slice(0, 3).map(s => s.pins.join(', ')).join(' / '))}${sel.length > 3 ? ' …' : ''}` : metaHtml(r.selection)}</div>
-            <div class="st-acts"><button type="button" class="${inStage ? 'is-done' : 'is-primary'}" data-st-stage-saved ${inStage ? 'disabled title="이미 스테이징에 있는 조합입니다"' : ''}>${inStage ? '✓ 스테이징됨' : '스테이징 +'}</button>${bundle ? '' : '<button type="button" data-st-open-saved>맵에서 열기</button>'}<button type="button" data-st-random-saved title="${bundle ? '묶음의 켜진 조합 하나에서 ' : ''}실제 게시물 하나를 프롬프트로">랜덤</button><button type="button" data-st-random-gen-saved title="랜덤 뒤 바로 생성">랜덤+생성</button></div></div>
+            <div class="st-acts"><button type="button" class="${inStage ? 'is-done' : 'is-primary'}" data-st-stage-saved ${inStage ? 'disabled title="이미 스테이징에 있는 조합입니다"' : ''}>${inStage ? '✓ 스테이징됨' : '스테이징 +'}</button></div></div>
+          ${opened ? `<div class="st-acts st-acts-open st-saved-acts"><button type="button" data-st-pen title="이름 바꾸기">✎ 이름</button><button type="button" data-st-more aria-haspopup="menu" aria-expanded="${menuFor === r.id}" title="분류 옮기기 · 삭제">분류 변경</button><span class="st-acts-gap"></span>${bundle ? '' : '<button type="button" data-st-open-saved>맵에서 열기</button>'}<button type="button" data-st-random-saved title="${bundle ? '묶음의 켜진 조합 하나에서 ' : ''}실제 게시물 하나를 프롬프트로">랜덤</button><button type="button" data-st-random-gen-saved title="랜덤 뒤 바로 생성">랜덤+생성</button></div>` : ''}
         </div>`;
       }).join('') : saved.length ? '<div class="st-empty">맞는 조합이 없습니다.</div>'
       : '<div class="st-empty">저장된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>이 조합 저장하기</b>.</div>';
@@ -332,7 +336,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     // 스테이징 줄 펼치기 · 접기(단추를 누른 것이 아닐 때)
     const pick = t.closest('[data-st-pick]');
-    if (pick && !t.closest('button')) { openRow = openRow === id ? '' : id; paintBody(); return; }
+    if (pick && !t.closest('button, input')) {
+      openRow = openRow === id ? '' : id;
+      if (tab === 'saved') { closeMenu(); paintSavedList(); } else paintBody();
+      return;
+    }
     if (t.closest('[data-st-pen]') && savedRow) {
       closeMenu();
       renaming = id; paintBody();

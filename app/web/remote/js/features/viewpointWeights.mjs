@@ -15,10 +15,14 @@
 //   v9(사용자 지시 2026-10-17): 부감(위쪽 high-angle · bird's-eye · from above)만 v7 값으로 되돌린다(최대 2).
 //   v10(사용자 지시 2026-10-17): 'from side' 도 v7 값으로 - 7회차에서 옆(90)이 진짜 옆얼굴 0/2(몸만 돌고 얼굴은 정면).
 //   v11(사용자 제안 2026-10-17): 'side view' 를 옆 몫 그대로 덧붙인다 - 9회차에서 옆(90) 옆얼굴 1/2 -> 2/2.
+//   v12(사용자 지시 2026-10-17): 후면 묶음 · looking away · looking at viewer 억제가 덜 빨리 약해진다(45 까지 그대로, 65 에서 2/3).
+//   10회차에서 뒤 3/4(65)가 앞 3/4 로 뒤집혔다(1/2) - 후면 0.5 가 from side 0.9 · 3/4 0.55 에 졌다.
+//   v13(사용자 지시 2026-10-17): v12 는 뒤 45 를 순수 뒷모습으로 과보정(0/2) - 후면 몫을 0~15 = 1, 15~45 에서 2/3 로,
+//   45~70 = 2/3 평평, 70~90 에서 0 으로. 후면 묶음 1.5 -> 1.0 이 뒤 3/4 구간 전체에 걸린다.
 //   5회차에서 절반 값(+45 = 0.5 + 0.25)은 전면 부감 4장 모두 약했다 - 모델이 부감을 문턱 넘는 스위치로 받는다(3차).
 // 좌우(어느 쪽을 보나)는 모델이 시드로 정한다 - 태그는 |yaw| 만 본다(대칭 처리, 사용자 결정 2026-10-16).
 
-export const VIEWPOINT_VERSION = 'viewpoint-v11';
+export const VIEWPOINT_VERSION = 'viewpoint-v13';
 export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.2, maxWeight: 1.5});
 
 // 후면 묶음 - 사용자가 실제로 돌려 본 예(2026-10-17)의 가중치. 절반 규칙의 예외다.
@@ -91,9 +95,12 @@ export function convertViewpoint(input) {
   if (hemisphere === 'front') {
     add('X', 'from behind', -0.65 * facing * Math.cos(rad(pitch)));
   } else {
-    add('X', REAR_TAG, REAR_WEIGHT * facing);
-    add('X', 'looking away', facing);
-    add('X', 'looking at viewer', REAR_LOOK_AT_VIEWER * facing);
+    // v13: 뒷모습 띠(15)까지 1, 45 까지 2/3 로 내려 뒤 3/4 구간(45~70)은 2/3 평평, 70 -> 90 에서 0.
+    //      옆 · 3/4 태그에 지지 않으면서(v11 의 65 가 앞으로 뒤집힘) 3/4 를 누르지도 않게(v12 의 45 가 순수 뒷모습).
+    const rearFacing = ay <= 15 ? 1 : ay <= 45 ? 1 - ((ay - 15) / 30) / 3 : ay <= 70 ? 2 / 3 : (2 / 3) * (90 - ay) / 20;
+    add('X', REAR_TAG, REAR_WEIGHT * rearFacing);
+    add('X', 'looking away', rearFacing);
+    add('X', 'looking at viewer', REAR_LOOK_AT_VIEWER * rearFacing);
   }
   add('X', 'three-quarter view', quarter);
   add('X', 'from side', V7_GAIN * side, V7_MAX);

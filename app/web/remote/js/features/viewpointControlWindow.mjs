@@ -22,7 +22,7 @@ import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
   LIMITS, VIEW_EXTRAS, azimuthToViewpoint, convertViewpoint, formatViewpointTags, normalizeExtras, normalizeViewpoint,
   viewpointToAzimuth,
-} from './viewpointWeights.mjs?v=20261017-vpw5';
+} from './viewpointWeights.mjs?v=20261017-vpw7';
 import {GAZE_GROUPS, gazeLabel, gazeTags, normalizeGaze} from './viewpointGaze.mjs?v=20261017-copy1';
 
 const STYLE_ID = 'vpc-style';

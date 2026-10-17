@@ -152,7 +152,47 @@ export function createPromptEngineeringPanel({
   setOllamaAutoBoost = () => {},
   // Result 우상단 PE 디버그 오버레이가 켜져 있나 - [디버그] 단추의 눌림 표시(3단계).
   isDebugOverlayOn = () => false,
+  // (textarea, overlay) -> Promise<handle|null>. Prefix · Postfix 를 메인 프롬프트의 하이라이터로 칠한다(사용자 지시
+  // 2026-10-17 - PE 색 규칙: 단계 없는 흰색 · e621 겨자색 · 마이너스 가중치 회색조 · Quick Filter 강조 없음).
+  attachPromptHighlight = null,
 }) {
+  // 칠하고 있는 칸들. 본문은 렌더마다 innerHTML 로 새로 만들어지므로 그때마다 거두고 새로 붙인다.
+  let highlightHandles = [];
+  let highlightSeq = 0;
+
+  function detachHighlights() {
+    highlightSeq += 1;                       // 아직 붙는 중인 것도 무효 - 늦게 오면 바로 거둔다
+    highlightHandles.forEach(handle => { try { handle.detach(); } catch (_) { /* 이미 없다 */ } });
+    highlightHandles = [];
+  }
+
+  /** Prefix · Postfix 칸에 색칠 층을 붙인다. 랜덤 프리셋의 읽기 전용 칸은 맨 글자로 둔다(점선 · 흐린 글자가
+   *  '고칠 수 없다' 를 말한다 - 색을 입히면 고칠 수 있는 칸처럼 보인다). */
+  function attachHighlights() {
+    detachHighlights();
+    if (typeof attachPromptHighlight !== 'function') return;
+    const mine = highlightSeq;
+    ['modPrePrompt', 'modPostPrompt'].forEach(id => {
+      const textarea = document.getElementById(id);
+      const overlay = textarea?.parentElement?.querySelector('.pe-hl');
+      if (!textarea || !overlay || textarea.readOnly) return;
+      Promise.resolve(attachPromptHighlight(textarea, overlay))
+        .then(handle => {
+          if (!handle) return;
+          if (mine !== highlightSeq || !textarea.isConnected) { handle.detach(); return; }
+          highlightHandles.push(handle);
+          // 하이라이터는 칸에 손을 걸지 않는다(메인 프롬프트는 app.js 가 건다) - 여기서 건다. 칸은 렌더마다 새것이라 풀 필요가 없다.
+          textarea.addEventListener('input', () => handle.update());
+          textarea.addEventListener('scroll', () => handle.syncScroll());
+          textarea.addEventListener('focus', () => handle.applyState());
+          textarea.addEventListener('blur', () => handle.applyState());
+          handle.applyState();
+          handle.update();
+        })
+        .catch(() => { /* 색이 없을 뿐이다 */ });
+    });
+  }
+
   // Readiness gating state for the "Auto Boost" checkbox. We poll /api/boost-v2/status
   // while the PE panel is mounted and reflect ready/not-ready onto the checkbox
   // (enabled vs disabled) in-place, without a full re-render.
@@ -603,11 +643,13 @@ export function createPromptEngineeringPanel({
     <div class="pe-prompt-stack">
       <div class="pe-prompt-field pe-prompt-field--tall">
         <div class="mod-section-label has-actions"><span>Prefix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea>
+        <div class="pe-hl-box"><div class="pe-hl" aria-hidden="true"></div>
+        <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea></div>
       </div>
       <div class="pe-prompt-field pe-prompt-field--tall">
         <div class="mod-section-label has-actions"><span>Postfix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_POSTFIX_GUIDE)}">ⓘ 가이드</button></span></div>
-        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea>
+        <div class="pe-hl-box"><div class="pe-hl" aria-hidden="true"></div>
+        <textarea class="mod-textarea pe-textarea" id="modPostPrompt" data-preset="${escHtml(m.preset || '')}" placeholder="postfix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','post_prompt',this.value,this.dataset.preset)">${escHtml(m.post_prompt)}</textarea></div>
       </div>
       <div class="pe-prompt-field">
         <div class="mod-section-label has-actions"><span>Auto-Hide (Filter)</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_AUTOHIDE_GUIDE)}">ⓘ 가이드</button></span></div>
@@ -633,6 +675,7 @@ export function createPromptEngineeringPanel({
     applyPresetFilter();
     restoreTextareaHeights(textareaHeights);
     restoreFocus(focusSnap);
+    attachHighlights();
     // Reflect last-known readiness immediately on the freshly rendered checkbox,
     // then (re)start the lightweight status poll while the panel is mounted.
     applyOllamaBoostGating();
@@ -643,6 +686,7 @@ export function createPromptEngineeringPanel({
     render,
     // PE 창을 닫을 때 부른다 - 창의 본문은 닫혀도 문서에 남아(isConnected) 폴링이 스스로 멈추지 않는다.
     // 다음에 열면 render 가 다시 시작한다.
-    stopPolling: stopOllamaPolling,
+    // 색칠 층도 함께 거둔다 - 본문은 다른 모듈이 갈아 끼울 수 있고, 남은 하이라이터는 문서 전역 이름을 쥐고 있다.
+    stopPolling: () => { stopOllamaPolling(); detachHighlights(); },
   };
 }

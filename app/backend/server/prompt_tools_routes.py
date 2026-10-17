@@ -164,6 +164,9 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
     character_tags: set[str] = set()
     copyright_tags: set[str] = set()
     known_tags: set[str] = set()
+    # e621 태그(사전의 `_cat: e621`) - PE 의 Prefix · Postfix 가 자동완성의 겨자색으로 칠한다(사용자 지시 2026-10-17).
+    # 메인 프롬프트는 예전처럼 '아는 태그' 로 칠한다 - 화면(promptHighlighter)이 이 목록을 그 단계로 읽는다.
+    e621_tags: set[str] = set()
     for tag_lower, info in raw_tags.items():
         if not isinstance(info, dict):
             continue
@@ -177,6 +180,8 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
             character_tags.add(tag)
         elif cat == "copyright":
             copyright_tags.add(tag)
+        elif cat == "e621":
+            e621_tags.add(tag)
         else:
             known_tags.add(tag)
 
@@ -186,6 +191,8 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
     known_tags.difference_update(artist_tags)
     known_tags.difference_update(character_tags)
     known_tags.difference_update(copyright_tags)
+    # 다른 목록(표정 · 사물 · 메타 · 작가 …)에도 든 이름은 그쪽이 이긴다 - e621 은 **거기에만** 있는 것.
+    e621_tags.difference_update(known_tags, artist_tags, character_tags, copyright_tags)
 
     payload = {
         "version": "runtime-loaded",
@@ -195,6 +202,7 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
         "artistTags": sorted(artist_tags),
         "characterTags": sorted(character_tags),
         "copyrightTags": sorted(copyright_tags),
+        "e621Tags": sorted(e621_tags),
         "stats": {
             "high": len(high_value),
             "mid": len(mid_value),
@@ -202,6 +210,7 @@ def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
             "artists": len(artist_tags),
             "characters": len(character_tags),
             "copyrights": len(copyright_tags),
+            "e621": len(e621_tags),
         },
     }
     context._prompt_highlight_index_cache = payload

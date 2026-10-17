@@ -2405,7 +2405,7 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20260919-multi')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20261017-pehl1')
   .then(({createPromptHighlighter}) => {
     createPromptHighlighterFn = createPromptHighlighter;
     promptHighlighter = createPromptHighlighter({
@@ -7375,7 +7375,8 @@ function setNaiHighlightMode(mode) {
  *     겹치면 나중 것이 앞의 색을 통째로 덮는다.
  *  @returns {Promise<object|null>} 강조 손잡이 + `detach()`
  */
-async function attachPromptHighlight(textarea, overlay) {
+// `palette` = 'main'(메인 프롬프트 색 규칙) | 'pe'(PE 의 Prefix · Postfix - promptHighlighter.mjs 의 palette 참조).
+async function attachPromptHighlight(textarea, overlay, {palette = 'main'} = {}) {
   await promptHighlighterReady;
   if (!createPromptHighlighterFn || !textarea || !overlay) return null;
   extraPromptHighlightSeq += 1;
@@ -7386,6 +7387,7 @@ async function attachPromptHighlight(textarea, overlay) {
     escHtml,
     namePrefix: `naia-phx${extraPromptHighlightSeq}-`,
     getTagFilterState: tag => (quickFilter ? quickFilter.findTag(tag) : null),
+    palette,
   });
   extraPromptHighlighters.add(instance);
   instance.setMode(currentMode || modeSelect.value || 'NAI');
@@ -11591,7 +11593,7 @@ const promptEngineeringWindowReady = peUsesWindow
       console.error('Failed to initialize prompt engineering window', error);
     })
   : Promise.resolve();
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261015-pedbg1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261017-pehl1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -11603,6 +11605,8 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
         if (promptEngineeringActions) promptEngineeringActions.setOllamaAutoBoost(checked);
       },
       isDebugOverlayOn: () => Boolean(peDebugOverlay && peDebugOverlay.isOn()),
+      // Prefix · Postfix 를 메인 프롬프트의 하이라이터로 칠한다 - PE 색 규칙(사용자 지시 2026-10-17).
+      attachPromptHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
     });
   })
   .catch(error => {
@@ -14999,7 +15003,8 @@ import('./js/features/mainPeQuick.mjs?v=20261010-review8')
       },
       getPreset: () => String(slashPeState().preset || ''),
       requestState: () => { try { requestModuleState('prompt_engineering'); } catch (_) {} },
-      attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay),
+      // Prefix · Postfix 칸이다 - PE 창과 같은 색 규칙(같은 글을 두 화면이 다르게 칠하면 안 된다).
+      attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
       bindAssist: (textarea, options) => bindTagAssist(textarea, options),
     });
   })

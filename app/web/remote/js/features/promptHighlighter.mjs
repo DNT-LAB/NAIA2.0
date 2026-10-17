@@ -70,6 +70,7 @@ export function createPromptTagClassifier(index = {}) {
   let artistTags = makeLookupSet(index.artistTags);
   let characterTags = makeLookupSet(index.characterTags);
   let copyrightTags = makeLookupSet(index.copyrightTags);
+  let e621Tags = makeLookupSet(index.e621Tags);
 
   function setIndex(nextIndex = {}) {
     highValueTags = makeLookupSet(nextIndex.highValueTags);
@@ -78,6 +79,7 @@ export function createPromptTagClassifier(index = {}) {
     artistTags = makeLookupSet(nextIndex.artistTags);
     characterTags = makeLookupSet(nextIndex.characterTags);
     copyrightTags = makeLookupSet(nextIndex.copyrightTags);
+    e621Tags = makeLookupSet(nextIndex.e621Tags);
   }
 
   function classify(raw) {
@@ -106,6 +108,10 @@ export function createPromptTagClassifier(index = {}) {
     }
     if (knownTags.has(tag)) {
       return {kind: 'low', className: 'prompt-token-low', tag};
+    }
+    // e621 은 색인에 따로 온다(2026-10-17). 메인 프롬프트에서는 예전처럼 '아는 태그' 단계다 - `e621` 표식은 PE 색 규칙만 읽는다.
+    if (e621Tags.has(tag)) {
+      return {kind: 'low', className: 'prompt-token-low', tag, e621: true};
     }
     return {kind: 'unknown', className: 'prompt-token-unknown', tag};
   }
@@ -157,6 +163,9 @@ function matchPresetPromptToken(text, index) {
   return text.substring(index, end);
 }
 
+// PE 색 규칙에서 '일반 태그' 로 모으는 분류(메인의 밝기 단계). 작가 · 캐릭터 · 작품 · 주석은 제 색을 지킨다.
+const PE_FLAT_KINDS = new Set(['high', 'mid', 'low', 'unknown']);
+
 export function createPromptHighlighter({
   document, promptEdit, escHtml, getTagFilterState = null,
   // 오버레이를 직접 줄 수 있다. 안 주면 예전대로 메인 프롬프트의 것을 찾는다.
@@ -165,7 +174,12 @@ export function createPromptHighlighter({
   //    문서 전역이라, 같은 이름을 쓰면 나중에 칠한 쪽이 앞의 것을 통째로 덮어
   //    먼저 만든 칸의 색이 조용히 사라진다.
   namePrefix = 'naia-ph',
+  // 색 규칙. 'main' = 메인 프롬프트(밝기 단계 · Quick Filter 강조). 'pe' = PE 의 Prefix · Postfix(사용자 지시 2026-10-17):
+  //   일반 태그는 단계 없이 흰색 한 밝기(`prompt-token-flat`) · e621 은 자동완성의 겨자색(`prompt-token-e621`) ·
+  //   마이너스 가중치 구간은 회색조 흰색(`prompt-token-negw`) · Quick Filter 강조는 붙이지 않는다.
+  palette = 'main',
 }) {
+  const pe = palette === 'pe';
   const highlight = highlightEl || document.getElementById('promptHighlight');
   const wrap = highlight ? highlight.parentElement : null;
   const tagClassifier = createPromptTagClassifier();
@@ -213,7 +227,7 @@ export function createPromptHighlighter({
   // (`paintWithHighlights`). 그래서 클래스만 붙이면 Custom Highlight API 경로와
   // span 폴백 경로가 함께 따라온다 - 두 곳을 따로 손댈 필요가 없다.
   function tagFilterClassFor(core) {
-    if (typeof getTagFilterState !== 'function') return '';
+    if (pe || typeof getTagFilterState !== 'function') return '';
     let found = null;
     try { found = getTagFilterState(core); } catch (_error) { return ''; }
     // ⚠️ **Exclude 목록은 칠하지 않는다**(사용자 지시 2026-10-17). 처음(08-31)엔 포함 · 제외를 대칭으로 칠했는데, 제외 태그는
@@ -223,6 +237,13 @@ export function createPromptHighlighter({
     return found.exact
       ? 'prompt-token-tagfilter prompt-token-tagfilter-exact'
       : 'prompt-token-tagfilter';
+  }
+
+  /** PE 색 규칙이면 밝기 단계(high · mid · low · unknown)를 한 밝기로 모으고 e621 을 가른다. 메인은 분류색 그대로. */
+  function peClassName(classification) {
+    if (!pe) return classification.className;
+    if (classification.e621) return 'prompt-token-e621';
+    return PE_FLAT_KINDS.has(classification.kind) ? 'prompt-token-flat' : classification.className;
   }
 
   // 시퀀스 구문(:begin / :seqN / :end)의 **앞머리만** 칠한다 - Dev0714 `PromptHighlighter` 와 같은
@@ -275,7 +296,7 @@ export function createPromptHighlighter({
     }
     const classification = tagClassifier.classify(core);
     const filterClass = tagFilterClassFor(core);
-    const className = [classification.className, filterClass].filter(Boolean).join(' ');
+    const className = [peClassName(classification), filterClass].filter(Boolean).join(' ');
     if (!className) return escHtml(segment);
     return escHtml(leading) +
       `<span class="${className}">${escHtml(core)}</span>` +
@@ -330,7 +351,10 @@ export function createPromptHighlighter({
       const weight = parseFloat(match[1]);
       const cls = weight < 1.0 ? 'nai-wt-blue' : weight > 1.0 ? 'nai-wt-red' : '';
       const mark = '<span class="nai-wt-mark">::</span>';
-      const inner = formatTaggedText(match[3]);
+      // PE 색 규칙: 마이너스 가중치 구간은 태그마다 분류하지 않고 통째로 회색조 흰색 - '빼는 태그' 로 읽히게(작가여도 같다).
+      const inner = pe && weight < 0 && match[3]
+        ? `<span class="prompt-token-negw">${escHtml(match[3])}</span>`
+        : formatTaggedText(match[3]);
       if (cls) {
         html += `<span class="${cls}"><span class="nai-wt-open">${escHtml(match[1])}</span>${mark}${inner}${mark}</span>`;
       } else {

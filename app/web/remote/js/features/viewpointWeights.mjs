@@ -17,6 +17,21 @@ export const VIEWPOINT_TAGS = Object.freeze([
   'close-up', 'wide shot', 'object focus',
 ]);
 
+// 구도 · 시점 탭의 추가 옵션 - 3D 시점과 상관없이 켜고 끄는 태그(사용자 지시 2026-10-17). 출처 = 옛 Interactive 구도 블록의
+// '스페셜 태그' 다섯 + POV 체크(C:/VNR/NAIA2.0/ui/interactive/composition_block.py). 이름은 Danbooru 그대로(건수 2026-04):
+// dutch angle 15만 · perspective 9천 · foreshortening 6.4만 · upside-down 3.2만 · sideways 5천 · pov 17.7만.
+// 옛 POV 체크는 'pov, first person view' 를 냈다 - first person view 는 Danbooru 에 없어 pov 만 둔다.
+export const VIEW_EXTRAS = Object.freeze([
+  ['dutch angle', '기울임'], ['perspective', '원근감'], ['foreshortening', '역동감'],
+  ['upside-down', '뒤집기'], ['sideways', '90도'], ['pov', '1인칭(POV)'],
+]);
+
+/** 켠 추가 옵션 - 알려진 것만, VIEW_EXTRAS 차례로. */
+export function normalizeExtras(list) {
+  const on = new Set(Array.isArray(list) ? list.map(String) : []);
+  return VIEW_EXTRAS.map(([tag]) => tag).filter(tag => on.has(tag));
+}
+
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const rad = deg => (deg * Math.PI) / 180;
 

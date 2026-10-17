@@ -13,24 +13,31 @@
 //     지금 탭의 것만 다룬다. 시선 탭에는 3D 장면이 없다 - 판의 그림은 늘 정면을 봐서 시선을 보여 줄 수 없다(사용자 2026-10-17).
 //   - 메인 프롬프트에 넣는 단추는 없다 - 글 칸을 드래그해 복사하거나 [복사](사용자 지시 2026-10-17). 넣기는 '전에 넣은 태그' 를
 //     프롬프트에서 찾아 바꿔야 했는데, 가중치 없는 시선 태그는 사용자가 쓴 것과 끝내 못 가려(Codex 리뷰 6차까지) 걷어 냈다.
+//   - [즉시 생성] = 지금 프롬프트 뒤에 이 글을 붙인 것으로 **한 장만** 생성한다(사용자 지시 2026-10-17). 프롬프트 칸은 그대로다 -
+//     app.js 가 메인 생성과 같은 길(generateWithInteractiveSnapshot)로 보낸다.
+//   - 구도 · 시점 탭의 추가 옵션(기울임 · 원근감 …)은 3D 와 상관없이 켜고 끄는 태그다(VIEW_EXTRAS).
 // 투영 미리보기는 넣지 않는다(사용자 결정). 껍데기는 다른 떠 있는 창과 같다(em-overlay em-window).
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
-  LIMITS, azimuthToViewpoint, convertViewpoint, formatViewpointTags, normalizeViewpoint, viewpointToAzimuth,
-} from './viewpointWeights.mjs?v=20261017-v7';
+  LIMITS, VIEW_EXTRAS, azimuthToViewpoint, convertViewpoint, formatViewpointTags, normalizeExtras, normalizeViewpoint,
+  viewpointToAzimuth,
+} from './viewpointWeights.mjs?v=20261017-extras1';
 import {GAZE_GROUPS, gazeLabel, gazeTags, normalizeGaze} from './viewpointGaze.mjs?v=20261017-copy1';
 
 const STYLE_ID = 'vpc-style';
 const STATE_KEY = 'naia.viewpoint.state';
 const GAZE_KEY = 'naia.viewpoint.gaze';
 const TAB_KEY = 'naia.viewpoint.tab';
+const EXTRAS_KEY = 'naia.viewpoint.extras';
 const GUIDE = '구도 / 시점 제어 - 화면은 관찰점(C)에서 본 장면입니다. 시점을 고르면 구도 가중치 태그를 만듭니다.\n\n'
   + '끌기 - 카메라가 인물 둘레를 돕니다(좌우 = 방위, 정면 -> 옆 -> 뒤로 이어짐 / 위아래 = 상하).\n'
   + '휠 · 거리 슬라이더 - 가까이 / 멀리. 방향키도 됩니다.\n'
   + '판의 L 표식 = 그녀의 왼쪽. 오른쪽 위 나침반 = 위에서 본 자리(아래가 정면).\n\n'
   + '[시선] 탭 - 방향 · 대상 · 신체에서 하나씩 고릅니다. 다시 누르면 풉니다.\n'
   + '시선 탭은 구도와 따로입니다 - 글 칸 · [복사] 는 지금 탭의 것만 다룹니다.\n\n'
+  + '추가 옵션(기울임 · 원근감 · 역동감 · 뒤집기 · 90도 · 1인칭) - 3D 와 상관없이 켜고 끕니다.\n\n'
+  + '[즉시 생성] - 지금 프롬프트 뒤에 이 글을 붙여 한 장만 생성합니다. 프롬프트 칸은 바뀌지 않습니다.\n'
   + '글 칸을 드래그해 복사하거나 [복사] 를 눌러 메인 · 캐릭터 프롬프트에 붙여 넣습니다.\n\n'
   + '한계(실험): 좌우 방향은 시드가 정합니다(대칭). 원경과 바로 위 시점은 태그만으로는 약합니다.';
 // [이름, {az?, pitch?, radius?}] - 비운 값은 그대로 둔다.
@@ -73,12 +80,15 @@ export function createViewpointControlWindow({
   storage = (typeof localStorage !== 'undefined' ? localStorage : null),
   escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   onVisibilityChange = () => {},
+  // 지금 프롬프트 뒤에 이 글을 붙여 한 장 생성한다(app.js). 생성을 보냈으면 true. 없으면 단추를 숨긴다.
+  instantGenerate = null,
 }) {
   ensureStyle(doc);
   let view = readState();          // {hemisphere, yaw, pitch, radius} - 수식의 입력
   let az = viewpointToAzimuth(view);  // 방위 -180 ~ 180(0 = 정면, +90 = 그녀의 왼쪽, ±180 = 뒤) - 끄는 동안의 연속값
   let gaze = readGaze();           // {dir, tgt, body}
   let tab = readTab();             // 'view' | 'gaze'
+  let extras = readExtras();       // 켠 추가 옵션 태그(VIEW_EXTRAS 차례)
 
   const panel = createDraggablePanel({
     document: doc, window: win, id: 'viewpointControlWindow', title: '구도 / 시점 제어',
@@ -113,6 +123,7 @@ export function createViewpointControlWindow({
           <div class="vpc-head"><span class="vpc-hemi-badge" data-vpc-hemi></span><span class="vpc-summary"></span></div>
           <label class="vpc-radius-row"><span>거리</span>
             <input type="range" class="vpc-radius" data-vpc-range="radius" min="${LIMITS.minRadius}" max="${LIMITS.maxRadius}" step="0.1" aria-label="거리"></label>
+          <div class="vpc-extras" role="group" aria-label="추가 옵션"><span class="vpc-extras-head">추가</span>${VIEW_EXTRAS.map(([tag, label]) => `<button type="button" class="vpc-gaze-chip" data-vpc-extra="${escHtml(tag)}" title="${escHtml(tag)}">${escHtml(label)}</button>`).join('')}</div>
         </div>
         <div class="vpc-page" data-vpc-page="gaze" hidden>
           <div class="vpc-head"><span class="vpc-gaze-badge">시선</span><span class="vpc-gaze-summary"></span>
@@ -124,6 +135,7 @@ export function createViewpointControlWindow({
         </div>
         <textarea class="vpc-text" rows="3" readonly spellcheck="false" aria-label="복사할 시점 태그"></textarea>
         <div class="vpc-actions">
+          <button type="button" class="vpc-instant" data-vpc-instant title="지금 프롬프트 뒤에 이 글을 붙여 한 장만 생성합니다(프롬프트 칸은 그대로)"${instantGenerate ? '' : ' hidden'}>즉시 생성</button>
           <button type="button" class="vpc-copy" data-vpc-copy>복사</button>
           <span class="vpc-status" role="status" aria-live="polite"></span>
         </div>
@@ -146,6 +158,14 @@ export function createViewpointControlWindow({
   }
   function readGaze() {
     try { return normalizeGaze(JSON.parse(storage?.getItem(GAZE_KEY) || '{}')); } catch { return normalizeGaze({}); }
+  }
+  function readExtras() {
+    try { return normalizeExtras(JSON.parse(storage?.getItem(EXTRAS_KEY) || '[]')); } catch { return []; }
+  }
+  function toggleExtra(tag) {
+    extras = normalizeExtras(extras.includes(tag) ? extras.filter(t => t !== tag) : [...extras, tag]);
+    try { storage?.setItem(EXTRAS_KEY, JSON.stringify(extras)); } catch { /* 이번 실행에만 산다 */ }
+    render();
   }
   function readTab() {
     try { return storage?.getItem(TAB_KEY) === 'gaze' ? 'gaze' : 'view'; } catch { return 'view'; }
@@ -174,7 +194,7 @@ export function createViewpointControlWindow({
 
   function result() {
     const r = convertViewpoint(view);
-    return {...r, text: formatViewpointTags(r.tags, getMode())};
+    return {...r, text: [formatViewpointTags(r.tags, getMode()), ...extras].filter(Boolean).join(', ')};
   }
   /** 지금 탭의 넣을 글. */
   function currentText() {
@@ -195,6 +215,11 @@ export function createViewpointControlWindow({
     // X / Y / Z 숫자 줄과 가중치 칩은 뺐다(사용자 지시 2026-10-17) - 요약 한 줄 + 넣을 글로 충분하다.
     const range = $('[data-vpc-range="radius"]');
     if (range && Number(range.value) !== view.radius) range.value = String(view.radius);
+    panel.body.querySelectorAll('[data-vpc-extra]').forEach(b => {
+      const on = extras.includes(b.dataset.vpcExtra);
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
     panel.body.querySelectorAll('[data-vpc-tab]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.vpcTab === tab)));
     panel.body.querySelectorAll('[data-vpc-page]').forEach(page => { page.hidden = page.dataset.vpcPage !== tab; });
     panel.body.querySelectorAll('[data-vpc-only]').forEach(el => { el.hidden = el.dataset.vpcOnly !== tab; });
@@ -418,6 +443,9 @@ export function createViewpointControlWindow({
     if (event.target.closest('[data-vpc-gaze-clear]')) { setGaze({dir: '', tgt: '', body: ''}); return; }
     const preset = event.target.closest('[data-vpc-preset]');
     if (preset) { move(PRESETS[Number(preset.dataset.vpcPreset)][1]); return; }
+    const extra = event.target.closest('[data-vpc-extra]');
+    if (extra) { toggleExtra(extra.dataset.vpcExtra); return; }
+    if (event.target.closest('[data-vpc-instant]')) { instant(); return; }
     if (event.target.closest('[data-vpc-copy]')) copy();
   });
 
@@ -427,6 +455,19 @@ export function createViewpointControlWindow({
   }
   // 복사가 이 창의 유일한 내보내기다 - 클립보드 API 가 막힌 곳(권한 · 브라우저 창)에서는 글 칸을 골라 execCommand 로
   // (이벤트 맵 · Fast Search 와 같은 예비 길). 그것도 막히면 글을 골라 둔 채 Ctrl+C 를 안내한다.
+  // 처리 중에는 다시 받지 않는다(Codex 리뷰 9차: 연타가 유료 생성 두 건이 됐다). app.js 도 300ms 표로 한 번 더 막는다.
+  let instantBusy = false;
+  async function instant() {
+    if (instantBusy) return;
+    const text = currentText();
+    if (!text) { status('생성할 태그가 없습니다'); return; }
+    instantBusy = true;
+    let result = false;
+    try { result = await instantGenerate(text); } catch { result = false; } finally { instantBusy = false; }
+    // true = 보냈다 · 글 = 보내지 않은 까닭(Auto Gen · Interactive …) · false = 연결 · 생성 중 · 연타.
+    if (result === true) status('생성을 보냈습니다 - 프롬프트 뒤에 이 글을 붙여 한 장');
+    else status(typeof result === 'string' && result ? result : '지금은 생성할 수 없습니다(연결 · 생성 중)');
+  }
   async function copy() {
     const text = currentText();
     if (!text) { status('복사할 태그가 없습니다'); return; }
@@ -506,7 +547,9 @@ const VPC_CSS = `
 .vpc-radius{flex:1;min-width:0}
 .vpc-text{width:100%;box-sizing:border-box;resize:vertical;background:var(--bg-input,#101019);border:1px solid var(--border-dim);border-radius:3px;color:var(--text-primary);font:inherit;padding:6px 8px}
 .vpc-actions{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
-.vpc-actions .vpc-copy{border-color:rgba(120,140,255,.55);background:rgba(120,140,255,.18);color:#dfe4ff}
+.vpc-actions .vpc-instant{border-color:rgba(120,140,255,.55);background:rgba(120,140,255,.18);color:#dfe4ff}
+.vpc-extras{display:flex;flex-wrap:wrap;align-items:center;gap:4px;margin:0 0 10px}
+.vpc-extras-head{color:var(--text-dim);margin-right:4px}
 .vpc-status{color:var(--text-dim)}
 .vpc-note{margin-top:8px;color:var(--text-dim);font-size:10px}
 @container (max-width: 640px){.vpc{grid-template-columns:minmax(0,1fr)}.vpc-gaze-cols{grid-template-columns:minmax(0,1fr)}.vpc-canvas{width:100%;max-width:320px;height:auto;aspect-ratio:320/280}}

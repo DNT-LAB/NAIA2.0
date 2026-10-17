@@ -11399,7 +11399,7 @@ function openViewpointControlTool() {
   }
   if (viewpointControlLoading) return;
   // 메인 프롬프트에 넣는 단추는 없다 - 사용자가 글 칸에서 복사해 붙인다(사용자 지시 2026-10-17).
-  viewpointControlLoading = import('./js/features/viewpointControlWindow.mjs?v=20261017-vpc17')
+  viewpointControlLoading = import('./js/features/viewpointControlWindow.mjs?v=20261017-vpc19')
     .then(({createViewpointControlWindow}) => {
       viewpointControl = createViewpointControlWindow({
         document,
@@ -11408,6 +11408,7 @@ function openViewpointControlTool() {
         notify: (msg, type) => showToast(msg, type),
         escHtml,
         onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+        instantGenerate: generateViewpointInstant,
       });
       viewpointControl.open();
     })
@@ -11416,6 +11417,35 @@ function openViewpointControlTool() {
       showToast('구도 / 시점 제어를 열지 못했습니다', 'error');
     })
     .finally(() => { viewpointControlLoading = null; });
+}
+
+/** 구도 / 시점 제어의 [즉시 생성](사용자 지시 2026-10-17) - 지금 프롬프트 뒤에 그 글을 붙여 **한 장만** 생성한다.
+ *  씬 카드의 즉시 생성(generateSceneImmediate)처럼 정식 경로를 그대로 타되 프롬프트만 계산값으로 보낸다 -
+ *  프롬프트 칸(promptEdit)에는 쓰지 않는다. 사람이 누른 것이라 생성 중이면 큐에 선다(쌓을 수 있는 자리일 때). */
+async function generateViewpointInstant(suffix) {
+  const add = String(suffix || '').trim();
+  if (!add) return false;
+  // **한 장만** 이어야 한다(Codex 리뷰 9차). 연쇄가 생길 수 있는 자리에서는 보내지 않고 까닭을 돌려준다:
+  //   - Auto Gen · 자동화: 이 한 장이 끝나면 서버(또는 프론트)가 이어 받아 태그 없는 장을 계속 낸다.
+  //     서버의 '특수 요청' 표식으로 막으면 조건부 네거티브 · 레퍼런스 인셋 · Storyteller Vibe 까지 꺼져 메인 생성과 달라진다.
+  //   - Interactive: 공통 경로가 랜덤 구도를 굴려 프롬프트 칸을 통째로 갈아 끼운다 - 붙인 태그가 사라진다.
+  //   - 프리셋 · 시퀀스 탭 · 인페인트 세션: 메인 Generate 가 따로 보내는 자리다(canQueueGenerate).
+  if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 즉시 생성을 보내지 않습니다(한 장으로 끝나지 않는다)';
+  if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 즉시 생성을 보내지 않습니다';
+  if (interactivePanel?.isActive?.()) return 'Interactive 에서는 즉시 생성을 쓸 수 없습니다 - 복사해서 쓰세요';
+  if (!canQueueGenerate()) return '이 탭에서는 즉시 생성을 보내지 않습니다';
+  // 더블클릭 · 연타가 두 장이 되지 않게 - 메인 Generate 와 같은 300ms 표를 나눠 쓴다.
+  const now = performance.now();
+  if (now - lastHumanGenerateAt < 300) return false;
+  lastHumanGenerateAt = now;
+  const base = promptEdit ? promptEdit.value.replace(/[\s,]+$/, '') : '';
+  const prompt = base ? `${base}, ${add}` : add;
+  const negative = negEdit ? negEdit.value : '';
+  return generateWithInteractiveSnapshot({
+    prompt,
+    negative_prompt: negative,
+    overrides: buildWebGenerationOverrides(prompt, negative),
+  }, null, {queue: true});
 }
 
 function openDanbooruBrowserTool() {

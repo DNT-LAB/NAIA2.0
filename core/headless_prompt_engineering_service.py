@@ -579,6 +579,19 @@ class HeadlessPromptEngineeringService:
             ok, message = store.delete_preset(text_value or store.state()["current_preset"])
             if not ok:
                 return context._toast(message, level="error")
+        elif key == "preset_rename":
+            # 값 = {"from": 옛 이름, "to": 새 이름}(사용자 요청 2026-10-17 - Manage Preset 의 [이름 바꾸기]).
+            try:
+                payload = json.loads(text_value or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            old_name = str(payload.get("from") or store.state()["current_preset"])
+            ok, message = store.rename_preset(old_name, str(payload.get("to") or ""))
+            if not ok:
+                return [context._toast(message, level="error"), self.state()]
+            return [context._toast(f"이름을 바꿨습니다: {old_name} → {message}", level="success"), self.state()]
         elif key == "randomized_add":
             ok, message = store.add_randomized_preset(text_value)
             if not ok:

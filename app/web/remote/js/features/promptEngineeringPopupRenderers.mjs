@@ -3,6 +3,7 @@ export function createPromptEngineeringPopupRenderers({
   requestAnimationFrame,
   escHtml,
   createPromptPreset,
+  renamePromptPreset = () => false,
   applyPromptPreset,
   addRandomizedPreset,
   removeRandomizedPreset,
@@ -379,6 +380,8 @@ export function createPromptEngineeringPopupRenderers({
       body.querySelector('[data-current-preset]').textContent = m.preset || '(none)';
       body.querySelector('[data-save-current]').disabled = !canSaveCurrent;
       body.querySelector('[data-delete-current]').disabled = !canDeleteCurrent;
+      const renameBtn = body.querySelector('[data-rename-current]');
+      if (renameBtn) renameBtn.disabled = !canDeleteCurrent;
       presetBrowser.updateApply();
       return;
     }
@@ -389,8 +392,15 @@ export function createPromptEngineeringPopupRenderers({
     <div class="mod-info-chip" data-current-preset>${escHtml(m.preset || '(none)')}</div>
     <div class="mod-inline-row">
       <button class="mod-btn-secondary" data-save-current ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
+      <button type="button" class="mod-btn-secondary" data-rename-current ${canDeleteCurrent ? '' : 'disabled'}>이름 바꾸기</button>
       <button class="mod-btn-danger" data-delete-current ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
     </div>
+    <div class="mod-inline-row" data-rename-row style="display:none">
+      <input class="mod-input" type="text" data-rename-input aria-label="새 프리셋 이름" maxlength="120" style="flex:1;min-width:0">
+      <button type="button" class="mod-btn-secondary" data-rename-ok>바꾸기</button>
+      <button type="button" class="mod-btn-secondary" data-rename-cancel>취소</button>
+    </div>
+    <div class="pe-preset-hint" data-rename-error role="alert" style="color:var(--danger, #f0997b)"></div>
     <div class="pe-preset-browser">
       <div class="mod-section-label">저장된 프롬프트 미리보기 · ${escHtml(mode)}</div>
       <p class="pe-preset-hint">선택해서 내용을 확인하고 복사하세요. 현재 편집 내용은 ‘적용’을 눌러야 바뀝니다.</p>
@@ -404,6 +414,49 @@ export function createPromptEngineeringPopupRenderers({
       <div data-preset-fields></div>
     </div>
   `;
+    // [이름 바꾸기](사용자 요청 2026-10-17) - 지금 프리셋만. 같은 모드 안에 같은 이름을 두지 않는다(사용자 지정):
+    // 윈도 파일 이름이라 대소문자만 다른 이름도 같은 이름으로 막는다(제 이름의 대소문자만 바꾸는 것은 된다).
+    // 서버(rename_preset)가 같은 규칙으로 다시 막는다 - 여기서는 보내기 전에 바로 알려 줄 뿐이다.
+    const renameRow = body.querySelector('[data-rename-row]');
+    const renameInput = body.querySelector('[data-rename-input]');
+    const renameError = body.querySelector('[data-rename-error]');
+    const closeRename = () => { renameRow.style.display = 'none'; renameError.textContent = ''; };
+    const renameProblem = (oldName, newName) => {
+      if (!newName) return '새 이름을 적어 주세요.';
+      if (/[<>:"/\\|?*]/.test(newName)) return '쓸 수 없는 글자가 있습니다 ( < > : " / \\ | ? * )';
+      if (newName.toLowerCase() === 'default' || newName.startsWith('*') || /\.hires$/i.test(newName) || newName.endsWith('.')
+          || /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(newName)) return `이 이름은 쓸 수 없습니다: ${newName}`;
+      const clash = names.find(name => name !== oldName && String(name).toLowerCase() === newName.toLowerCase());
+      if (clash) return `같은 이름의 프리셋이 이미 있습니다: ${clash}`;
+      return '';
+    };
+    const submitRename = () => {
+      const oldName = String(presetBrowser?.currentPreset || m.preset || '');
+      const newName = renameInput.value.trim();
+      if (newName === oldName) { closeRename(); return; }
+      const problem = renameProblem(oldName, newName);
+      if (problem) { renameError.textContent = problem; return; }
+      if (renamePromptPreset(oldName, newName) === false) {
+        renameError.textContent = '연결이 끊겨 보내지 못했습니다 - 다시 연결된 뒤 눌러 주세요.';
+        return;
+      }
+      closeRename();
+    };
+    body.querySelector('[data-rename-current]').addEventListener('click', () => {
+      renameRow.style.display = 'flex';
+      renameError.textContent = '';
+      renameInput.value = String(presetBrowser?.currentPreset || m.preset || '');
+      renameInput.focus();
+      renameInput.select();
+    });
+    body.querySelector('[data-rename-ok]').addEventListener('click', submitRename);
+    body.querySelector('[data-rename-cancel]').addEventListener('click', closeRename);
+    renameInput.addEventListener('input', () => { renameError.textContent = ''; });
+    renameInput.addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); submitRename(); }
+      else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRename(); }
+    });
+
     const root = body.querySelector('.pe-preset-browser');
     const search = root.querySelector('input');
     const select = root.querySelector('select');

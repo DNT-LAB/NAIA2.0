@@ -11612,7 +11612,7 @@ const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel
   .catch(error => {
     console.error('Failed to initialize Prompt Engineering panel module', error);
   });
-const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261005-rolled')
+const promptEngineeringActionsReady = import('./js/features/promptEngineeringActions.mjs?v=20261017-rename')
   .then(({createPromptEngineeringActions}) => {
     promptEngineeringActions = createPromptEngineeringActions({
       document,
@@ -12228,7 +12228,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20261017-auxf
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261017-auxfoot1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261017-rename')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -12236,6 +12236,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       requestAnimationFrame: window.requestAnimationFrame.bind(window),
       escHtml,
       createPromptPreset,
+      renamePromptPreset,
       applyPromptPreset: onPromptPresetChange,
       addRandomizedPreset: addRandomizedPromptPreset,
       removeRandomizedPreset: removeRandomizedPromptPreset,
@@ -13085,6 +13086,11 @@ function applyRecommendedPromptPreset() {
 
 function deleteCurrentPromptPreset() {
   if (promptEngineeringActions) promptEngineeringActions.deleteCurrentPreset();
+}
+
+/** Manage Preset 의 [이름 바꾸기](사용자 요청 2026-10-17). 반환: 보냈는가. */
+function renamePromptPreset(from, to) {
+  return promptEngineeringActions ? promptEngineeringActions.renamePreset(from, to) : false;
 }
 
 function addRandomizedPromptPreset() {

@@ -105,6 +105,16 @@ export function createPromptEngineeringActions({
     closePresetManagePanel();
   }
 
+  /** 지금 프리셋의 이름을 바꾼다(사용자 요청 2026-10-17). 같은 모드 안의 같은 이름 · 금지 글자는 서버가 다시 막는다.
+   *  손댄 편집을 먼저 보낸다 - 서버가 옛 이름에 쓴 뒤 이름을 바꾼다. 반환: 보냈는가. */
+  function renamePreset(from, to) {
+    const oldName = String(from || '').trim();
+    const newName = String(to || '').trim();
+    if (!oldName || !newName) return false;
+    flushPresetSaveState();
+    return setModuleParam('prompt_engineering', 'preset_rename', JSON.stringify({from: oldName, to: newName})) !== false;
+  }
+
   function commitHoveredRandomizedPresetOption() {
     const select = document.getElementById('modRandomizedPresetAddSelect');
     if (!select) return null;
@@ -253,6 +263,7 @@ export function createPromptEngineeringActions({
     createRandomizedSlot,
     applyRecommendedPreset,
     deleteCurrentPreset,
+    renamePreset,
     addRandomizedPreset,
     removeRandomizedPreset,
     switchRandomizedPreset,

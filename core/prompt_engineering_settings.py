@@ -1342,6 +1342,118 @@ class PromptEngineeringHeadlessStore:
         self.refresh(mode_key)
         return True, name
 
+    def rename_preset(self, old_name: str, new_name: str, mode: str | None = None) -> tuple[bool, str]:
+        """프리셋 이름 바꾸기(사용자 요청 2026-10-17). 반환: (성공, 새 이름 또는 사유).
+
+        - **같은 모드 안에 같은 이름을 두지 않는다**(사용자 지정). 윈도는 파일 이름의 대소문자를 가리지 않으므로
+          대소문자만 다른 이름도 같은 이름으로 본다 - 아니면 다른 프리셋 파일을 덮어쓴다. 제 이름의 대소문자만 바꾸는 것은 된다.
+        - 이름을 따라가야 하는 것: 프리셋 파일과 그 .bak · 지금 프리셋 표(last_used_preset) · 랜덤 풀(기본 칸과 더한 칸,
+          차례 그대로 - 안 고치면 바뀐 이름이 풀에서 조용히 빠진다) · 썸네일(save/presets/previews - 모드를 가리지 않는
+          자리라 다른 모드에 같은 이름이 있으면 옮기지 않고 복사한다) · WEBUI 의 hires 덧설정.
+        - 바꾸기 전에 손댄 편집을 지금 프리셋에 먼저 쓴다 - 아래 refresh 가 디스크에서 다시 조립한다.
+        """
+        mode_key = self.mode(mode)
+        # ⚠️ 다듬기 **전에** 가른다(delete_preset 과 같다) - `*` · `:` 를 지우면 랜덤 칸이 엉뚱한 프리셋 이름이 된다.
+        if is_synthetic_preset_name(old_name):
+            return False, "랜덤 · 스냅샷 칸은 이름을 바꿀 수 없습니다."
+        old = sanitize_preset_name(old_name)
+        if not old:
+            return False, "이름을 바꿀 프리셋이 없습니다."
+        if old == "default":
+            return False, "기본 프리셋은 이름을 바꿀 수 없습니다."
+        raw_new = str(new_name or "").strip()
+        if any(char in raw_new for char in '<>:"/\\|?*'):
+            return False, '쓸 수 없는 글자가 있습니다 ( < > : " / \\ | ? * )'
+        new = sanitize_preset_name(raw_new)
+        if not new:
+            return False, "새 이름을 적어 주세요."
+        if new == old:
+            return False, "같은 이름입니다."
+        stem = new.split(".")[0].strip().upper()
+        if (new.casefold() == "default" or new.casefold().endswith(".hires") or new.endswith(".")
+                or stem in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}):
+            return False, f"이 이름은 쓸 수 없습니다: {new}"
+        names = self.list_preset_names(mode_key)
+        if old not in names:
+            return False, f"프리셋을 찾을 수 없습니다: {old}"
+        clash = next((name for name in names if name != old and name.casefold() == new.casefold()), "")
+        if clash:
+            return False, f"같은 이름의 프리셋이 이미 있습니다: {clash}"
+        folder = preset_dir(mode_key, save_root=self._save_root)
+        old_path = folder / f"{old}.json"
+        if not old_path.exists():
+            return False, f"이 프리셋은 옛 저장 폴더에 있어 이름을 바꿀 수 없습니다: {old}"
+
+        self.persist_active_settings(mode_key)          # 손댄 편집을 지금 프리셋(옛 이름일 수도 있다)에 먼저 쓴다
+        case_only = new.casefold() == old.casefold()
+        new_path = folder / f"{new}.json"
+
+        def move(src: Path, dst: Path) -> None:
+            # 대소문자만 바뀌면 윈도에서는 같은 파일이다 - 임시 이름을 거쳐 옮긴다.
+            if case_only:
+                temp = src.with_name(f"{src.name}.renaming")
+                os.replace(src, temp)
+                os.replace(temp, dst)
+            else:
+                os.replace(src, dst)
+
+        move(old_path, new_path)
+        old_backup, new_backup = backup_path(old_path), backup_path(new_path)
+        if old_backup.exists():
+            move(old_backup, new_backup)
+        old_hires, new_hires = folder / f"{old}.hires.json", folder / f"{new}.hires.json"
+        if old_hires.exists():
+            move(old_hires, new_hires)
+
+        # 랜덤 풀 - 기본 칸(data[mode].pool)과 더한 칸(data.slots[mode][이름].pool). 차례 그대로 이름만 바꾼다.
+        pool_data = _read_randomized_pool_data(self._save_root)
+        pool_changed = False
+
+        def renamed_pool(raw: Any) -> Any:
+            nonlocal pool_changed
+            if isinstance(raw, list):
+                if old in raw:
+                    pool_changed = True
+                    return [new if item == old else item for item in raw]
+                return raw
+            if isinstance(raw, dict) and isinstance(raw.get("pool"), list) and old in raw["pool"]:
+                pool_changed = True
+                return {**raw, "pool": [new if item == old else item for item in raw["pool"]]}
+            return raw
+
+        if mode_key in pool_data:
+            pool_data[mode_key] = renamed_pool(pool_data[mode_key])
+        slots = pool_data.get(RANDOMIZED_SLOTS_KEY)
+        by_mode = slots.get(mode_key) if isinstance(slots, dict) else None
+        if isinstance(by_mode, dict):
+            for label in list(by_mode):
+                by_mode[label] = renamed_pool(by_mode[label])
+        if pool_changed:
+            _write_randomized_pool_data(pool_data, self._save_root)
+
+        # 썸네일 - 모드를 가리지 않는 자리다. 다른 모드에 옛 이름의 프리셋이 있으면 그 그림이기도 하니 복사한다.
+        # 새 이름의 그림이 이미 있으면(다른 모드의 같은 이름 프리셋 것) 덮지 않는다.
+        previews = self._save_root / "presets" / "previews"
+        shared = any(old in list_preset_names(other, save_root=self._save_root)
+                     for other in PROMPT_ENGINEERING_PRESET_MODES if other != mode_key)
+        for ext in (".png", ".webp", ".jpg", ".jpeg"):
+            src, dst = previews / f"{old}{ext}", previews / f"{new}{ext}"
+            if not src.exists() or (dst.exists() and not case_only):
+                continue
+            if shared:
+                if not case_only:
+                    import shutil
+
+                    shutil.copy2(src, dst)
+            else:
+                move(src, dst)
+
+        state = self.state(mode_key)
+        if state.get("current_preset") == old:
+            self.save_last_used_preset(mode_key, new)
+        self.refresh(mode_key)
+        return True, new
+
     # ⚠️ 아래 넷은 **지금 보는 랜덤 칸**(`active_randomized_name`)을 고친다. 그 칸을 고른 채로만 관리 화면이
     #    열리므로 화면이 본 칸과 같다 - 랜덤 칸을 고르지 않았으면 기본 칸이다(예전 그대로).
     def add_randomized_preset(self, preset_name: str, mode: str | None = None) -> tuple[bool, str]:

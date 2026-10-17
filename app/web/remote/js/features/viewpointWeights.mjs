@@ -11,15 +11,20 @@
 //   - 후면 = 사용자가 실제로 돌려 본 프롬프트 그대로: `1.5::rear view, from behind ::, looking away, -1.3::looking at viewer ::`
 //     (절반 규칙보다 이 예가 우선 - 'facing viewer' 억제는 'looking at viewer' 억제로 바뀌었다).
 //   - 'object focus' 회수 - 사물에 초점을 두라는 태그라 인물 근접에 맞지 않는다.
+//   v9(사용자 지시 2026-10-17): 부감(위쪽 high-angle · bird's-eye · from above)만 v7 값으로 되돌린다(최대 2).
+//   5회차에서 절반 값(+45 = 0.5 + 0.25)은 전면 부감 4장 모두 약했다 - 모델이 부감을 문턱 넘는 스위치로 받는다(3차).
 // 좌우(어느 쪽을 보나)는 모델이 시드로 정한다 - 태그는 |yaw| 만 본다(대칭 처리, 사용자 결정 2026-10-16).
 
-export const VIEWPOINT_VERSION = 'viewpoint-v8';
+export const VIEWPOINT_VERSION = 'viewpoint-v9';
 export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.2, maxWeight: 1.5});
 
 // 후면 묶음 - 사용자가 실제로 돌려 본 예(2026-10-17)의 가중치. 절반 규칙의 예외다.
 const REAR_TAG = 'rear view, from behind';
 const REAR_WEIGHT = 1.5;
 const REAR_LOOK_AT_VIEWER = -1.3;
+// 부감 태그만 v7 값으로(v9) - 2 x share, 최대 2.
+const UP_GAIN = 2;
+const UP_MAX = 2;
 
 // 이 수식이 쓰는 태그 전부(묶음 'rear view, from behind' 는 한 가중치로 나간다).
 export const VIEWPOINT_TAGS = Object.freeze([
@@ -46,10 +51,10 @@ export function normalizeExtras(list) {
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const rad = deg => (deg * Math.PI) / 180;
 
-/** 원하는 가중치 -> 0.05 단위(절댓값 최대 1.5). 0.2 미만이면 0(태그를 뺀다). v7 의 2 x share 를 절반으로 = share 그대로. */
-export function weightOf(value) {
+/** 원하는 가중치 -> 0.05 단위(절댓값 최대 max, 기본 1.5). 0.2 미만이면 0(태그를 뺀다). v7 의 2 x share 를 절반으로 = share 그대로. */
+export function weightOf(value, max = LIMITS.maxWeight) {
   if (!Number.isFinite(value)) return 0;
-  const w = Math.round(Math.min(Math.abs(value), LIMITS.maxWeight) * 20) / 20;
+  const w = Math.round(Math.min(Math.abs(value), max) * 20) / 20;
   return w < LIMITS.minWeight - 1e-9 ? 0 : Math.sign(value) * w;
 }
 
@@ -69,8 +74,8 @@ export function convertViewpoint(input) {
   const ax = Math.abs(yaw) / 90;
   const z = (radius - 4) / (radius < 4 ? 1.6 : 3);
   const tags = [];
-  const add = (axis, tag, value) => {
-    const weight = weightOf(value);
+  const add = (axis, tag, value, max) => {
+    const weight = weightOf(value, max);
     if (weight) tags.push({axis, tag, share: value, weight});
   };
   const ay = Math.abs(yaw);
@@ -94,9 +99,11 @@ export function convertViewpoint(input) {
   // v8: 수평 띠(|pitch| < 20)에는 위아래 태그가 없다 - 15 에서 0 -> 30 에서 1 로 켠다(앙각 쪽이 -13 에서도 low-angle 을 냈다).
   const level = clamp((Math.abs(pitch) - 15) / 15, 0, 1);
   for (const [center, tag] of [[-90, "worm's-eye view"], [-45, 'low-angle view'], [45, 'high-angle view'], [90, "bird's-eye view"]]) {
-    add('Y', tag, level * up * Math.max(0, 1 - Math.abs(pitch - center) / 45));
+    // v9: 부감 쪽만 v7 값(2 x share, 최대 2) - 앙각은 v8 절반 그대로.
+    const gain = center > 0 ? UP_GAIN : 1;
+    add('Y', tag, gain * level * up * Math.max(0, 1 - Math.abs(pitch - center) / 45), center > 0 ? UP_MAX : undefined);
   }
-  add('Y', 'from above', level * up * Math.max(0, Math.min(1, pitch / 45)) * 0.5);
+  add('Y', 'from above', UP_GAIN * level * up * Math.max(0, Math.min(1, pitch / 45)) * 0.5, UP_MAX);
   add('Y', 'from below', level * Math.max(0, Math.min(1, -pitch / 45)) * 0.5);
   const near = Math.max(0, -z);
   const far = Math.max(0, z);

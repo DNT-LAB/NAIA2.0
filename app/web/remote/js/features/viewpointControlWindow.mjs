@@ -1,6 +1,6 @@
 // [프롬프트 도구] > [구도 / 시점 제어] - 관찰점 C 로 시점을 고르면 구도 가중치 태그를 만든다(사용자 지시 2026-10-16).
 //
-// 수식은 viewpointWeights.mjs(v6). 이 창은 고르는 화면과 복사뿐이다:
+// 수식은 viewpointWeights.mjs(v7). 이 창은 고르는 화면과 복사뿐이다:
 //   - 왼쪽 캔버스 = **C 에서 본 장면**(사용자 제안 2026-10-17 "C 와 사용자 View 를 동기화"). 끌면 카메라가 인물 둘레를 360° 돈다 -
 //     좌우 = 방위(정면 -> 옆 -> 뒤로 이어진다), 위아래 = 상하, 휠 = 거리. 앞 / 뒤 반구는 C 의 자리로 정해진다(배지로만 보인다).
 //     예전 뷰어는 보이는 앞면 위의 점으로만 잡아 반구 뒤로 못 넘어갔다 · 그다음 판은 반구를 바깥에서 돌려 앞뒤가 뒤집혀 보였다.
@@ -18,7 +18,7 @@
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
   LIMITS, azimuthToViewpoint, convertViewpoint, formatViewpointTags, normalizeViewpoint, viewpointToAzimuth,
-} from './viewpointWeights.mjs?v=20261017-copy1';
+} from './viewpointWeights.mjs?v=20261017-v7';
 import {GAZE_GROUPS, gazeLabel, gazeTags, normalizeGaze} from './viewpointGaze.mjs?v=20261017-copy1';
 
 const STYLE_ID = 'vpc-style';

@@ -11399,7 +11399,7 @@ function openViewpointControlTool() {
   }
   if (viewpointControlLoading) return;
   // 메인 프롬프트에 넣는 단추는 없다 - 사용자가 글 칸에서 복사해 붙인다(사용자 지시 2026-10-17).
-  viewpointControlLoading = import('./js/features/viewpointControlWindow.mjs?v=20261017-vpc16')
+  viewpointControlLoading = import('./js/features/viewpointControlWindow.mjs?v=20261017-vpc17')
     .then(({createViewpointControlWindow}) => {
       viewpointControl = createViewpointControlWindow({
         document,

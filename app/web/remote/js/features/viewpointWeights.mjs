@@ -2,16 +2,17 @@
 //
 // 출처: docs/projective_geometry_viewer_20261011 의 변환식을 1girl 실험(docs/girl_viewpoint_lab_20261016)으로 보정한 판.
 //   v3 위쪽 곡선 B · 0.1 단위 / v4 straight-on 이 기울기만큼 약해짐 / v5 위쪽 곡선 뒷부분 보강 / v6 후면의 뒤쪽 가중치를
-//   좌우 각도만으로(위아래 극단에서 후면 3/4 가 앞모습이 되던 것 - 4회차 0/6).
+//   좌우 각도만으로(위아래 극단에서 후면 3/4 가 앞모습이 되던 것 - 4회차 0/6) / v7 straight-on 회수(사용자 지시 2026-10-17:
+//   구도 제어를 방해할 때가 많다 - 정면은 억제 태그 'from behind' 만 남는다).
 // 대상은 인물 기준이다: 후면 억제 태그 = 'facing viewer'(뷰어의 소파 전용 태그 대신).
 // 좌우(어느 쪽을 보나)는 모델이 시드로 정한다 - 태그는 |yaw| 만 본다(대칭 처리, 사용자 결정 2026-10-16).
 
-export const VIEWPOINT_VERSION = 'viewpoint-v6';
+export const VIEWPOINT_VERSION = 'viewpoint-v7';
 export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.1, maxWeight: 2});
 
 // 이 수식이 쓰는 태그 전부.
 export const VIEWPOINT_TAGS = Object.freeze([
-  'straight-on', 'from behind', 'facing viewer', 'three-quarter view', 'from side',
+  'from behind', 'facing viewer', 'three-quarter view', 'from side',
   "worm's-eye view", 'low-angle view', 'high-angle view', "bird's-eye view", 'from above', 'from below',
   'close-up', 'wide shot', 'object focus',
 ]);
@@ -50,8 +51,6 @@ export function convertViewpoint(input) {
   const quarter = Math.max(0, 1 - Math.abs(2 * ax - 1));
   const side = Math.max(0, 2 * ax - 1);
   if (hemisphere === 'front') {
-    // 'straight-on' = 눈높이 정면(Danbooru) - 기울면 약하게(v4).
-    add('X', 'straight-on', central * (1 - Math.abs(pitch) / 90));
     add('X', 'from behind', -0.65 * visibility);
   } else {
     // v6: 뒤쪽은 좌우 각도만으로 - 위아래 극단(|pitch| >= 75)에서 cos(pitch) 때문에 뒤쪽 가중치가 사라져 앞모습이 됐다.

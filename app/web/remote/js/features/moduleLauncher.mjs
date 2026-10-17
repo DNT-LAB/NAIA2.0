@@ -31,6 +31,13 @@ const MODULE_REGISTRY = {
     action: 'danbooru_browser',
     className: 'module-detached-tool',
   },
+  // 구도 / 시점 제어(사용자 지시 2026-10-16) - 반구 위 관찰점 -> 구도 가중치 태그. 떠 있는 창(viewpointControlWindow).
+  viewpoint_control: {
+    label: '구도 / 시점 제어',
+    title: '구도 / 시점 제어 - 반구로 시점을 고르면 구도 가중치 태그를 만든다',
+    category: 'prompt_tools',
+    action: 'viewpoint_control',
+  },
   wildcard: {
     label: '와일드카드 관리',
     title: '와일드카드 관리',
@@ -214,7 +221,7 @@ const CATEGORY_REGISTRY = [
     //    ⚠️ 옛 `chunkPanel.mjs` 은 이제 **열리는 길이 없다**. 우클릭 › [Add to Chunk] 도
     //    새 창으로 가게 바꿔서(`onAddToChunkWindow`), 그 파일은 지금 사실상 죽은 코드다.
     //    지우는 것은 별도 작업으로 둔다(31KB · 배선이 여러 곳).
-    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser'],
+    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },
@@ -261,6 +268,9 @@ export function createModuleLauncher({
   openModule,
   openChunkPanel,
   openDanbooruBrowser,
+  // 구도 / 시점 제어 창 열기(다시 누르면 닫힌다) · 열려 있나.
+  openViewpointControl = null,
+  isViewpointControlOpen = () => false,
   getComfyUiWorkflowState,
   switchComfyUiWorkflowDefault,
   uploadComfyUiWorkflow,
@@ -550,6 +560,8 @@ export function createModuleLauncher({
       openChunkPanel(null, true);
     } else if (config.action === 'danbooru_browser') {
       openDanbooruBrowser?.();
+    } else if (config.action === 'viewpoint_control') {
+      openViewpointControl?.();
     } else if (config.action === 'comfyui_workflow_default') {
       switchComfyUiWorkflowDefault?.();
     } else if (config.action === 'comfyui_workflow_upload') {
@@ -647,6 +659,7 @@ export function createModuleLauncher({
   function moduleIsActive(moduleId) {
     if (moduleId === 'chunk') return isChunkOpen();
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
+    if (MODULE_REGISTRY[moduleId]?.action === 'viewpoint_control') return Boolean(isViewpointControlOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;

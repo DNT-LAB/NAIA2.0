@@ -7353,6 +7353,7 @@ function applyPromptFields(prompt, negative, {authored = false} = {}) {
 
 // ---- Prompt syntax highlight (main prompt only) ----
 let currentMode = '';
+let viewpointControl = null;   // 구도 / 시점 제어 창(openViewpointControlTool) - 모드가 바뀌면 다시 그린다
 function updatePromptHighlight() { if (promptHighlighter) promptHighlighter.update(); }
 function syncPromptHighlight() { if (promptHighlighter) promptHighlighter.syncScroll(); }
 function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.applyState(); }
@@ -7360,6 +7361,8 @@ function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.
 function setNaiHighlightMode(mode) {
   currentMode = mode;
   if (promptHighlighter) promptHighlighter.setMode(mode);
+  // 구도 / 시점 제어 창의 글 칸은 모드마다 가중치 문법이 다르다(NAI `w::tag ::` · 그 밖 `(tag:w)`).
+  if (viewpointControl) viewpointControl.refresh();
   extraPromptHighlighters.forEach(extra => extra.setMode(mode));
   // 캐릭터 프롬프트는 NAID4+ 전용 - 모드가 바뀌면 빠른 패널도 따라 사라진다.
   syncCharacterQuickPanelVisibility();
@@ -11385,6 +11388,36 @@ const poolLoad = (() => {
 const lockTagSurface = source => tagSurfaceLock.begin(source);
 const unlockTagSurface = source => tagSurfaceLock.end(source);
 
+// [프롬프트 도구] > [구도 / 시점 제어](사용자 지시 2026-10-16) - 반구 위 관찰점 -> 구도 가중치 태그. 처음 열 때 불러온다.
+// (`viewpointControl` 은 setNaiHighlightMode 가 읽어서 그 앞 - currentMode 옆에 선언한다.)
+let viewpointControlLoading = null;
+function openViewpointControlTool() {
+  if (viewpointControl) {
+    viewpointControl.toggle();
+    if (moduleLauncherControl) moduleLauncherControl.updateState();
+    return;
+  }
+  if (viewpointControlLoading) return;
+  // 메인 프롬프트에 넣는 단추는 없다 - 사용자가 글 칸에서 복사해 붙인다(사용자 지시 2026-10-17).
+  viewpointControlLoading = import('./js/features/viewpointControlWindow.mjs?v=20261017-vpc16')
+    .then(({createViewpointControlWindow}) => {
+      viewpointControl = createViewpointControlWindow({
+        document,
+        window,
+        getMode: () => currentMode || modeSelect.value || 'NAI',
+        notify: (msg, type) => showToast(msg, type),
+        escHtml,
+        onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+      });
+      viewpointControl.open();
+    })
+    .catch(error => {
+      console.error('Failed to open viewpoint control', error);
+      showToast('구도 / 시점 제어를 열지 못했습니다', 'error');
+    })
+    .finally(() => { viewpointControlLoading = null; });
+}
+
 function openDanbooruBrowserTool() {
   if (danbooruTabControl?.openBrowser) {
     danbooruTabControl.openBrowser();
@@ -11399,7 +11432,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-tagq')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261016-vpc1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -11411,6 +11444,8 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20260929-
       openModule,
       openChunkPanel,
       openDanbooruBrowser: openDanbooruBrowserTool,
+      openViewpointControl: openViewpointControlTool,
+      isViewpointControlOpen: () => Boolean(viewpointControl && viewpointControl.isOpen()),
       getComfyUiWorkflowState: () => comfyuiWorkflowState,
       switchComfyUiWorkflowDefault,
       uploadComfyUiWorkflow,

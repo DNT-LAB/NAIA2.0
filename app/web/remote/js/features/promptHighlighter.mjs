@@ -10,18 +10,21 @@ const PRESET_TOKEN_STYLES = [
   {prefix: 'preset:expressions', className: 'prompt-token-preset-expressions'},
 ];
 
+// 같은 색인을 받은 하이라이터들은 지은 Set 을 함께 쓴다(읽기만 한다). 색인은 22만 개가 넘어 한 번 짓는 데
+// 100~200ms 다 - PE 창은 상태가 올 때마다 Prefix · Postfix 하이라이터를 새로 붙이므로, 나눠 쓰지 않으면
+// Random 한 번에 여섯 번을 다시 지어 1초 넘게 멈췄다(실측 2026-10-17).
+const lookupSetCache = new WeakMap();
+
 function makeLookupSet(values) {
-  if (!values) return EMPTY_SET;
-  if (values instanceof Set) {
-    return new Set([...values].map(normalizeTagLookup).filter(Boolean));
-  }
-  if (Array.isArray(values)) {
-    return new Set(values.map(normalizeTagLookup).filter(Boolean));
-  }
-  if (typeof values === 'object') {
-    return new Set(Object.keys(values).map(normalizeTagLookup).filter(Boolean));
-  }
-  return EMPTY_SET;
+  if (!values || typeof values !== 'object') return EMPTY_SET;
+  const cached = lookupSetCache.get(values);
+  if (cached) return cached;
+  let built;
+  if (values instanceof Set) built = new Set([...values].map(normalizeTagLookup).filter(Boolean));
+  else if (Array.isArray(values)) built = new Set(values.map(normalizeTagLookup).filter(Boolean));
+  else built = new Set(Object.keys(values).map(normalizeTagLookup).filter(Boolean));
+  lookupSetCache.set(values, built);
+  return built;
 }
 
 function normalizeTagLookup(value) {

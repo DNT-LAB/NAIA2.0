@@ -2405,7 +2405,7 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20261017-pehl1')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20261017-pehl2')
   .then(({createPromptHighlighter}) => {
     createPromptHighlighterFn = createPromptHighlighter;
     promptHighlighter = createPromptHighlighter({
@@ -12994,8 +12994,14 @@ function flushPromptEngineeringEdits({force = false} = {}) {
   const autoHide = document.getElementById('modAutoHide');
   // 칸에 박힌 `data-preset` = 이 칸을 그릴 때의 프리셋. 화면이 아직 앞 프리셋을
   // 들고 있으면 그 표식이 따라가고 백엔드가 버린다.
-  const send = (key, el) => setModuleParam(
-    'prompt_engineering', key, stampedEdit(el.value, el.dataset.preset), {skipPendingFlush: true});
+  // 서버가 이미 같은 글을 들고 있는 칸은 보내지 않는다. 보내면 칸마다 PE 상태 전체가 되돌아와 창을 통째로
+  // 다시 그린다 - PE 창을 열어 둔 채 Random 을 누르면 매번 세 번씩 그려 단추가 1초 넘게 잠겼다(사용자 제보
+  // 2026-10-17). 밀린 편집은 위에서 이미 나갔으므로 여기서 같다는 것은 '바뀐 것이 없다' 이다.
+  const known = moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState;
+  const send = (key, el) => {
+    if (known && known.preset === el.dataset.preset && String(known[key] ?? '') === el.value) return;
+    setModuleParam('prompt_engineering', key, stampedEdit(el.value, el.dataset.preset), {skipPendingFlush: true});
+  };
   if (pre) send('pre_prompt', pre);
   if (post) send('post_prompt', post);
   if (autoHide) send('auto_hide', autoHide);

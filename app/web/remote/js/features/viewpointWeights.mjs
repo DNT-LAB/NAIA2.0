@@ -4,17 +4,28 @@
 //   v3 위쪽 곡선 B · 0.1 단위 / v4 straight-on 이 기울기만큼 약해짐 / v5 위쪽 곡선 뒷부분 보강 / v6 후면의 뒤쪽 가중치를
 //   좌우 각도만으로(위아래 극단에서 후면 3/4 가 앞모습이 되던 것 - 4회차 0/6) / v7 straight-on 회수(사용자 지시 2026-10-17:
 //   구도 제어를 방해할 때가 많다 - 정면은 억제 태그 'from behind' 만 남는다).
-// 대상은 인물 기준이다: 후면 억제 태그 = 'facing viewer'(뷰어의 소파 전용 태그 대신).
+//   v8(사용자 제보 2026-10-17 "가중치가 너무 세다 · 정면~45° 는 조합이 복잡해 헷갈린다 · 후면은 이상한 프롬프트로 안 된다"):
+//   - 가중치 절반(0.05 단위, 최대 1). 1 이면 가중치 문법 없이 태그만.
+//   - 0.2 미만은 뺀다 - 작은 몫이 최소 가중치로 올라붙어 생기던 꼬리 태그(0.1::high-angle view 따위)를 없앤다.
+//   - 요약과 같은 띠에서는 태그도 없다: |yaw| < 15 = 정면 / 뒷모습(3/4 가 새지 않는다), |pitch| < 20 = 수평(위아래 태그 없음).
+//   - 후면 = 사용자가 실제로 돌려 본 프롬프트 그대로: `1.5::rear view, from behind ::, looking away, -1.3::looking at viewer ::`
+//     (절반 규칙보다 이 예가 우선 - 'facing viewer' 억제는 'looking at viewer' 억제로 바뀌었다).
+//   - 'object focus' 회수 - 사물에 초점을 두라는 태그라 인물 근접에 맞지 않는다.
 // 좌우(어느 쪽을 보나)는 모델이 시드로 정한다 - 태그는 |yaw| 만 본다(대칭 처리, 사용자 결정 2026-10-16).
 
-export const VIEWPOINT_VERSION = 'viewpoint-v7';
-export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.1, maxWeight: 2});
+export const VIEWPOINT_VERSION = 'viewpoint-v8';
+export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.2, maxWeight: 1.5});
 
-// 이 수식이 쓰는 태그 전부.
+// 후면 묶음 - 사용자가 실제로 돌려 본 예(2026-10-17)의 가중치. 절반 규칙의 예외다.
+const REAR_TAG = 'rear view, from behind';
+const REAR_WEIGHT = 1.5;
+const REAR_LOOK_AT_VIEWER = -1.3;
+
+// 이 수식이 쓰는 태그 전부(묶음 'rear view, from behind' 는 한 가중치로 나간다).
 export const VIEWPOINT_TAGS = Object.freeze([
-  'from behind', 'facing viewer', 'three-quarter view', 'from side',
+  'from behind', REAR_TAG, 'looking away', 'looking at viewer', 'three-quarter view', 'from side',
   "worm's-eye view", 'low-angle view', 'high-angle view', "bird's-eye view", 'from above', 'from below',
-  'close-up', 'wide shot', 'object focus',
+  'close-up', 'wide shot',
 ]);
 
 // 구도 · 시점 탭의 추가 옵션 - 3D 시점과 상관없이 켜고 끄는 태그(사용자 지시 2026-10-17). 출처 = 옛 Interactive 구도 블록의
@@ -35,10 +46,11 @@ export function normalizeExtras(list) {
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const rad = deg => (deg * Math.PI) / 180;
 
-/** share -> 가중치(0.1 단위, 절댓값 0.1 ~ 2.0). 0 이면 태그를 뺀다. */
-export function weightOf(share) {
-  if (!Number.isFinite(share) || Math.abs(share) < 1e-12) return 0;
-  return Math.sign(share) * Math.round(clamp(2 * Math.abs(share), 0.05, 2) * 10) / 10;
+/** 원하는 가중치 -> 0.05 단위(절댓값 최대 1.5). 0.2 미만이면 0(태그를 뺀다). v7 의 2 x share 를 절반으로 = share 그대로. */
+export function weightOf(value) {
+  if (!Number.isFinite(value)) return 0;
+  const w = Math.round(Math.min(Math.abs(value), LIMITS.maxWeight) * 20) / 20;
+  return w < LIMITS.minWeight - 1e-9 ? 0 : Math.sign(value) * w;
 }
 
 export function normalizeViewpoint(input = {}) {
@@ -56,39 +68,43 @@ export function convertViewpoint(input) {
   const {hemisphere, yaw, pitch, radius} = normalizeViewpoint(input);
   const ax = Math.abs(yaw) / 90;
   const z = (radius - 4) / (radius < 4 ? 1.6 : 3);
-  const visibility = Math.cos(rad(yaw)) * Math.cos(rad(pitch));
   const tags = [];
-  const add = (axis, tag, share) => {
-    const weight = weightOf(share);
-    if (weight) tags.push({axis, tag, share, weight});
+  const add = (axis, tag, value) => {
+    const weight = weightOf(value);
+    if (weight) tags.push({axis, tag, share: value, weight});
   };
-  const central = Math.max(0, 1 - 2 * ax);
-  const quarter = Math.max(0, 1 - Math.abs(2 * ax - 1));
+  const ay = Math.abs(yaw);
+  // 정면 / 뒷모습 몫: |yaw| <= 15 에서 1(요약의 '정면' · '뒷모습' 띠), 90 에서 0. 15 밖은 v6 의 max(1-2ax, 0.8cos) 와 거의 같다.
+  // v6 그대로 좌우 각도만 본다 - 위아래 극단에서 후면 3/4 가 앞모습이 되던 것(4회차 0/6).
+  const facing = clamp((90 - ay) / 75, 0, 1);
+  // 3/4: 15 까지 0 -> 45 에서 1 -> 90 에서 0. 정면 · 뒷모습 띠에는 새지 않는다.
+  const quarter = ay <= 15 ? 0 : ay <= 45 ? (ay - 15) / 30 : (90 - ay) / 45;
   const side = Math.max(0, 2 * ax - 1);
   if (hemisphere === 'front') {
-    add('X', 'from behind', -0.65 * visibility);
+    add('X', 'from behind', -0.65 * facing * Math.cos(rad(pitch)));
   } else {
-    // v6: 뒤쪽은 좌우 각도만으로 - 위아래 극단(|pitch| >= 75)에서 cos(pitch) 때문에 뒤쪽 가중치가 사라져 앞모습이 됐다.
-    const behind = Math.cos(rad(yaw));
-    add('X', 'from behind', Math.max(central, 0.8 * behind));
-    add('X', 'facing viewer', -0.65 * behind);
+    add('X', REAR_TAG, REAR_WEIGHT * facing);
+    add('X', 'looking away', facing);
+    add('X', 'looking at viewer', REAR_LOOK_AT_VIEWER * facing);
   }
   add('X', 'three-quarter view', quarter);
   add('X', 'from side', side);
   // 위쪽은 모델이 문턱을 넘으면 한 번에 강한 부감이 된다 - +45 까지 pitch/90, 그 뒤 +70 에서 1(v3 B · v5).
   const up = pitch <= 0 ? 1 : pitch <= 45 ? pitch / 90 : Math.min(1, 0.5 + ((pitch - 45) / 25) * 0.5);
+  // v8: 수평 띠(|pitch| < 20)에는 위아래 태그가 없다 - 15 에서 0 -> 30 에서 1 로 켠다(앙각 쪽이 -13 에서도 low-angle 을 냈다).
+  const level = clamp((Math.abs(pitch) - 15) / 15, 0, 1);
   for (const [center, tag] of [[-90, "worm's-eye view"], [-45, 'low-angle view'], [45, 'high-angle view'], [90, "bird's-eye view"]]) {
-    add('Y', tag, up * Math.max(0, 1 - Math.abs(pitch - center) / 45));
+    add('Y', tag, level * up * Math.max(0, 1 - Math.abs(pitch - center) / 45));
   }
-  add('Y', 'from above', up * Math.max(0, Math.min(1, pitch / 45)) * 0.5);
-  add('Y', 'from below', Math.max(0, Math.min(1, -pitch / 45)) * 0.5);
+  add('Y', 'from above', level * up * Math.max(0, Math.min(1, pitch / 45)) * 0.5);
+  add('Y', 'from below', level * Math.max(0, Math.min(1, -pitch / 45)) * 0.5);
   const near = Math.max(0, -z);
   const far = Math.max(0, z);
   add('Z', 'close-up', near);
   add('Z', 'wide shot', far);
-  add('Z', 'wide shot', -0.675 * near);
-  add('Z', 'close-up', -0.675 * far);
-  add('Z', 'object focus', 0.5 * near);
+  // 억제 쪽은 사용자가 돌려 본 후면 예의 -0.75(v7 -1.35 의 절반 -0.675 와 가깝다).
+  add('Z', 'wide shot', -0.75 * near);
+  add('Z', 'close-up', -0.75 * far);
   return {version: VIEWPOINT_VERSION, viewpoint: {hemisphere, yaw, pitch, radius}, relative: {x: yaw / 90, y: pitch / 90, z}, tags, summary: summarize({hemisphere, yaw, pitch, radius})};
 }
 
@@ -104,12 +120,17 @@ export function summarize({hemisphere, yaw, pitch, radius}) {
   return `${horizontal} · ${vertical} · ${framing}`;
 }
 
-/** 모드에 맞는 가중치 문법. NAI = `1.6::tag ::`(음수 = 억제). WEBUI · ComfyUI = `(tag:1.6)` - 음수 가중치가 없어 억제 태그는 뺀다. */
+/** 모드에 맞는 가중치 문법. NAI = `0.65::tag ::`(음수 = 억제). WEBUI · ComfyUI = `(tag:0.65)` - 음수 가중치가 없어 억제 태그는 뺀다.
+ *  가중치 1 은 문법 없이 태그만(v8 - 사용자가 돌려 본 후면 예의 `looking away`). */
 export function formatViewpointTags(tags, mode = 'NAI') {
   const nai = String(mode || 'NAI').toUpperCase() === 'NAI';
   return tags
     .filter(t => nai || t.weight > 0)
-    .map(t => (nai ? `${Number(t.weight.toFixed(1))}::${t.tag} ::` : `(${t.tag}:${t.weight.toFixed(1)})`))
+    .map(t => {
+      const w = Number(t.weight.toFixed(2));
+      if (w === 1) return t.tag;
+      return nai ? `${w}::${t.tag} ::` : `(${t.tag}:${w})`;
+    })
     .join(', ');
 }
 

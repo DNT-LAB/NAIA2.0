@@ -22,7 +22,7 @@ import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
   LIMITS, VIEW_EXTRAS, azimuthToViewpoint, convertViewpoint, formatViewpointTags, normalizeExtras, normalizeViewpoint,
   viewpointToAzimuth,
-} from './viewpointWeights.mjs?v=20261017-extras1';
+} from './viewpointWeights.mjs?v=20261017-vpw2';
 import {GAZE_GROUPS, gazeLabel, gazeTags, normalizeGaze} from './viewpointGaze.mjs?v=20261017-copy1';
 
 const STYLE_ID = 'vpc-style';
@@ -140,6 +140,7 @@ export function createViewpointControlWindow({
           <span class="vpc-status" role="status" aria-live="polite"></span>
         </div>
         <div class="vpc-note" data-vpc-only="view">좌우 방향은 시드가 정함(대칭) · 원경 · 바로 위는 태그로 한계</div>
+        <div class="vpc-rear-warn" data-vpc-rear-warn hidden>캐릭터가 후면을 보고 있을 때, 얼굴 관련 프롬프트, 특히 입 모양, 눈 색상, 그 외 성기와 같이 전면에서만 볼 수 있는 태그가 포함되면 이미지 생성 모델은 온전한 뒷모습을 보여줄 수 없습니다.</div>
       </div>
     </div>`;
   const $ = sel => panel.body.querySelector(sel);
@@ -224,6 +225,8 @@ export function createViewpointControlWindow({
     panel.body.querySelectorAll('[data-vpc-page]').forEach(page => { page.hidden = page.dataset.vpcPage !== tab; });
     panel.body.querySelectorAll('[data-vpc-only]').forEach(el => { el.hidden = el.dataset.vpcOnly !== tab; });
     $('.vpc').classList.toggle('is-gaze', tab === 'gaze');
+    // 후면이면 앞에서만 보이는 태그(얼굴 · 입 · 눈 색 · 성기)가 뒷모습을 깬다고 알린다(사용자 지시 2026-10-17).
+    $('[data-vpc-rear-warn]').hidden = !(rear && tab === 'view');
     renderGaze();
     const ta = $('.vpc-text');
     ta.value = currentText();
@@ -552,5 +555,6 @@ const VPC_CSS = `
 .vpc-extras-head{color:var(--text-dim);margin-right:4px}
 .vpc-status{color:var(--text-dim)}
 .vpc-note{margin-top:8px;color:var(--text-dim);font-size:10px}
+.vpc-rear-warn{margin-top:6px;color:#fff3b0;font-size:10px;line-height:1.5}
 @container (max-width: 640px){.vpc{grid-template-columns:minmax(0,1fr)}.vpc-gaze-cols{grid-template-columns:minmax(0,1fr)}.vpc-canvas{width:100%;max-width:320px;height:auto;aspect-ratio:320/280}}
 `;

@@ -12930,20 +12930,14 @@ body.detached-metadata .metadata-layout {
   overflow-y: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  transition: height 160ms ease, min-height 160ms ease, border-color 0.2s;
+  transition: border-color 0.2s;
 }
 .pe-textarea::-webkit-scrollbar {
   width: 0;
   height: 0;
 }
-.pe-prompt-stack:focus-within .pe-prompt-field:not(:focus-within) .pe-textarea {
-  height: 42px;
-  min-height: 42px;
-}
-.pe-prompt-stack:focus-within .pe-prompt-field:focus-within .pe-textarea {
-  height: 150px;
-  min-height: 150px;
-}
+/* 초점이 들어간 칸을 키우고 나머지를 42px 로 접던 규칙은 회수했다(사용자 지시 2026-10-17 - 창이 커졌고, 크기는 손잡이로
+   조절한다). 칸은 늘 제 높이를 지킨다 - 확대 애니메이션용 height 전환도 함께 뺐다(손잡이로 끌 때 늦게 따라온다). */
 .mod-textarea:focus { border-color: var(--accent); }
 .mod-textarea::placeholder { color: var(--text-dim); font-style: italic; }
 /* NAI 캐릭터 프롬프트/UC 입력칸: 포커스(클릭) 시 높이 확장 — PE .pe-textarea 패턴 이식.
@@ -15485,10 +15479,9 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   color: var(--text-muted); font-size: 12px; line-height: 1; cursor: pointer;
 }
 .pe-opt-gear:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.16); color: var(--text-primary); }
-/* Prefix · Postfix 는 넓게(사용자 지시 2026-10-15 - Auto-Hide 는 그대로 88px). 초점이 들어간 칸은 더 커지고, 다른 칸이
-   초점을 쥐면 예전처럼 42px 로 접힌다(.pe-prompt-stack:focus-within 규칙 - 그쪽이 더 구체적이라 이긴다). */
+/* Prefix · Postfix 는 넓게(사용자 지시 2026-10-15 - Auto-Hide 는 그대로 88px). 초점에 따라 키우고 접던 규칙은 회수했다
+   (2026-10-17 - 위 .pe-textarea 의 주석). */
 .pe-layout .pe-prompt-field--tall .pe-textarea { height: 136px; min-height: 136px; max-height: 320px; }
-.pe-layout .pe-prompt-stack:focus-within .pe-prompt-field--tall:focus-within .pe-textarea { height: 220px; min-height: 220px; }
 /* [디버그] - Result 우상단 PE 디버그 오버레이를 켜고 끈다(3단계). 켜져 있으면 눌린 모양. */
 .pe-debug-toggle[aria-pressed="true"] { border-color: var(--accent); background: rgba(124,106,239,0.24); color: var(--text-primary); }
 /* 입력칸 모서리를 줄인다(사용자 지시 2026-10-15 - 모던하게). PE 창 안의 글칸 · 검색칸 · 프리셋 셀렉트만. */

@@ -10,25 +10,28 @@
 //   - 요약과 같은 띠에서는 태그도 없다: |yaw| < 15 = 정면 / 뒷모습(3/4 가 새지 않는다), |pitch| < 20 = 수평(위아래 태그 없음).
 //   - 후면 = 사용자가 실제로 돌려 본 프롬프트 그대로: `1.5::rear view, from behind ::, looking away, -1.3::looking at viewer ::`
 //     (절반 규칙보다 이 예가 우선 - 'facing viewer' 억제는 'looking at viewer' 억제로 바뀌었다).
-//   - 'object focus' 회수 - 사물에 초점을 두라는 태그라 인물 근접에 맞지 않는다.
+//   - 'object focus' 회수 - 사물에 초점을 두라는 태그라 인물 근접에 맞지 않는다. 인물이 물건을 들고 있으면 그 물건으로
+//     초점이 넘어가 그림이 무너진다(사용자 2026-10-17). 다시 넣지 말 것.
 //   v9(사용자 지시 2026-10-17): 부감(위쪽 high-angle · bird's-eye · from above)만 v7 값으로 되돌린다(최대 2).
+//   v10(사용자 지시 2026-10-17): 'from side' 도 v7 값으로 - 7회차에서 옆(90)이 진짜 옆얼굴 0/2(몸만 돌고 얼굴은 정면).
+//   v11(사용자 제안 2026-10-17): 'side view' 를 옆 몫 그대로 덧붙인다 - 9회차에서 옆(90) 옆얼굴 1/2 -> 2/2.
 //   5회차에서 절반 값(+45 = 0.5 + 0.25)은 전면 부감 4장 모두 약했다 - 모델이 부감을 문턱 넘는 스위치로 받는다(3차).
 // 좌우(어느 쪽을 보나)는 모델이 시드로 정한다 - 태그는 |yaw| 만 본다(대칭 처리, 사용자 결정 2026-10-16).
 
-export const VIEWPOINT_VERSION = 'viewpoint-v9';
+export const VIEWPOINT_VERSION = 'viewpoint-v11';
 export const LIMITS = Object.freeze({yaw: 90, pitch: 90, minRadius: 2.4, maxRadius: 7, referenceRadius: 4, minWeight: 0.2, maxWeight: 1.5});
 
 // 후면 묶음 - 사용자가 실제로 돌려 본 예(2026-10-17)의 가중치. 절반 규칙의 예외다.
 const REAR_TAG = 'rear view, from behind';
 const REAR_WEIGHT = 1.5;
 const REAR_LOOK_AT_VIEWER = -1.3;
-// 부감 태그만 v7 값으로(v9) - 2 x share, 최대 2.
-const UP_GAIN = 2;
-const UP_MAX = 2;
+// v7 값으로 되돌린 태그(부감 = v9 · from side = v10) - 2 x share, 최대 2.
+const V7_GAIN = 2;
+const V7_MAX = 2;
 
 // 이 수식이 쓰는 태그 전부(묶음 'rear view, from behind' 는 한 가중치로 나간다).
 export const VIEWPOINT_TAGS = Object.freeze([
-  'from behind', REAR_TAG, 'looking away', 'looking at viewer', 'three-quarter view', 'from side',
+  'from behind', REAR_TAG, 'looking away', 'looking at viewer', 'three-quarter view', 'from side', 'side view',
   "worm's-eye view", 'low-angle view', 'high-angle view', "bird's-eye view", 'from above', 'from below',
   'close-up', 'wide shot',
 ]);
@@ -93,17 +96,18 @@ export function convertViewpoint(input) {
     add('X', 'looking at viewer', REAR_LOOK_AT_VIEWER * facing);
   }
   add('X', 'three-quarter view', quarter);
-  add('X', 'from side', side);
+  add('X', 'from side', V7_GAIN * side, V7_MAX);
+  add('X', 'side view', side);
   // 위쪽은 모델이 문턱을 넘으면 한 번에 강한 부감이 된다 - +45 까지 pitch/90, 그 뒤 +70 에서 1(v3 B · v5).
   const up = pitch <= 0 ? 1 : pitch <= 45 ? pitch / 90 : Math.min(1, 0.5 + ((pitch - 45) / 25) * 0.5);
   // v8: 수평 띠(|pitch| < 20)에는 위아래 태그가 없다 - 15 에서 0 -> 30 에서 1 로 켠다(앙각 쪽이 -13 에서도 low-angle 을 냈다).
   const level = clamp((Math.abs(pitch) - 15) / 15, 0, 1);
   for (const [center, tag] of [[-90, "worm's-eye view"], [-45, 'low-angle view'], [45, 'high-angle view'], [90, "bird's-eye view"]]) {
     // v9: 부감 쪽만 v7 값(2 x share, 최대 2) - 앙각은 v8 절반 그대로.
-    const gain = center > 0 ? UP_GAIN : 1;
-    add('Y', tag, gain * level * up * Math.max(0, 1 - Math.abs(pitch - center) / 45), center > 0 ? UP_MAX : undefined);
+    const gain = center > 0 ? V7_GAIN : 1;
+    add('Y', tag, gain * level * up * Math.max(0, 1 - Math.abs(pitch - center) / 45), center > 0 ? V7_MAX : undefined);
   }
-  add('Y', 'from above', UP_GAIN * level * up * Math.max(0, Math.min(1, pitch / 45)) * 0.5, UP_MAX);
+  add('Y', 'from above', V7_GAIN * level * up * Math.max(0, Math.min(1, pitch / 45)) * 0.5, V7_MAX);
   add('Y', 'from below', level * Math.max(0, Math.min(1, -pitch / 45)) * 0.5);
   const near = Math.max(0, -z);
   const far = Math.max(0, z);

@@ -1352,7 +1352,8 @@ export function createCharacterQuickPanel({
   // ⚠️ 목록만 갈아 끼운다. 창 전체를 다시 그리면 검색칸이 새로 생겨 한 글자마다 캐럿을 잃는다.
   const FIND_PER_PAGE = 30;
   let findEl = null;
-  let findTab = 'dex';
+  // 처음 여는 갈래 = 히스토리 · 즐겨찾기(사용자 지시 2026-10-17). 탭 차례(사전이 앞)는 그대로 - 기본값만 바꿨다.
+  let findTab = 'lib';
   const findQuery = {dex: '', lib: ''};
   let findDexRows = [];
   let findDexSeq = 0;

@@ -216,7 +216,10 @@ export function createPromptHighlighter({
     if (typeof getTagFilterState !== 'function') return '';
     let found = null;
     try { found = getTagFilterState(core); } catch (_error) { return ''; }
-    if (!found) return '';
+    // ⚠️ **Exclude 목록은 칠하지 않는다**(사용자 지시 2026-10-17). 처음(08-31)엔 포함 · 제외를 대칭으로 칠했는데, 제외 태그는
+    //    원래 Search 가 걸러 메인 프롬프트에 나타날 일이 없었다 - 이벤트 맵 조합이 그 태그를 프롬프트에 넣을 수 있게 되며
+    //    '제외한 태그가 강조되는' 화면이 생겼다. 우클릭 메뉴(chunkPanel)는 같은 조회로 두 목록을 다 본다 - 거기는 그대로다.
+    if (!found || found.list === 'exclude') return '';
     return found.exact
       ? 'prompt-token-tagfilter prompt-token-tagfilter-exact'
       : 'prompt-token-tagfilter';

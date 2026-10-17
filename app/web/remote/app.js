@@ -11562,7 +11562,7 @@ function syncPeDebugToggles(on) {
 // 다른 화면 아홉 파일이 그 id 로 칸을 읽는다.
 const promptEngineeringHost = document.createElement('div');
 const promptEngineeringWindowReady = peUsesWindow
-  ? import('./js/features/promptEngineeringWindow.mjs?v=20261015-peaux3')
+  ? import('./js/features/promptEngineeringWindow.mjs?v=20261017-auxfoot1')
     .then(({createPromptEngineeringWindow}) => {
       promptEngineeringWindow = createPromptEngineeringWindow({
         document,
@@ -12219,7 +12219,7 @@ const peOllamaBoostPanel = $('peOllamaBoostPanel');
 const peDebugPanel = $('peDebugPanel');
 // Boost v2(llama.cpp) 설정 영역 — Auto Boost Settings 팝업에서 백엔드가 llama.cpp 일 때 그린다.
 let boostV2Panel = null;
-const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpustart')
+const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20261017-auxfoot1')
   .then(({createBoostV2Panel}) => {
     boostV2Panel = createBoostV2Panel({
       document, escHtml, setModuleParam, showToast, openLlmSetup: () => window.openAiModelSetup(),
@@ -12228,7 +12228,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20260927-cpus
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261015-pew1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261017-auxfoot1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },

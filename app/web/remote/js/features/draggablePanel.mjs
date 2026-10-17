@@ -167,7 +167,7 @@ export function createDraggablePanel({
 
   const api = {
     el, body, head, slot,
-    open, close, toggle, isOpen, setTitle, moveTo, sizeTo, resetGeometry,
+    open, close, toggle, isOpen, setTitle, moveTo, sizeTo, resetGeometry, bringIntoView,
     collapse, expand, isCollapsed, raise, refit, destroy,
     setParentPanel, setPinned, isPinned,
   };
@@ -427,6 +427,22 @@ export function createDraggablePanel({
       heldHeight = el.style.height;
     }
     moveTo(x, y, {persist: false});
+    return true;
+  }
+
+  /** 창이 화면에 **다 들어오지 않으면** 다시 놓는다 - 부모가 있으면 처음 열 때처럼 그 옆(placeBesideParent), 없으면
+   *  화면 안으로 당긴다. 다 보이면 아무것도 안 한다(사용자가 둔 자리를 지킨다). 옮겼으면 true.
+   *  ⚠️ 끄는 중의 clampPos('머리줄만 잡히면 된다')와 다른 규칙이다 - 부르는 쪽이 '열 때' 만 부른다(PE 보조 창, 사용자 지시
+   *     2026-10-17: 구석에 박힌 채 열려 아래쪽 저장 단추가 화면 밖에 있었다). 다른 창의 동작은 바뀌지 않는다. */
+  function bringIntoView() {
+    if (!isOpen()) return false;
+    const {w: vw, h: vh} = viewport();
+    if (vw <= 0 || vh <= 0) return false;
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || (rect.left >= 0 && rect.top >= 0 && rect.right <= vw && rect.bottom <= vh)) return false;
+    if (placeBesideParent()) return true;
+    const fit = fitWholePanel(rect.left, rect.top);
+    moveTo(fit.x, fit.y);
     return true;
   }
 

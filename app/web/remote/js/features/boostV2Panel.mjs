@@ -61,9 +61,9 @@ export function createBoostV2Panel({ document, escHtml, setModuleParam, showToas
         ${rows}
         <div class="mod-boost-caption">끈 섹션은 출력에서 빠집니다. 선호 문구는 장면에 어울릴 때만 쓰도록 모델에 전달됩니다. 결과는 프롬프트 본문 끝(postfix 앞)에 붙습니다.</div>
       </div>
-      <div class="mod-inline-row">
-        <button class="mod-btn-secondary" data-boost-act="save">Save Boost Settings</button>
-        <span data-boost-dirty style="font-size:11px;color:var(--text-dim);margin-left:6px">${draft ? '저장 안 됨' : ''}</span>
+      <div class="pe-aux-foot">
+        <span class="pe-aux-status" data-boost-dirty>${draft ? '저장 안 됨' : ''}</span>
+        <button type="button" class="pe-aux-save" data-boost-act="save">저장</button>
       </div>`;
     mountedRoot = body.querySelector('[data-boost-v2-root]');
     // body 는 재렌더돼도 같은 요소다(innerHTML 만 바뀐다) — 리스너는 한 번만 건다.

@@ -15475,6 +15475,24 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   overflow: hidden;
 }
 .pe-popup.open { display: flex; }
+/* 가중치 · 보강 창(e621 · Danbooru · AI 부스트)의 아래 고정 줄 + [저장](사용자 지시 2026-10-17). 저장 단추가 내용 맨 끝에
+   있어서 창이 작으면 끝까지 굴려야 보였다. 줄은 굴러가는 칸(.pe-popup-body - 안쪽 여백 14px 16px)의 맨 끝 자식이고 바닥에
+   붙는다(sticky) - 여백만큼 바깥으로 빼서 창 폭을 다 쓴다. */
+.pe-popup-body > .pe-aux-foot,
+.pe-popup-body > [data-boost-v2-host] > .pe-aux-foot {
+  position: sticky; bottom: -14px; z-index: 2;
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  margin: auto -16px -14px; padding: 8px 16px;
+  border-top: 1px solid var(--border-dim); background: var(--bg-surface);
+}
+.pe-popup-body > [data-boost-v2-host] { display: flex; flex-direction: column; gap: 10px; flex: 1 0 auto; }
+.pe-aux-status { flex: 1 1 auto; min-width: 0; font-size: 11px; color: #e6a84a; }
+.pe-aux-save {
+  padding: 6px 18px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.pe-aux-save:hover { filter: brightness(1.1); }
 
 /* ── PE 2단 · 전처리 행 (PE 개편 2단계 2026-10-15 · docs/PE_WINDOW_REDESIGN_2026_10_15.md §3.2 · §3.3) ──────────────
    왼쪽 = 프리셋 · Prefix · Postfix · Auto-Hide, 오른쪽 = 전처리. 화면 폭이 아니라 **본문의 폭**을 본다(.pe-layout 이

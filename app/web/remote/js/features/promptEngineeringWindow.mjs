@@ -159,6 +159,8 @@ export function createPromptEngineeringWindow({
     }
     aux.open();
     if (aux.isCollapsed()) aux.expand();
+    // 구석에 박혀 일부가 화면 밖이면 PE 창 옆으로 끄집어낸다(사용자 지시 2026-10-17) - 다 보이면 둔 자리 그대로.
+    aux.bringIntoView?.();
     return true;
   }
 

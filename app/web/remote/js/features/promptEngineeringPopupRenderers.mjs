@@ -800,8 +800,8 @@ export function createPromptEngineeringPopupRenderers({
       <div class="mod-section-label">숨길 태그 (Hidden Tags)</div>
       <textarea class="mod-textarea" id="modE621HiddenTags" placeholder="쉼표 또는 줄바꿈으로 구분">${escHtml(e621Hidden)}</textarea>
     </div>
-    <div class="mod-inline-row">
-      <button class="mod-btn-secondary" onclick="savePromptEngineeringE621Settings()">Save e621 Settings</button>
+    <div class="pe-aux-foot">
+      <button type="button" class="pe-aux-save" onclick="savePromptEngineeringE621Settings()">저장</button>
     </div>
   `;
   }
@@ -869,8 +869,8 @@ export function createPromptEngineeringPopupRenderers({
         <span class="mod-checkbox-label">가중치 반전 (흔한 태그를 강조)</span>
       </label>
     </details>
-    <div class="mod-inline-row">
-      <button class="mod-btn-secondary" onclick="savePromptEngineeringDanbooruSettings()">Save Danbooru Settings</button>
+    <div class="pe-aux-foot">
+      <button type="button" class="pe-aux-save" onclick="savePromptEngineeringDanbooruSettings()">저장</button>
     </div>
   `;
     bindDanbooruFeedback(danbooru);

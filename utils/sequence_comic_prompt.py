@@ -49,8 +49,13 @@ SCENE_LAYOUTS: dict[int, tuple[str, ...]] = {
     4: ("top-left panel", "top-right panel", "bottom-left panel", "bottom-right panel"),
 }
 COMIC_SENTENCE = ("A {n}-panel comic strip separated by thick, bold black borders. The panels are arranged "
-                  "sequentially from top to bottom to show a continuous progression of events with the same, "
+                  "sequentially from {order} to show a continuous progression of events with the same, "
                   "sequential, silent comic")
+# 고정 문장의 칸 차례. 4장면은 2x2 라 위 줄 왼쪽 -> 오른쪽, 아래 줄 왼쪽 -> 오른쪽(사용자 2026-10-18 · SCENE_LAYOUTS 와 같은 차례).
+COMIC_ORDER_DEFAULT = "top to bottom"
+COMIC_ORDER: dict[int, str] = {
+    4: "top-left to top-right, and bottom-left to bottom-right",
+}
 RATING_TAGS = {
     "g": "rating:general",
     "s": "rating:sensitive",
@@ -309,7 +314,7 @@ def build_comic_prompt(assembled: str, n: int, body: str) -> str:
         koma = f"2::{spec['koma']} ::"
         hit = re.search(_PERSON_TAG, prefix)
         prefix = f"{prefix[:hit.start()]}{koma}, {prefix[hit.start():]}" if hit else f"{koma}, {prefix}"
-        sentence = COMIC_SENTENCE.format(n=n)
+        sentence = COMIC_SENTENCE.format(n=n, order=COMIC_ORDER.get(int(n or 0), COMIC_ORDER_DEFAULT))
         stripped = prefix.rstrip()
         trail = prefix[len(stripped):]
         core_prefix = stripped.rstrip(",").rstrip()

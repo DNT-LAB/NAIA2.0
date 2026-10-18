@@ -325,7 +325,7 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
                 overrides["height"] = fixed_h
             if fixed_w and fixed_h:
                 overrides["resolution"] = f"{fixed_w} x {fixed_h}"
-        # 장면 수별 고정 해상도(사용자 2026-10-17: 4 = 1024x1024 · 3 = 768x1344(10-18) · 2 = 896x1152). 사양 없는 수는 위 그대로.
+        # 장면 수별 고정 해상도(사용자 2026-10-17: 4 = 1088x960(10-18) · 3 = 768x1344(10-18) · 2 = 896x1152). 사양 없는 수는 위 그대로.
         # 라지(유료 · 10-18): 4 = 1280x1280 · 3 = 1024x1792 · 2 = 1152x1472.
         spec = comic_spec(n_scenes)
         if spec:

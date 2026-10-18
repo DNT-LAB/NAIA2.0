@@ -194,7 +194,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
           <span class="seq-flabel">컷</span>${cutChips}
           ${LARGE_SIZE_ENABLED ? `<span class="seq-sizeseg" role="group" aria-label="만화 크기">
             <button type="button" class="seq-size ${state.size === 'normal' ? 'active' : ''}" data-seq-size="normal"
-              aria-pressed="${state.size === 'normal'}" title="2컷 896x1152 · 3컷 768x1344 · 4컷 1024x1024">노말</button>
+              aria-pressed="${state.size === 'normal'}" title="2컷 896x1152 · 3컷 768x1344 · 4컷 1088x960">노말</button>
             <button type="button" class="seq-size seq-size-large ${state.size === 'large' ? 'active' : ''}" data-seq-size="large"
               aria-pressed="${state.size === 'large'}" title="2컷 1152x1472 · 3컷 1024x1792 · 4컷 1280x1280 - 1MP 를 넘어 Anlas 를 씁니다">라지 (유료)</button>
           </span>` : ''}

@@ -178,15 +178,18 @@ class HeadlessSequenceRunService:
         st = self._runtime_for(run_id)
         return dict(st.get("query") or {}) if st else {}
 
-    def update_query(self, query: dict[str, Any]) -> bool:
-        """도는 런의 다음 라운드 모집단(검색 조건)을 바꾼다. 런이 없으면 False.
+    def update_query(self, query: dict[str, Any], run_id: str = "") -> bool:
+        """도는 런의 다음 라운드 모집단(검색 조건)을 바꾼다. 런이 없거나 **번호가 다르면** False.
 
         Auto Gen 의 다음 라운드는 이 query 로 뽑는다 - 예전에는 시작할 때의 것만 써서, 도는 중에 컷 · 수위 칩을 바꿔도
-        다음 라운드에 안 걸렸다(사용자 제보 2026-10-18). 화면이 칩 · 검색을 바꿀 때마다 보낸다."""
+        다음 라운드에 안 걸렸다(사용자 제보 2026-10-18). 화면이 칩 · 검색을 바꿀 때마다 보낸다.
+        run_id 는 꼭 맞아야 한다 - 끝난 런에 보낸 늦은 요청이 새 런의 조건을 덮지 않게(Codex 리뷰)."""
         st = self._state()
         if not st or not st.get("is_running") or not isinstance(query, dict):
             return False
-        st["query"] = dict(query)
+        if not run_id or str(st.get("run_id") or "") != str(run_id):
+            return False
+        st["query"] = {k: v for k, v in query.items() if k != "runId"}
         return True
 
     def last_group_id(self, run_id: str):

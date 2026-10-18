@@ -3944,7 +3944,18 @@ export function createTagAssistController({
       if (textarea._acExplicitSelect && e.key === 'Enter') {
         // 고른 줄이 있으면 그것을 넣고, 없으면 친 그대로 둔다. 어느 쪽이든 Enter 는 막지 않는다 - 칸의 주인(검색)이 받는다
         // (아티스트 검색 칸: 고른 것을 넣고 바로 검색).
-        if (acSel >= 0) selectAutocomplete(acSel);
+        const row = acSel >= 0 ? acResults[acSel] : null;
+        // 단계형 후보(청크 그룹 · 와일드카드 master · 중간 프리셋 경로)는 다음 목록을 연다 - 그 Enter 는 고르기의 한 단계라
+        // 예전처럼 삼키고 목록을 둔다(닫으면 하위 후보 응답이 버려졌다 - Codex 리뷰).
+        const stepping = !!row && (row._wc_type === 'chunk_group' || row._wc_type === 'wildcard_master'
+          || (row._wc_type === 'preset_path' && !row.final));
+        if (stepping) {
+          e.preventDefault();
+          e.stopPropagation();
+          selectAutocomplete(acSel);
+          return;
+        }
+        if (row) selectAutocomplete(acSel);
         hideAutocomplete();
         return;
       }

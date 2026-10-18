@@ -92,9 +92,10 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     recent: null,           // 아래 칸의 카드 요약(방금 생성 · 히스토리에서 고른 그림의 이야기)
     boxLabel: '방금 생성',
     recentId: 0,            // 마지막으로 생성한 그룹 번호(요약을 받기 전에도 같은 번호를 두 번 묻지 않게)
-    pendingBox: null,       // 패널이 뜨기 전에 온 칸 {gid, label}
+    pendingBox: null,       // 패널이 뜨기 전에 온 칸 {gid, label, kind, selectAt}
     runSeen: {runId: '', round: 0},   // 런 상태로 본 가장 새 라운드 - 늦게 온 첫 라운드 HTTP 답이 칸을 되돌리지 않게
     runActive: false,       // Auto Gen 연속 런이 도는 중(런 상태) - 칩 · 검색을 바꾸면 그 런의 다음 라운드 조건도 바꾼다
+    activeRunId: '',        // 그 런의 번호 - 조건 갱신은 이 번호로만 간다(끝난 런의 늦은 요청이 새 런을 덮지 않게)
     favorites: [],          // 즐겨찾기 카드 요약(새로 단 것이 먼저 · 데이터에 없으면 {groupId, missing})
     favLoaded: false,
     favOnly: false,         // 목록 = 즐겨찾기
@@ -162,8 +163,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       void loadFavorites();
       renderRecent();
       if (state.pendingBox && !state.recent) {   // 패널을 열기 전에 런 상태 · 히스토리 고르기가 왔다
-        const {gid, label} = state.pendingBox;
-        void fillBox(gid, label);
+        const {gid, label, kind, selectAt} = state.pendingBox;
+        void fillBox(gid, label, kind, selectAt);
       }
       await runSearch();
     } catch (error) {
@@ -309,12 +310,23 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
 
   // Auto Gen 이 도는 동안 컷 · 수위 칩 · 검색을 바꾸면 그 런의 다음 라운드 조건도 바꾼다(사용자 2026-10-18 - 예전엔 시작할 때의
   // 조건으로 계속 뽑았다). 한 줄로 보내고 조건은 **보낼 때** 읽는다 - 칩을 연달아 눌러도 마지막 조건이 마지막에 닿는다.
+  // 런 번호를 함께 보낸다 - 서버는 지금 도는 런과 번호가 같을 때만 고친다(Codex 리뷰).
   let runQueryChain = Promise.resolve();
-  function pushRunQuery() {
-    if (!state.runActive) return;
+  function pushRunQuery(runId = state.activeRunId) {
+    if (!runId) return;
     runQueryChain = runQueryChain
-      .then(() => postJson('/api/sequence-preset/run-query', searchPayload()))
+      .then(() => postJson('/api/sequence-preset/run-query', {...searchPayload(), runId}))
       .catch(() => null);      // 실패해도 다음 칩 변경이 다시 보낸다
+  }
+
+  // 시작 요청을 보낸 뒤 답이 오기 전(프롬프트 조립 동안)에 칩 · 검색을 바꿨으면 런 상태가 아직 없어 위 갱신이 안 나갔다
+  // (Codex 리뷰). 답이 오면 보낼 때의 조건과 지금 조건을 견줘, 다르면 받은 런 번호로 지금 조건을 보낸다.
+  function queryKey() {
+    const q = searchPayload();
+    return JSON.stringify([q.include, q.exclude, q.ratings, q.frameCounts, q.favoritesOnly, q.size]);
+  }
+  function catchUpRunQuery(out, sentKey) {
+    if (out && out.ok && out.runId && queryKey() !== sentKey) pushRunQuery(String(out.runId));
   }
 
   // -------------------------------------------------------------- 검색/생성
@@ -384,8 +396,10 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     state.busy = true; syncGenerateButtons();
     try {
       if (!(await charactersSettled())) return;
+      const sentKey = queryKey();
       const out = await postJson('/api/sequence-preset/generate',
         {groupId: Number(groupId), ...searchPayload()});
+      catchUpRunQuery(out, sentKey);
       // 등록 성공 알림은 띄우지 않는다(사용자 2026-10-18 - 이야기 하나 = 한 장이라 뜻이 없다 · 무엇을 그렸는지는 '방금 생성' 칸).
       if (!out.ok) {
         const failed = (out.frames || []).find(f => !f.ok);
@@ -410,7 +424,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     state.busy = true;
     try {
       if (!(await charactersSettled())) return true;
+      const sentKey = queryKey();
       const out = await postJson('/api/sequence-preset/random-generate', searchPayload());
+      catchUpRunQuery(out, sentKey);
       if (!out.ok) {   // 등록 성공 알림은 없다(위 generateGroup 과 같다)
         const failed = (out.frames || []).find(f => !f.ok);
         showToast(`연속 생성 실패: ${failed?.error || out.error || '매칭/자격증명/큐 확인'}`, 'error');
@@ -552,7 +568,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   async function fillBox(gid, label, kind = 'recent', selectAt = userSelectSeq) {
     const my = ++boxSeq;
     fillKind = kind;
-    if (state.available !== true) { state.pendingBox = {gid, label}; return; }   // 셸이 생기면 ensureReady 가 다시 부른다
+    if (state.available !== true) { state.pendingBox = {gid, label, kind, selectAt}; return; }   // 셸이 생기면 ensureReady 가 다시 부른다
     state.pendingBox = null;
     let summary = findSummary(gid);
     if (!summary) {
@@ -588,6 +604,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   function onRunState(st) {
     state.runActive = st?.is_running === true || String(st?.is_running).toLowerCase() === 'true';
     const runId = String(st?.run_id || '');
+    state.activeRunId = state.runActive ? runId : '';
     const round = Number(st?.round_count) || 0;
     if (runId && (runId !== state.runSeen.runId || round > state.runSeen.round)) state.runSeen = {runId, round};
     const key = `${runId}:${round}`;
@@ -612,6 +629,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   // 히스토리에서 다른 그림을 골랐다 - 아직 채우는 중인 앞 그림의 칸은 무른다(일반 그림을 골랐는데 앞 그림이 뒤늦게 뜨지 않게).
   function cancelHistoryFill() {
     if (fillKind === 'history') boxSeq += 1;
+    // 패널을 열기 전이라 보류해 둔 히스토리 칸도 지운다 - 안 그러면 패널을 열 때 앞 그림의 이야기가 떴다(Codex 리뷰).
+    if (state.pendingBox?.kind === 'history') state.pendingBox = null;
   }
 
   // ---------------------------------------------------------------- 즐겨찾기

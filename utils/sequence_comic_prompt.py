@@ -27,12 +27,17 @@ from typing import Any, Iterable
 
 # 5 · 6장면은 모델이 받는지 검증되지 않았다(사용자 2026-10-17) - 앞 4장면까지만.
 MAX_SCENES = 4
-# 장면 수별 고정 사양(사용자 2026-10-17). koma = `2::{koma} ::` 를 1girl 앞에 · 해상도는 이 크기로 고정.
+# 장면 수별 고정 사양(사용자 2026-10-17). koma = `2::{koma} ::` 를 인원 태그 앞에 · 해상도는 이 크기로 고정.
+# 3장면은 768x1344(사용자 2026-10-18 - 832x1216 에서 바꿈 · 1,032,192px 라 1MP 안).
 COMIC_SPECS: dict[int, dict[str, Any]] = {
     4: {"size": (1024, 1024), "koma": "4koma"},
-    3: {"size": (832, 1216), "koma": "3koma"},
+    3: {"size": (768, 1344), "koma": "3koma"},
     2: {"size": (896, 1152), "koma": "2koma"},
 }
+# 인원 태그(1girl · 2girls · 1boy · 6+boys · 1other …). koma 는 이 중 **맨 앞 것** 앞에 간다 - 예전엔 첫 `1girl` 앞만 찾아
+# `1boy, 1girl` 이면 `1boy, 2::2koma ::, 1girl` 로 둘 사이에 끼었다(사용자 제보 2026-10-18).
+# 가중치가 붙은 것(`0.8::1girl ::`)은 가중치 앞에 넣는다. `artist:2girls` 처럼 `:` 뒤에 붙은 글자는 인원 태그가 아니다.
+_PERSON_TAG = r"(?<![\w:+.])(?:\d+(?:\.\d+)?::\s*)?\d+\+?(?:girl|boy|other)s?(?![\w])"
 COMIC_SENTENCE = ("A {n}-panel comic strip separated by thick, bold black borders. The panels are arranged "
                   "sequentially from top to bottom to show a continuous progression of events with the same, "
                   "sequential, silent comic")
@@ -267,7 +272,7 @@ def build_comic_prompt(assembled: str, n: int, body: str) -> str:
     PE 파이프라인을 장면 줄에 통과시키지 않는 이유: 본문 태그를 정렬 · 중복 제거 · 숨김 처리해 `scene k:` 구조가 깨진다.
 
     장면 수 사양이 있으면(2~4, 사용자 2026-10-17):
-    - `2::{k}koma ::` 를 첫 `1girl` 앞에(없으면 맨 앞),
+    - `2::{k}koma ::` 를 맨 앞 인원 태그(`1boy` · `1girl` · `2girls` …) 앞에(없으면 맨 앞),
     - 고정 문장(COMIC_SENTENCE)을 **선행 고정 프롬프트(PE prefix) 뒤** = 본문 표식 바로 앞에 붙인다.
     ⚠️ 맨 앞의 `{n}koma, {n} panel comic, sequential` 은 회수했다(사용자: "묻어나온다").
     """
@@ -285,7 +290,7 @@ def build_comic_prompt(assembled: str, n: int, body: str) -> str:
         prefix, tail = text[:at], text[end:]
     if spec:
         koma = f"2::{spec['koma']} ::"
-        hit = re.search(r"(?<![\w:])1girl\b", prefix)
+        hit = re.search(_PERSON_TAG, prefix)
         prefix = f"{prefix[:hit.start()]}{koma}, {prefix[hit.start():]}" if hit else f"{koma}, {prefix}"
         sentence = COMIC_SENTENCE.format(n=n)
         stripped = prefix.rstrip()

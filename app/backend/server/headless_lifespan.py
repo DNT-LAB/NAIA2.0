@@ -95,6 +95,14 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
                 await run_in_thread(save_runner_parquet, context)
             except Exception as exc:
                 print(f"Headless Remote: runner parquet shutdown save failed - {exc}", flush=True)
+            try:
+                # Tag Filter 이어 하기(사용자 2026-10-18) - 정상 종료 때 남은 행 색인을 쓴다. 포터블은 이 finally 까지
+                # 못 오고 강제로 꺼지므로 Electron 이 먼저 POST /api/session/prepare-shutdown 으로 같은 저장을 시킨다.
+                from core.tag_filter_remaining import save_remaining
+
+                await run_in_thread(save_remaining, context)
+            except Exception as exc:
+                print(f"Headless Remote: tag filter remaining shutdown save failed - {ascii(str(exc))}", flush=True)
             # 정상 종료면 청소 흔적을 지운다 - 다음 부팅이 죽은 pid 를 붙들고
             # 청소를 건너뛰지 않게. 강제 종료면 남지만 그때는 pid 생존 확인이
             # 걸러 준다(Codex 11차).

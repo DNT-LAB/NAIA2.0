@@ -239,6 +239,7 @@ const APP_WINDOW_BOUNDS = Object.freeze({
 let mainWindow = null;
 let backendProcess = null;
 let backendState = "stopped";
+let shutdownFlushState = "idle";   // 종료 전 저장: idle -> pending(기다리는 중 - 어떤 quit 도 막는다) -> done
 let backendPort = readPort(process.env.NAIA_BACKEND_PORT, DEFAULT_PORT);
 let backendUrl = buildRemoteUrl(backendPort);
 let backendLogs = [];
@@ -1014,6 +1015,9 @@ function httpJsonRequest(targetUrl, options = {}) {
     }, (res) => {
       let body = "";
       res.setEncoding("utf8");
+      // 응답이 중간에 끊기면 end 가 안 와서 영영 안 끝났다(Codex) - 끊김 · 오류도 거절로 끝낸다.
+      res.on("aborted", () => reject(new Error(`Response aborted: ${targetUrl}`)));
+      res.on("error", reject);
       res.on("data", (chunk) => {
         body += chunk;
       });
@@ -1847,6 +1851,21 @@ async function waitForOwnedProcessesToExit(entries, timeoutMs = 12000) {
     alive = alive.filter((entry) => processAlive(entry.pid));
   }
   return alive;
+}
+
+// 종료 전 저장(사용자 2026-10-18): 백엔드를 끄기 **전에** 저장을 시키고 답을 기다린다(최대 8초).
+// stopBackend 는 taskkill /F 라 파이썬의 종료 정리가 돌지 않는다. 실패 · 시간 초과여도 호출부는 그대로 끈다.
+async function prepareBackendShutdown() {
+  if (!backendProcess || backendState !== "ready" || !backendUrl) return;
+  try {
+    // 전체 시한 - 소켓 시한만으로는 끊긴 응답을 못 건진다(Codex). 시한이 지나면 저장을 포기하고 끈다.
+    await Promise.race([
+      httpJsonRequest(`${backendUrl}/api/session/prepare-shutdown`, { method: "POST", timeoutMs: 8000 }),
+      delay(9000).then(() => { throw new Error("prepare-shutdown deadline"); }),
+    ]);
+  } catch (error) {
+    appendBackendLog("shell", `prepare-shutdown failed: ${error && error.message ? error.message : error}`);
+  }
 }
 
 function stopBackend() {
@@ -2771,6 +2790,7 @@ ipcMain.handle("naia:restart-backend", async () => {
   // (maintenance.html, dataMigrationPanel, smoke_electron_cdp's
   // "navigated or closed" handler) tolerates it.
   loadMaintenance("loading", "NAIA 재시작 중...");
+  await prepareBackendShutdown();   // 재시작도 저장을 거친다(Codex P2)
   stopBackend();
   // Wait for the old process to actually exit (its 'exit' handler clears
   // ``backendProcess``) before spawning the replacement. The previous fixed
@@ -3281,6 +3301,7 @@ async function stopOwnedProcessesForUpdate(timeoutMs = 12000) {
     { pid: grokLoginProcess && grokLoginProcess.pid, name: "Grok 로그인" },
   ].filter((entry) => entry.pid);
   stopGrokProxy();
+  await prepareBackendShutdown();   // 업데이트도 저장을 거친다(Codex P2)
   stopBackend();
   return waitForOwnedProcessesToExit(tracked, timeoutMs);
 }
@@ -3444,8 +3465,24 @@ if (!lock) {
       createMainWindow();
     }
   });
-  app.on("before-quit", () => {
+  app.on("before-quit", (event) => {
     quitting = true;
+    // 종료 전 저장 대기(사용자 2026-10-18): 백엔드는 아래 stopBackend 가 taskkill /F 로 끄므로 파이썬의 종료 정리가
+    // 돌지 않는다. 한 번만 종료를 미루고 저장을 시킨 뒤(최대 8초) 다시 quit 한다 - 실패 · 시간 초과여도 끈다.
+    // 저장을 기다리는 동안의 quit(창 닫기 등)은 모두 막는다 - 시작할 때 done 으로 두면 두 번째 quit 이 바로 끈다(Codex P2).
+    if (shutdownFlushState === "pending") {
+      event.preventDefault();
+      return;
+    }
+    if (shutdownFlushState === "idle" && backendProcess && backendState === "ready" && backendUrl) {
+      shutdownFlushState = "pending";
+      event.preventDefault();
+      prepareBackendShutdown().finally(() => {
+        shutdownFlushState = "done";
+        app.quit();
+      });
+      return;
+    }
     stopBackend();
     stopGrokProxy(); // Grok(제거 가능)
   });

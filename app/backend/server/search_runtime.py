@@ -553,6 +553,11 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     ids = result.get("_ids", set())
     source_snapshot = result.get("_source_snapshot")
     source_generation = int(result.get("_pool_generation") or 0)
+    # 이어 하기(사용자 2026-10-18): 지난번에 남겨 둔 행 색인이 같은 원본 · 같은 조건이면 그만큼만 남긴다
+    # (core/tag_filter_remaining). 다 쓴 뒤 되채우는 기준(아래 snapshot)은 그대로 전체 ids 다. 파일 읽기는 잠금 밖.
+    from core.tag_filter_remaining import apply_remaining
+
+    live_ids, resumed_ratings = apply_remaining(context, result, set(ids))
     # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
     # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
     # 찢긴 읽기는 _active_tag_filter_state 가 ids 로 임시 상태를 복원해 graceful. 동시 호출(get_search_state
@@ -564,19 +569,21 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
             or source_generation != current_search_pool_generation(context)
         ):
             return False
-        context.active_tag_filter_ids = set(ids)
+        context.active_tag_filter_ids = set(live_ids)
         context.active_tag_filter = {
             "tags": [str(tag) for tag in result.get("tags", [])],
             "branches": [list(b) for b in (result.get("branches") or [])],
-            "ids": set(ids),
-            "count": int(result.get("count") or 0),
+            "ids": set(live_ids),
+            # 이어 갔는지는 id 수로 본다 - rating 열이 없는 풀은 등급 수가 None 이라도 이어 갔다(Codex).
+            "count": len(live_ids) if len(live_ids) != len(ids) else int(result.get("count") or 0),
             "request_id": "",
-            "rating_counts": dict(result.get("rating_counts") or {}),
+            "rating_counts": dict(resumed_ratings if resumed_ratings is not None else (result.get("rating_counts") or {})),
         }
         # 적용 순간의 불변 집합 - commit 과 같은 모양(저장이 뽑아 쓴 행을 포함하고, 소진 뒤 같은 조건으로 되채운다).
         context.active_tag_filter_snapshot = {
             "ids": set(ids),
             "tags": [str(tag) for tag in result.get("tags", [])],
+            "branches": [list(b) for b in (result.get("branches") or [])],
             "count": int(result.get("count") or 0),
             "rating_counts": dict(result.get("rating_counts") or {}),
             "request_id": "",
@@ -752,6 +759,7 @@ def commit_pending_tag_filter_assignment(
         context.active_tag_filter_snapshot = {
             "ids": set(context.active_tag_filter_ids),
             "tags": list(tags),
+            "branches": [list(b) for b in branches],
             "count": int(pending.get("count") or 0),
             "rating_counts": dict(pending.get("rating_counts") or {}),
             "request_id": request_id,

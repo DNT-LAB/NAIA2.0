@@ -268,6 +268,8 @@ def _restore_tag_filter_snapshot(context: WebSessionContext) -> dict[str, Any] |
     context.active_tag_filter_ids = set(ids)
     context.active_tag_filter = {
         "tags": list(snapshot.get("tags") or []),
+        # 분기도 되살린다 - 빠지면 되채운 뒤의 이어 하기 명함이 분기 없는 조건이 되어 다음 시작과 안 맞는다(Codex).
+        "branches": [list(b) for b in (snapshot.get("branches") or [])],
         "ids": set(ids),
         "count": int(snapshot.get("count") or len(ids)),
         "request_id": str(snapshot.get("request_id") or ""),

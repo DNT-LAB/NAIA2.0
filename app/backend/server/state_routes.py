@@ -37,6 +37,18 @@ def register_state_routes(
             return JSONResponse({"error": "prompt run not found"}, status_code=404)
         return payload
 
+    @app.post("/api/session/prepare-shutdown")
+    async def api_session_prepare_shutdown():
+        """종료 전 저장(사용자 2026-10-18): Electron 이 백엔드를 강제로 끄기(taskkill /F) **전에** 부르고 답을 기다린다.
+        지금은 Tag Filter 이어 하기 색인(core/tag_filter_remaining)만 쓴다. 실패해도 종료는 막지 않는다."""
+        from core.tag_filter_remaining import save_remaining
+
+        try:
+            remaining = await run_in_thread(save_remaining, session_context)
+        except Exception as exc:
+            return {"ok": False, "error": ascii(str(exc))}
+        return {"ok": True, "tag_filter_remaining": remaining}
+
     @app.get("/api/queue/state")
     async def api_queue_state():
         return session_context.queue_state_payload()

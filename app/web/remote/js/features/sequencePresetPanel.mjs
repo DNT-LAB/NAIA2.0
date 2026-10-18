@@ -30,6 +30,46 @@ const CUTS = [2, 3, 4];
 // [노말 | 라지 (유료)] 는 숨겼다(사용자 2026-10-18 - "NAI 가 아직 감당하지 못한다"). 서버도 라지를 받지 않는다
 // (sequence_preset_routes.LARGE_SIZE_ENABLED) - 되살릴 때 둘을 함께 켠다.
 const LARGE_SIZE_ENABLED = false;
+// 제외 칸의 기본값(사용자 2026-10-18). 저장된 검색 조건이 있으면 그것이 먼저다(사람이 지운 것은 지운 채로).
+const DEFAULT_EXCLUDE = 'futanari, guro, scat, peeing';
+// 검색 조건 자동 저장(사용자 2026-10-18) - 검색할 때마다(검색 · Enter · 칩 · 랜덤 검색) 이 화면에 남기고, 다음에 열면 되살린다.
+// 이 화면의 편의 상태라 서버에 두지 않는다. 저장소가 막혀 있어도(사생활 모드 등) 기본값으로 그대로 돈다.
+const QUERY_STORE_KEY = 'naia.sequence.query.v1';
+
+function loadSavedQuery() {
+  try {
+    const raw = globalThis.localStorage?.getItem(QUERY_STORE_KEY);
+    const data = raw ? JSON.parse(raw) : null;
+    if (!data || typeof data !== 'object') return null;
+    return {
+      include: typeof data.include === 'string' ? data.include : null,
+      exclude: typeof data.exclude === 'string' ? data.exclude : null,
+      ratings: Array.isArray(data.ratings) ? data.ratings.filter(r => ALL_RATINGS.includes(r)) : null,
+      cuts: Array.isArray(data.cuts) ? data.cuts.map(Number).filter(n => CUTS.includes(n)) : null,
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function saveQuery(q) {
+  try {
+    globalThis.localStorage?.setItem(QUERY_STORE_KEY, JSON.stringify({
+      include: q.include, exclude: q.exclude, ratings: Array.from(q.ratings), cuts: Array.from(q.cuts),
+    }));
+  } catch (_) { /* 저장소가 막혀 있다 - 이번 화면에서만 쓴다 */ }
+}
+
+function initialQuery() {
+  const q = {include: '1girl', exclude: DEFAULT_EXCLUDE, ratings: new Set(['q']), cuts: new Set()};
+  const saved = loadSavedQuery();
+  if (!saved) return q;
+  if (saved.include !== null) q.include = saved.include;
+  if (saved.exclude !== null) q.exclude = saved.exclude;
+  if (saved.ratings && saved.ratings.length) q.ratings = new Set(saved.ratings);
+  if (saved.cuts) q.cuts = new Set(saved.cuts);
+  return q;
+}
 
 export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange,
   beforeGenerate, onSizeChange}) {
@@ -38,7 +78,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     presentRatings: [],
     groupCount: 0,
     // G · S 이야기는 백엔드가 뺀다(사용자 2026-10-18) - 수위 칩은 Q · E 만 남고 기본은 Q.
-    query: {include: '1girl', exclude: '', ratings: new Set(['q']), cuts: new Set()},
+    query: initialQuery(),  // 저장된 검색 조건 · 없으면 기본(1girl · 제외 DEFAULT_EXCLUDE · Q)
     results: null,
     detail: null,
     openGroupId: null,      // 미리보기 툴팁에 떠 있는 그룹
@@ -112,7 +152,11 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       }
       state.presentRatings = (st.ratings || []).filter(r => ALL_RATINGS.includes(r));
       state.groupCount = st.groupCount || 0;
-      if (!state.presentRatings.includes('q')) state.query.ratings.delete('q');
+      // 데이터에 없는 수위는 뺀다(저장된 조건이 옛 데이터의 것일 수 있다). 다 빠지면 있는 것 중 Q, 없으면 첫째.
+      for (const r of Array.from(state.query.ratings)) if (!state.presentRatings.includes(r)) state.query.ratings.delete(r);
+      if (!state.query.ratings.size && state.presentRatings.length) {
+        state.query.ratings.add(state.presentRatings.includes('q') ? 'q' : state.presentRatings[0]);
+      }
       state.available = true;
       buildShell();
       void loadFavorites();
@@ -279,6 +323,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     closePopup();
     state.favOnly = false;      // 검색 · 칩을 누르면 검색 결과를 본다
     syncChips();
+    saveQuery(state.query);     // 검색한 조건을 남긴다 - 다음에 열면 그대로
     pushRunQuery();             // 도는 런이 있으면 다음 라운드부터 이 조건으로
     state.busy = true; renderBody();
     try {

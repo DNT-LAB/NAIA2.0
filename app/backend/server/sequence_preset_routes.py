@@ -629,6 +629,16 @@ def register_sequence_preset_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Sequence random-generate failed: {exc}"}, status_code=500)
 
+    @app.post("/api/sequence-preset/run-query")
+    async def api_sequence_preset_run_query(req: Request):
+        # Auto Gen 이 도는 동안 바꾼 검색 조건(컷 · 수위 칩 · 검색)을 다음 라운드 모집단으로(사용자 2026-10-18).
+        payload = await _read_json(req)
+        try:
+            updated = session_context._sequence_run_service().update_query(payload)
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence run query failed: {exc}"}, status_code=500)
+        return {"ok": True, "updated": bool(updated)}
+
     @app.post("/api/sequence-preset/stop")
     async def api_sequence_preset_stop():
         try:

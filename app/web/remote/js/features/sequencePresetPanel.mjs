@@ -54,6 +54,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     recentId: 0,            // 마지막으로 생성한 그룹 번호(요약을 받기 전에도 같은 번호를 두 번 묻지 않게)
     pendingBox: null,       // 패널이 뜨기 전에 온 칸 {gid, label}
     runSeen: {runId: '', round: 0},   // 런 상태로 본 가장 새 라운드 - 늦게 온 첫 라운드 HTTP 답이 칸을 되돌리지 않게
+    runActive: false,       // Auto Gen 연속 런이 도는 중(런 상태) - 칩 · 검색을 바꾸면 그 런의 다음 라운드 조건도 바꾼다
     favorites: [],          // 즐겨찾기 카드 요약(새로 단 것이 먼저 · 데이터에 없으면 {groupId, missing})
     favLoaded: false,
     favOnly: false,         // 목록 = 즐겨찾기
@@ -258,12 +259,23 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     };
   }
 
+  // Auto Gen 이 도는 동안 컷 · 수위 칩 · 검색을 바꾸면 그 런의 다음 라운드 조건도 바꾼다(사용자 2026-10-18 - 예전엔 시작할 때의
+  // 조건으로 계속 뽑았다). 한 줄로 보내고 조건은 **보낼 때** 읽는다 - 칩을 연달아 눌러도 마지막 조건이 마지막에 닿는다.
+  let runQueryChain = Promise.resolve();
+  function pushRunQuery() {
+    if (!state.runActive) return;
+    runQueryChain = runQueryChain
+      .then(() => postJson('/api/sequence-preset/run-query', searchPayload()))
+      .catch(() => null);      // 실패해도 다음 칩 변경이 다시 보낸다
+  }
+
   // -------------------------------------------------------------- 검색/생성
   async function runSearch(opts = {}) {
     collectInputs();
     closePopup();
     state.favOnly = false;      // 검색 · 칩을 누르면 검색 결과를 본다
     syncChips();
+    pushRunQuery();             // 도는 런이 있으면 다음 라운드부터 이 조건으로
     state.busy = true; renderBody();
     try {
       const q = state.query;
@@ -525,6 +537,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   // 되돌리지 않게. 칸이 이미 그 그룹이면 다시 고르지 않는다(HTTP 답이 먼저 채운 경우).
   let appliedRunKey = '';
   function onRunState(st) {
+    state.runActive = st?.is_running === true || String(st?.is_running).toLowerCase() === 'true';
     const runId = String(st?.run_id || '');
     const round = Number(st?.round_count) || 0;
     if (runId && (runId !== state.runSeen.runId || round > state.runSeen.round)) state.runSeen = {runId, round};

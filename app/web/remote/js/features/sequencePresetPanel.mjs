@@ -28,7 +28,8 @@ const ALL_RATINGS = ['e', 'q', 's', 'g'];
 // 2~4컷만(사용자 2026-10-18 - 5 · 6컷은 모델이 받는지 검증되지 않았다. 백엔드도 데이터를 읽을 때 뺀다).
 const CUTS = [2, 3, 4];
 
-export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange}) {
+export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange,
+  beforeGenerate}) {
   const state = {
     available: null,        // null=미확인
     presentRatings: [],
@@ -45,8 +46,11 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     previews: new Map(),    // groupId -> /sequence 응답(미리보기 툴팁 캐시)
     busy: false,
     selected: null,         // 고른 이야기의 카드 요약 {groupId, peakRating, frameCount, stages, preview} - 메인 Generate 가 이것
-    recent: null,           // '방금 생성' 칸의 카드 요약(마지막 하나)
-    recentId: 0,            // 런 상태로 받은 마지막 그룹 번호(요약을 받기 전에도 같은 번호를 두 번 묻지 않게)
+    recent: null,           // 아래 칸의 카드 요약(방금 생성 · 히스토리에서 고른 그림의 이야기)
+    boxLabel: '방금 생성',
+    recentId: 0,            // 마지막으로 생성한 그룹 번호(요약을 받기 전에도 같은 번호를 두 번 묻지 않게)
+    pendingBox: null,       // 패널이 뜨기 전에 온 칸 {gid, label}
+    runSeen: {runId: '', round: 0},   // 런 상태로 본 가장 새 라운드 - 늦게 온 첫 라운드 HTTP 답이 칸을 되돌리지 않게
     favorites: [],          // 즐겨찾기 카드 요약(새로 단 것이 먼저 · 데이터에 없으면 {groupId, missing})
     favLoaded: false,
     favOnly: false,         // 목록 = 즐겨찾기
@@ -107,7 +111,10 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       buildShell();
       void loadFavorites();
       renderRecent();
-      if (state.recentId && !state.recent) void showRecent(state.recentId);   // 패널을 열기 전에 런 상태가 왔다
+      if (state.pendingBox && !state.recent) {   // 패널을 열기 전에 런 상태 · 히스토리 고르기가 왔다
+        const {gid, label} = state.pendingBox;
+        void fillBox(gid, label);
+      }
       await runSearch();
     } catch (error) {
       state.available = false; renderUnavailable();
@@ -281,10 +288,27 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
   }
 
+  // 생성 전에 퀵 패널의 가상 캐릭터(인셋) 편집이 서버에 다 닿기를 기다린다(Codex 리뷰 - 안 기다리면 화면의 최신 글이 아니라
+  // 옛 인물로 그린다). 기다리는 사이 저장이 실패했으면 생성하지 않는다.
+  async function charactersSettled() {
+    if (typeof beforeGenerate !== 'function') return true;
+    try {
+      if (await beforeGenerate() !== false) return true;
+    } catch (_) { /* 아래에서 알린다 */ }
+    showToast('캐릭터 편집이 저장되지 않아 생성하지 않았습니다 - 확인한 뒤 다시 눌러 주세요.', 'error');
+    return false;
+  }
+
+  // 런 상태로 이 런의 다음 라운드를 이미 봤으면 첫 라운드의 HTTP 답은 칸에 그리지 않는다(Codex 리뷰).
+  function newerRoundSeen(runId) {
+    return !!runId && state.runSeen.runId === String(runId) && state.runSeen.round > 1;
+  }
+
   async function generateGroup(groupId) {
     if (state.busy) return;
     state.busy = true; syncGenerateButtons();
     try {
+      if (!(await charactersSettled())) return;
       const out = await postJson('/api/sequence-preset/generate',
         {groupId: Number(groupId), ...searchPayload()});
       const frames = out.frames || [];
@@ -301,7 +325,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
                               : `${what} 생성 큐 등록${skipNote}`, 'success');
       }
-      if (out.ok) setRecent(out.group, out.groupId);
+      if (out.ok && !newerRoundSeen(out.runId)) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
     } finally {
@@ -319,6 +343,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (state.busy) return true;
     state.busy = true;
     try {
+      if (!(await charactersSettled())) return true;
       const out = await postJson('/api/sequence-preset/random-generate', searchPayload());
       const frames = out.frames || [];
       const failed = frames.filter(f => !f.ok && !f.skipped);
@@ -331,7 +356,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
                               : `${what} 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
       }
-      if (out.ok) setRecent(out.group, out.groupId);
+      if (out.ok && !newerRoundSeen(out.runId)) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`연속 생성 실패: ${error.message}`, 'error');
     } finally {
@@ -412,7 +437,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (!recentEl) return;
     if (!state.recent) { recentEl.hidden = true; recentEl.innerHTML = ''; return; }
     recentEl.hidden = false;
-    recentEl.innerHTML = `<div class="seq-recent-head">방금 생성</div>${renderCard(state.recent)}`;
+    recentEl.innerHTML = `<div class="seq-recent-head">${escHtml(state.boxLabel || '방금 생성')}</div>${renderCard(state.recent)}`;
   }
 
   function renderLists() {
@@ -430,9 +455,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       || state.previews.get(gid)?.group || null;
   }
 
-  function selectGroup(groupId) {
-    const gid = Number(groupId);
-    state.selected = state.selected?.groupId === gid ? null : (findSummary(gid) || null);   // 다시 누르면 푼다
+  function applySelection(summary) {
+    state.selected = summary && !summary.missing ? summary : null;
     panel.querySelectorAll('[data-seq-group]').forEach(card => {
       const on = Number(card.dataset.seqGroup) === state.selected?.groupId;
       card.classList.toggle('selected', on);
@@ -441,68 +465,113 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     try { onSelectionChange?.(state.selected); } catch (_) { /* 단추 글자 갱신 실패가 고르기를 막지 않는다 */ }
   }
 
-  // ---------------------------------------------------------------- 방금 생성
+  function selectGroup(groupId) {
+    const gid = Number(groupId);
+    applySelection(state.selected?.groupId === gid ? null : findSummary(gid));   // 다시 누르면 푼다
+  }
+
+  // 아래 칸이 바뀌면 고른 것도 그리로 옮긴다(사용자 2026-10-18 - 바로 Generate 로 다시 그릴 수 있게).
+  function showRecentCard(summary, label = '방금 생성') {
+    state.recent = summary;
+    state.boxLabel = label;
+    renderRecent();
+    if (!summary.missing) applySelection(summary);   // 데이터에 없는 이야기는 고를 수 없다 - 고른 것을 그대로 둔다
+  }
+
+  // ---------------------------------------------------------------- 아래 칸(방금 생성 · 히스토리에서 고른 그림)
+  let boxSeq = 0;      // 칸을 바꾸는 차례 - 요약을 받아 오는 사이 더 새 것이 오면 늦은 답은 버린다
+
+  // 요약이 손에 없으면(Auto Gen 의 다음 라운드 · 히스토리 · 패널을 늦게 연 경우) 미리보기와 같은 응답으로 받는다(캐시 공유).
+  async function fillBox(gid, label) {
+    const my = ++boxSeq;
+    if (state.available !== true) { state.pendingBox = {gid, label}; return; }   // 셸이 생기면 ensureReady 가 다시 부른다
+    state.pendingBox = null;
+    let summary = findSummary(gid);
+    if (!summary) {
+      try {
+        const d = state.previews.get(gid) || await postJson('/api/sequence-preset/sequence', {groupId: gid});
+        state.previews.set(gid, d);
+        summary = d.group || null;
+      } catch (_) {
+        summary = null;
+      }
+      if (my !== boxSeq) return;              // 그새 다음 라운드 · 다른 그림이 왔다
+    }
+    showRecentCard(summary || {groupId: gid, missing: true}, label);
+  }
+
   function setRecent(group, groupId) {
     const gid = Number(group?.groupId ?? groupId);
     if (!Number.isFinite(gid) || gid <= 0) return;
     state.recentId = gid;
-    if (group && group.groupId === gid) { state.recent = group; renderRecent(); return; }
-    void showRecent(gid);
-  }
-
-  // 요약이 손에 없으면(Auto Gen 의 다음 라운드 · 패널을 늦게 연 경우) 미리보기와 같은 응답으로 받는다(캐시 공유).
-  async function showRecent(gid) {
-    const known = findSummary(gid);
-    if (known) { state.recent = known; renderRecent(); return; }
-    if (state.available !== true) return;     // 셸이 생기면 ensureReady 가 다시 부른다
-    try {
-      const d = state.previews.get(gid) || await postJson('/api/sequence-preset/sequence', {groupId: gid});
-      state.previews.set(gid, d);
-      if (state.recentId !== gid) return;     // 그새 다음 라운드가 왔다
-      state.recent = d.group || {groupId: gid, missing: true};
-    } catch (_) {
-      if (state.recentId !== gid) return;
-      state.recent = {groupId: gid, missing: true};
+    if (group && group.groupId === gid && state.available === true) {
+      boxSeq += 1;                            // 받아 오던 늦은 답을 무른다
+      state.pendingBox = null;
+      showRecentCard(group);
+      return;
     }
-    renderRecent();
+    void fillBox(gid, '방금 생성');
   }
 
   // 런 상태(module_state `sequence_run`) - Auto Gen 이 다음 라운드로 넘어가면 그 그룹이 '방금 생성' 이 된다.
   function onRunState(st) {
+    const runId = String(st?.run_id || '');
+    const round = Number(st?.round_count) || 0;
+    if (runId && (runId !== state.runSeen.runId || round > state.runSeen.round)) state.runSeen = {runId, round};
     const gid = Number(st?.group_id) || 0;
     if (gid <= 0 || gid === state.recentId) return;
     state.recentId = gid;
-    void showRecent(gid);
+    void fillBox(gid, '방금 생성');
+  }
+
+  // 히스토리에서 고른 그림이 Sequence 로 만든 것이면 그 이야기를 칸에 띄운다(사용자 2026-10-18 - 고르면 따라간다).
+  function showFromHistory(gid) {
+    const n = Number(gid) || 0;
+    if (n <= 0) return;
+    void fillBox(n, n === state.recentId ? '방금 생성' : '히스토리에서 고른 그림의 이야기');
   }
 
   // ---------------------------------------------------------------- 즐겨찾기
-  async function loadFavorites() {
-    try {
-      const out = await getJson('/api/sequence-preset/favorites');
-      state.favorites = Array.isArray(out.favorites) ? out.favorites : [];
-    } catch (error) {
-      showToast(`즐겨찾기 불러오기 실패: ${error.message}`, 'error');
-    } finally {
-      state.favLoaded = true;
-      renderLists();
-    }
+  // 조회 · 별 달기 · 떼기를 **한 줄로** 보낸다(Codex 리뷰). 서버는 매번 목록 전체를 돌려주는데, 따로 보내면 늦게 온 앞의 답이
+  // 뒤의 답을 덮었다(A · B 를 연달아 달면 B 가 사라짐 · 처음 조회가 떼기 뒤에 오면 뗀 별이 되살아남).
+  let favChain = Promise.resolve();
+  function queueFavorites(task) {
+    const run = favChain.then(task);
+    favChain = run.catch(() => null);
+    return run;
   }
 
-  async function toggleFavorite(groupId) {
+  function loadFavorites() {
+    return queueFavorites(async () => {
+      try {
+        const out = await getJson('/api/sequence-preset/favorites');
+        state.favorites = Array.isArray(out.favorites) ? out.favorites : [];
+      } catch (error) {
+        showToast(`즐겨찾기 불러오기 실패: ${error.message}`, 'error');
+      } finally {
+        state.favLoaded = true;
+        renderLists();
+      }
+    });
+  }
+
+  function toggleFavorite(groupId) {
     const gid = Number(groupId);
     if (!Number.isFinite(gid) || state.favPending.has(gid)) return;
-    const favorite = !isFavorite(gid);
+    const favorite = !isFavorite(gid);       // 누른 순간 보이던 별의 반대
     state.favPending.add(gid);
-    try {
-      const out = await postJson('/api/sequence-preset/favorites', {groupId: gid, favorite});
-      state.favorites = Array.isArray(out.favorites) ? out.favorites : state.favorites;
-      state.favLoaded = true;
-    } catch (error) {
-      showToast(`즐겨찾기 ${favorite ? '넣기' : '빼기'} 실패: ${error.message}`, 'error');
-    } finally {
-      state.favPending.delete(gid);
-      renderLists();
-    }
+    void queueFavorites(async () => {
+      try {
+        const out = await postJson('/api/sequence-preset/favorites', {groupId: gid, favorite});
+        state.favorites = Array.isArray(out.favorites) ? out.favorites : state.favorites;
+        state.favLoaded = true;
+      } catch (error) {
+        showToast(`즐겨찾기 ${favorite ? '넣기' : '빼기'} 실패: ${error.message}`, 'error');
+      } finally {
+        state.favPending.delete(gid);
+        renderLists();
+      }
+    });
   }
 
   // 미리보기 툴팁(사용자 2026-10-18): 모양은 예전 우측 팝업 그대로. 캐릭터 특징은 뺀 채(백엔드 comic_preview)
@@ -648,5 +717,6 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     },
     randomGenerate() { return runRandomGenerate(); },  // req2/3: 랜덤 그룹 연속 생성
     onRunState(st) { onRunState(st); },                // app.js onModuleState('sequence_run') - 방금 생성 칸
+    showFromHistory(gid) { showFromHistory(gid); },    // app.js 히스토리 고르기 - 그 그림의 이야기
   };
 }

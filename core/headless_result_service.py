@@ -692,6 +692,9 @@ class HeadlessResultStore:
         return {
             "prompt_run_id": str(params.get("prompt_run_id") or ""),
             "generation_request_id": str(params.get("generation_request_id") or ""),
+            # Sequence 로 만든 그림의 이야기 번호 - 화면이 히스토리에서 고른 그림의 이야기를 Sequence 칸에 띄운다
+            # (사용자 2026-10-18 · 히스토리가 메모리에 있는 이번 서버 세션만).
+            "sequence_group_id": str(params.get("sequence_preset_group_id") or ""),
         }
 
     def _build_metadata_payload(self, item: HeadlessHistoryItem, image_meta: dict[str, Any]) -> dict[str, Any]:

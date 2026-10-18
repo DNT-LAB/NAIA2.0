@@ -637,6 +637,8 @@ const insetCharacterQueuedText = new Map();     // 아직 안 나간 글 편집:
 // 줄 안의 어느 편집이 실패했나 - 그러면 앞서 성공한 답을 안 그렸을 수 있다(뒤에 기다리는 편집이 있어 건너뛰었다).
 // 줄이 비는 순간 서버의 지금 상태를 다시 받아 맞춘다(Codex 리뷰 2차: 서버 6명 · 화면 5명).
 let insetCharacterFailed = false;
+// 실패 횟수 - Sequence 가 생성 전에 '기다리는 사이 실패했나' 를 본다(`settleInsetCharacterEdits`).
+let insetCharacterFailures = 0;
 
 async function refreshInsetAfterCharacterFailure() {
   try {
@@ -665,6 +667,7 @@ function insetCharacterParam(key, value) {
       if (!response.ok || !data || data.error) {
         showToast(data?.error || `가상 캐릭터를 바꾸지 못했습니다 (${response.status})`, 'error');
         insetCharacterFailed = true;
+        insetCharacterFailures += 1;
         return null;
       }
       if (insetCharacterWaiting <= 1) setReferenceInsetBadge(data);   // 뒤에 더 새 편집이 있으면 그 답이 맞춘다
@@ -672,6 +675,7 @@ function insetCharacterParam(key, value) {
     } catch (error) {
       showToast(`가상 캐릭터를 바꾸지 못했습니다: ${error.message}`, 'error');
       insetCharacterFailed = true;                // 답을 못 받았다 - 서버는 바꿨을 수 있다
+      insetCharacterFailures += 1;
       return null;
     } finally {
       insetCharacterWaiting -= 1;
@@ -683,6 +687,14 @@ function insetCharacterParam(key, value) {
   });
   insetCharacterChain = run.catch(() => null);
   return run;
+}
+
+/** 줄에 선 가상 캐릭터 편집이 다 끝날 때까지 기다린다. 기다리는 사이 실패가 있었으면 false.
+ *  Sequence 는 자기 HTTP 로 생성을 보내 이 줄을 앞지를 수 있다 - 화면의 최신 글이 아니라 옛 인물로 그렸다(Codex 리뷰). */
+async function settleInsetCharacterEdits() {
+  const failuresBefore = insetCharacterFailures;
+  while (insetCharacterWaiting > 0) await insetCharacterChain;   // 기다리는 사이 새 편집이 붙으면 그것까지
+  return insetCharacterFailures === failuresBefore;
 }
 
 /** 인페인트 세션이 화면을 잡고 있는 동안 잠가 두는 것들(사용자 지정 2026-08-26).
@@ -3353,7 +3365,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqpick1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqpick2')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -3363,6 +3375,7 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
       getApiMode: () => currentMode || modeSelect?.value || '',
       // 항목을 고르면 메인 Generate 글자가 `#id Generate` 가 된다(사용자 2026-10-18).
       onSelectionChange: () => updateGenerateButtonMode(),
+      beforeGenerate: () => settleInsetCharacterEdits(),
     });
     // 패널이 늦게 떴으면 그 전에 온 런 상태(마지막 그룹)를 넘긴다 - '방금 생성' 칸.
     const run = moduleStateCache.get('sequence_run');
@@ -5459,6 +5472,33 @@ async function updateResultEnhanceForSavedPath(relPath = '') {
 function onResultHistorySelectionChanged(relPath = '') {
   updateResultEnhanceForSavedPath(relPath);
   scheduleResultUnsavedActionRefresh();
+  void syncSequenceFromHistory(relPath);
+}
+
+// 히스토리에서 고른 그림이 Sequence 로 만든 것이면 그 이야기를 Sequence 아래 칸에 띄우고 고른다(사용자 2026-10-18).
+// 히스토리 항목(`__history_item__/<id>`)만 - 그 항목이 생성 요청의 `sequence_preset_group_id` 를 갖고 있다(이번 서버 세션만).
+// 번호는 항목마다 한 번만 묻는다. 빨리 넘기면 마지막에 고른 그림만 반영한다.
+const sequenceGroupByHistoryId = new Map();
+let sequenceHistoryToken = 0;
+async function syncSequenceFromHistory(relPath) {
+  const match = /^__history_item__\/([^/]+)/.exec(String(relPath || '').replace(/\\/g, '/'));
+  const token = ++sequenceHistoryToken;
+  if (!match) return;
+  const historyId = match[1];
+  let gid = sequenceGroupByHistoryId.get(historyId);
+  if (gid === undefined) {
+    try {
+      const response = await fetch(`/api/history/meta/${encodeURIComponent(historyId)}`);
+      if (!response.ok) return;
+      const meta = await response.json();
+      gid = Number(meta?.sequence_group_id) || 0;
+    } catch (_) {
+      return;
+    }
+    sequenceGroupByHistoryId.set(historyId, gid);
+  }
+  if (token !== sequenceHistoryToken || !gid) return;
+  sequencePresetControl?.showFromHistory?.(gid);
 }
 
 function activeResultAssetUrl() {

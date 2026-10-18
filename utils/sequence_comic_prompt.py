@@ -36,8 +36,9 @@ COMIC_SPECS: dict[int, dict[str, Any]] = {
 }
 # 인원 태그(1girl · 2girls · 1boy · 6+boys · 1other …). koma 는 이 중 **맨 앞 것** 앞에 간다 - 예전엔 첫 `1girl` 앞만 찾아
 # `1boy, 1girl` 이면 `1boy, 2::2koma ::, 1girl` 로 둘 사이에 끼었다(사용자 제보 2026-10-18).
-# 가중치가 붙은 것(`0.8::1girl ::`)은 가중치 앞에 넣는다. `artist:2girls` 처럼 `:` 뒤에 붙은 글자는 인원 태그가 아니다.
-_PERSON_TAG = r"(?<![\w:+.])(?:\d+(?:\.\d+)?::\s*)?\d+\+?(?:girl|boy|other)s?(?![\w])"
+# 가중치가 붙은 것(`0.8::1girl ::` · `-0.8::` · `.8::`)은 가중치째 그 앞에 넣는다 - 부호 · 소수점 가운데서 다시 맞추면
+# `-2::2koma ::, 0.8::1girl` 처럼 부호가 koma 로 넘어갔다(Codex 리뷰). `artist:2girls` 처럼 `:` 뒤에 붙은 글자는 인원 태그가 아니다.
+_PERSON_TAG = r"(?<![\w:+.\-])(?:-?(?:\d+(?:\.\d*)?|\.\d+)::\s*)?\d+\+?(?:girl|boy|other)s?(?![\w])"
 COMIC_SENTENCE = ("A {n}-panel comic strip separated by thick, bold black borders. The panels are arranged "
                   "sequentially from top to bottom to show a continuous progression of events with the same, "
                   "sequential, silent comic")

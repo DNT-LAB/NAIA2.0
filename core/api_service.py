@@ -282,6 +282,29 @@ def _get_loaded_middle_module(app_context, class_name: str):
             return module
     return None
 
+def _embed_stealth_pnginfo(image: Image.Image, chunks: Dict[str, str]) -> Image.Image:
+    """NAI 의 숨은 생성 정보 사본(알파 LSB · `stealth_pngcomp`)을 ``chunks`` 로 다시 심는다(열 우선 · 254|bit).
+
+    읽는 쪽은 `utils.image_info.ImageMetadataExtractor._read_stealth_pnginfo`. 알파는 255 로 채운 뒤 앞부분에만 비트를 싣는다.
+    그림이 담기에 너무 작으면 알파를 떼고(RGB) 돌려준다 - 낡은 사본을 남기지 않는다. 읽는 쪽은 서명을 첫 열에서만 찾으므로
+    높이가 120 보다 작아도 못 읽는다(같이 뗀다).
+    """
+    import gzip
+
+    blob = gzip.compress(json.dumps(chunks, ensure_ascii=False).encode('utf-8'))
+    bits = ''.join(f"{byte:08b}" for byte in b"stealth_pngcomp") + f"{len(blob) * 8:032b}"
+    bits += ''.join(f"{byte:08b}" for byte in blob)
+    rgba = image.convert('RGBA')
+    width, height = rgba.size
+    if height < 120 or len(bits) > width * height:
+        return rgba.convert('RGB')
+    alpha = np.full((width, height), 255, dtype=np.uint8)      # [x, y] - 열 우선으로 펴기 위해
+    flat = alpha.reshape(-1)
+    flat[:len(bits)] = 254 | np.frombuffer(bits.encode('ascii'), dtype=np.uint8) - 48
+    rgba.putalpha(Image.fromarray(alpha.T.copy(), mode='L'))
+    return rgba
+
+
 class APIService:
     def _nai_registry_knows(self, model_key: Any) -> bool:
         """레지스트리(빌트인 + 사용자 등록)가 이 키를 아는가. 조회 실패는 False."""
@@ -831,6 +854,11 @@ class APIService:
                 if result and result.get('status') == 'success' and parameters.get('_reference_inset_crop_left'):
                     result = self._crop_reference_inset_result(result, parameters)
 
+                # 레퍼런스 인셋: 넣었던 인셋 태그(split screen 등)를 결과 그림의 메타데이터와 요청 파라미터(히스토리의 생성
+                # 정보)에서 걷는다(사용자 지시 2026-10-18 - Outpainting · Enhance 같은 후처리가 그 태그를 이어받아 부작용).
+                if parameters.get('_reference_inset_injected_tags'):
+                    result = self._strip_reference_inset_tags(result, parameters)
+
                 # Check if cropped_image_request is enabled
                 if result and result.get('status') == 'success' and parameters.get('cropped_image_request'):
                     print("✂️ Cropped image request enabled, extracting mask area...")
@@ -1186,6 +1214,24 @@ class APIService:
             try:
                 if reference_inset_should_inject_params(params, app_context=self.app_context):
                     _inset_tags = reference_inset_tags_for(params, app_context=self.app_context)
+                    # **이 코드가 넣는** 태그를 적어 둔다 - 생성이 끝나면 결과 · 히스토리에서 걷는다(사용자 지시 2026-10-18).
+                    # 사용자가 직접 쓴 같은 태그는 넣지 않으므로(이미 있다) 적히지 않고 남는다. 재시도에서는 앞 시도가
+                    # 넣은 것이 이미 들어 있으니 모아 둔다.
+                    _lowered = str(params.get('input', '') or '').lower()
+                    _injected = [tag for tag in _inset_tags if tag not in _lowered]
+                    # 랜덤 시점의 훅이 먼저 넣은 것도 '넣은 것' 이다(Codex 리뷰). **이 요청의** 프롬프트 런 기록에서 읽는다 -
+                    # 훅이 맥락 metadata 에 적은 것을 런이 이어받는다. 전역의 '지금 맥락' 은 다른 Random 이 바꿔 놓을 수 있다.
+                    try:
+                        _run_id = str(params.get('prompt_run_id') or '')
+                        _registry = getattr(self.app_context, 'pipeline_run_registry', None)
+                        _run = _registry.get_prompt_run(_run_id) if (_run_id and _registry is not None) else None
+                        _hooked = (getattr(_run, 'metadata', None) or {}).get('reference_inset_injected_tags') or []
+                        _injected += [str(tag) for tag in _hooked if str(tag).lower() in _lowered]
+                    except Exception:
+                        pass
+                    if _injected:
+                        params['_reference_inset_injected_tags'] = sorted(
+                            set(params.get('_reference_inset_injected_tags') or []) | set(_injected))
                     cleaned_input = inject_reference_inset_into_prompt(
                         params.get('input', '') or '',
                         _inset_tags,
@@ -2707,6 +2753,148 @@ class APIService:
             # Return original result on error
             return result
 
+    def _strip_reference_inset_tags(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:  # noqa: C901
+        """생성 완료 후 **이 코드가 넣은** 인셋 태그를 걷는다(사용자 지시 2026-10-18).
+
+        - 요청 파라미터의 `input` - 히스토리의 생성 정보(Enhance · Outpainting 이 통째로 복사한다)
+        - 결과 그림의 PNG 글 청크: `Comment`(JSON 의 prompt · v4_prompt.caption.base_caption) · `Description`
+        - 알파에 숨은 생성 정보 사본(스텔스 - 알파가 254 · 255 뿐일 때) - 거기에도 태그가 남으므로 알파를 뗀다.
+          진짜 투명한 그림(투명 배경)은 그대로 둔다.
+        실패해도 결과는 그대로 돌려준다(만든 그림을 잃지 않는다). 표식은 결과가 실패여도 걷는다.
+        """
+        tags = {str(tag).strip().lower() for tag in (parameters.pop('_reference_inset_injected_tags', None) or [])
+                if str(tag).strip()}
+        if not tags:
+            return result
+
+        def clean(text: Any) -> Any:
+            if not isinstance(text, str) or not text:
+                return text
+            parts = text.split(',')
+            kept = [part for part in parts if part.strip().lower() not in tags]
+            if len(kept) == len(parts):
+                return text
+            return ','.join(kept).lstrip(' ,\n\t')
+
+        if isinstance(parameters.get('input'), str):
+            parameters['input'] = clean(parameters['input'])
+        # '인셋 태그를 넣어라' 표식도 걷는다 - 이 생성 정보를 복사하는 후처리(Enhance 등)가 다시 넣지 않게(Codex 리뷰).
+        parameters.pop('reference_inset_tag_required', None)
+        parameters.pop('reference_inset_vertical', None)
+        if not (isinstance(result, dict) and result.get('status') == 'success'):
+            return result
+        try:
+            raw = result.get('raw_bytes') or result.get('image_bytes')
+            if isinstance(raw, (bytes, bytearray)) and bytes(raw).startswith(b'\x89PNG'):
+                source = Image.open(io.BytesIO(bytes(raw)))
+                source.load()
+            else:
+                source = result.get('image')
+            if source is None:
+                return result
+            info = dict(getattr(source, 'info', {}) or {})
+            if not info.get('Comment') and source.mode == 'RGBA':
+                # 생성 정보가 알파의 숨은 사본에만 있다 - 먼저 읽어 글 청크로 옮긴다. 안 그러면 알파를 떼며 통째로 잃는다
+                # (Codex 리뷰). NAI 의 숨은 사본은 같은 글 청크들을 담은 JSON 이다.
+                try:
+                    from utils.image_info import ImageMetadataExtractor
+
+                    stealth = ImageMetadataExtractor._read_stealth_pnginfo(source)
+                    hidden = json.loads(stealth) if stealth else None
+                    if isinstance(hidden, dict):
+                        for key, value in hidden.items():
+                            if isinstance(value, dict):          # Comment 가 글이 아니라 객체로 든 사본도 있다
+                                value = json.dumps(value, ensure_ascii=False)
+                            if key not in info and isinstance(value, str):
+                                info[key] = value
+                except Exception as exc:   # noqa: BLE001 - 못 읽으면 알파를 떼지 않는다(아래)
+                    print(f"[inset] stealth metadata read failed: {ascii(exc)}", flush=True)
+            pnginfo = PngInfo()
+            _chunk_texts: Dict[str, str] = {}
+            for key in ("Title", "Description", "Software", "Source", "Comment", "Generation time", "Author"):
+                value = info.get(key)
+                if isinstance(value, bytes):
+                    value = value.decode('utf-8', errors='ignore')
+                if not isinstance(value, str) or not value:
+                    continue
+                if key == 'Description':
+                    value = clean(value)
+                elif key == 'Comment':
+                    try:
+                        payload = json.loads(value)
+                        if isinstance(payload, dict):
+                            if isinstance(payload.get('prompt'), str):
+                                payload['prompt'] = clean(payload['prompt'])
+                            for block in ('v4_prompt',):
+                                caption = ((payload.get(block) or {}).get('caption') or {})
+                                if isinstance(caption.get('base_caption'), str):
+                                    caption['base_caption'] = clean(caption['base_caption'])
+                            value = json.dumps(payload, ensure_ascii=False)
+                    except (TypeError, ValueError):
+                        value = clean(value)
+                pnginfo.add_text(key, value)
+                _chunk_texts[key] = value
+            image = source
+            if image.mode == 'RGBA':
+                low, _high = image.getchannel('A').getextrema()
+                # 알파가 숨은 생성 정보 사본뿐이면 **걷은 내용으로 다시 심는다**(사용자 지시 2026-10-18). 클립보드로 복사하면
+                # 글 청크는 버려지고 알파만 남는다 - 사본을 떼면 붙여넣은 그림의 프롬프트를 못 읽는다. 진짜 투명한 그림은
+                # 알파를 건드리지 않는다. 걷은 정보를 글 청크로 옮기지 못했으면(Comment 없음) 그대로 둔다.
+                if low >= 254 and info.get('Comment'):
+                    image = _embed_stealth_pnginfo(image, _chunk_texts)
+            elif image.mode not in ('RGB', 'RGBA'):
+                image = image.convert('RGB')
+            buffer = io.BytesIO()
+            image.save(buffer, format='PNG', pnginfo=pnginfo)
+            cleaned_bytes = buffer.getvalue()
+            final_image = Image.open(io.BytesIO(cleaned_bytes))
+            final_image.load()
+            result['image'] = final_image
+            result['image_bytes'] = cleaned_bytes
+            result['raw_bytes'] = cleaned_bytes
+            print(f"[inset] removed injected tags from the result: {sorted(tags)}", flush=True)
+        except Exception as exc:   # noqa: BLE001 - 태그를 못 걷어도 만든 그림은 돌려준다
+            print(f"[inset] tag cleanup failed: {ascii(exc)}", flush=True)
+        return result
+
+    def _reference_inset_upscale_to_1mp(self, image: Image.Image, parameters: Dict[str, Any]) -> Image.Image:
+        """칸을 빼고 남긴 그림을 NovelAI 업스케일(서버 배율 - 실측 2배)에 보내고 **1MP 넓이로** 줄인다(사용자 지시 2026-10-18).
+
+        Anlas 가 든다. 실패하면 자른 그림을 그대로 돌려준다(만든 그림을 잃지 않는다). 메타데이터는 부르는 쪽이 다시 싣는다.
+        """
+        try:
+            buffer = io.BytesIO()
+            image.save(buffer, format='PNG')
+            # 사용자가 **지목한 계정**이 있으면 그 계정으로(Result 의 Upscale 과 같은 규칙 - Codex 리뷰). 없으면 기본(메인).
+            token = None
+            try:
+                from core.nai_account_service import NaiAccountService
+
+                accounts = NaiAccountService(self.app_context)
+                forced = accounts.forced_account()
+                if forced:
+                    token = next((tok for account_id, tok in accounts.active_accounts() if account_id == forced), None)
+            except Exception as exc:   # noqa: BLE001 - 계정 하나 때문에 업스케일이 죽으면 안 된다
+                print(f"[inset] auto upscale account pick failed: {ascii(exc)}", flush=True)
+            upscaled = self.upscale_NAI(None, token=token, raw_bytes=buffer.getvalue(), model_key=parameters.get('model'))
+            big = upscaled.get('image') if isinstance(upscaled, dict) and upscaled.get('status') == 'success' else None
+            if big is None:
+                print(f"[inset] auto upscale failed: {ascii((upscaled or {}).get('message'))}", flush=True)
+                return image
+            limit = 1024 * 1024
+            width, height = big.size
+            if width * height > limit:
+                scale = (limit / float(width * height)) ** 0.5
+                big = big.resize((max(1, int(width * scale)), max(1, int(height * scale))), Image.Resampling.LANCZOS)
+            if big.mode not in ('RGB', 'RGBA'):
+                big = big.convert('RGB')
+            print(f"[inset] auto upscaled {image.size[0]}x{image.size[1]} -> {width}x{height} -> "
+                  f"{big.size[0]}x{big.size[1]}", flush=True)
+            return big
+        except Exception as exc:   # noqa: BLE001 - 업스케일 실패가 만든 그림을 버리게 하면 안 된다
+            print(f"[inset] auto upscale failed: {ascii(exc)}", flush=True)
+            return image
+
     def _crop_reference_inset_result(self, result: Dict[str, Any], parameters: Dict[str, Any]) -> Dict[str, Any]:
         """레퍼런스 인셋으로 만든 결과에서 **인셋 칸(과 칸 테두리)을 잘라 내고** 그린 부분만 남긴다.
 
@@ -2721,6 +2909,8 @@ class APIService:
         """
         divider = int(parameters.pop('_reference_inset_crop_left', 0) or 0)
         expected = str(parameters.pop('_reference_inset_crop_canvas', '') or '')
+        # 생성 후 자동 업스케일(사용자 지시 2026-10-18) - 아래 지문이 맞아 **실제로 자른 결과**에만 건다.
+        auto_upscale = bool(parameters.pop('_reference_inset_auto_upscale', False))
         # 상하 모드면 칸이 **위**다 - 돌려 눕혀서 같은 길(왼쪽 자르기)로 자르고 다시 세운다.
         vertical = str(parameters.pop('_reference_inset_crop_axis', '') or '') == 'y'
         try:
@@ -2744,6 +2934,8 @@ class APIService:
                 cropped = cropped.transpose(Image.Transpose.TRANSPOSE)
             if cropped.mode not in ('RGB', 'RGBA'):
                 cropped = cropped.convert('RGB')
+            if auto_upscale:
+                cropped = self._reference_inset_upscale_to_1mp(cropped, parameters)
             pnginfo = self._build_nai_pnginfo_for_cropped_image(generated, parameters)
             buffer = io.BytesIO()
             if pnginfo is not None:

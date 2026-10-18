@@ -5,7 +5,9 @@
 viewer_new_image_payload → save_history_item)에 주입한다. NAI 계정(nai_token)이 등록돼 있으면
 모드와 무관하게 사용 가능(augment-image 는 NAI 토큰만 있으면 동작).
 
-지원 변형(req_type): declutter / lineart / sketch / colorize + 24개 emotion.
+지원 변형(req_type): declutter / lineart / sketch / colorize + 24개 emotion + bg-removal(Remove BG - 2026-10-18).
+- bg-removal                   : `core/nai_background_removal` 을 쓴다 - 응답 셋 중 Blend 를 **투명 배경 그대로** 남긴다
+                                 (아래 `augment_image_nai` 는 RGB 로 바꿔 알파를 버린다)
 - declutter / lineart / sketch : req_type 만 (프롬프트·defry 없음)
 - colorize                     : + prompt + defry
 - emotion(Happy/Sad/...)       : req_type="emotion", prompt="<emotion>;;<user prompt>;" + defry
@@ -185,6 +187,20 @@ def augment_image_nai(token: str, image_bytes: bytes, mode: str, prompt: str = "
     return {"status": "success", "image": pil, "raw_bytes": png_bytes, "message": "Director 변형 완료"}
 
 
+def _remove_background_result(token: str, image_bytes: bytes) -> dict[str, Any]:
+    """Remove BG 를 결과 파이프라인의 꼴로 - 투명 배경(RGBA)을 그대로 둔다."""
+    from core.nai_background_removal import BackgroundRemovalError, remove_background_blend
+
+    try:
+        blend = remove_background_blend(token, image_bytes)
+        with Image.open(io.BytesIO(blend)) as image:
+            image.load()
+            pil = image.convert("RGBA")
+    except (BackgroundRemovalError, ValueError) as exc:
+        return {"status": "error", "message": str(exc)}
+    return {"status": "success", "image": pil, "raw_bytes": blend, "message": "배경 제거 완료"}
+
+
 def _result_token(context) -> str:
     try:
         return str(context.secure_token_manager.get_token("nai_token") or "").strip()
@@ -212,7 +228,11 @@ def perform_nai_director(context, payload: dict[str, Any] | None):
     image_bytes, label, _gen_params, _prompt_ctx = resolve_result_image_action_source(context, payload)
     prompt = str(payload.get("prompt") or "")
     defry = str(payload.get("defry") or "")
-    result = augment_image_nai(token, image_bytes, mode, prompt, defry)
+    if mode.lower() == "bg-removal":
+        result = _remove_background_result(token, image_bytes)
+        prompt = defry = ""
+    else:
+        result = augment_image_nai(token, image_bytes, mode, prompt, defry)
     if not isinstance(result, dict) or result.get("status") != "success":
         raise RuntimeError(str((result or {}).get("message") or "Director 변형 실패"))
 

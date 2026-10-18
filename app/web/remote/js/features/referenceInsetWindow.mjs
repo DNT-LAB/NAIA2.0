@@ -160,6 +160,15 @@ export function createReferenceInsetWindow({
   // [특징 추출] 의 결과 {keep, unknown, dropped, on: Set(켜진 태그), url} - 가상 캐릭터에 넣기 전에 사람이 고른다.
   let extracted = null;
   let extracting = false;
+  // 사용자가 닫은 '프롬프트 인식됨'(칸 · 그림 열쇠들) - 같은 그림이 다시 그려져도 되살리지 않는다(Codex 리뷰).
+  let recognizedDismissed = new Set();
+  // [배경 제거] - Anlas 가 든다. 한 번 누르면 '한 번 더' 로 바뀌고(3초), 그때 누르면 보낸다(Storage 지우기와 같은 방식).
+  // [초기화] - 한 번 누르면 채워지고(3초) 한 번 더 누르면 비운다. 글자는 안 바꾼다(머리줄이 흔들리지 않게).
+  let resetArmed = false;
+  let resetTimer = 0;
+  let removeBgArmed = false;
+  let removeBgTimer = 0;
+  let removingBg = false;
   let drag = null;
   let wheelTimer = 0;
   let wheelAnchor = null;   // 휠을 굴리기 시작한 순간의 닻 - 멎을 때까지 쥔다
@@ -236,6 +245,8 @@ export function createReferenceInsetWindow({
     });
     // 머리줄의 켜고 끄기. `data-nodrag` 가 없으면 스위치를 누르려다 창을 끈다.
     panel.slot.innerHTML = `
+      <button type="button" class="riw-reset-btn" data-nodrag data-riw-reset-all
+              data-naia-title="그림 · 배치 · 가상 캐릭터를 비우고 인셋을 끕니다 - 처음 화면으로 (두 번 눌러야 합니다 · 저장하지 않은 붙여넣은 그림은 사라집니다)">초기화</button>
       <span class="riw-orient" data-nodrag role="group" aria-label="칸의 방향">
         <button type="button" class="riw-orient-btn" data-riw-orient="horizontal"
                 data-naia-title="칸이 왼쪽 · 그릴 곳이 오른쪽">좌우</button>
@@ -274,7 +285,6 @@ export function createReferenceInsetWindow({
           <div class="riw-empty-hint">에셋의 그림은 Assets 탭의 [C1+레퍼런스 인셋] 으로 꽂습니다</div>
         </div>
         <div class="riw-row" data-riw-row>
-          <span class="riw-label">칸의 그림</span>
           <span class="riw-sizes" data-riw-slots></span>
           <button type="button" class="riw-chip" data-riw-paste
                   data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)으로 인셋 칸의 그림을 바꿉니다">붙여넣기</button>
@@ -284,10 +294,12 @@ export function createReferenceInsetWindow({
                   data-naia-title="저장해 둔 그림에서 고릅니다">Storage</button>
           <button type="button" class="riw-chip" data-riw-extract-run
                   data-naia-title="고른 그림을 WD 태거(huggingface - 그림이 외부로 나갑니다)에 보내 캐릭터 특징만 뽑습니다 - 확인한 뒤 가상 캐릭터에 넣습니다">특징 추출</button>
+          <button type="button" class="riw-chip riw-chip-paid" data-riw-remove-bg
+                  data-naia-title="고른 그림의 배경을 NovelAI Remove BG 로 지웁니다 - 배치는 그대로 · Anlas 를 소모합니다 (두 번 눌러야 보냅니다 · 지운 그림은 Storage 에 저장됩니다)">배경 제거 (유료)</button>
           <button type="button" class="riw-chip" data-riw-upscale
                   data-naia-title="레퍼런스 원본을 NAI 업스케일에 한 번 보내 두고, 그 뒤로는 거기서 줄여 칸에 놓습니다 - 그림을 키워도 흐려지지 않습니다 (Anlas 가 듭니다 · 그림 하나에 한 번)">업스케일</button>
           <button type="button" class="riw-chip" data-riw-bg
-                  data-naia-title="칸의 바탕색을 흰색 · 검정으로 바꿉니다 - 투명한 그림의 뒤와 그림이 덮지 않은 자리가 이 색으로 나갑니다"></button>
+                  data-naia-title="칸의 바탕색을 흰색 · 회색 · 검정 순서로 바꿉니다 - 투명한 그림의 뒤와 그림이 덮지 않은 자리가 이 색으로 나갑니다"></button>
           <span class="riw-note" data-riw-note></span>
         </div>
         <div class="riw-row" data-riw-row>
@@ -305,21 +317,33 @@ export function createReferenceInsetWindow({
           <span class="riw-label">결과</span>
           <label class="riw-check" data-naia-title="생성된 그림에서 인셋 칸을 잘라 내고 그린 부분만 남깁니다 (NAI 메타데이터는 남습니다)">
             <input type="checkbox" data-riw-crop> 인셋 칸을 빼고 남기기</label>
+          <label class="riw-check riw-check-paid" data-riw-auto-upscale-box hidden
+                 data-naia-title="칸을 빼고 남긴 결과를 NovelAI 업스케일에 보낸 뒤 1MP 로 줄여 히스토리에 넣습니다 - 생성마다 Anlas 를 소모합니다 (메타데이터는 남습니다)">
+            <input type="checkbox" data-riw-auto-upscale> 생성 후 자동 업스케일 (유료)</label>
           <span class="riw-cost" data-riw-cost
                 data-naia-title="이 캔버스(1MP 를 넘는 해상도)로 생성하면 Anlas 를 소모합니다"></span>
         </div>
         <div class="riw-extract" data-riw-extract hidden>
           <div class="riw-row">
-            <span class="riw-label">추출된 특징</span>
+            <span class="riw-label" data-riw-extract-label>추출된 특징</span>
             <span class="riw-extract-src" data-riw-extract-src></span>
-            <span class="riw-read" data-riw-extract-note></span>
+            <span class="riw-extract-modes" data-riw-extract-modes>
+              <button type="button" class="riw-chip" data-riw-extract-mode="features">특징만</button>
+              <button type="button" class="riw-chip" data-riw-extract-mode="both">특징+의상</button>
+              <button type="button" class="riw-chip" data-riw-extract-mode="clothes">의상만</button>
+            </span>
           </div>
-          <div class="riw-extract-body" data-riw-extract-body></div>
+          <div class="riw-extract-edit">
+            <div class="riw-extract-hl" data-riw-extract-hl aria-hidden="true"></div>
+            <textarea class="riw-extract-text" data-riw-extract-text spellcheck="false" rows="3"
+                      aria-label="가상 캐릭터에 넣을 프롬프트"></textarea>
+          </div>
+          <div class="riw-read riw-extract-legend">흰색 = 특징 · 연노랑 = 의상 · 회색 = 직접 쓴 것</div>
           <div class="riw-row">
             <button type="button" class="riw-chip is-on" data-riw-extract-c1
-                    data-naia-title="켜진 칩을 가상 C1 에 넣습니다 (C1 을 덮습니다)">가상 C1 에 넣기</button>
+                    data-naia-title="이 프롬프트를 가상 C1 에 넣습니다 (C1 을 덮습니다)">가상 C1 에 넣기</button>
             <button type="button" class="riw-chip" data-riw-extract-add
-                    data-naia-title="켜진 칩을 새 가상 캐릭터로 넣습니다">가상 캐릭터로 추가</button>
+                    data-naia-title="이 프롬프트를 새 가상 캐릭터로 넣습니다">가상 캐릭터로 추가</button>
             <button type="button" class="riw-chip" data-riw-extract-close>닫기</button>
           </div>
         </div>
@@ -356,10 +380,15 @@ export function createReferenceInsetWindow({
       result: find('[data-riw-result]'),
       showResult: find('[data-riw-show-result]'),
       extractRun: find('[data-riw-extract-run]'),
+      removeBg: find('[data-riw-remove-bg]'),
       extract: find('[data-riw-extract]'),
-      extractBody: find('[data-riw-extract-body]'),
+      extractText: find('[data-riw-extract-text]'),
+      extractHl: find('[data-riw-extract-hl]'),
+      extractModes: find('[data-riw-extract-modes]'),
       extractSrc: find('[data-riw-extract-src]'),
-      extractNote: find('[data-riw-extract-note]'),
+      extractLabel: find('[data-riw-extract-label]'),
+      autoUpscale: find('[data-riw-auto-upscale]'),
+      autoUpscaleBox: find('[data-riw-auto-upscale-box]'),
       resultNote: find('[data-riw-result-note]'),
       frame: find('[data-riw-frame]'),
       divider: find('[data-riw-divider]'),
@@ -380,6 +409,7 @@ export function createReferenceInsetWindow({
       enabledText: panel.slot.querySelector('[data-riw-enabled-text]'),
       switchBox: panel.slot.querySelector('[data-riw-switch]'),
       orients: [...panel.slot.querySelectorAll('[data-riw-orient]')],
+      resetAll: panel.slot.querySelector('[data-riw-reset-all]'),
       store: find('[data-riw-store]'),
       storeGrid: find('[data-riw-store-grid]'),
       storeCount: find('[data-riw-store-count]'),
@@ -394,16 +424,33 @@ export function createReferenceInsetWindow({
     el.slots.addEventListener('click', onPickSlot);
     el.showResult.addEventListener('change', () => { render(); });
     el.extractRun.addEventListener('click', runExtract);
-    el.extractBody.addEventListener('click', event => {
-      const chip = event.target.closest('[data-riw-feature]');
-      if (!chip || !extracted) return;
-      const tag = chip.dataset.riwFeature;
-      if (extracted.on.has(tag)) extracted.on.delete(tag); else extracted.on.add(tag);
-      renderExtract();
+    el.resetAll.addEventListener('click', runResetAll);
+    el.removeBg.addEventListener('click', runRemoveBg);
+    el.extractModes.addEventListener('click', event => {
+      const pick = event.target.closest('[data-riw-extract-mode]');
+      if (!pick || !extracted) return;
+      setExtractMode(pick.dataset.riwExtractMode);
+    });
+    el.extractText.addEventListener('input', () => {
+      if (!extracted) return;
+      extracted.text = el.extractText.value;
+      extracted.edited = true;             // 손으로 고쳤다 - 앞선 [넣기] 의 늦은 답이 이 칸을 닫지 않는다(Codex 리뷰)
+      paintExtract();
+    });
+    el.extractText.addEventListener('scroll', () => { el.extractHl.scrollTop = el.extractText.scrollTop; });
+    el.autoUpscale.addEventListener('change', () => {
+      send({enabled: el.autoUpscale.checked}, KEEP_DRAFT, '/api/character-asset/inset/auto-upscale').then(data => {
+        if (data) showToast(data.auto_upscale ? '생성 후 자동 업스케일을 켰습니다 - 생성마다 Anlas 를 소모합니다'
+          : '생성 후 자동 업스케일을 껐습니다', data.auto_upscale ? 'info' : 'success');
+      });
     });
     find('[data-riw-extract-c1]').addEventListener('click', () => useExtracted('virtual_c1'));
     find('[data-riw-extract-add]').addEventListener('click', () => useExtracted('add_character'));
-    find('[data-riw-extract-close]').addEventListener('click', () => { extracted = null; renderExtract(); });
+    find('[data-riw-extract-close]').addEventListener('click', () => {
+      if (extracted?.key) recognizedDismissed.add(extracted.key);
+      extracted = null;
+      renderExtract();
+    });
     el.kinds.addEventListener('click', onPickKind);
     el.reset.addEventListener('click', () => { if (!locked()) send({reset: true}, null); });
     el.upscale.addEventListener('click', runUpscale);
@@ -455,7 +502,9 @@ export function createReferenceInsetWindow({
     // 칸의 바탕색: 흰색 <-> 검정(사용자 결정 2026-10-11). 이 세션의 설정이라 그림을 바꿔 꽂아도 남는다.
     el.bg.addEventListener('click', () => {
       if (locked()) return;
-      send({color: state?.background === 'black' ? 'white' : 'black'}, KEEP_DRAFT, '/api/character-asset/inset/background');
+      // 흰색 -> 회색 -> 검정 -> 흰색(회색 - 사용자 지시 2026-10-18).
+      const next = {white: 'gray', gray: 'black', black: 'white'}[state?.background] || 'gray';
+      send({color: next}, KEEP_DRAFT, '/api/character-asset/inset/background');
     });
     el.crop.addEventListener('change', () => {
       send({enabled: el.crop.checked}, KEEP_DRAFT, '/api/character-asset/inset/crop');
@@ -466,6 +515,7 @@ export function createReferenceInsetWindow({
   // ── 그리기 ────────────────────────────────────────────────────────────
   function render() {
     if (!panel || !state) return;
+    showRecognized();          // 고른 그림이 바뀌는 길이 여럿이다 - 그릴 때마다 그 그림의 인식 칸으로(Codex 리뷰)
     const ready = configured();
     const on = ready && !!state.active;
     el.main.hidden = view !== 'main';
@@ -479,6 +529,9 @@ export function createReferenceInsetWindow({
       : on ? '켜져 있습니다 - 다음 생성이 인셋으로 나갑니다 (끄면 일반 생성 · 그림과 배치는 남습니다)'
         : '꺼져 있습니다 - 일반 생성으로 나갑니다 (켜면 이 그림 · 배치 그대로 이어집니다)';
     el.crop.checked = !!state.crop_result;
+    // 자동 업스케일은 칸을 빼고 남길 때만 뜻이 있다(자른 결과에 건다) - 그때만 보인다.
+    el.autoUpscaleBox.hidden = !state.crop_result;
+    el.autoUpscale.checked = !!state.auto_upscale;
     // 머리줄의 방향 - 아래의 일찍 돌아가는 길(Storage · 빈 상태)보다 먼저 맞춘다.
     const vert = vertical();
     el.orients.forEach(button => {
@@ -488,11 +541,14 @@ export function createReferenceInsetWindow({
       button.disabled = locked();
     });
     if (!state.second && !wantSecond) slot = 1;
-    if (view === 'storage') { renderStorage(); return; }
+    el.resetAll.disabled = locked() || (!configured() && !(state.characters || []).length);
+    el.resetAll.classList.toggle('is-armed', resetArmed);
+    if (view === 'storage') { renderStorage(); renderExtract(); return; }
     el.stage.hidden = !ready;
     el.empty.hidden = ready;
     el.rows.forEach(row => { row.hidden = !ready; });
-    if (!ready) { el.pic.removeAttribute('src'); return; }
+    // 처음 화면 · Storage 에서도 추출 칸을 다시 따진다 - 안 하면 [초기화] 뒤에도 앞 그림의 특징이 남아 보인다.
+    if (!ready) { el.pic.removeAttribute('src'); renderExtract(); return; }
     el.stage.classList.toggle('is-off', !on);
     const canvasW = Number(state.width) || 1;
     const canvasH = Number(state.height) || 1;
@@ -582,10 +638,10 @@ export function createReferenceInsetWindow({
     el.reset.disabled = lock || (!draft && !state.custom);
     el.upscale.disabled = lock || !!state.upscaled;          // 그림 하나에 한 번이면 된다
     // 미리보기의 칸도 **나가는 캔버스와 같은 바탕**을 깐다. 예전에는 미리보기는 희고 나가는 것은 검었다.
-    const dark = state.background === 'black';
-    el.bg.textContent = dark ? '바탕 검정' : '바탕 흰색';
+    const tone = {black: ['바탕 검정', '#000000'], gray: ['바탕 회색', '#d0d0d0']}[state.background] || ['바탕 흰색', '#ffffff'];
+    el.bg.textContent = tone[0];
     el.bg.disabled = lock;
-    el.panel.style.background = dark ? '#000000' : '#ffffff';
+    el.panel.style.background = tone[1];
     el.upscale.textContent = busy ? '업스케일 중…' : state.upscaled ? '업스케일됨' : '업스케일';
     el.pastes.forEach(button => { button.disabled = lock; });
     el.storages.forEach(button => { button.disabled = lock; });
@@ -605,6 +661,12 @@ export function createReferenceInsetWindow({
     renderSlots(two, lock);
     renderResult(canvasW, canvasH);
     el.extractRun.disabled = lock || extracting || (slot === 2 && !state.second);
+    // 이미 지운 판이면 그림이 바뀔 때까지 다시 내지 않는다(사용자 지시 2026-10-18).
+    // ⚠️ 누르기 확인(armed)은 **글을 바꾸지 않는다** - 글이 길어지면 줄이 넘쳐 아래 칸이 밀렸다(사용자 제보). 색과 토스트로만.
+    const removedNow = slot === 2 ? !!state.second?.bg_removed : !!state.bg_removed;
+    el.removeBg.disabled = lock || removingBg || removedNow || (slot === 2 && !state.second);
+    el.removeBg.classList.toggle('is-armed', removeBgArmed && !removedNow);
+    el.removeBg.textContent = removingBg ? '배경 제거 중…' : removedNow ? '배경 제거됨' : '배경 제거 (유료)';
     el.extractRun.textContent = extracting ? '특징 추출 중…' : '특징 추출';
     renderExtract();
   }
@@ -805,6 +867,7 @@ export function createReferenceInsetWindow({
     }
     slot = key === '2' ? 2 : 1;
     if (slot === 1 && !state.second) wantSecond = false;
+    showRecognized();          // 고른 그림의 인식 칸으로(Codex 리뷰 - 다른 그림의 것이 남아 있었다)
     render();
   }
 
@@ -835,6 +898,8 @@ export function createReferenceInsetWindow({
   /** 고른 그림을 WD 태거에 보내 캐릭터 특징만 받는다. ⚠️ 그림이 외부(huggingface)로 나간다 - 단추를 누를 때만. */
   async function runExtract() {
     if (!configured() || locked() || extracting) return;
+    const forKey = pictureKey();           // 보낸 순간의 그림 - 이 결과가 어느 그림의 것인지(Codex 리뷰)
+    const before = extracted;              // 보낸 순간의 칸 - 그 사이에 칸이 바뀌었으면(다른 그림을 거쳐 왔어도) 덮지 않는다
     extracting = true;
     render();
     showToast('특징 추출 중… 외부 태거의 답을 기다립니다(보통 4초)', 'info');
@@ -847,10 +912,19 @@ export function createReferenceInsetWindow({
         showToast(`특징을 뽑지 못했습니다: ${data?.error || response.status}`, 'error');
         return;
       }
+      // 기다리는 사이에 그림이 바뀌었으면 버린다 - 지금 그림의 칸(고친 글 포함)을 덮지 않는다(Codex 리뷰).
+      if (pictureKey() !== forKey || extracted !== before) {
+        showToast('그림이 바뀌어 특징 추출 결과를 버렸습니다', 'info');
+        return;
+      }
+      // 사전에 없는 태그(unknown)는 넣지 않는다(사용자 결정 2026-10-18) - 필요하면 손으로 쓴다(회색으로 보인다).
       extracted = {
-        keep: data.keep || [], unknown: data.unknown || [], dropped: data.dropped || [],
-        on: new Set(data.keep || []), url: String(data.space_url || ''), notice: String(data.notice || ''),
+        features: data.keep || [],
+        clothes: (data.dropped || []).filter(row => row.group === '의상').map(row => row.tag),
+        mode: 'features', text: '', url: String(data.space_url || ''), notice: String(data.notice || ''),
+        key: forKey,
       };
+      extracted.text = extracted.features.join(', ');
     } catch (error) {
       showToast(`특징을 뽑지 못했습니다: ${error.message}`, 'error');
     } finally {
@@ -859,35 +933,143 @@ export function createReferenceInsetWindow({
     }
   }
 
+  async function runResetAll() {
+    if (locked()) return;
+    if (!resetArmed) {
+      resetArmed = true;
+      win?.clearTimeout(resetTimer);
+      resetTimer = win?.setTimeout(() => { resetArmed = false; render(); }, 3000) || 0;
+      showToast('한 번 더 누르면 인셋을 초기화합니다 (그림 · 배치 · 가상 캐릭터)', 'info');
+      render();
+      return;
+    }
+    resetArmed = false;
+    recognizedDismissed = new Set();
+    win?.clearTimeout(resetTimer);
+    win?.clearTimeout(wheelTimer);
+    wheelAnchor = null;
+    draft = null;
+    extracted = null;
+    wantSecond = false;
+    slot = 1;
+    view = 'main';
+    clearResult();
+    const data = await send({}, null, '/api/character-asset/inset/reset');
+    if (data) showToast('레퍼런스 인셋을 초기화했습니다', 'success');
+  }
+
+  async function runRemoveBg() {
+    if (!configured() || locked() || removingBg || (slot === 2 && !state.second)) return;
+    if (slot === 2 ? state.second?.bg_removed : state.bg_removed) return;
+    if (!removeBgArmed) {
+      removeBgArmed = true;
+      win?.clearTimeout(removeBgTimer);
+      removeBgTimer = win?.setTimeout(() => { removeBgArmed = false; render(); }, 3000) || 0;
+      showToast('한 번 더 누르면 배경을 지웁니다 (Anlas 소모)', 'info');
+      render();
+      return;
+    }
+    removeBgArmed = false;
+    win?.clearTimeout(removeBgTimer);
+    win?.clearTimeout(wheelTimer);
+    wheelAnchor = null;
+    removingBg = true;
+    render();
+    const target = slot;
+    try {
+      const data = await send({slot: target}, null, '/api/character-asset/inset/remove-bg');
+      if (data && data.store_error) {
+        // 지운 그림은 칸에 있지만 저장되지 않았다 - 앱을 끄면 사라진다. [저장] 으로 다시 넣게 한다(Codex 리뷰).
+        showToast(`배경은 지웠지만 Storage 에 저장하지 못했습니다 - [저장] 을 눌러 주세요 (${data.store_error})`, 'warning');
+      } else if (data) {
+        showToast(`${target === 2 ? '둘째 그림의' : '칸의 그림의'} 배경을 지웠습니다${
+          data.stored ? ' - Storage 에 저장했습니다' : ''}`, 'success');
+      }
+    } finally {
+      removingBg = false;
+      render();
+    }
+  }
+
+  /** [특징만] · [특징+의상] · [의상만] - 프롬프트를 그 묶음으로 다시 채운다(손으로 고친 것은 덮인다). */
+  function setExtractMode(mode) {
+    if (!extracted) return;
+    extracted.mode = mode;
+    const tags = mode === 'clothes' ? extracted.clothes
+      : mode === 'both' ? [...extracted.features, ...extracted.clothes] : extracted.features;
+    extracted.text = tags.join(', ');
+    renderExtract();
+  }
+
+  /** 프롬프트 칸 뒤에 같은 글을 깔고 태그마다 칠한다: 특징 = 흰색 · 의상 = 연노랑 · 그 밖(직접 쓴 것) = 회색. */
+  /** 맨 바깥 쉼표로만 자른다(쉼표도 한 조각으로 남긴다) - 괄호 안 · 가중치 묶음(`n::` ~ `::`) 안의 쉼표는 자르지 않는다.
+   *  `core/inset_feature_extract._prompt_units` 와 같은 규칙(Codex 리뷰 - 묶음이 쪼개져 색이 틀렸다). */
+  function splitTopLevel(text) {
+    const out = [];
+    let buf = '';
+    let depth = 0;
+    let weighted = false;
+    for (let i = 0; i < text.length; i += 1) {
+      if (text.startsWith('::', i)) {
+        if (weighted) weighted = false;
+        else if (/-?\d+(?:\.\d+)?\s*$/.test(buf)) weighted = true;
+        buf += '::';
+        i += 1;
+        continue;
+      }
+      const ch = text[i];
+      if ('{[('.includes(ch)) depth += 1;
+      else if ('}])'.includes(ch)) depth = Math.max(0, depth - 1);
+      if (ch === ',' && depth === 0 && !weighted) { out.push(buf, ','); buf = ''; } else buf += ch;
+    }
+    out.push(buf);
+    return out;
+  }
+
+  function paintExtract() {
+    const features = new Set(extracted.features.map(tag => tag.toLowerCase()));
+    const clothes = new Set(extracted.clothes.map(tag => tag.toLowerCase()));
+    const html = splitTopLevel(String(extracted.text || '')).map(part => {
+      if (part === ',') return '<span class="riw-hl-sep">,</span>';
+      const key = part.trim().toLowerCase();
+      const kind = features.has(key) ? 'f' : clothes.has(key) ? 'c' : 'o';
+      return `<span class="riw-hl-${kind}">${escHtml(part)}</span>`;
+    }).join('') + '\n';
+    el.extractHl.innerHTML = html;
+    el.extractHl.scrollTop = el.extractText.scrollTop;
+  }
+
   function renderExtract() {
     el.extract.hidden = !extracted || view !== 'main' || !configured();
     if (el.extract.hidden) return;
-    const chip = tag => `<button type="button" class="riw-feature${extracted.on.has(tag) ? ' is-on' : ''}"
-      data-riw-feature="${escHtml(tag)}" aria-pressed="${extracted.on.has(tag) ? 'true' : 'false'}">${escHtml(tag)}</button>`;
-    const group = (label, tags) => (tags.length
-      ? `<div class="riw-feature-group"><span class="riw-feature-label">${escHtml(label)}</span>${tags.map(chip).join('')}</div>` : '');
-    const html = group('남김', extracted.keep)
-      + group('사전에 없음 (눌러서 켜기)', extracted.unknown)
-      + group('뺌: 의상 · 표정 · 포즈 · 배경 · 메타', extracted.dropped.map(row => row.tag));
-    if (el.extractBody.innerHTML !== html) el.extractBody.innerHTML = html;
-    el.extractNote.textContent = `켜짐 ${extracted.on.size}개`;
+    el.extractLabel.textContent = extracted.label || '추출된 특징';
+    if (el.extractText.value !== extracted.text) el.extractText.value = extracted.text;
+    el.extractModes.querySelectorAll('[data-riw-extract-mode]').forEach(button => {
+      const on = button.dataset.riwExtractMode === extracted.mode;
+      button.classList.toggle('is-on', on);
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    paintExtract();
     const src = extracted.url
       ? `[ ${escHtml(extracted.notice || '웹에서 사용')} : <a href="${escHtml(extracted.url)}" target="_blank"
-         rel="noopener noreferrer">WD 태거</a> ]` : '';
+         rel="noopener noreferrer">WD 태거</a> ]` : escHtml(extracted.source || '');
     if (el.extractSrc.innerHTML !== src) el.extractSrc.innerHTML = src;
   }
 
-  /** 켜진 칩을 태거의 차례대로 이어 가상 캐릭터에 넣는다. */
+  /** 프롬프트 칸의 글을 가상 캐릭터에 넣는다. */
   async function useExtracted(key) {
     if (!extracted) return;
-    const ordered = [...extracted.keep, ...extracted.unknown, ...extracted.dropped.map(row => row.tag)]
-      .filter(tag => extracted.on.has(tag));
-    if (!ordered.length) { showToast('켜진 특징이 없습니다', 'error'); return; }
-    const prompt = ordered.join(', ');
+    const applied = extracted;             // 누른 순간의 칸 - 답을 기다리는 사이에 그림을 바꿔도 이것을 닫는다(Codex 리뷰)
+    // 칸에 적힌 그대로 넣는다(손으로 고친 것 포함) - 빈 조각만 걷는다.
+    const prompt = String(extracted.text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
+    if (!prompt) { showToast('넣을 프롬프트가 비어 있습니다', 'error'); return; }
     const data = await send({key, value: key === 'virtual_c1' ? {prompt} : prompt}, KEEP_DRAFT,
       '/api/character-asset/inset/character');
     if (!data) return;
-    extracted = null;
+    // 넣은 칸은 닫은 것과 같다 - 그 그림의 인식 칸을 다시 띄우지 않는다(Codex 리뷰).
+    if (applied.key) recognizedDismissed.add(applied.key);
+    // 다른 그림을 거쳐 돌아와 같은 그림의 칸이 새로 떠 있어도 닫는다 - 단 그 새 칸을 손으로 고쳤으면(아직 안 넣은 글) 둔다(Codex 리뷰).
+    if (extracted === applied || (applied.key && extracted?.key === applied.key && !extracted.edited)) extracted = null;
     render();
     showToast(key === 'virtual_c1' ? '가상 C1 에 넣었습니다' : '가상 캐릭터로 추가했습니다', 'success');
   }
@@ -962,7 +1144,7 @@ export function createReferenceInsetWindow({
     let lost = false;       // 답을 못 받았다 - 서버가 바꿨는지 알 수 없다
     // 기다리는 한계. 넘으면 이 요청을 실패로 치고 줄을 풀어 준다 - 안 그러면 뒤의 요청이 영영 안 나간다.
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
-    const limit = path.endsWith('/inset/upscale') ? UPSCALE_TIMEOUT_MS : SEND_TIMEOUT_MS;
+    const limit = path.endsWith('/inset/upscale') || path.endsWith('/inset/remove-bg') ? UPSCALE_TIMEOUT_MS : SEND_TIMEOUT_MS;
     const timer = controller && win ? win.setTimeout(() => controller.abort(), limit) : 0;
     try {
       const response = await fetchImpl(path, {
@@ -1226,10 +1408,36 @@ export function createReferenceInsetWindow({
 
   // ── 바깥에서 부르는 것 ────────────────────────────────────────────────
   /** 서버 상태가 바뀔 때마다 부른다. 꺼졌거나 꽂아 둔 것이 없어져도 **창은 닫지 않는다** - 이 창이 켜는 자리다. */
+  /** 붙여넣은 NAI 그림의 캐릭터 프롬프트를 '프롬프트 인식됨' 으로 띄운다(사용자 지시 2026-10-18). 고른 칸의 그림이
+   *  처음 보일 때 한 번 - [특징만] · [특징+의상] · [의상만] 과 칠하기는 [특징 추출] 과 같다. */
+  /** 고른 그림의 열쇠(칸 · 그림 판). 추출 칸이 어느 그림의 것인지 가른다. */
+  function pictureKey() {
+    const n = slot === 2 ? 2 : 1;
+    return `${n}|${n === 2 ? state?.second?.source_revision || '' : state?.source_revision || ''}`;
+  }
+
+  function showRecognized() {
+    if (!configured()) return;
+    const n = slot === 2 ? 2 : 1;
+    const rec = n === 2 ? state.second?.recognized : state.recognized;
+    const key = pictureKey();
+    // 이미 이 그림의 것(인식이든 [특징 추출] 이든) - 고친 글을 덮지 않는다(Codex 리뷰).
+    if (extracted?.key === key) return;
+    // 다른 그림의 칸([특징 추출] 결과도)은 걷는다(Codex 리뷰 - 메타데이터 없는 그림 아래에 앞 그림의 글이 남아 C1 으로 들어갔다).
+    if (extracted && extracted.key !== key) extracted = null;
+    if (!rec || recognizedDismissed.has(key)) return;
+    extracted = {
+      features: rec.features || [], clothes: rec.clothes || [], mode: 'features', text: (rec.features || []).join(', '),
+      url: '', notice: '', label: '프롬프트 인식됨', source: `NAI 메타데이터 · C1${n === 2 ? ' (둘째 그림)' : ''}`,
+      key, recKey: key,
+    };
+  }
+
   function sync(next) {
     const before = state;
     state = next && typeof next === 'object' ? next : null;
     if (!configured() || !state.active) clearResult();     // 꺼지면 마지막 결과도 놓는다(Codex 리뷰)
+    showRecognized();          // 창이 닫혀 있을 때 붙여넣었어도 열면 보이게 - 창 확인보다 먼저
     if (!panel) return;
     if (!configured()) draft = null;       // 놓을 그림이 없다 - 닫으면서 보낼 배치도 없다
     // 캔버스나 그림이 바뀌었으면(띠의 해상도 메뉴 · 다른 창) 끌어 놓은 배치는 **옛 캔버스의 값**이다 - 버린다.
@@ -1247,6 +1455,7 @@ export function createReferenceInsetWindow({
 
   function open(next) {
     state = next && typeof next === 'object' ? next : {active: false, configured: false};
+    showRecognized();
     ensurePanel();
     draft = null;
     view = 'main';

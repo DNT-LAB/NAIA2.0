@@ -247,6 +247,7 @@ def prepare_result_enhance_command(
     with Image.open(io.BytesIO(image_bytes)) as image:
         orig_w, orig_h = image.size
     params = copy.deepcopy(generation_params)
+    _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
         params.pop(key, None)
@@ -353,6 +354,13 @@ async def stop_loops_for_inpaint(context, clients) -> None:
         print(f"[warn] inpaint could not stop auto generation: {exc}", flush=True)
 
 
+def _drop_reference_inset_flags(params: dict[str, Any]) -> None:
+    """결과에서 파생된 요청(Enhance · Upscale 등)은 레퍼런스 인셋 생성이 아니다 - 인셋 태그를 다시 넣게 하는 표식을 걷는다
+    (사용자 지시 2026-10-18: 생성이 끝나면 split screen 을 회수 - 그것을 다시 붙이면 후처리에 부작용)."""
+    for key in ("reference_inset_tag_required", "reference_inset_vertical", "_reference_inset_injected_tags"):
+        params.pop(key, None)
+
+
 def _upscale_token(context: WebSessionContext) -> str:
     """Upscale 에 쓸 토큰. 지목한 계정이 있으면 그 계정, 없으면 기본값(메인).
 
@@ -394,6 +402,7 @@ def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, An
         raise RuntimeError(str((result or {}).get("message") or "NAI upscale failed"))
 
     params = copy.deepcopy(generation_params)
+    _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
         params.pop(key, None)
@@ -430,6 +439,7 @@ def perform_nai_result_outpaint(context: WebSessionContext, payload: dict[str, A
         context.api_service = service
 
     params = copy.deepcopy(generation_params)
+    _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
         params.pop(key, None)

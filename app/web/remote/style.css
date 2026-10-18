@@ -31072,6 +31072,33 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
 .riw-stage.is-locked .riw-split { display: none; }
 /* 그릴 곳의 마지막 결과 - 칸 밑에 깔린다(칸이 위에 그려진다). */
 .riw-result { position: absolute; max-width: none; pointer-events: none; user-select: none; opacity: 0.85; }
+/* [배경 제거 (유료)] - 노란 단추(사용자 지시 2026-10-18). 한 번 누르면 채워지고(armed), 한 번 더 누르면 Anlas 를 쓰고 보낸다. */
+.riw-chip.riw-chip-paid { border-color: rgba(239, 159, 39, 0.75); color: #fac775; }
+.riw-chip.riw-chip-paid:hover:not(:disabled) { background: rgba(239, 159, 39, 0.12); color: #fac775; }
+.riw-chip.riw-chip-paid.is-armed { background: rgba(239, 159, 39, 0.32); border-color: #ef9f27; color: #ffffff; }
+/* [특징 추출] 프롬프트 칸(사용자 지시 2026-10-18): 같은 글을 뒤에 깔고 칠한다 - 특징 흰색 · 의상 연노랑 · 직접 쓴 것 회색.
+   칸(textarea)은 글자를 투명하게 두고 커서만 보인다. 두 겹의 글꼴 · 여백 · 줄바꿈이 같아야 겹친다. */
+.riw-extract-modes { display: inline-flex; gap: 4px; margin-left: auto; }
+.riw-extract-edit { position: relative; }
+.riw-extract-hl, .riw-extract-text {
+  box-sizing: border-box; width: 100%; margin: 0; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px;
+  font: 500 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal;
+  /* 칸에 스크롤바가 생겨도 두 겹의 줄바꿈이 같게 - 스크롤바 자리를 둘 다 늘 비워 둔다. */
+  scrollbar-gutter: stable;
+}
+.riw-extract-hl { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; }
+.riw-extract-text {
+  position: relative; display: block; min-height: 72px; max-height: 140px; resize: vertical; overflow-y: auto;
+  background: rgba(0, 0, 0, 0.22); border-color: var(--border-glow); color: transparent; caret-color: #ffffff;
+}
+.riw-extract-text:focus { outline: none; border-color: rgba(139, 118, 255, 0.85); }
+.riw-hl-f { color: #ffffff; }
+.riw-hl-c { color: #f5e6a3; }
+.riw-hl-o, .riw-hl-sep { color: var(--text-muted); }
+.riw-extract-legend { margin-left: 0; }
+/* 생성 후 자동 업스케일 (유료) - 노란 글(배경 제거 (유료) 와 같은 표시). */
+.riw-check.riw-check-paid { color: #fac775; }
+.riw-check[hidden] { display: none !important; }
 /* [특징 추출] 결과(사용자 결정 2026-10-18): 켜진 칩 = 가상 캐릭터에 넣을 것. 누르면 켜고 끈다. */
 .riw-extract { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--border-glow); }
 .riw-extract[hidden] { display: none !important; }
@@ -31088,6 +31115,14 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   border-style: solid; border-color: rgba(93, 202, 165, 0.8); color: #ffffff; background: rgba(29, 158, 117, 0.28);
   text-decoration: none;
 }
+/* 머리줄의 [초기화](사용자 지시 2026-10-18). 한 번 누르면 붉게 채워진다(armed) - 한 번 더 누르면 비운다. */
+.riw-reset-btn {
+  border: 1px solid var(--border-glow); border-radius: 999px; padding: 2px 9px; margin-right: 4px;
+  background: transparent; color: var(--text-muted); font: 700 11px var(--font-mono); cursor: pointer;
+}
+.riw-reset-btn:hover:not(:disabled) { color: var(--text-primary); }
+.riw-reset-btn.is-armed { border-color: rgba(226, 75, 74, 0.9); background: rgba(226, 75, 74, 0.28); color: #ffffff; }
+.riw-reset-btn:disabled { opacity: 0.45; cursor: default; }
 /* 머리줄의 [좌우 | 상하]. 켜고 끄기 스위치와 같은 알약 모양. */
 .riw-orient {
   display: inline-flex; border: 1px solid var(--border-glow); border-radius: 999px; overflow: hidden; margin-right: 4px;
@@ -31149,6 +31184,8 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   font: 600 10.5px var(--font-mono); letter-spacing: 0.02em;
 }
 .riw-row-center { justify-content: center; }
+/* 추출 칸의 이름은 길이가 바뀐다('프롬프트 인식됨') - 글자만큼 넓힌다(고정 폭이면 옆 글에 겹쳐 보인다). */
+.riw-extract .riw-label { width: auto; }
 /* 꽂아 둔 것이 없을 때. 캔버스가 놓일 자리와 비슷한 높이로 두어 그림을 넣어도 창이 덜 튄다. */
 .riw-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;

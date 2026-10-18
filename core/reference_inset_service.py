@@ -94,6 +94,11 @@ def apply_reference_inset_to_prompt_context(context, app_context=None):
     tags = reference_inset_tags_for(settings, app_context=app_context)
     if reference_inset_context_already_present(context, tags):
         return context
+    # **이 훅이 넣는** 태그를 적어 둔다 - 생성이 끝나면 결과 · 히스토리에서 걷는다(사용자 지시 2026-10-18 · Codex 리뷰:
+    # 이 훅이 먼저 넣으면 생성 시점에는 '이미 있다' 로 보여 걷지 못했다). 사용자가 쓴 것은 빠져 있지 않으므로 안 적힌다.
+    metadata = getattr(context, "metadata", None)
+    if isinstance(metadata, dict):
+        metadata["reference_inset_injected_tags"] = list(_missing_inset_tags_for_context(context, tags))
     # V5 는 **prefix 끝**에 붙인다. 그 밖에는 예전대로 인물 태그 연속 구간 뒤.
     after_prefix = tags is REFERENCE_INSET_V5_TAGS or tags is REFERENCE_INSET_V5_VERTICAL_TAGS
     inject_reference_inset_into_context(context, tags, after_prefix=after_prefix)

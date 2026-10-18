@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -114,3 +115,60 @@ def split_character_features(
         else:
             unknown.append(tag)
     return {"keep": person + keep, "unknown": unknown, "dropped": dropped}
+
+
+def split_character_prompt(prompt: Any, repo_root: str | Path | None = None) -> dict[str, list[str]]:
+    """사람이 쓴 캐릭터 프롬프트(붙여넣은 NAI 그림의 C1)를 특징 · 의상으로 가른다(사용자 지시 2026-10-18).
+
+    태거 결과와 달리 사람이 고른 글이라 **모르는 태그는 특징으로 남긴다**(의상 필터와 같은 방향 - 이름 · 체형 · 종족이
+    사전에 없어 빠지던 사고). 의상으로 확인된 것만 의상이다. 차례는 프롬프트 그대로.
+    """
+    from core.character_outfit_filter import keep_tag
+
+    features: list[str] = []
+    clothes: list[str] = []
+    for unit in _prompt_units(str(prompt or "")):
+        text = unit.strip()
+        if not text:
+            continue
+        # 괄호 · 가중치(`1.2::a, b ::`) 묶음은 통째로 한 덩이다 - 쪼개면 괄호가 깨진다(Codex 리뷰). 안의 태그가 **전부**
+        # 의상일 때만 의상이고, 하나라도 아니면 특징으로 남긴다(모르는 것은 남긴다는 방향).
+        inner = [part.strip() for part in _WEIGHT_RE.sub("", text).replace("::", "").strip("{}[]() ").split(",")]
+        inner = [part.strip("{}[]() ") for part in inner if part.strip("{}[]() ")]
+        (clothes if inner and not any(keep_tag(part, repo_root) for part in inner) else features).append(text)
+    return {"features": features, "clothes": clothes}
+
+
+_WEIGHT_RE = re.compile(r"-?\d+(?:\.\d+)?\s*::")
+_WEIGHT_TAIL_RE = re.compile(r"-?\d+(?:\.\d+)?\s*$")
+
+
+def _prompt_units(prompt: str) -> list[str]:
+    """프롬프트를 맨 바깥 쉼표로만 자른다 - 괄호 안 · 가중치 묶음(`n::` ~ `::`) 안의 쉼표는 자르지 않는다."""
+    units: list[str] = []
+    buf = ""
+    depth = 0
+    weighted = False
+    index = 0
+    while index < len(prompt):
+        if prompt.startswith("::", index):
+            if weighted:
+                weighted = False
+            elif _WEIGHT_TAIL_RE.search(buf):
+                weighted = True
+            buf += "::"
+            index += 2
+            continue
+        char = prompt[index]
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth = max(0, depth - 1)
+        if char == "," and depth == 0 and not weighted:
+            units.append(buf)
+            buf = ""
+        else:
+            buf += char
+        index += 1
+    units.append(buf)
+    return units

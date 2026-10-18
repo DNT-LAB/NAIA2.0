@@ -1281,7 +1281,7 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261018-inset28');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261018-inset43');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),
@@ -2652,7 +2652,7 @@ const grokI2vModalReady = import('./js/features/grokI2vModal.mjs?v=20260602-grok
   });
 // --- NAI Director Tools 모달 (제거 가능): GENERATION INFO [Director] → 현재 결과 변형 ---
 let naiDirectorModal = null;
-const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20260602-director5')
+const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20261018-removebg1')
   .then(({createNaiDirectorModal}) => {
     naiDirectorModal = createNaiDirectorModal({document, getWs: () => ws, WebSocket, showToast, escHtml, bindTagAssist});
   })
@@ -3365,7 +3365,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-review3')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-ratings1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),

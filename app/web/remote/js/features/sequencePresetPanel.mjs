@@ -41,10 +41,12 @@ function loadSavedQuery() {
     const raw = globalThis.localStorage?.getItem(QUERY_STORE_KEY);
     const data = raw ? JSON.parse(raw) : null;
     if (!data || typeof data !== 'object') return null;
+    // 수위 = 빈 목록도 뜻이 있다(칩을 다 끈 것 = 모든 수위). 모르는 값만 있던 목록은 상한 것으로 보고 기본값으로.
+    const ratings = Array.isArray(data.ratings) ? data.ratings.filter(r => ALL_RATINGS.includes(r)) : null;
     return {
       include: typeof data.include === 'string' ? data.include : null,
       exclude: typeof data.exclude === 'string' ? data.exclude : null,
-      ratings: Array.isArray(data.ratings) ? data.ratings.filter(r => ALL_RATINGS.includes(r)) : null,
+      ratings: ratings && (ratings.length || !data.ratings.length) ? ratings : null,
       cuts: Array.isArray(data.cuts) ? data.cuts.map(Number).filter(n => CUTS.includes(n)) : null,
     };
   } catch (_) {
@@ -66,7 +68,7 @@ function initialQuery() {
   if (!saved) return q;
   if (saved.include !== null) q.include = saved.include;
   if (saved.exclude !== null) q.exclude = saved.exclude;
-  if (saved.ratings && saved.ratings.length) q.ratings = new Set(saved.ratings);
+  if (saved.ratings) q.ratings = new Set(saved.ratings);   // 빈 목록(모든 수위)도 그대로 살린다(Codex 리뷰)
   if (saved.cuts) q.cuts = new Set(saved.cuts);
   return q;
 }
@@ -153,9 +155,11 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       }
       state.presentRatings = (st.ratings || []).filter(r => ALL_RATINGS.includes(r));
       state.groupCount = st.groupCount || 0;
-      // 데이터에 없는 수위는 뺀다(저장된 조건이 옛 데이터의 것일 수 있다). 다 빠지면 있는 것 중 Q, 없으면 첫째.
+      // 데이터에 없는 수위는 뺀다(저장된 조건이 옛 데이터의 것일 수 있다). **그래서** 다 빠졌을 때만 있는 것 중 Q, 없으면 첫째 -
+      // 사람이 칩을 다 꺼 둔 것(모든 수위)은 그대로 둔다(Codex 리뷰).
+      const hadRatings = state.query.ratings.size > 0;
       for (const r of Array.from(state.query.ratings)) if (!state.presentRatings.includes(r)) state.query.ratings.delete(r);
-      if (!state.query.ratings.size && state.presentRatings.length) {
+      if (hadRatings && !state.query.ratings.size && state.presentRatings.length) {
         state.query.ratings.add(state.presentRatings.includes('q') ? 'q' : state.presentRatings[0]);
       }
       state.available = true;

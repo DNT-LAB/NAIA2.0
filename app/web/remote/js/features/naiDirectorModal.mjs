@@ -24,6 +24,8 @@ const MODES = [
   {value: 'sketch', label: 'Sketch'},
   {value: 'colorize', label: 'Colorize'},
   {value: 'emotion', label: 'Emotion'},
+  // NovelAI Remove BG(사용자 지시 2026-10-18) - 투명 배경 그림이 새 결과로 들어온다. 추가 입력 없음.
+  {value: 'bg-removal', label: 'Remove BG'},
 ];
 const EMOTIONS = [
   'Neutral', 'Happy', 'Sad', 'Angry', 'Scared', 'Surprised', 'Tired', 'Excited',
@@ -74,6 +76,8 @@ export function createNaiDirectorModal({document, window: win = window, getWs, W
     setRowHidden('nai-director-emotion-row', !usesEmotion(m));
     setRowHidden('nai-director-defry-row', !usesPromptDefry(m));
     setRowHidden('nai-director-prompt-row', !usesPromptDefry(m));
+    // Remove BG 는 결과가 투명 배경이다 - 무엇이 오는지 미리 말해 둔다.
+    if (!running) setStatus(m === 'bg-removal' ? '배경을 지운 그림(투명 배경)이 새 결과로 들어옵니다' : '', 'info');
     position();  // 높이 변동 → 재배치
   }
 

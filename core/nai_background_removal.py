@@ -83,3 +83,35 @@ def remove_background(token: str, image_bytes: bytes) -> list[bytes]:
     if len(results) < len(RESULT_NAMES):
         raise BackgroundRemovalError("배경 제거 응답에 그림이 모자랍니다.")
     return results[:len(RESULT_NAMES)]
+
+
+def fit_to_limit(image_bytes: bytes) -> bytes:
+    """1024x1024 넓이를 넘는 그림을 비율대로 줄인다(넘지 않으면 그대로). 알파는 쥔 채 - 붙여넣은 큰 그림 · 결과 그림을
+    배경 제거에 보낼 수 있게(`source_png` 는 넘는 그림을 거절한다). 64 의 배수로 맞춘다(NAI 의 다른 도구와 같다)."""
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(bytes(image_bytes or b""))) as image:
+            image.load()
+            width, height = image.size
+            if width * height <= MAX_PIXELS:
+                return bytes(image_bytes)
+            ratio = width / height
+            new_w = max(64, int((MAX_PIXELS * ratio) ** 0.5) // 64 * 64)
+            new_h = max(64, int(new_w / ratio) // 64 * 64)
+            while new_w * new_h > MAX_PIXELS and new_w > 64:
+                new_w -= 64
+                new_h = max(64, int(new_w / ratio) // 64 * 64)
+            converted = image.convert("RGBA" if image.mode in ("RGBA", "LA") or "transparency" in image.info else "RGB")
+            resized = converted.resize((new_w, new_h), Image.Resampling.LANCZOS)
+    except Exception as exc:  # noqa: BLE001 - 그림이 아니다
+        raise ValueError(f"image could not be read: {exc}") from exc
+    output = io.BytesIO()
+    resized.save(output, format="PNG")
+    return output.getvalue()
+
+
+def remove_background_blend(token: str, image_bytes: bytes) -> bytes:
+    """배경을 지운 그림 하나(Blend - 안쪽은 원본 · 가장자리만 다시 그린 것, 투명 배경 RGBA PNG). 큰 그림은 먼저 줄인다.
+    Anlas 가 든다. 실패는 `BackgroundRemovalError`."""
+    return remove_background(token, fit_to_limit(image_bytes))[RESULT_NAMES.index("blend")]

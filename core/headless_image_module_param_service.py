@@ -65,6 +65,8 @@ REFERENCE_INSET_LIVE_REFETCH_KEYS = (
     # 인셋의 가상 캐릭터(우회 모드) - 중간에 고친 것이 다음 장부터 실려야 한다.
     "sketchbook_character_prompts",
     "_reference_inset_skip_characters",
+    # 생성 후 자동 업스케일 - 중간에 켜고 끈 것이 다음 장부터.
+    "_reference_inset_auto_upscale",
     "_reference_inset_pin",
 )
 

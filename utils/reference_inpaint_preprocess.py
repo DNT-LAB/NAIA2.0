@@ -158,7 +158,10 @@ def rgb_without_hidden_color(image: Image.Image) -> Image.Image:
 # 인셋 칸의 바탕색(사용자 결정 2026-10-11). 투명한 그림의 뒤와, 그림이 덮지 않은 칸이 이 색이다.
 # 기본은 흰색 - 붙여넣은 그림도 흰 바탕이고 캔버스도 희다. 검정은 화면의 토글로 고른다
 # (예전에는 투명한 자리가 늘 검정으로 나갔다 - 알파를 그냥 떼어서 그 밑의 검정이 드러났을 뿐이다).
-REFERENCE_INSET_PANEL_COLORS: dict[str, tuple[int, int, int]] = {"white": (255, 255, 255), "black": (0, 0, 0)}
+# 연한 회색(사용자 지시 2026-10-18 - 이전 실험에서 회색 계열 바탕이 결과가 더 나았다). 값은 (208, 208, 208).
+REFERENCE_INSET_PANEL_COLORS: dict[str, tuple[int, int, int]] = {
+    "white": (255, 255, 255), "gray": (208, 208, 208), "black": (0, 0, 0),
+}
 DEFAULT_REFERENCE_INSET_PANEL_COLOR = "white"
 
 

@@ -216,6 +216,21 @@ def reencode_with_nai_meta(edited_image, source_image, parameters: dict) -> byte
     return buffer.getvalue()
 
 
+class InsetConflict(ValueError):
+    """인셋 작업이 지금 상태와 부딪친다(이미 지운 판 · 지우는 중) - 라우트가 409 로 돌려준다."""
+
+
+def _has_transparent_background(image: Any) -> bool:
+    """그림의 5% 이상이 완전히 투명한가 = 배경이 이미 지워져 있다. 알파가 없으면 False."""
+    try:
+        if image.mode not in ("RGBA", "LA") and "transparency" not in image.info:
+            return False
+        alpha = image.convert("RGBA").getchannel("A")
+        return alpha.histogram()[0] >= 0.05 * image.width * image.height
+    except Exception:      # noqa: BLE001 - 판정 실패는 '아니다' 로
+        return False
+
+
 class HeadlessCharacterAssetService:
     def __init__(self, context: Any):
         self.context = context
@@ -251,6 +266,9 @@ class HeadlessCharacterAssetService:
         # 그림을 바꿔 꽂아도 유지된다. **기본은 켜짐**이다(사용자 지시 2026-10-11 - 예전에는 꺼진 채로 시작했다).
         # 앱을 다시 켜면 켜진 채로 시작한다.
         self._reference_inset_crop_result = True
+        # 칸을 빼고 남긴 결과를 NovelAI 업스케일(서버 배율 - 실측 2배)에 보낸 뒤 1MP 로 줄여 넣는다(사용자 지시 2026-10-18).
+        # 이 세션의 설정 · 기본 꺼짐 · Anlas 가 든다. 칸을 빼고 남기기가 꺼져 있으면 실리지 않는다.
+        self._reference_inset_auto_upscale = False
         # 칸의 바탕색("white" | "black" - 사용자 결정 2026-10-11). 핀이 아니라 이 세션의 설정이다(그림을 바꿔 꽂아도
         # 유지된다). 투명한 그림의 뒤와 그림이 덮지 않은 칸이 이 색으로 나간다. 앱을 다시 켜면 흰색이다.
         self._reference_inset_background = "white"
@@ -262,6 +280,11 @@ class HeadlessCharacterAssetService:
         # 그림을 바꿔도 남고 앱을 다시 켜면 사라진다. POS 는 AUTO 만이다(좌표를 싣지 않는다).
         self._reference_inset_characters: list[dict[str, str]] = []
         self._reference_inset_extracting = False
+        # 붙여넣은 그림에서 읽은 캐릭터 프롬프트(사용자 지시 2026-10-18 - NAI 그림이면 C1 을 '프롬프트 인식됨' 으로 보여 준다).
+        # 그림의 지문(source_id) -> {prompt, uc, features, clothes}. 몇 장만 쥔다.
+        self._reference_inset_recognized: dict[str, dict[str, Any]] = {}
+        # 지금 배경을 지우는 중인 그림 열쇠들(`begin_reference_inset_bg_removal`).
+        self._reference_inset_bg_inflight: set[tuple] = set()
         # 인셋이 **켜져 있는가**. 꽂아 둔 것(`_reference_inset_pin` - 그림 · 배치 · 해상도)과 따로다:
         # 꺼도 꽂아 둔 것은 남고, 다시 켜면 그대로 이어진다(사용자 결정 2026-10-10). 앱을 켜면 꺼진 채다.
         self._reference_inset_enabled = False
@@ -380,6 +403,7 @@ class HeadlessCharacterAssetService:
         orientation: Optional[str] = None,
         second: Optional[dict[str, Any]] = None,
         split: Any = None,
+        bg_removed: bool = False,
     ) -> dict[str, Any]:
         """선택 이미지를 레퍼런스 인셋 소스로 고정한다(Dev0714 Comic Panel 계보).
 
@@ -450,14 +474,22 @@ class HeadlessCharacterAssetService:
             canvas_width=canvas_w, canvas_height=canvas_h, panel_rgb=REFERENCE_INSET_PANEL_COLORS[background],
         )
         source_id = hashlib.sha1(override).hexdigest()[:16] if override else ""
+        # 에셋의 그림이면 그 파일 **내용**의 지문 - 같은 캐릭터 id 에서 대표 그림이 바뀌어도(바리에이션 올리기) 알아본다
+        # (배경 제거가 잡은 그림과 보낸 그림이 같은지 보는 열쇠 - Codex 리뷰).
+        # ⚠️ 한 번 읽은 바이트로 지문도 내고 그림도 굽는다 - 따로 읽으면 그 사이에 파일이 바뀌어 지문과 그림이 갈린다(Codex 리뷰).
+        asset_bytes = path.read_bytes() if (path is not None and not override) else b""
+        asset_digest = hashlib.sha1(asset_bytes).hexdigest()[:16] if asset_bytes else ""
         with self._retain_lock:
             upscaled_png = (
                 self._reference_inset_upscaled_sources.get((character_id, variation, source_id)) if use_upscaled else None
             )
-        with (Image.open(io.BytesIO(override)) if override else Image.open(path)) as opened:
+        with Image.open(io.BytesIO(override if override else asset_bytes)) as opened:
             opened.load()
             source = opened.transpose(Image.Transpose.TRANSPOSE) if vertical else opened
             source_size = (int(source.width), int(source.height))
+            # 배경이 이미 투명한 그림이면 '배경 지운 판' 이다 - Storage 로 다시 꽂은 지운 그림 · 투명한 그림에 Anlas 를
+            # 다시 쓰지 않게(Codex 리뷰). 표시를 따로 쥐지 않아도 그림이 말해 준다.
+            bg_removed = bool(bg_removed) or _has_transparent_background(opened)
             classic_box, classic_divider = classic_reference_inset_layout(source_size, spec)
             # 칸에 든 것이 에셋의 캐릭터면(붙여넣은 그림으로 덮지 않았으면) 가운데 · 살짝 키운 자리가 기본이다.
             as_character = bool(character_layout) or bool(character_id and not override)
@@ -486,6 +518,7 @@ class HeadlessCharacterAssetService:
                     opened2.load()
                     second_image = (opened2.transpose(Image.Transpose.TRANSPOSE) if vertical else opened2.copy())
                 second_size = (int(second_image.width), int(second_image.height))
+                second_clear = bool(second.get("bg_removed")) or _has_transparent_background(second_image)
                 default_split = int(reference_inset_split_limits(spec)["default_split"])
                 split_px = normalize_reference_inset_split(split, spec) if split is not None else default_split
                 cell1 = default_reference_inset_cell_box(source_size, spec, divider, 0, split_px)
@@ -533,6 +566,7 @@ class HeadlessCharacterAssetService:
             # 붙여넣은 그림으로 칸을 덮었으면 그 그림(PNG)과 그 지문. 없으면 에셋의 그림이다.
             "source_override": override,
             "source_id": source_id,
+            "asset_digest": asset_digest,
             # 이 그림이 Storage 의 어느 것인가(꺼냈거나 방금 저장했으면). 없으면 빈 문자열.
             "stored_id": str(stored_id or ""),
             # 에셋이 아닌 그림을 캐릭터 자리(가운데 · 살짝 키움)에 놓았는가 - 배치 · 해상도를 바꿀 때 이어 간다.
@@ -555,9 +589,12 @@ class HeadlessCharacterAssetService:
                 "png": second_png,
                 "source_id": hashlib.sha1(second_png).hexdigest()[:16],
                 "stored_id": str(second.get("stored_id") or ""),
+                "bg_removed": second_clear,
                 "box": dict(placed2),
                 "source": (int(second_image.width), int(second_image.height)),
             } if second_png else None,
+            # 첫 그림이 배경을 지운 판인가 - 그림이 바뀔 때까지 다시 지우지 않는다(사용자 지시 2026-10-18 - Anlas).
+            "bg_removed": bool(bg_removed),
             # 두 칸을 나누는 선(모델 공간 y) · 기본값. 둘째 그림이 없으면 None.
             "split": split_px,
             "default_split": default_split,
@@ -582,6 +619,8 @@ class HeadlessCharacterAssetService:
             "source_override": pin.get("source_override"),
             "stored_id": str(pin.get("stored_id") or ""),
             "character_layout": bool(pin.get("character_layout")),
+            # 같은 그림을 다시 굽는 길(배치 · 해상도 · 바탕색 · 방향)은 '배경 지운 판' 도 이어 간다.
+            "bg_removed": bool(pin.get("bg_removed")),
             **HeadlessCharacterAssetService._second_carry(pin, keep_layout),
         }
 
@@ -594,6 +633,7 @@ class HeadlessCharacterAssetService:
         keep = bool(keep_layout and pin.get("custom"))
         return {
             "second": {"png": second["png"], "stored_id": second.get("stored_id") or "",
+                       "bg_removed": bool(second.get("bg_removed")),
                        "box": dict(second["box"]) if keep else None},
             "split": pin.get("split") if keep else None,
         }
@@ -668,7 +708,10 @@ class HeadlessCharacterAssetService:
                 if not second:
                     raise ValueError("저장할 둘째 그림이 없습니다.")
                 data = bytes(second["png"])
+                removed = bool(second.get("bg_removed"))
             item = self._inset_storage().save(data)
+            if removed:
+                self._inset_storage().mark_bg_removed(item["id"])     # 다시 꺼내 꽂아도 '지운 판' 이다
             with self._retain_lock:
                 if self._reference_inset_pin is pin:
                     second["stored_id"] = item["id"]
@@ -681,6 +724,7 @@ class HeadlessCharacterAssetService:
             key = (str(pin["character_id"]), str(pin["variation"]), str(pin.get("source_id") or ""))
             upscaled = self._reference_inset_upscaled_sources.get(key) if pin.get("upscaled") else None
             override = pin.get("source_override")
+            removed_first = bool(pin.get("bg_removed"))
         if upscaled:
             data = bytes(upscaled)
         elif override:
@@ -688,6 +732,8 @@ class HeadlessCharacterAssetService:
         else:
             data = self._normalize_inset_source(self.resolve_image_path(key[0], key[1]).read_bytes())
         item = self._inset_storage().save(data)
+        if removed_first:
+            self._inset_storage().mark_bg_removed(item["id"])         # 다시 꺼내 꽂아도 '지운 판' 이다
         with self._retain_lock:
             if self._reference_inset_pin is pin:
                 pin["stored_id"] = item["id"]
@@ -714,12 +760,13 @@ class HeadlessCharacterAssetService:
                 raise ValueError("첫 그림을 먼저 넣어 주세요.")
             # 붙여넣기와 같은 한계(크기 · 픽셀 · 긴 변)로 맞춘다 - Storage 의 그림은 업스케일본처럼 클 수 있다(Codex 리뷰).
             # Storage 의 어느 것인가는 원본의 지문으로 남긴다.
-            carry["second"] = {"png": self._normalize_inset_source(data), "stored_id": stored, "box": None}
+            carry["second"] = {"png": self._normalize_inset_source(data), "stored_id": stored, "box": None,
+                               "bg_removed": storage.is_bg_removed(stored)}
             state = self.set_reference_inset_pin(character_id, variation, width, height, enable=True, **carry)
         else:
             state = self.set_reference_inset_pin(
                 character_id, variation, width, height, source_override=data, stored_id=stored, enable=True,
-                **self._second_carry(pin, keep_layout=False),
+                bg_removed=storage.is_bg_removed(stored), **self._second_carry(pin, keep_layout=False),
             )
         if state["active"]:
             state["references_disabled"] = self._release_character_references_for_inset()
@@ -771,7 +818,7 @@ class HeadlessCharacterAssetService:
 
         name = str(color or "").strip().lower()
         if name not in REFERENCE_INSET_PANEL_COLORS:
-            raise ValueError("바탕색은 white 또는 black 입니다.")
+            raise ValueError("바탕색은 white · gray · black 입니다.")
         with self._retain_lock:
             pin = self._reference_inset_pin
             self._reference_inset_background = name
@@ -811,6 +858,134 @@ class HeadlessCharacterAssetService:
             return self.reference_inset_state()
         # 방향은 다 구운 핀과 함께 싣는다. 굽다 실패하면 옛 방향 · 옛 핀 그대로다.
         return self.set_reference_inset_pin(character_id, variation, width, height, orientation=name, **carry)
+
+    def begin_reference_inset_bg_removal(self, slot: Any = 1) -> tuple[tuple, bytes]:
+        """배경 제거를 시작한다 - 그림 열쇠를 **잡는다**. 이미 지운 판이거나 같은 그림이 지우는 중이면 `InsetConflict`.
+
+        확인과 잡기를 한 잠금 안에서 한다(Codex 리뷰: 두 창이 동시에 눌러 둘 다 확인을 지나 Anlas 가 두 번 나갔다).
+        보낼 그림도 **그 열쇠의 그림**으로 함께 돌려준다 `(열쇠, PNG)` - 따로 읽으면 그 사이에 바뀐 그림을 보낸다(Codex 리뷰).
+        끝나면 반드시 `end_reference_inset_bg_removal` 로 놓는다.
+        """
+        # ⚠️ `_retain_lock` 은 다시 잡을 수 없다(threading.Lock) - 아래 두 판정을 이 잠금 안에서 직접 한다.
+        two = self._inset_slot(slot) == 2
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            second = (pin or {}).get("second")
+            if not pin or (two and not second):
+                raise ValueError("배경을 지울 그림이 없습니다.")
+            asset_path = None
+            if two:
+                identity = ("second", str(second["source_id"]))
+                removed = bool(second.get("bg_removed"))
+                data = bytes(second["png"])
+            else:
+                identity = ("first", str(pin["character_id"]), str(pin["variation"]), str(pin.get("source_id") or ""),
+                            str(pin.get("asset_digest") or ""))
+                removed = bool(pin.get("bg_removed"))
+                override = pin.get("source_override")
+                data = bytes(override) if override else b""
+                if not override:
+                    asset_path = (str(pin["character_id"]), str(pin["variation"]))
+            if removed:
+                raise InsetConflict("이미 배경을 지운 그림입니다.")
+            if identity in self._reference_inset_bg_inflight:
+                raise InsetConflict("이 그림의 배경을 지우는 중입니다.")
+            self._reference_inset_bg_inflight.add(identity)
+        if asset_path is not None:
+            # 에셋의 그림 - 잠금 밖에서 읽고, 열쇠에 든 내용 지문과 맞는지 본다(파일이 바뀌었으면 보내지 않는다).
+            import hashlib
+
+            try:
+                data = self.resolve_image_path(*asset_path).read_bytes()
+                if hashlib.sha1(data).hexdigest()[:16] != identity[4]:
+                    # 꽂은 뒤에 에셋의 그림 파일이 바뀌었다 - 칸에 보이는 그림이 아니다. 보내지 않는다.
+                    raise ValueError("에셋의 그림이 바뀌었습니다 - 인셋을 다시 꽂아 주세요.")
+            except Exception:
+                self.end_reference_inset_bg_removal(identity)
+                raise
+        return identity, data
+
+    def end_reference_inset_bg_removal(self, identity: tuple) -> None:
+        with self._retain_lock:
+            self._reference_inset_bg_inflight.discard(identity)
+
+    @_inset_serialized
+    def apply_removed_background(self, png: bytes, slot: Any, expected: Any, size: Any) -> dict[str, Any]:
+        """지운 그림을 칸에 넣고 **그 그림을** Storage 에 저장한다 - 한 줄(인셋 작업 잠금) 안에서(Codex 리뷰: 둘 사이에 다른
+        창이 그림을 바꾸면 그 그림이 저장됐다). 저장이 실패해도 지운 그림은 칸에 남는다 - `store_error` 로 알린다."""
+        state = self.replace_reference_inset_picture(png, slot, expected, size)
+        try:
+            saved = self.save_reference_inset_to_storage(slot)
+        except Exception as exc:      # noqa: BLE001 - 저장 실패가 지운 결과를 버리게 하면 안 된다
+            print(f"[CharacterAsset] removed-background storage save failed: {ascii(exc)}")
+            return {**state, "stored": None, "store_error": str(exc) or type(exc).__name__}
+        item = saved.get("item") or {}
+        return {**{key: value for key, value in saved.items() if key != "item"}, "stored": item.get("id")}
+
+    def reference_inset_bg_removed(self, slot: Any = 1) -> bool:
+        """칸의 그림(``slot``)이 이미 배경을 지운 판인가 - 그러면 다시 보내지 않는다(Anlas)."""
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                return False
+            if self._inset_slot(slot) == 2:
+                return bool((pin.get("second") or {}).get("bg_removed"))
+            return bool(pin.get("bg_removed"))
+
+    def reference_inset_picture_identity(self, slot: Any = 1) -> tuple:
+        """칸의 그림(``slot``)이 무엇인가 - 오래 걸리는 일(배경 제거)이 돌아왔을 때 **아직 같은 그림인지** 보는 열쇠."""
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                return ()
+            if self._inset_slot(slot) == 2:
+                second = pin.get("second")
+                return ("second", str(second["source_id"])) if second else ()
+            return ("first", str(pin["character_id"]), str(pin["variation"]), str(pin.get("source_id") or ""),
+                    str(pin.get("asset_digest") or ""))
+
+    @_inset_serialized
+    def replace_reference_inset_picture(
+        self, png: bytes, slot: Any = 1, expected: Any = None, size: Any = None
+    ) -> dict[str, Any]:
+        """칸의 그림(``slot``)을 **같은 그림의 다른 판**으로 갈아 끼운다 - 배경 제거의 결과(사용자 지시 2026-10-18).
+
+        붙여넣기와 달리 **배치는 그대로** 둔다(같은 그림이라 자리 · 크기가 그대로 뜻을 가진다). 첫 그림이 에셋의 캐릭터였으면
+        캐릭터 자리 기본값도 이어 간다. 업스케일해 둔 판은 옛 그림의 것이라 버린다. Storage 와의 연결도 끊긴다(새 그림이다).
+        ``expected`` = 일을 시작할 때의 그림 열쇠(`reference_inset_picture_identity`) - 그 사이에 그림이 바뀌었으면 거절한다
+        (늦게 온 결과가 새 그림을 덮지 않게 - Codex 리뷰). ``size`` = 원래 그림의 크기 - 보낼 때 64 의 배수로 줄이며 비율이
+        조금 바뀌므로 그 크기로 되돌려 넣는다(안 그러면 그림의 너비가 달라져 배치가 흔들린다 - Codex 리뷰).
+        """
+        if expected is not None and tuple(expected) != self.reference_inset_picture_identity(slot):
+            raise ValueError("배경을 지우는 동안 칸의 그림이 바뀌었습니다 - 다시 눌러 주세요.")
+        if size:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(bytes(png))) as opened:
+                opened.load()
+                target = (int(size[0]), int(size[1]))
+                if opened.size != target and target[0] > 0 and target[1] > 0:
+                    buffer = io.BytesIO()
+                    opened.convert("RGBA").resize(target, Image.Resampling.LANCZOS).save(buffer, format="PNG")
+                    png = buffer.getvalue()
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            if not pin:
+                raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
+            character_id, variation = str(pin["character_id"]), str(pin["variation"])
+            width, height = pin["width"], pin["height"]
+            box = {**pin["box"], "divider": pin["divider"]} if pin.get("custom") else None
+            carry = self._inset_carry(pin)
+            was_character = bool(pin.get("character_layout")) or bool(character_id and not pin.get("source_override"))
+        data = self._normalize_inset_source(png)
+        if self._inset_slot(slot) == 2:
+            if not carry.get("second"):
+                raise ValueError("둘째 그림이 없습니다.")
+            carry["second"] = {**carry["second"], "png": data, "stored_id": "", "bg_removed": True}
+        else:
+            carry.update(source_override=data, stored_id="", use_upscaled=False, character_layout=was_character,
+                         bg_removed=True)
+        return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
 
     # 가상 캐릭터는 NAI 의 캐릭터 상한(6)까지.
     REFERENCE_INSET_MAX_CHARACTERS = 6
@@ -968,7 +1143,8 @@ class HeadlessCharacterAssetService:
                 # 올려 둔 원본은 쥐고 있다 - 그 그림을 다시 꽂고 누르면 새로 부르지 않고 바로 된다.
                 raise ValueError("업스케일하는 동안 인셋이 바뀌었습니다 - 그 그림을 다시 꽂고 눌러 주세요.")
             return self.set_reference_inset_pin(
-                key[0], key[1], width, height, box=box, use_upscaled=True, source_override=override, **second
+                key[0], key[1], width, height, box=box, use_upscaled=True, source_override=override,
+                bg_removed=bool(current.get("bg_removed")), **second,
             )
 
     def reference_inset_canvas_png(self) -> bytes:
@@ -1027,13 +1203,16 @@ class HeadlessCharacterAssetService:
             variation = str(pin["variation"]) if pin else ""
             width, height = (pin["width"], pin["height"]) if pin else (0, 0)
             carry = self._inset_carry(pin, keep_layout=False) if pin else {}
+        normalized = self._normalize_inset_source(image_bytes) if image_bytes is not None else None
+        if normalized is not None:
+            self._remember_recognized_prompt(image_bytes, normalized)
         if self._inset_slot(slot) == 2:
             # 둘째 그림: 넣기(그림) · 빼기(None). 첫 그림 · 업스케일은 그대로, 배치는 기본으로.
             if not pin:
                 raise ValueError("첫 그림을 먼저 넣어 주세요.")
             carry["second"] = (
                 None if image_bytes is None
-                else {"png": self._normalize_inset_source(image_bytes), "stored_id": "", "box": None}
+                else {"png": normalized, "stored_id": "", "box": None}
             )
             carry["split"] = None
             state = self.set_reference_inset_pin(
@@ -1050,11 +1229,39 @@ class HeadlessCharacterAssetService:
         # 꽂아 둔 것이 없어도 된다 - 붙여넣은 그림만으로 인셋을 만든다(Fn 에서 바로 여는 길). 그림을 넣으면 켠다.
         state = self.set_reference_inset_pin(
             character_id, variation, width, height,
-            source_override=self._normalize_inset_source(image_bytes), enable=True, **second,
+            source_override=normalized, enable=True, **second,
         )
         if state["active"]:
             state["references_disabled"] = self._release_character_references_for_inset()
         return state
+
+    REFERENCE_INSET_RECOGNIZED_LIMIT = 16
+
+    def _remember_recognized_prompt(self, raw: bytes, normalized: bytes) -> None:
+        """붙여넣은 원본에서 NAI 캐릭터 프롬프트(C1)를 읽어 그 그림(정규화한 바이트의 지문)에 붙여 둔다.
+        글 청크와 알파의 숨은 사본을 둘 다 본다(클립보드를 거치면 글 청크가 없다). 못 읽으면 아무것도 안 한다."""
+        try:
+            import hashlib
+
+            from core.inset_feature_extract import split_character_prompt
+            from utils.image_info import character_prompts_from_embedded, extract_embedded_metadata
+
+            slots = character_prompts_from_embedded(extract_embedded_metadata(bytes(raw)))
+            # C1 만 - 비어 있으면 인식하지 않는다(C2 를 C1 으로 보이면 다른 캐릭터를 넣는다 · Codex 리뷰).
+            first = slots[0] if slots and str(slots[0].get("prompt") or "").strip() else None
+            if not first:
+                return
+            prompt = str(first["prompt"])
+            entry = {"prompt": prompt, "uc": str(first.get("uc") or ""),
+                     **split_character_prompt(prompt, getattr(self.context, "repo_root", None))}
+            key = hashlib.sha1(bytes(normalized)).hexdigest()[:16]
+            with self._retain_lock:
+                self._reference_inset_recognized.pop(key, None)
+                self._reference_inset_recognized[key] = entry
+                while len(self._reference_inset_recognized) > self.REFERENCE_INSET_RECOGNIZED_LIMIT:
+                    self._reference_inset_recognized.pop(next(iter(self._reference_inset_recognized)))
+        except Exception as exc:      # noqa: BLE001 - 인식 실패가 붙여넣기를 막으면 안 된다
+            print(f"[CharacterAsset] prompt recognition failed: {ascii(exc)}")
 
     def _normalize_inset_source(self, image_bytes: Any) -> bytes:
         """붙여넣은 그림을 쥘 수 있는 꼴(PNG · 긴 변 4096 이하)로 만든다. **투명한 곳은 투명한 채로** 둔다 -
@@ -1118,6 +1325,30 @@ class HeadlessCharacterAssetService:
         coerce = getattr(self.context, "_coerce_bool", None)
         with self._retain_lock:
             self._reference_inset_crop_result = bool(coerce(enabled)) if callable(coerce) else bool(enabled)
+            self._reference_inset_sync_seq += 1
+        return self.reference_inset_state()
+
+    def set_reference_inset_auto_upscale(self, enabled: Any) -> dict[str, Any]:
+        """생성 후 자동 업스케일(칸을 빼고 남긴 결과 -> NovelAI 업스케일 -> 1MP). 핀이 없어도 정해 둘 수 있다."""
+        coerce = getattr(self.context, "_coerce_bool", None)
+        with self._retain_lock:
+            self._reference_inset_auto_upscale = bool(coerce(enabled)) if callable(coerce) else bool(enabled)
+            self._reference_inset_sync_seq += 1
+        return self.reference_inset_state()
+
+    @_inset_serialized
+    def reset_reference_inset(self) -> dict[str, Any]:
+        """[초기화](사용자 지시 2026-10-18): 꽂아 둔 것(그림 두 장 · 배치)과 가상 캐릭터를 비우고 인셋을 끈다 - 창은 처음 화면.
+
+        세션 설정(방향 · 바탕색 · 결과 자르기 · 자동 업스케일)은 그대로 둔다. Storage 는 건드리지 않는다.
+        `_inset_serialized` 라 가 있는 굽기 · 배경 제거의 넣기와 섞이지 않는다(뒤에 온 것이 빈 핀을 보고 거절한다).
+        """
+        with self._retain_lock:
+            if self._reference_inset_enabled:
+                self._reference_inset_enabled = False
+                self._reference_inset_toggle_epoch += 1      # 그 사이에 시작된 붙여넣기가 도로 켜지 않게
+            self._reference_inset_pin = None
+            self._reference_inset_characters = []
             self._reference_inset_sync_seq += 1
         return self.reference_inset_state()
 
@@ -1215,7 +1446,8 @@ class HeadlessCharacterAssetService:
             if not pin:
                 # 꽂아 둔 것이 없다. 창은 이 상태로도 열린다('그림을 넣어 주세요').
                 return {"active": False, "configured": False, "background": self._reference_inset_background,
-                        "crop_result": bool(self._reference_inset_crop_result), **sync}
+                        "crop_result": bool(self._reference_inset_crop_result),
+                        "auto_upscale": bool(self._reference_inset_auto_upscale), **sync}
             stored_id = str(pin.get("stored_id") or "")
             vertical = pin.get("orientation") == "vertical"
             kinds = REFERENCE_INSET_VERTICAL_CANVAS_KINDS if vertical else REFERENCE_INSET_CANVAS_KINDS
@@ -1236,6 +1468,8 @@ class HeadlessCharacterAssetService:
                 "source_revision": str(pin.get("source_id") or "asset"),
                 # 생성 결과에서 인셋 칸을 잘라 내는가(이 세션의 설정).
                 "crop_result": bool(self._reference_inset_crop_result),
+                # 칸을 빼고 남긴 결과를 생성 후 자동 업스케일하는가(이 세션의 설정 · Anlas).
+                "auto_upscale": bool(self._reference_inset_auto_upscale),
                 # 칸의 바탕색("white" | "black" - 이 세션의 설정). 화면의 미리보기도 이 색을 깐다.
                 "background": self._reference_inset_background,
                 "character_id": pin["character_id"],
@@ -1273,7 +1507,13 @@ class HeadlessCharacterAssetService:
                     "source_height": second["source"][1],
                     "source_revision": second["source_id"],
                     "saved": bool(second.get("stored_id")) and self._inset_storage().has(second["stored_id"]),
+                    "bg_removed": bool(second.get("bg_removed")),
+                    "recognized": self._reference_inset_recognized.get(str(second["source_id"])),
                 } if second else None,
+                # 붙여넣은 NAI 그림에서 읽은 캐릭터 프롬프트(C1) - 화면이 '프롬프트 인식됨' 으로 띄운다. 없으면 None.
+                "recognized": self._reference_inset_recognized.get(str(pin.get("source_id") or "")),
+                # 첫 그림이 배경을 지운 판인가(그림이 바뀔 때까지 [배경 제거] 를 다시 내지 않는다).
+                "bg_removed": bool(pin.get("bg_removed")),
                 # 두 칸을 나누는 선(모델 공간 y) · 기본값 · 범위. 둘째 그림이 없으면 split 은 None.
                 "split": pin.get("split"),
                 "default_split": pin.get("default_split"),
@@ -1316,6 +1556,9 @@ class HeadlessCharacterAssetService:
                 params["_reference_inset_crop_canvas"] = str(pin["canvas_id"])
                 if pin.get("orientation") == "vertical":
                     params["_reference_inset_crop_axis"] = "y"      # 칸이 위 - 위를 잘라 낸다
+                if self._reference_inset_auto_upscale:
+                    # 자른 결과를 업스케일 -> 1MP. 자르기와 같은 지문 문으로만 돈다(Enhance · Upscale 로 번지지 않는다).
+                    params["_reference_inset_auto_upscale"] = True
             if pin.get("orientation") == "vertical":
                 params["reference_inset_vertical"] = True           # V5 태그 = 2koma
             # 가상 캐릭터 = 우회 모드(사용자 결정 2026-10-18): 메인 캐릭터 슬롯을 건너뛰고 이것만 싣는다. 좌표는 안 싣는다

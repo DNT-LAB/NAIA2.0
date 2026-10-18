@@ -103,6 +103,22 @@ class ReferenceInsetStorage:
             saved_at = path.stat().st_mtime
         return {"id": item_id, "width": int(width), "height": int(height), "saved_at": saved_at}
 
+    # '배경을 지운 판' 표시(사용자 지시 2026-10-18 - 다시 꺼내 꽂아도 Anlas 를 또 쓰지 않게). 그림 옆의 빈 파일 하나다.
+    def _bg_mark(self, item_id: str) -> Path:
+        return self.root / f"{item_id}.bgremoved"
+
+    def mark_bg_removed(self, item_id: Any) -> None:
+        checked = self._checked(item_id)
+        with _WRITE_LOCK:
+            if self._path(checked).is_file():
+                _write_atomically(self._bg_mark(checked), b"")
+
+    def is_bg_removed(self, item_id: Any) -> bool:
+        try:
+            return self._bg_mark(self._checked(item_id)).is_file()
+        except ValueError:
+            return False
+
     def read(self, item_id: Any) -> bytes:
         path = self._path(self._checked(item_id))
         if not path.is_file():
@@ -138,7 +154,7 @@ class ReferenceInsetStorage:
         path = self._path(checked)
         with _WRITE_LOCK:
             existed = path.is_file()
-            for target in (path, self.thumbs / f"{checked}.jpg"):
+            for target in (path, self.thumbs / f"{checked}.jpg", self._bg_mark(checked)):
                 try:
                     target.unlink()
                 except FileNotFoundError:

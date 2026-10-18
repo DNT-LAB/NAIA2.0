@@ -667,6 +667,21 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/remove-bg",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/auto-upscale",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/reset",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/inset/enabled",
           "smoke": "state_mutation"
         },

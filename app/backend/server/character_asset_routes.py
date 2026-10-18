@@ -605,6 +605,13 @@ def register_character_asset_routes(
         state = _asset_service(session_context).set_reference_inset_crop_result(payload.get("enabled"))
         return {"ok": True, "crop_result": bool(payload.get("enabled")) and state.get("crop_result", False), **state}
 
+    @app.post("/api/character-asset/inset/auto-upscale")
+    async def api_character_asset_inset_auto_upscale(req: Request):
+        # 생성 후 자동 업스케일(`{enabled}`) - 칸을 빼고 남긴 결과 -> NovelAI 업스케일 -> 1MP. 이 세션의 설정 · Anlas.
+        payload = await _read_json(req)
+        state = _asset_service(session_context).set_reference_inset_auto_upscale(payload.get("enabled"))
+        return {"ok": True, **state}
+
     async def _inset_reply(state: dict):
         # 인셋을 켜면서 Character Reference 를 껐으면 그 모듈의 화면도 맞춘다([C1+레퍼런스 인셋] 과 같은 길).
         if state.get("references_disabled"):
@@ -654,6 +661,64 @@ def register_character_asset_routes(
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/remove-bg")
+    async def api_character_asset_inset_remove_bg(req: Request):
+        # 칸의 그림(`{slot}`)의 배경을 NovelAI Remove BG 로 지운다(Anlas 소모 - 화면이 두 번 눌러야 보낸다). 배치는 그대로.
+        from core.generation_access_policy import GenerationBlocked, access_policy
+        from core.nai_background_removal import BackgroundRemovalError, remove_background_blend
+
+        from app.backend.server.result_commands import _upscale_token
+        from core.headless_character_asset_service import InsetConflict
+
+        payload = await _read_json(req)
+        service = _asset_service(session_context)
+        slot = payload.get("slot") or 1
+        # 보내기 전에 이 그림을 '지우는 중' 으로 잡는다 - 이미 지운 판 · 지우는 중이면 409(Anlas 를 두 번 쓰지 않는다).
+        # 잡은 열쇠는 돌아왔을 때 아직 같은 그림인지 보는 데도 쓴다(Codex 리뷰).
+        try:
+            identity, data = await run_in_thread(service.begin_reference_inset_bg_removal, slot)
+        except InsetConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        sent = False
+        try:
+            if not data:
+                return JSONResponse({"error": "배경을 지울 그림이 없습니다."}, status_code=400)
+            try:
+                from PIL import Image
+
+                with Image.open(io.BytesIO(data)) as opened:
+                    source_size = opened.size
+            except Exception:
+                return JSONResponse({"error": "칸의 그림을 읽지 못했습니다."}, status_code=400)
+
+            def remove() -> bytes:
+                # 사용자가 **지목한 계정**이 있으면 그 계정으로(Result 의 Upscale 과 같은 규칙 - 회전은 태우지 않는다).
+                token = _upscale_token(session_context) or str(
+                    session_context.secure_token_manager.get_token("nai_token") or "").strip()
+                with access_policy(session_context).operation():
+                    return remove_background_blend(token, data)
+
+            sent = True
+            blend = await run_in_thread(remove)
+            # 넣기와 Storage 저장을 한 줄에서(지운 **그** 그림을 저장한다). 저장 실패는 `store_error` 로 온다.
+            state = await run_in_thread(service.apply_removed_background, blend, slot, identity, source_size)
+        except (BackgroundRemovalError, GenerationBlocked) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset background removal failed: {exc}"}, status_code=500)
+        finally:
+            service.end_reference_inset_bg_removal(identity)
+            if sent:
+                # 요청이 나갔으면 실패했어도 잔액이 변했을 수 있다(에셋 옮기기와 같은 갱신).
+                from app.backend.server.anlas_poller import schedule_subscription_refresh
+
+                schedule_subscription_refresh(session_context, clients, force=True)
         return {"ok": True, **state}
 
     @app.post("/api/character-asset/inset/extract-features")
@@ -763,6 +828,12 @@ def register_character_asset_routes(
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         return Response(content=data, media_type=media, headers=PRIVATE_CACHE_HEADERS)
+
+    @app.post("/api/character-asset/inset/reset")
+    async def api_character_asset_inset_reset():
+        # [초기화] - 꽂아 둔 것 · 가상 캐릭터를 비우고 끈다(세션 설정 · Storage 는 그대로).
+        state = await run_in_thread(_asset_service(session_context).reset_reference_inset)
+        return {"ok": True, **state}
 
     @app.post("/api/character-asset/inset/unpin")
     async def api_character_asset_inset_unpin():

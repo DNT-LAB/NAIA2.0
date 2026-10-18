@@ -73,6 +73,14 @@ def sequence_favorites_store(context: WebSessionContext) -> SequenceFavoritesSto
     return store
 
 
+def _favorite_pool(context: WebSessionContext, query: Any) -> list[int] | None:
+    """즐겨찾기 보기에서 누른 SEQ Random · Auto Gen 의 모집단(사용자 2026-10-18 - 즐겨찾기 안에서만). 아니면 None.
+    뽑을 때마다 파일을 읽는다 - 도는 중에 별을 달고 떼면 다음 라운드부터 반영된다."""
+    if not isinstance(query, dict) or not context._coerce_bool(query.get("favoritesOnly", False)):
+        return None
+    return [row["groupId"] for row in sequence_favorites_store(context).entries()]
+
+
 def _favorites_payload(context: WebSessionContext) -> dict[str, Any]:
     rows = sequence_favorites_store(context).entries()
     groups = sequence_preset_service(context).group_summaries([row["groupId"] for row in rows])
@@ -388,7 +396,8 @@ async def start_sequence_run(
             group_id = int(explicit_group_id)
         else:
             pick = await run_in_thread(
-                sequence_preset_service(session_context).pick_random_group, query
+                sequence_preset_service(session_context).pick_random_group, query,
+                only_group_ids=_favorite_pool(session_context, query),
             )
             if not pick.get("ok") or pick.get("groupId") is None:
                 return JSONResponse(
@@ -454,7 +463,8 @@ async def continue_sequence_run(session_context: WebSessionContext, clients, run
     query = svc.query(run_id)
     last = svc.last_group_id(run_id)
     pick = await asyncio.to_thread(
-        sequence_preset_service(session_context).pick_random_group, query, exclude_group_id=last
+        sequence_preset_service(session_context).pick_random_group, query, exclude_group_id=last,
+        only_group_ids=_favorite_pool(session_context, query),
     )
     if not pick.get("ok") or pick.get("groupId") is None:
         return False

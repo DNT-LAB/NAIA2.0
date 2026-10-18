@@ -308,14 +308,28 @@ class SequencePresetService:
                 mask &= df["frame_count"] <= max_frames
         return mask
 
-    def pick_random_group(self, payload: dict[str, Any], *, exclude_group_id: Any = None) -> dict[str, Any]:
+    def pick_random_group(self, payload: dict[str, Any], *, exclude_group_id: Any = None,
+                          only_group_ids: Any = None) -> dict[str, Any]:
         """검색 필터(payload)에 매칭되는 **전체 셋**에서 그룹 1개를 무작위로 뽑는다(표시 60건 아님).
-        Auto Gen 연속 시퀀스의 다음 라운드 선택용. exclude_group_id 로 직전 그룹 즉시 반복 회피."""
+        Auto Gen 연속 시퀀스의 다음 라운드 선택용. exclude_group_id 로 직전 그룹 즉시 반복 회피.
+        only_group_ids(즐겨찾기 보기 - 사용자 2026-10-18)가 오면 **그 번호들 안에서만** 뽑는다(검색 필터는 안 본다 -
+        화면의 즐겨찾기 목록도 필터와 상관없이 전부 보인다)."""
         payload = payload if isinstance(payload, dict) else {}
         self._ensure_loaded()
         df = self._df
         if df is None or len(df) == 0:
             return {"ok": False, "total": 0, "groupId": None, "error": self._load_error or "no data"}
+        if only_group_ids is not None:
+            ids = {int(g) for g in only_group_ids if str(g).strip().lstrip("-").isdigit()}
+            hits = df[df["group_id"].isin(ids)]
+            total = int(len(hits))
+            if total == 0:
+                return {"ok": False, "total": 0, "groupId": None, "error": "즐겨찾기에 뽑을 이야기가 없습니다."}
+            pool = hits
+            if exclude_group_id is not None and total > 1:
+                pool = hits[hits["group_id"] != int(exclude_group_id)]
+            one = pool.sample(1).iloc[0]
+            return {"ok": True, "total": total, "groupId": int(one["group_id"])}
         include = self._parse_terms(payload.get("include"))
         exclude = self._parse_terms(payload.get("exclude"))
         ratings = [r for r in (payload.get("ratings") or []) if r in RATING_ORDER]

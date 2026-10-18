@@ -219,10 +219,12 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     excEl.value = q.exclude;
     // 태그 자동완성 (포함/제외) — input 도 value/selection 기반이라 동작.
     // 시퀀스 데이터는 danbooru 기반이라 e621 제안은 제외(excludeE621).
+    // explicitSelect(사용자 2026-10-18): 사람이 ↑↓ · 마우스로 고른 후보만 넣고 Enter 는 늘 검색 - 예전엔 첫 후보가 미리 골라져
+    // Enter 가 그것을 넣고 검색을 삼켰다(아티스트 검색 칸과 같은 규칙).
     if (typeof bindTagAssist === 'function') {
       try {
-        bindTagAssist(incEl, {excludeE621: true});
-        bindTagAssist(excEl, {excludeE621: true});
+        bindTagAssist(incEl, {excludeE621: true, explicitSelect: true});
+        bindTagAssist(excEl, {excludeE621: true, explicitSelect: true});
       } catch (_) { /* tagAssist 미준비 */ }
     }
     refreshVibeGate();   // 현재 모드 기준 Vibe 체크박스 활성/비활성 동기화
@@ -250,6 +252,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       include: q.include, exclude: q.exclude,
       ratings: Array.from(q.ratings),
       frameCounts: Array.from(q.cuts),
+      // 즐겨찾기 보기면 SEQ Random · Auto Gen 이 즐겨찾기 안에서만 뽑는다(사용자 2026-10-18 - 예전엔 검색 조건에서 뽑았다).
+      favoritesOnly: !!state.favOnly,
       // 만화 크기 - 런 상태에 남아 Auto Gen 다음 라운드도 같은 크기다.
       size: LARGE_SIZE_ENABLED ? state.size : 'normal',
       // 하단 '고정' 토글 — 생성/연속 추첨에 전달(런 상태에 저장돼 auto-continue 라운드에도 적용).
@@ -682,6 +686,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       state.favOnly = !state.favOnly;
       if (state.favOnly && !state.favLoaded) void loadFavorites();
       renderLists();
+      pushRunQuery();             // 도는 런이 있으면 다음 라운드부터 즐겨찾기 안 / 검색 조건으로
       return;
     }
     const rchip = event.target.closest('[data-seq-rating]');
@@ -729,9 +734,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     else if (kind === 'vibe') { if (!fix.disabled) state.useVibe = fix.checked; }  // 비NAI(disabled)면 값 보존
   });
 
-  // 포함/제외 칸에서 Enter = 검색(사용자 2026-10-18 - 눌러도 아무 일이 없었다). 자동완성이 후보를 고른 Enter 는
-  // 그쪽이 칸에서 stopPropagation 으로 삼켜 여기까지 안 온다(그 Enter 는 태그 넣기). 조합 중(IME) · Ctrl/Alt+Enter
-  // (전역 생성 · 랜덤)는 건드리지 않는다.
+  // 포함/제외 칸에서 Enter = 검색(사용자 2026-10-18 - 눌러도 아무 일이 없었다). 자동완성은 이 칸에서 explicitSelect 라
+  // Enter 를 막지 않는다 - ↑↓ 로 고른 후보가 있으면 그것을 넣은 **뒤** 여기로 온다(넣고 바로 검색). 조합 중(IME) ·
+  // Ctrl/Alt+Enter(전역 생성 · 랜덤)는 건드리지 않는다.
   panel.addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.defaultPrevented) return;
     if (event.isComposing || event.keyCode === 229) return;

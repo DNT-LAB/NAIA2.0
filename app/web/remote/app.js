@@ -3365,7 +3365,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-runquery1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-favpool1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -15113,7 +15113,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261015-pew1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261018-explicit1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

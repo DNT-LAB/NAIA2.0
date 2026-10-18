@@ -3029,6 +3029,15 @@ export function createTagAssistController({
   }
 
   function firstDefaultAutocompleteIndex(rows = acResults) {
+    // `explicitSelect` 칸(bindTagAssist)은 첫 줄을 미리 고르지 않는다 - 그러면 Enter 가 사람이 안 고른 후보를 넣고 칸의 Enter
+    // (검색)를 삼켰다(사용자 제보 2026-10-18 · Sequence 포함/제외 칸). 친 낱말과 **정확히 같은** 후보만 미리 고른다 - 그 Enter 는
+    // 어차피 그 낱말이다(아티스트 검색 칸 artistSearchPanel 과 같은 규칙).
+    if (acTarget && acTarget._acExplicitSelect) {
+      const norm = text => String(text || '').replace(/_/g, ' ').trim().toLowerCase();
+      const typed = norm(getActiveTokenInfo(acTarget)?.stripped);
+      if (!typed) return -1;
+      return rows.findIndex(row => canSelectAutocompleteRow(row) && norm(row.tag) === typed);
+    }
     return firstDefaultAutocompleteIndexForRows(rows);
   }
 
@@ -3722,6 +3731,8 @@ export function createTagAssistController({
   function bindTagAssist(textarea, options = {}) {
     if (!textarea) return;
     textarea._excludeE621Autocomplete = !!options.excludeE621;
+    // 사람이 고른 후보만 넣는다(↑↓ · 마우스) - Enter 는 칸의 주인에게 흘려보낸다(firstDefaultAutocompleteIndex 참조).
+    textarea._acExplicitSelect = !!options.explicitSelect;
     // 자동완성·태그 정보를 떠 있는 팝업 대신 이 요소 안에 그린다(syncTooltipHost).
     textarea._tagAssistInlineHost = options.inlineHost || null;
     // 카테고리 통째로 빼기. Interactive 의 글로벌 태그 칸이 캐릭터·아티스트를
@@ -3927,6 +3938,13 @@ export function createTagAssistController({
       //    Ctrl+Enter(=생성)를 삼키고 있었다 - 태그를 치다 생성하려고 누르면
       //    후보만 들어가고 그림이 안 나갔다. 팝업은 닫고 키는 흘려보낸다.
       if ((e.key === 'Enter' || e.key === 'Tab') && (e.ctrlKey || e.metaKey)) {
+        hideAutocomplete();
+        return;
+      }
+      if (textarea._acExplicitSelect && e.key === 'Enter') {
+        // 고른 줄이 있으면 그것을 넣고, 없으면 친 그대로 둔다. 어느 쪽이든 Enter 는 막지 않는다 - 칸의 주인(검색)이 받는다
+        // (아티스트 검색 칸: 고른 것을 넣고 바로 검색).
+        if (acSel >= 0) selectAutocomplete(acSel);
         hideAutocomplete();
         return;
       }

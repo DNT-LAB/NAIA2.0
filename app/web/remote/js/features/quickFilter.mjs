@@ -1435,6 +1435,9 @@ export function createQuickFilterController(deps) {
   function onUpdate(message) {
     if (!noteAuthoritativeRevision(message.tag_filter_revision)) return false;
     if (message.rating_counts) ratingCounts = message.rating_counts;
+    // 백엔드가 걸어 둔 필터를 받았다(시작 · 새로고침의 정착된 상태) - 이 창이 assign 을 안 돌았어도 '적용됐던'
+    // 필터다. 안 세우면 시작 재적용을 건너뛴 창에서 그 뒤 green [검색] 이 필터를 풀 때 '해제됨' 안내가 안 뜬다.
+    if (active) filterWasApplied = true;
     renderMatchedCount('assigned');
     const toggleBtn = getEl('tagFilterToggle');
     if (toggleBtn && active) toggleBtn.classList.add('assigned');

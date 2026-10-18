@@ -17,6 +17,7 @@ from app.backend.server.search_runtime import (
     run_search_command,
     search_parquet_action,
     search_pool_state_guard,
+    settled_tag_filter_rating_counts,
     tag_filter_search,
 )
 from core.web_session_context import WebSessionContext
@@ -122,6 +123,12 @@ async def handle_search_command(
         # 표시 카운트와 실제 랜덤 풀이 일치하도록(재시작/가져오기 후 'random 이 필터 무시/꼬임' 수정).
         await run_in_thread(reconstruct_active_tag_filter, context)
         payload = context.search_state_payload()
+        # 필터가 이미 걸려 있으면(재조립 · 앞선 적용) 정착됨 - 화면의 시작 재적용이 남은 행을 전체로 덮지 않게.
+        settled_counts = settled_tag_filter_rating_counts(context)
+        if settled_counts is not None:
+            payload["tag_filter_settled"] = True
+            if settled_counts:   # 빈 dict 를 실으면 화면이 수를 0 으로 그린다(rating 열 없는 풀)
+                payload["tag_filter_rating_counts"] = settled_counts
         # 첫 설치의 첫 풀에 Tag Filter "1girl, solo" 를 걸었으면 화면이 그 창을 한 번 연다(core/first_run_state).
         # 브로드캐스트가 아니라 **이 답**에만 싣는다 - 풀이 채워진 뒤 화면이 스스로 묻는 자리다.
         from core.first_run_state import take_notice

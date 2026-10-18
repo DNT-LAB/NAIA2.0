@@ -593,6 +593,24 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     return True
 
 
+def settled_tag_filter_rating_counts(context: WebSessionContext) -> dict[str, int] | None:
+    """저장된 '활성' Tag Filter 가 지금 풀에 이미 걸려 있으면 그 등급별 수(빈 dict 일 수 있다), 아니면 None.
+
+    get_search_state 답이 이것으로 tag_filter_settled 를 단다 - 화면은 시작할 때 저장된 칩으로 검색 -> assign 을
+    한 번 더 돌리는데(searchPanel 의 시작 재적용), 그 assign 은 필터를 **처음부터** 다시 걸어 남은 행을 전체로
+    되돌린다. 재조립이 이어 간 남은 행(core/tag_filter_remaining)이 몇 초 뒤 원본 행 수로 돌아가던 원인이다
+    (사용자 제보 2026-10-18: 6,303 -> 5초 뒤 6,320). 새로고침도 같은 길로 쓴 행을 되살렸다.
+    백엔드가 이미 걸었으면 그 재적용은 할 일이 없다 - 다시 채우는 것은 사용자가 거는 적용(커밋 · 재적용)만 한다."""
+    with search_pool_state_guard(context):
+        tag_filter = getattr(context, "active_tag_filter", None)
+        if not isinstance(tag_filter, dict):
+            return None
+        state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
+        if not state.get("tag_filter_active"):
+            return None
+        return {str(k): int(v or 0) for k, v in dict(tag_filter.get("rating_counts") or {}).items()}
+
+
 def run_search_command(
     context: WebSessionContext,
     command: dict[str, Any],

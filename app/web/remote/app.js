@@ -3365,7 +3365,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqsize1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqsize2')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),

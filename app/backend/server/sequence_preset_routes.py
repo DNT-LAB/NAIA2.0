@@ -138,8 +138,15 @@ def _inset_virtual_characters(session_context: WebSessionContext) -> list[dict[s
     return out
 
 
+# 라지(유료) 크기는 숨겼다(사용자 2026-10-18 - "NAI 가 아직 감당하지 못한다"). 화면의 단추도 없고, 요청에 size=large 가 와도
+# 노말로 그린다. 크기 사양(COMIC_SPECS 의 large)은 남겨 둔다 - 되살릴 때 이것과 패널의 LARGE_SIZE_ENABLED 를 켠다.
+LARGE_SIZE_ENABLED = False
+
+
 def _wants_large(query: Any) -> bool:
     """패널의 [노말 | 라지 (유료)](사용자 2026-10-18). 런 상태의 query 에도 남아 Auto Gen 다음 라운드가 같은 크기로 그린다."""
+    if not LARGE_SIZE_ENABLED:
+        return False
     return isinstance(query, dict) and str(query.get("size") or "").strip().lower() == "large"
 
 

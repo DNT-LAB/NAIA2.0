@@ -27,6 +27,9 @@ const RATING_LABELS = {g: 'G', s: 'S', q: 'Q', e: 'E'};
 const ALL_RATINGS = ['e', 'q', 's', 'g'];
 // 2~4컷만(사용자 2026-10-18 - 5 · 6컷은 모델이 받는지 검증되지 않았다. 백엔드도 데이터를 읽을 때 뺀다).
 const CUTS = [2, 3, 4];
+// [노말 | 라지 (유료)] 는 숨겼다(사용자 2026-10-18 - "NAI 가 아직 감당하지 못한다"). 서버도 라지를 받지 않는다
+// (sequence_preset_routes.LARGE_SIZE_ENABLED) - 되살릴 때 둘을 함께 켠다.
+const LARGE_SIZE_ENABLED = false;
 
 export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange,
   beforeGenerate, onSizeChange}) {
@@ -189,12 +192,12 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         <div class="seq-filters">
           <span class="seq-flabel">수위</span>${ratingChips}
           <span class="seq-flabel">컷</span>${cutChips}
-          <span class="seq-sizeseg" role="group" aria-label="만화 크기">
+          ${LARGE_SIZE_ENABLED ? `<span class="seq-sizeseg" role="group" aria-label="만화 크기">
             <button type="button" class="seq-size ${state.size === 'normal' ? 'active' : ''}" data-seq-size="normal"
               aria-pressed="${state.size === 'normal'}" title="2컷 896x1152 · 3컷 768x1344 · 4컷 1024x1024">노말</button>
             <button type="button" class="seq-size seq-size-large ${state.size === 'large' ? 'active' : ''}" data-seq-size="large"
               aria-pressed="${state.size === 'large'}" title="2컷 1152x1472 · 3컷 1024x1792 · 4컷 1280x1280 - 1MP 를 넘어 Anlas 를 씁니다">라지 (유료)</button>
-          </span>
+          </span>` : ''}
           <button type="button" class="seq-rchip seq-favchip ${state.favOnly ? 'active' : ''}" data-seq-favonly
             title="즐겨찾기만 봅니다 - 항목의 ☆ 를 누르면 넣고 뺍니다">★ 즐겨찾기 <span data-seq-favcount>${state.favorites.length}</span></button>
         </div>
@@ -247,7 +250,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       ratings: Array.from(q.ratings),
       frameCounts: Array.from(q.cuts),
       // 만화 크기 - 런 상태에 남아 Auto Gen 다음 라운드도 같은 크기다.
-      size: state.size,
+      size: LARGE_SIZE_ENABLED ? state.size : 'normal',
       // 하단 '고정' 토글 — 생성/연속 추첨에 전달(런 상태에 저장돼 auto-continue 라운드에도 적용).
       fixSeed: state.fixSeed,
       fixResolution: state.fixResolution,
@@ -738,7 +741,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
     // 메인 Generate = 고른 이야기(사용자 2026-10-18). 고른 것이 없으면 app.js 가 안내만 한다.
     selectedGroupId() { return state.selected ? state.selected.groupId : 0; },
-    isLarge() { return state.size === 'large'; },     // app.js 금액 판정 - 라지는 1MP 를 넘는다
+    isLarge() { return LARGE_SIZE_ENABLED && state.size === 'large'; },   // app.js 금액 판정 - 라지는 1MP 를 넘는다
     hasSelection() { return !!state.selected; },
     generateSelected() {
       if (!state.selected) return false;

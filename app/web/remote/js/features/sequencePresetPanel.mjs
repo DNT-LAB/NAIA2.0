@@ -4,7 +4,7 @@
 // 좌측 #tabSequence 상주. 생성은 표준 PE 경유 — Storyteller 비커플링.
 // 2026-10-18(사용자): 항목을 누르면 고른다 - 메인 Generate = 고른 이야기(`#id Generate`). ★ = 즐겨찾기(서버 파일) ·
 // [★ 즐겨찾기 N] 칩 = 목록을 즐겨찾기로. 목록 아래 '방금 생성' 칸 = 마지막으로 생성한 이야기 하나(SEQ Random 이 고른 것을
-// 다시 찾을 수 있게 · Auto Gen 의 다음 라운드도 따라간다 · 서버를 다시 켜면 비어 있다).
+// 다시 찾을 수 있게 · Auto Gen 의 다음 라운드도 따라간다 · 서버를 다시 켜면 비어 있다). [노말 | 라지 (유료)] = 만화 크기.
 
 async function readJsonResponse(response) {
   let data = null;
@@ -29,7 +29,7 @@ const ALL_RATINGS = ['e', 'q', 's', 'g'];
 const CUTS = [2, 3, 4];
 
 export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange,
-  beforeGenerate}) {
+  beforeGenerate, onSizeChange}) {
   const state = {
     available: null,        // null=미확인
     presentRatings: [],
@@ -55,6 +55,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     favLoaded: false,
     favOnly: false,         // 목록 = 즐겨찾기
     favPending: new Set(),  // 별 요청을 보내는 중인 그룹(연타 막기)
+    // [노말 | 라지 (유료)](사용자 2026-10-18). 저장하지 않는다 - 새로 열면 노말(모르는 새 유료로 나가지 않게).
+    size: 'normal',
   };
   let incEl = null, excEl = null, bodyEl = null, popupEl = null, recentEl = null, dlTimer = null;
 
@@ -187,6 +189,12 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         <div class="seq-filters">
           <span class="seq-flabel">수위</span>${ratingChips}
           <span class="seq-flabel">컷</span>${cutChips}
+          <span class="seq-sizeseg" role="group" aria-label="만화 크기">
+            <button type="button" class="seq-size ${state.size === 'normal' ? 'active' : ''}" data-seq-size="normal"
+              aria-pressed="${state.size === 'normal'}" title="2컷 896x1152 · 3컷 768x1344 · 4컷 1024x1024">노말</button>
+            <button type="button" class="seq-size seq-size-large ${state.size === 'large' ? 'active' : ''}" data-seq-size="large"
+              aria-pressed="${state.size === 'large'}" title="2컷 1152x1472 · 3컷 1024x1792 · 4컷 1280x1280 - 1MP 를 넘어 Anlas 를 씁니다">라지 (유료)</button>
+          </span>
           <button type="button" class="seq-rchip seq-favchip ${state.favOnly ? 'active' : ''}" data-seq-favonly
             title="즐겨찾기만 봅니다 - 항목의 ☆ 를 누르면 넣고 뺍니다">★ 즐겨찾기 <span data-seq-favcount>${state.favorites.length}</span></button>
         </div>
@@ -238,6 +246,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       include: q.include, exclude: q.exclude,
       ratings: Array.from(q.ratings),
       frameCounts: Array.from(q.cuts),
+      // 만화 크기 - 런 상태에 남아 Auto Gen 다음 라운드도 같은 크기다.
+      size: state.size,
       // 하단 '고정' 토글 — 생성/연속 추첨에 전달(런 상태에 저장돼 auto-continue 라운드에도 적용).
       fixSeed: state.fixSeed,
       fixResolution: state.fixResolution,
@@ -299,9 +309,10 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     return false;
   }
 
-  // 런 상태로 이 런의 다음 라운드를 이미 봤으면 첫 라운드의 HTTP 답은 칸에 그리지 않는다(Codex 리뷰).
-  function newerRoundSeen(runId) {
-    return !!runId && state.runSeen.runId === String(runId) && state.runSeen.round > 1;
+  // 이 런의 런 상태(module_state)를 이미 받았으면 HTTP 답은 칸에 그리지 않는다 - 런 상태가 먼저 칸을 채웠고, 그 뒤 사람이
+  // 다른 카드를 골랐을 수 있다(Codex 재리뷰: 같은 라운드의 늦은 HTTP 답이 그 선택을 되돌려 Generate 가 엉뚱한 번호를 보냈다).
+  function runAlreadySeen(runId) {
+    return !!runId && state.runSeen.runId === String(runId);
   }
 
   async function generateGroup(groupId) {
@@ -311,21 +322,12 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       if (!(await charactersSettled())) return;
       const out = await postJson('/api/sequence-preset/generate',
         {groupId: Number(groupId), ...searchPayload()});
-      const frames = out.frames || [];
-      const failed = frames.filter(f => !f.ok && !f.skipped);   // skipped(중복)은 실패 아님
-      const skipped = frames.filter(f => f.skipped).length;
-      const skipNote = skipped ? ` (중복 ${skipped}컷 생략)` : '';
+      // 등록 성공 알림은 띄우지 않는다(사용자 2026-10-18 - 이야기 하나 = 한 장이라 뜻이 없다 · 무엇을 그렸는지는 '방금 생성' 칸).
       if (!out.ok) {
-        showToast(`생성 등록 실패: ${failed.length ? failed[0].error : (out.error || '자격증명/큐 확인')}`, 'error');
-      } else if (failed.length) {
-        const detail = failed.map(f => `컷${f.index + 1}(${f.error || 'failed'})`).join(', ');
-        showToast(`${out.total}컷 중 ${out.enqueued}컷 등록${skipNote} · 실패: ${detail}`, 'warning');
-      } else {
-        const what = out.scenes ? `${out.scenes}장면 만화 1장` : `${out.enqueued}장`;
-        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
-                              : `${what} 생성 큐 등록${skipNote}`, 'success');
+        const failed = (out.frames || []).find(f => !f.ok);
+        showToast(`생성 등록 실패: ${failed?.error || out.error || '자격증명/큐 확인'}`, 'error');
       }
-      if (out.ok && !newerRoundSeen(out.runId)) setRecent(out.group, out.groupId);
+      if (out.ok && !runAlreadySeen(out.runId)) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
     } finally {
@@ -345,18 +347,11 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     try {
       if (!(await charactersSettled())) return true;
       const out = await postJson('/api/sequence-preset/random-generate', searchPayload());
-      const frames = out.frames || [];
-      const failed = frames.filter(f => !f.ok && !f.skipped);
-      const skipped = frames.filter(f => f.skipped).length;
-      const skipNote = skipped ? ` (중복 ${skipped}컷 생략)` : '';
-      if (!out.ok) {
-        showToast(`연속 생성 실패: ${failed.length ? failed[0].error : (out.error || '매칭/자격증명/큐 확인')}`, 'error');
-      } else {
-        const what = out.scenes ? `${out.scenes}장면 만화 1장` : `${out.enqueued}장`;
-        showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
-                              : `${what} 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
+      if (!out.ok) {   // 등록 성공 알림은 없다(위 generateGroup 과 같다)
+        const failed = (out.frames || []).find(f => !f.ok);
+        showToast(`연속 생성 실패: ${failed?.error || out.error || '매칭/자격증명/큐 확인'}`, 'error');
       }
-      if (out.ok && !newerRoundSeen(out.runId)) setRecent(out.group, out.groupId);
+      if (out.ok && !runAlreadySeen(out.runId)) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`연속 생성 실패: ${error.message}`, 'error');
     } finally {
@@ -465,25 +460,34 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     try { onSelectionChange?.(state.selected); } catch (_) { /* 단추 글자 갱신 실패가 고르기를 막지 않는다 */ }
   }
 
+  // 사람이 카드를 누른 차례. 칸을 채우는 사이(요약을 받아 오는 동안) 사람이 직접 골랐으면 늦게 온 칸은 그 선택을 덮지
+  // 않는다 - 안 그러면 다음 Generate 가 사람이 고르지 않은 이야기를 보냈다(Codex 재리뷰).
+  let userSelectSeq = 0;
+
   function selectGroup(groupId) {
     const gid = Number(groupId);
+    userSelectSeq += 1;
     applySelection(state.selected?.groupId === gid ? null : findSummary(gid));   // 다시 누르면 푼다
   }
 
   // 아래 칸이 바뀌면 고른 것도 그리로 옮긴다(사용자 2026-10-18 - 바로 Generate 로 다시 그릴 수 있게).
-  function showRecentCard(summary, label = '방금 생성') {
+  function showRecentCard(summary, label = '방금 생성', {autoSelect = true} = {}) {
     state.recent = summary;
     state.boxLabel = label;
     renderRecent();
-    if (!summary.missing) applySelection(summary);   // 데이터에 없는 이야기는 고를 수 없다 - 고른 것을 그대로 둔다
+    // 데이터에 없는 이야기는 고를 수 없다 - 고른 것을 그대로 둔다.
+    if (autoSelect && !summary.missing) applySelection(summary);
   }
 
   // ---------------------------------------------------------------- 아래 칸(방금 생성 · 히스토리에서 고른 그림)
   let boxSeq = 0;      // 칸을 바꾸는 차례 - 요약을 받아 오는 사이 더 새 것이 오면 늦은 답은 버린다
+  let fillKind = '';   // 지금 칸을 채우는 쪽('recent' | 'history') - 히스토리에서 다른 그림을 고르면 히스토리 채우기만 무른다
 
   // 요약이 손에 없으면(Auto Gen 의 다음 라운드 · 히스토리 · 패널을 늦게 연 경우) 미리보기와 같은 응답으로 받는다(캐시 공유).
-  async function fillBox(gid, label) {
+  // selectAt = 이 칸을 부른 순간의 '사람이 고른 차례' - 그 뒤로 사람이 골랐으면 칸만 바꾸고 고르지는 않는다.
+  async function fillBox(gid, label, kind = 'recent', selectAt = userSelectSeq) {
     const my = ++boxSeq;
+    fillKind = kind;
     if (state.available !== true) { state.pendingBox = {gid, label}; return; }   // 셸이 생기면 ensureReady 가 다시 부른다
     state.pendingBox = null;
     let summary = findSummary(gid);
@@ -497,7 +501,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       }
       if (my !== boxSeq) return;              // 그새 다음 라운드 · 다른 그림이 왔다
     }
-    showRecentCard(summary || {groupId: gid, missing: true}, label);
+    showRecentCard(summary || {groupId: gid, missing: true}, label, {autoSelect: userSelectSeq === selectAt});
   }
 
   function setRecent(group, groupId) {
@@ -514,21 +518,35 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   }
 
   // 런 상태(module_state `sequence_run`) - Auto Gen 이 다음 라운드로 넘어가면 그 그룹이 '방금 생성' 이 된다.
+  // 라운드마다 **한 번만** 반영한다 - 같은 라운드의 거듭된 알림(한 장 완료 · 런 종료)이 사람이 히스토리에서 고른 칸을
+  // 되돌리지 않게. 칸이 이미 그 그룹이면 다시 고르지 않는다(HTTP 답이 먼저 채운 경우).
+  let appliedRunKey = '';
   function onRunState(st) {
     const runId = String(st?.run_id || '');
     const round = Number(st?.round_count) || 0;
     if (runId && (runId !== state.runSeen.runId || round > state.runSeen.round)) state.runSeen = {runId, round};
+    const key = `${runId}:${round}`;
+    if (key === appliedRunKey) return;
+    appliedRunKey = key;
     const gid = Number(st?.group_id) || 0;
-    if (gid <= 0 || gid === state.recentId) return;
+    if (gid <= 0) return;
+    if (gid === state.recentId && state.recent?.groupId === gid) return;
     state.recentId = gid;
     void fillBox(gid, '방금 생성');
   }
 
   // 히스토리에서 고른 그림이 Sequence 로 만든 것이면 그 이야기를 칸에 띄운다(사용자 2026-10-18 - 고르면 따라간다).
-  function showFromHistory(gid) {
+  // selectStamp = 그림을 고른 순간의 selectionStamp() - 메타를 받아 오는 사이 사람이 카드를 골랐으면 그 선택을 둔다.
+  function showFromHistory(gid, selectStamp) {
     const n = Number(gid) || 0;
     if (n <= 0) return;
-    void fillBox(n, n === state.recentId ? '방금 생성' : '히스토리에서 고른 그림의 이야기');
+    const stamp = Number.isFinite(Number(selectStamp)) ? Number(selectStamp) : userSelectSeq;
+    void fillBox(n, n === state.recentId ? '방금 생성' : '히스토리에서 고른 그림의 이야기', 'history', stamp);
+  }
+
+  // 히스토리에서 다른 그림을 골랐다 - 아직 채우는 중인 앞 그림의 칸은 무른다(일반 그림을 골랐는데 앞 그림이 뒤늦게 뜨지 않게).
+  function cancelHistoryFill() {
+    if (fillKind === 'history') boxSeq += 1;
   }
 
   // ---------------------------------------------------------------- 즐겨찾기
@@ -632,6 +650,17 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (event.target.closest('[data-seq-download]')) { startDownload(); return; }
     const star = event.target.closest('[data-seq-star]');
     if (star) { void toggleFavorite(star.dataset.seqStar); return; }
+    const sizeBtn = event.target.closest('[data-seq-size]');
+    if (sizeBtn) {
+      state.size = sizeBtn.dataset.seqSize === 'large' ? 'large' : 'normal';
+      panel.querySelectorAll('[data-seq-size]').forEach(b => {
+        const on = b.dataset.seqSize === state.size;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-pressed', String(on));
+      });
+      try { onSizeChange?.(state.size); } catch (_) { /* 단추 · 경고 갱신 실패가 고르기를 막지 않는다 */ }
+      return;
+    }
     if (event.target.closest('[data-seq-favonly]')) {
       closePopup();
       state.favOnly = !state.favOnly;
@@ -709,6 +738,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
     // 메인 Generate = 고른 이야기(사용자 2026-10-18). 고른 것이 없으면 app.js 가 안내만 한다.
     selectedGroupId() { return state.selected ? state.selected.groupId : 0; },
+    isLarge() { return state.size === 'large'; },     // app.js 금액 판정 - 라지는 1MP 를 넘는다
     hasSelection() { return !!state.selected; },
     generateSelected() {
       if (!state.selected) return false;
@@ -717,6 +747,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     },
     randomGenerate() { return runRandomGenerate(); },  // req2/3: 랜덤 그룹 연속 생성
     onRunState(st) { onRunState(st); },                // app.js onModuleState('sequence_run') - 방금 생성 칸
-    showFromHistory(gid) { showFromHistory(gid); },    // app.js 히스토리 고르기 - 그 그림의 이야기
+    showFromHistory(gid, stamp) { showFromHistory(gid, stamp); },   // app.js 히스토리 고르기 - 그 그림의 이야기
+    cancelHistoryFill() { cancelHistoryFill(); },
+    selectionStamp() { return userSelectSeq; },
   };
 }

@@ -145,9 +145,8 @@ class HeadlessSequenceRunService:
         messages: list[dict[str, Any]] = []
         toast = getattr(self.context, "_toast", None)
         if callable(toast):
-            if reason == "complete":
-                messages.append(toast("시퀀스 연속 생성을 마쳤습니다.", level="success"))
-            elif reason == "stopped":
+            # '마쳤습니다' 는 알리지 않는다(사용자 2026-10-18 - 이야기 하나 = 한 장이라 끝날 때마다 떠서 뜻이 없다).
+            if reason == "stopped":
                 messages.append(toast("시퀀스 연속 생성을 정지했습니다.", level="info"))
             elif reason == "error":
                 messages.append(toast("시퀀스 연속 생성이 오류로 정지됐습니다.", level="error"))

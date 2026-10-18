@@ -29,10 +29,11 @@ from typing import Any, Iterable
 MAX_SCENES = 4
 # 장면 수별 고정 사양(사용자 2026-10-17). koma = `2::{koma} ::` 를 인원 태그 앞에 · 해상도는 이 크기로 고정.
 # 3장면은 768x1344(사용자 2026-10-18 - 832x1216 에서 바꿈 · 1,032,192px 라 1MP 안).
+# large = 패널 [라지 (유료)] 의 크기(사용자 2026-10-18) - 셋 다 1MP 를 넘어 Anlas 를 쓴다.
 COMIC_SPECS: dict[int, dict[str, Any]] = {
-    4: {"size": (1024, 1024), "koma": "4koma"},
-    3: {"size": (768, 1344), "koma": "3koma"},
-    2: {"size": (896, 1152), "koma": "2koma"},
+    4: {"size": (1024, 1024), "large": (1280, 1280), "koma": "4koma"},
+    3: {"size": (768, 1344), "large": (1024, 1792), "koma": "3koma"},
+    2: {"size": (896, 1152), "large": (1152, 1472), "koma": "2koma"},
 }
 # 인원 태그(1girl · 2girls · 1boy · 6+boys · 1other …). koma 는 이 중 **맨 앞 것** 앞에 간다 - 예전엔 첫 `1girl` 앞만 찾아
 # `1boy, 1girl` 이면 `1boy, 2::2koma ::, 1girl` 로 둘 사이에 끼었다(사용자 제보 2026-10-18).
@@ -263,6 +264,11 @@ def panel_tags(n: int) -> str:
 def comic_spec(n: int) -> dict[str, Any] | None:
     """장면 수 n 의 고정 사양(해상도 · koma). 사양이 없는 수(1)면 None - 그때는 사용자 해상도 · 만화 문구 없음."""
     return COMIC_SPECS.get(int(n or 0))
+
+
+def comic_size(spec: dict[str, Any], large: bool = False) -> tuple[int, int]:
+    """사양의 해상도 - 라지면 large(없으면 노말)."""
+    return tuple(spec.get("large") or spec["size"]) if large else tuple(spec["size"])
 
 
 def build_comic_prompt(assembled: str, n: int, body: str) -> str:

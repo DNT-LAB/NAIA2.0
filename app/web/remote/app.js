@@ -3365,7 +3365,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqpick2')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqsize1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -3376,6 +3376,8 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
       // 항목을 고르면 메인 Generate 글자가 `#id Generate` 가 된다(사용자 2026-10-18).
       onSelectionChange: () => updateGenerateButtonMode(),
       beforeGenerate: () => settleInsetCharacterEdits(),
+      // [라지 (유료)] 를 고르면 Generate 칩 · 상단 알약이 유료를 말한다.
+      onSizeChange: () => { updateGenerateButtonMode(); updateAnlasPaidIndicator(); },
     });
     // 패널이 늦게 떴으면 그 전에 온 런 상태(마지막 그룹)를 넘긴다 - '방금 생성' 칸.
     const run = moduleStateCache.get('sequence_run');
@@ -5483,6 +5485,9 @@ let sequenceHistoryToken = 0;
 async function syncSequenceFromHistory(relPath) {
   const match = /^__history_item__\/([^/]+)/.exec(String(relPath || '').replace(/\\/g, '/'));
   const token = ++sequenceHistoryToken;
+  // 앞 그림의 칸을 아직 채우는 중이면 무른다 - 일반 · 디스크 그림을 골랐는데 앞 그림의 이야기가 뒤늦게 뜨지 않게(Codex 재리뷰).
+  sequencePresetControl?.cancelHistoryFill?.();
+  const selectStamp = sequencePresetControl?.selectionStamp?.();
   if (!match) return;
   const historyId = match[1];
   let gid = sequenceGroupByHistoryId.get(historyId);
@@ -5498,7 +5503,7 @@ async function syncSequenceFromHistory(relPath) {
     sequenceGroupByHistoryId.set(historyId, gid);
   }
   if (token !== sequenceHistoryToken || !gid) return;
-  sequencePresetControl?.showFromHistory?.(gid);
+  sequencePresetControl?.showFromHistory?.(gid, selectStamp);
 }
 
 function activeResultAssetUrl() {
@@ -8758,6 +8763,9 @@ function switchTab(name) {
   if (promptDrawerControl) promptDrawerControl.switchTab(name);
   if (eventPresetPanel) eventPresetPanel.setActiveTab(activePromptTab === 'preset');
   updateGenerateButtonMode();
+  // Sequence 의 [라지 (유료)] 는 그 탭에서만 유료다 - 드나들 때 상단 알약도 다시 맞춘다. 미뤄서 부른다(첫 실행 중
+  // 아직 안 만든 알약을 건드리지 않게).
+  setTimeout(() => { try { updateAnlasPaidIndicator(); } catch (_) {} }, 0);
 }
 
 function positionFnMenu() {
@@ -11167,6 +11175,7 @@ function naiGenerationCostsAnlas() {
   //    (사용자 지정 2026-08-28: "지금부터 돈이 나갈 수 있어" 를 알리는 것이 핵심).
   //    판정은 백엔드가 준 것을 그대로 쓴다 - V5 여부·지목 계정까지 그쪽이 본다.
   if (naiQuotaExhausted) return true;
+  if (sequenceLargeSelected()) return true;
   // ⚠️ **인페인트를 무조건 유료로 치지 않는다.** 한때 그렇게 했는데 라이브 실측이
   //    뒤집었다(2026-08-28): 832x1216 4스텝 인페인트는 Anlas 가 한 푼도 안 빠졌고,
   //    1280x1280 은 14 가 빠졌다. 규칙은 t2i 와 **같다** - 크기와 스텝만 본다.
@@ -11217,7 +11226,13 @@ function naiGenerationCostsAnlas() {
  *     불명확하니 모두 'Anlas 소모' 로 대체"). 추정식은 일반 생성을 웹에서 잰 것이라, 인셋 인페인트의 실제 청구와 다를 수
  *     있다. 인페인트 세션이 열려 있으면 인셋은 주입되지 않는다 - 그때는 예전처럼 숫자다. */
 function genCostChipText(cost) {
-  return generationGoesThroughInset() ? 'Anlas 소모' : `${cost.toLocaleString()} Anlas`;
+  return (generationGoesThroughInset() || sequenceLargeSelected()) ? 'Anlas 소모' : `${cost.toLocaleString()} Anlas`;
+}
+
+/** Sequence 탭에서 [라지 (유료)] 를 골랐나 - 만화 한 장이 1MP 를 넘어 Anlas 를 쓴다(사용자 2026-10-18).
+ *  금액 추정은 Params 해상도로 한 것이라 이 크기를 모른다 - 칩은 숫자 없이 'Anlas 소모'. */
+function sequenceLargeSelected() {
+  return activePromptTab === 'sequence' && !!sequencePresetControl?.isLarge?.();
 }
 
 /** 지금 [Generate] 를 누르면 **레퍼런스 인셋으로 나가는가.** 서버가 인셋을 주입하는 조건과 맞춘다
@@ -11236,7 +11251,7 @@ function generationGoesThroughInset() {
 
 function genButtonHtml(label) {
   const cost = naiEffectiveAnlasCost();
-  const show = naiGenerationCostsAnlas() && cost > 0;
+  const show = naiGenerationCostsAnlas() && (cost > 0 || sequenceLargeSelected());
   // 대기가 있으면 `+N` 을 붙이고, 유료면 금액도 **대기만큼** 곱해 보인다 - 서버의 무료
   // 사용량 차단은 Auto Gen 루프에만 걸리고 사람이 쌓은 장은 그대로 유료로 나간다.
   // 화면이 유일한 경고다(Fable 검토 2026-09-23).
@@ -11266,7 +11281,7 @@ function busyForLoops() {
 function syncGenCostChip() {
   if (!btnGen) return;
   const cost = naiEffectiveAnlasCost();
-  const show = naiGenerationCostsAnlas() && cost > 0;
+  const show = naiGenerationCostsAnlas() && (cost > 0 || sequenceLargeSelected());
   let chip = btnGen.querySelector('.gen-cost-chip');
   if (!show) { if (chip) chip.remove(); return; }
   if (!chip) {

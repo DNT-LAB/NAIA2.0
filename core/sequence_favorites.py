@@ -37,14 +37,14 @@ class SequenceFavoritesStore:
         for row in rows if isinstance(rows, list) else []:
             try:
                 gid = int(row.get("groupId"))
-            except (AttributeError, TypeError, ValueError):
-                continue       # 한 줄이 상해도 나머지는 산다
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                continue       # 한 줄이 상해도 나머지는 산다(1e309 = inf 도)
             if gid < 0 or gid in seen:
                 continue
             try:
                 added = int(row.get("added") or 0)
-            except (TypeError, ValueError):
-                added = 0      # 단 시각이 상했어도 별은 산다(Codex 리뷰 - 한 줄이 목록 전체 · 모든 저장을 막았다)
+            except (TypeError, ValueError, OverflowError):
+                added = 0      # 단 시각이 상했어도 별은 산다(Codex 리뷰 - 한 줄이 목록 전체 · 모든 저장을 막았다 · 1e309 = inf)
             seen.add(gid)
             out.append({"groupId": gid, "added": added})
         return out

@@ -27,7 +27,7 @@ from fastapi.responses import JSONResponse
 from core.sequence_favorites import FAVORITES_FILE_NAME, SequenceFavoritesStore
 from core.sequence_preset_service import SequencePresetService
 from core.web_session_context import WebSessionContext
-from utils.sequence_comic_prompt import build_comic_body, build_comic_prompt, comic_spec
+from utils.sequence_comic_prompt import build_comic_body, build_comic_prompt, comic_size, comic_spec
 
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
@@ -138,6 +138,11 @@ def _inset_virtual_characters(session_context: WebSessionContext) -> list[dict[s
     return out
 
 
+def _wants_large(query: Any) -> bool:
+    """패널의 [노말 | 라지 (유료)](사용자 2026-10-18). 런 상태의 query 에도 남아 Auto Gen 다음 라운드가 같은 크기로 그린다."""
+    return isinstance(query, dict) and str(query.get("size") or "").strip().lower() == "large"
+
+
 def _coerce_dim(value: Any) -> int | None:
     try:
         parsed = int(float(value))
@@ -172,7 +177,8 @@ def _roll_random_resolution(session_context: WebSessionContext) -> tuple[int | N
 
 
 async def _do_round(session_context: WebSessionContext, thread_run, *, group_id: int, run_id: str,
-                    fix_seed: bool = True, fix_resolution: bool = True, use_vibe: bool = False):
+                    fix_seed: bool = True, fix_resolution: bool = True, use_vibe: bool = False,
+                    large: bool = False):
     """한 이벤트 그룹의 전 프레임을 fresh freeze 로 조립·baking·enqueue. _SEQ_LOCK 보유 가정.
     라운드마다 새 정체성(아티스트/캐릭터 와일드카드 롤)·새 시드(Seed Fixed면 사용자값)·해상도.
     정체성은 커맨드 params 에 baking 되어 freeze 해제(큐 드레인) 후에도 유지된다. 반환 (enqueued, total).
@@ -313,12 +319,14 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
             if fixed_w and fixed_h:
                 overrides["resolution"] = f"{fixed_w} x {fixed_h}"
         # 장면 수별 고정 해상도(사용자 2026-10-17: 4 = 1024x1024 · 3 = 768x1344(10-18) · 2 = 896x1152). 사양 없는 수는 위 그대로.
+        # 라지(유료 · 10-18): 4 = 1280x1280 · 3 = 1024x1792 · 2 = 1152x1472.
         spec = comic_spec(n_scenes)
         if spec:
+            width, height = comic_size(spec, large)
             overrides["auto_fit_resolution"] = False
             overrides["random_resolution"] = False
-            overrides["width"], overrides["height"] = spec["size"]
-            overrides["resolution"] = f"{spec['size'][0]} x {spec['size'][1]}"
+            overrides["width"], overrides["height"] = width, height
+            overrides["resolution"] = f"{width} x {height}"
         overrides["characters"] = chars_all
         overrides["uc"] = (ucs + [""] * len(chars_all))[:len(chars_all)]
         if positions:
@@ -391,6 +399,7 @@ async def start_sequence_run(
             enqueued, total, pinned_seed = await _do_round(
                 session_context, run_in_thread, group_id=group_id, run_id=run_id,
                 fix_seed=fix_seed, fix_resolution=fix_resolution, use_vibe=use_vibe,
+                large=_wants_large(query),
             )
         except SequenceNeedsCharacter as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -453,6 +462,7 @@ async def continue_sequence_run(session_context: WebSessionContext, clients, run
             enqueued, _total, _seed = await _do_round(
                 session_context, asyncio.to_thread, group_id=group_id, run_id=run_id,
                 fix_seed=fix_seed, fix_resolution=fix_resolution, use_vibe=use_vibe,
+                large=_wants_large(query),            # 시작할 때 고른 크기 그대로
             )
         except Exception:
             return False

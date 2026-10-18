@@ -31566,6 +31566,18 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
 .seq-star:hover { color: #f5c542; }
 .seq-star.on { color: #f5c542; }
 .seq-favchip { margin-left: auto; padding: 3px 8px; font-size: 11px; font-weight: 600; color: var(--text-primary); }
+/* [노말 | 라지 (유료)] - 붙은 두 칸. 라지는 켜지면 유료 경고와 같은 주황(.nai-acct-total.is-anlas). */
+.seq-sizeseg {
+  display: inline-flex; margin-left: 6px; border: 1px solid var(--border-dim); border-radius: 8px; overflow: hidden;
+}
+.seq-size {
+  border: none; background: var(--bg-elevated); color: var(--text-muted); cursor: pointer;
+  padding: 3px 9px; font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.seq-size + .seq-size { border-left: 1px solid var(--border-dim); }
+.seq-size:hover { color: var(--text-primary); }
+.seq-size.active { color: #fff; background: var(--accent, #7c6cf0); }
+.seq-size.seq-size-large.active { color: #1a1206; background: #ff9d3d; }
 /* '방금 생성' 칸 - 목록을 내려도 바닥에 붙어 있다(사용자 2026-10-18: SEQ Random 이 고른 이야기를 다시 찾을 수 있게).
    스크롤 칸(.tab-content)의 아래 여백 10px 만큼 내려 붙인다 - bottom: 0 이면 그 틈으로 목록 글자가 비친다(실측). */
 .seq-recent {

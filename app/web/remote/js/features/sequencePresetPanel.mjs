@@ -2,6 +2,9 @@
 // 검색바를 영속화(input autocomplete/포커스 보존) 하고 결과 영역만 갱신한다. 수위·컷 칩은
 // 검색 버튼 없이 즉시 반영. 포함/제외 입력에 tagAssist(태그 자동완성) 바인딩.
 // 좌측 #tabSequence 상주. 생성은 표준 PE 경유 — Storyteller 비커플링.
+// 2026-10-18(사용자): 항목을 누르면 고른다 - 메인 Generate = 고른 이야기(`#id Generate`). ★ = 즐겨찾기(서버 파일) ·
+// [★ 즐겨찾기 N] 칩 = 목록을 즐겨찾기로. 목록 아래 '방금 생성' 칸 = 마지막으로 생성한 이야기 하나(SEQ Random 이 고른 것을
+// 다시 찾을 수 있게 · Auto Gen 의 다음 라운드도 따라간다 · 서버를 다시 켜면 비어 있다).
 
 async function readJsonResponse(response) {
   let data = null;
@@ -25,7 +28,7 @@ const ALL_RATINGS = ['e', 'q', 's', 'g'];
 // 2~4컷만(사용자 2026-10-18 - 5 · 6컷은 모델이 받는지 검증되지 않았다. 백엔드도 데이터를 읽을 때 뺀다).
 const CUTS = [2, 3, 4];
 
-export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode}) {
+export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode, onSelectionChange}) {
   const state = {
     available: null,        // null=미확인
     presentRatings: [],
@@ -41,8 +44,15 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     useVibe: false,
     previews: new Map(),    // groupId -> /sequence 응답(미리보기 툴팁 캐시)
     busy: false,
+    selected: null,         // 고른 이야기의 카드 요약 {groupId, peakRating, frameCount, stages, preview} - 메인 Generate 가 이것
+    recent: null,           // '방금 생성' 칸의 카드 요약(마지막 하나)
+    recentId: 0,            // 런 상태로 받은 마지막 그룹 번호(요약을 받기 전에도 같은 번호를 두 번 묻지 않게)
+    favorites: [],          // 즐겨찾기 카드 요약(새로 단 것이 먼저 · 데이터에 없으면 {groupId, missing})
+    favLoaded: false,
+    favOnly: false,         // 목록 = 즐겨찾기
+    favPending: new Set(),  // 별 요청을 보내는 중인 그룹(연타 막기)
   };
-  let incEl = null, excEl = null, bodyEl = null, popupEl = null, dlTimer = null;
+  let incEl = null, excEl = null, bodyEl = null, popupEl = null, recentEl = null, dlTimer = null;
 
   function ratingBadge(r) {
     return `<span class="seq-badge seq-r-${escHtml(r)}">${escHtml(RATING_LABELS[r] || r)}</span>`;
@@ -95,6 +105,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       if (!state.presentRatings.includes('q')) state.query.ratings.delete('q');
       state.available = true;
       buildShell();
+      void loadFavorites();
+      renderRecent();
+      if (state.recentId && !state.recent) void showRecent(state.recentId);   // 패널을 열기 전에 런 상태가 왔다
       await runSearch();
     } catch (error) {
       state.available = false; renderUnavailable();
@@ -167,6 +180,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         <div class="seq-filters">
           <span class="seq-flabel">수위</span>${ratingChips}
           <span class="seq-flabel">컷</span>${cutChips}
+          <button type="button" class="seq-rchip seq-favchip ${state.favOnly ? 'active' : ''}" data-seq-favonly
+            title="즐겨찾기만 봅니다 - 항목의 ☆ 를 누르면 넣고 뺍니다">★ 즐겨찾기 <span data-seq-favcount>${state.favorites.length}</span></button>
         </div>
         <div class="seq-actions-row">
           <button type="button" class="seq-btn" data-seq-search>검색</button>
@@ -174,11 +189,13 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         </div>
       </div>
       <div class="seq-body" id="seqBody"></div>
+      <div class="seq-recent" id="seqRecent" hidden></div>
       <div class="seq-popup seq-peek" id="seqPopup"></div>`;
     incEl = panel.querySelector('#seqInclude');
     excEl = panel.querySelector('#seqExclude');
     bodyEl = panel.querySelector('#seqBody');
     popupEl = panel.querySelector('#seqPopup');
+    recentEl = panel.querySelector('#seqRecent');
     incEl.value = q.include;
     excEl.value = q.exclude;
     // 태그 자동완성 (포함/제외) — input 도 value/selection 기반이라 동작.
@@ -197,6 +214,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       b.classList.toggle('active', state.query.ratings.has(b.dataset.seqRating)));
     panel.querySelectorAll('[data-seq-cut]').forEach(b =>
       b.classList.toggle('active', state.query.cuts.has(Number(b.dataset.seqCut))));
+    panel.querySelectorAll('[data-seq-favonly]').forEach(b => b.classList.toggle('active', state.favOnly));
+    panel.querySelectorAll('[data-seq-favcount]').forEach(el => { el.textContent = String(state.favorites.length); });
   }
 
   function collectInputs() {
@@ -223,6 +242,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   async function runSearch(opts = {}) {
     collectInputs();
     closePopup();
+    state.favOnly = false;      // 검색 · 칩을 누르면 검색 결과를 본다
+    syncChips();
     state.busy = true; renderBody();
     try {
       const q = state.query;
@@ -239,7 +260,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
   }
 
-  // [미리보기] 에 마우스를 올리면 툴팁으로 그 그룹의 만화 한 장 구성을 보여 준다(사용자 2026-10-18 - 항목 클릭은 없앴다).
+  // [미리보기] 에 마우스를 올리면 툴팁으로 그 그룹의 만화 한 장 구성을 보여 준다(사용자 2026-10-18). 항목 누름 = 고르기.
   // 응답은 그룹별로 캐시한다. 늦게 온 응답은 지금 떠 있는 그룹일 때만 그린다(그새 다른 항목으로 옮겼을 수 있다).
   async function openGroup(groupId) {
     const id = Number(groupId);
@@ -280,6 +301,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
                               : `${what} 생성 큐 등록${skipNote}`, 'success');
       }
+      if (out.ok) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
     } finally {
@@ -309,6 +331,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
                               : `${what} 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
       }
+      if (out.ok) setRecent(out.group, out.groupId);
     } catch (error) {
       showToast(`연속 생성 실패: ${error.message}`, 'error');
     } finally {
@@ -320,8 +343,48 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   // -------------------------------------------------------------- body 렌더
   function renderBody() {
     if (!bodyEl) return;
+    if (state.favOnly) { bodyEl.innerHTML = renderFavorites(); return; }
     if (state.busy && !state.results) { bodyEl.innerHTML = '<div class="seq-empty">검색 중…</div>'; return; }
     bodyEl.innerHTML = renderResults();
+  }
+
+  function isFavorite(groupId) {
+    return state.favorites.some(f => f.groupId === groupId);
+  }
+
+  // 항목 = 글 + 오른쪽 끝 [☆] [생성] [미리보기](사용자 2026-10-18). 항목을 누르면 고른다(메인 Generate = 고른 것).
+  // 검색 결과 · 즐겨찾기 · 방금 생성이 같은 카드를 쓴다 - 같은 그룹이 두 곳에 있으면 두 곳 다 고른 표시가 난다.
+  function renderCard(g) {
+    const gid = Number(g.groupId);
+    const id = escHtml(String(gid));
+    const fav = isFavorite(gid);
+    const star = `<button type="button" class="seq-star ${fav ? 'on' : ''}" data-seq-star="${id}"
+      title="${fav ? '즐겨찾기에서 뺍니다' : '즐겨찾기에 넣습니다'}" aria-label="즐겨찾기" aria-pressed="${fav}">${fav ? '★' : '☆'}</button>`;
+    if (g.missing) {
+      // 데이터가 바뀌어 빠진 이야기 - 고르거나 생성할 수 없다. 별만 뗄 수 있다.
+      return `
+      <div class="seq-flow-card seq-flow-item seq-missing">
+        <div class="seq-flow-text"><span class="seq-flow-meta">#${id}</span>
+          <span class="seq-flow-name">지금 데이터에 없는 이야기입니다</span></div>
+        <div class="seq-flow-actions">${star}</div>
+      </div>`;
+    }
+    const selected = state.selected?.groupId === gid;
+    return `
+      <div class="seq-flow-card seq-flow-item ${state.openGroupId === gid ? 'active' : ''} ${selected ? 'selected' : ''}"
+        data-seq-group="${id}" aria-selected="${selected}" title="누르면 고릅니다 - 메인 Generate 가 이 이야기를 생성합니다">
+        <div class="seq-flow-text">
+          <span class="seq-flow-meta">${ratingBadge(g.peakRating)} ${escHtml(String(g.frameCount))}컷
+            <span class="seq-arc">${(g.stages || []).map(s => escHtml(STAGE_LABELS[s] || s)).join('›')}</span>
+            <span class="seq-gid">#${id}</span></span>
+          <span class="seq-flow-name">${escHtml(g.preview || '')}</span>
+        </div>
+        <div class="seq-flow-actions">
+          ${star}
+          <button type="button" class="seq-btn primary seq-mini" data-seq-generate="${id}" ${state.busy ? 'disabled' : ''}>생성</button>
+          <button type="button" class="seq-btn seq-mini" data-seq-peek="${id}">미리보기</button>
+        </div>
+      </div>`;
   }
 
   function renderResults() {
@@ -332,23 +395,114 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
     const head = `<div class="seq-rescount">${r.total.toLocaleString()}건 매칭 · ${r.groups.length} 표시
       ${state.groupCount ? `<span class="seq-count">전체 ${state.groupCount.toLocaleString()}</span>` : ''}</div>`;
-    // 항목 = 글 + 오른쪽 끝 [생성] [미리보기](사용자 2026-10-18). 항목 자체는 누르는 곳이 아니다.
-    const cards = r.groups.map(g => {
-      const id = escHtml(String(g.groupId));
-      return `
-      <div class="seq-flow-card seq-flow-item ${state.openGroupId === g.groupId ? 'active' : ''}" data-seq-group="${id}">
-        <div class="seq-flow-text">
-          <span class="seq-flow-meta">${ratingBadge(g.peakRating)} ${escHtml(String(g.frameCount))}컷
-            <span class="seq-arc">${g.stages.map(s => escHtml(STAGE_LABELS[s] || s)).join('›')}</span></span>
-          <span class="seq-flow-name">${escHtml(g.preview || '')}</span>
-        </div>
-        <div class="seq-flow-actions">
-          <button type="button" class="seq-btn primary seq-mini" data-seq-generate="${id}" ${state.busy ? 'disabled' : ''}>생성</button>
-          <button type="button" class="seq-btn seq-mini" data-seq-peek="${id}">미리보기</button>
-        </div>
-      </div>`;
-    }).join('');
-    return head + `<div class="seq-flow-list">${cards}</div>`;
+    return head + `<div class="seq-flow-list">${r.groups.map(renderCard).join('')}</div>`;
+  }
+
+  function renderFavorites() {
+    if (!state.favLoaded) return '<div class="seq-empty">즐겨찾기 불러오는 중…</div>';
+    if (!state.favorites.length) {
+      return '<div class="seq-empty">즐겨찾기가 없습니다 — 항목의 ☆ 를 누르면 여기에 남습니다.</div>';
+    }
+    const head = `<div class="seq-rescount">즐겨찾기 ${state.favorites.length.toLocaleString()}개</div>`;
+    return head + `<div class="seq-flow-list">${state.favorites.map(renderCard).join('')}</div>`;
+  }
+
+  // '방금 생성' 칸 - 목록 아래(스크롤해도 바닥에 붙어 있다). 마지막 하나만.
+  function renderRecent() {
+    if (!recentEl) return;
+    if (!state.recent) { recentEl.hidden = true; recentEl.innerHTML = ''; return; }
+    recentEl.hidden = false;
+    recentEl.innerHTML = `<div class="seq-recent-head">방금 생성</div>${renderCard(state.recent)}`;
+  }
+
+  function renderLists() {
+    renderBody();
+    renderRecent();
+    syncChips();
+  }
+
+  // ---------------------------------------------------------------- 고르기
+  function findSummary(groupId) {
+    const gid = Number(groupId);
+    return (state.results?.groups || []).find(g => g.groupId === gid)
+      || state.favorites.find(g => g.groupId === gid && !g.missing)
+      || (state.recent?.groupId === gid ? state.recent : null)
+      || state.previews.get(gid)?.group || null;
+  }
+
+  function selectGroup(groupId) {
+    const gid = Number(groupId);
+    state.selected = state.selected?.groupId === gid ? null : (findSummary(gid) || null);   // 다시 누르면 푼다
+    panel.querySelectorAll('[data-seq-group]').forEach(card => {
+      const on = Number(card.dataset.seqGroup) === state.selected?.groupId;
+      card.classList.toggle('selected', on);
+      card.setAttribute('aria-selected', String(on));
+    });
+    try { onSelectionChange?.(state.selected); } catch (_) { /* 단추 글자 갱신 실패가 고르기를 막지 않는다 */ }
+  }
+
+  // ---------------------------------------------------------------- 방금 생성
+  function setRecent(group, groupId) {
+    const gid = Number(group?.groupId ?? groupId);
+    if (!Number.isFinite(gid) || gid <= 0) return;
+    state.recentId = gid;
+    if (group && group.groupId === gid) { state.recent = group; renderRecent(); return; }
+    void showRecent(gid);
+  }
+
+  // 요약이 손에 없으면(Auto Gen 의 다음 라운드 · 패널을 늦게 연 경우) 미리보기와 같은 응답으로 받는다(캐시 공유).
+  async function showRecent(gid) {
+    const known = findSummary(gid);
+    if (known) { state.recent = known; renderRecent(); return; }
+    if (state.available !== true) return;     // 셸이 생기면 ensureReady 가 다시 부른다
+    try {
+      const d = state.previews.get(gid) || await postJson('/api/sequence-preset/sequence', {groupId: gid});
+      state.previews.set(gid, d);
+      if (state.recentId !== gid) return;     // 그새 다음 라운드가 왔다
+      state.recent = d.group || {groupId: gid, missing: true};
+    } catch (_) {
+      if (state.recentId !== gid) return;
+      state.recent = {groupId: gid, missing: true};
+    }
+    renderRecent();
+  }
+
+  // 런 상태(module_state `sequence_run`) - Auto Gen 이 다음 라운드로 넘어가면 그 그룹이 '방금 생성' 이 된다.
+  function onRunState(st) {
+    const gid = Number(st?.group_id) || 0;
+    if (gid <= 0 || gid === state.recentId) return;
+    state.recentId = gid;
+    void showRecent(gid);
+  }
+
+  // ---------------------------------------------------------------- 즐겨찾기
+  async function loadFavorites() {
+    try {
+      const out = await getJson('/api/sequence-preset/favorites');
+      state.favorites = Array.isArray(out.favorites) ? out.favorites : [];
+    } catch (error) {
+      showToast(`즐겨찾기 불러오기 실패: ${error.message}`, 'error');
+    } finally {
+      state.favLoaded = true;
+      renderLists();
+    }
+  }
+
+  async function toggleFavorite(groupId) {
+    const gid = Number(groupId);
+    if (!Number.isFinite(gid) || state.favPending.has(gid)) return;
+    const favorite = !isFavorite(gid);
+    state.favPending.add(gid);
+    try {
+      const out = await postJson('/api/sequence-preset/favorites', {groupId: gid, favorite});
+      state.favorites = Array.isArray(out.favorites) ? out.favorites : state.favorites;
+      state.favLoaded = true;
+    } catch (error) {
+      showToast(`즐겨찾기 ${favorite ? '넣기' : '빼기'} 실패: ${error.message}`, 'error');
+    } finally {
+      state.favPending.delete(gid);
+      renderLists();
+    }
   }
 
   // 미리보기 툴팁(사용자 2026-10-18): 모양은 예전 우측 팝업 그대로. 캐릭터 특징은 뺀 채(백엔드 comic_preview)
@@ -407,6 +561,15 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
   // -------------------------------------------------------------- 이벤트 (위임, 1회 부착)
   panel.addEventListener('click', event => {
     if (event.target.closest('[data-seq-download]')) { startDownload(); return; }
+    const star = event.target.closest('[data-seq-star]');
+    if (star) { void toggleFavorite(star.dataset.seqStar); return; }
+    if (event.target.closest('[data-seq-favonly]')) {
+      closePopup();
+      state.favOnly = !state.favOnly;
+      if (state.favOnly && !state.favLoaded) void loadFavorites();
+      renderLists();
+      return;
+    }
     const rchip = event.target.closest('[data-seq-rating]');
     if (rchip) {
       const r = rchip.dataset.seqRating;
@@ -425,6 +588,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (event.target.closest('[data-seq-random]')) { runSearch({random: true}); return; }
     const gen = event.target.closest('[data-seq-generate]');
     if (gen) { generateGroup(gen.dataset.seqGenerate); return; }
+    if (event.target.closest('[data-seq-peek]')) return;          // 미리보기는 호버 - 누름은 고르기가 아니다
+    const card = event.target.closest('[data-seq-group]');
+    if (card) selectGroup(card.dataset.seqGroup);
   });
 
   // [미리보기] 호버 = 툴팁. 버튼에 들어올 때 열고 버튼에서 나갈 때 닫는다(버튼 안의 자식 사이 이동은 무시).
@@ -472,9 +638,15 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     onOpen() { ensureReady(); },
     onModeChange() { refreshVibeGate(); },   // app.js syncMode → Vibe 체크박스 NAI 게이트 갱신
     // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
-    // 열어 두는 그룹 팝업은 없어졌다(미리보기는 호버 툴팁) - 메인 Generate 는 app.js 가 안내만 한다.
-    hasOpenGroup() { return false; },
-    generateOpenGroup() { return false; },
+    // 메인 Generate = 고른 이야기(사용자 2026-10-18). 고른 것이 없으면 app.js 가 안내만 한다.
+    selectedGroupId() { return state.selected ? state.selected.groupId : 0; },
+    hasSelection() { return !!state.selected; },
+    generateSelected() {
+      if (!state.selected) return false;
+      void generateGroup(state.selected.groupId);
+      return true;
+    },
     randomGenerate() { return runRandomGenerate(); },  // req2/3: 랜덤 그룹 연속 생성
+    onRunState(st) { onRunState(st); },                // app.js onModuleState('sequence_run') - 방금 생성 칸
   };
 }

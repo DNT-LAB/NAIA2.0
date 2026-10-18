@@ -31534,11 +31534,35 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
   background: rgba(10,10,15,0.85); color: var(--text-primary); font: 600 9.5px var(--font-mono); cursor: pointer;
 }
 
-/* Sequence 항목 = 글 + 오른쪽 끝 [생성] [미리보기] (사용자 2026-10-18). 항목은 누르는 곳이 아니다.
+/* Sequence 항목 = 글 + 오른쪽 끝 [☆] [생성] [미리보기] (사용자 2026-10-18). 항목을 누르면 고른다(메인 Generate = 고른 것).
    위쪽 .seq-flow-card 의 세로 배치를 가로로 되돌린다 - 파일 순서로 이긴다(뒤에 둔다). */
 .seq-flow-card.seq-flow-item {
-  flex-direction: row; align-items: center; gap: 8px; cursor: default;
+  flex-direction: row; align-items: center; gap: 8px; cursor: pointer;
 }
+/* 고른 항목 - 미리보기 호버(.active 파랑)와 겹쳐도 보이게 테두리 두께로 가른다. */
+.seq-flow-card.seq-flow-item.selected {
+  border-color: var(--accent, #7c6cf0); box-shadow: inset 0 0 0 1px var(--accent, #7c6cf0);
+  background: rgba(124, 108, 240, 0.12);
+}
+.seq-flow-card.seq-flow-item.seq-missing { cursor: default; opacity: 0.6; }
+.seq-gid { margin-left: auto; font-size: 10px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.seq-star {
+  border: none; background: none; padding: 2px 4px; cursor: pointer;
+  font-size: 16px; line-height: 1; color: var(--text-muted);
+}
+.seq-star:hover { color: #f5c542; }
+.seq-star.on { color: #f5c542; }
+.seq-favchip { margin-left: auto; padding: 3px 8px; font-size: 11px; font-weight: 600; color: var(--text-primary); }
+/* '방금 생성' 칸 - 목록을 내려도 바닥에 붙어 있다(사용자 2026-10-18: SEQ Random 이 고른 이야기를 다시 찾을 수 있게).
+   스크롤 칸(.tab-content)의 아래 여백 10px 만큼 내려 붙인다 - bottom: 0 이면 그 틈으로 목록 글자가 비친다(실측). */
+.seq-recent {
+  position: sticky; bottom: -10px; z-index: 2;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 0 12px; background: var(--bg-surface);
+  border-top: 1px solid var(--border-dim);
+}
+.seq-recent[hidden] { display: none; }
+.seq-recent-head { font-size: 11px; font-weight: 700; color: var(--text-muted); margin: 0 2px; }
 .seq-flow-item .seq-flow-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .seq-flow-actions { flex: 0 0 auto; display: flex; gap: 5px; }
 .seq-btn.seq-mini { padding: 5px 9px; font-size: 11px; white-space: nowrap; }

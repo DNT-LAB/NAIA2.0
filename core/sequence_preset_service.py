@@ -350,6 +350,23 @@ class SequencePresetService:
             "preview": ", ".join(t.replace("_", " ") for t in last_tags[:10]),
         }
 
+    def group_summaries(self, group_ids: Any) -> list[dict[str, Any]]:
+        """그룹 번호 목록 -> 카드 요약(받은 순서 그대로). 즐겨찾기 · '방금 생성' 칸이 쓴다(사용자 2026-10-18).
+        데이터에 없는 번호(데이터가 바뀌어 빠졌거나 아직 안 받았다)는 `missing` 으로 남긴다 - 별을 뗄 수 있게."""
+        self._ensure_loaded()
+        out: list[dict[str, Any]] = []
+        for raw in group_ids or []:
+            try:
+                gid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            pos = self._idx.get(gid)
+            if pos is None or self._df is None:
+                out.append({"groupId": gid, "missing": True})
+                continue
+            out.append(self._group_summary(self._df.iloc[pos]))
+        return out
+
     @staticmethod
     def _load_frames(row: pd.Series) -> list[dict[str, Any]]:
         try:

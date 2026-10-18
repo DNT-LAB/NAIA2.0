@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from core.sequence_favorites import FAVORITES_FILE_NAME, SequenceFavoritesStore
 from core.sequence_preset_service import SequencePresetService
 from core.web_session_context import WebSessionContext
 from utils.sequence_comic_prompt import build_comic_body, build_comic_prompt, comic_spec
@@ -63,6 +64,21 @@ def sequence_download_service(context: WebSessionContext):
     return svc
 
 
+def sequence_favorites_store(context: WebSessionContext) -> SequenceFavoritesStore:
+    """즐겨찾기(사용자 2026-10-18) - user-data 의 `sequence_favorites.json`."""
+    store = getattr(context, "sequence_favorites_store", None)
+    if store is None:
+        store = SequenceFavoritesStore(context._save_path(FAVORITES_FILE_NAME))
+        context.sequence_favorites_store = store
+    return store
+
+
+def _favorites_payload(context: WebSessionContext) -> dict[str, Any]:
+    rows = sequence_favorites_store(context).entries()
+    groups = sequence_preset_service(context).group_summaries([row["groupId"] for row in rows])
+    return {"ok": True, "favorites": groups}
+
+
 def _generation_service(context: WebSessionContext):
     from app.backend.server.generation_commands import generation_service
 
@@ -97,6 +113,29 @@ def _character_text(value: Any) -> str:
     if isinstance(value, dict):
         value = value.get("prompt") or value.get("text") or ""
     return str(value or "").strip()
+
+
+def _inset_virtual_characters(session_context: WebSessionContext) -> list[dict[str, str]] | None:
+    """레퍼런스 인셋이 켜져 있으면 그 가상 캐릭터 `[{prompt, uc}]`(비었으면 []), 꺼져 있으면 None.
+
+    인셋이 켜져 있는 동안 캐릭터 퀵 패널은 '가상 · 인셋' 을 보이고 일반 생성도 그것만 싣는다(우회 모드). Sequence 는
+    특수 요청이라 인셋이 안 실리는데, 얼리는 캐릭터는 숨은 **메인 슬롯**이었다 - 화면에 보이는 인물과 다른 인물로 그리거나
+    메인 슬롯이 비면 '캐릭터를 넣어 주세요' 로 막혔다(사용자 제보 2026-10-18). 켜짐 판정은 일반 생성이 인셋을 싣는 곳
+    (`reference_inset_generation_params` - 꽂아 둔 그림 + 켜짐)에서 그대로 읽는다."""
+    getter = getattr(session_context, "_character_asset_service", None)
+    if not callable(getter):
+        return None
+    try:
+        params = getter().reference_inset_generation_params()
+    except Exception:
+        return None
+    if not params:
+        return None
+    out: list[dict[str, str]] = []
+    for item in params.get("sketchbook_character_prompts") or []:
+        if isinstance(item, dict) and str(item.get("prompt") or "").strip():
+            out.append({"prompt": str(item.get("prompt") or "").strip(), "uc": str(item.get("uc") or "").strip()})
+    return out
 
 
 def _coerce_dim(value: Any) -> int | None:
@@ -202,9 +241,22 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
     #    인물은 캐릭터 프롬프트가 정한다(장면 태그에서 캐릭터 특징을 뺀다) - 비어 있으면 시작하지 않는다.
     _ = use_vibe   # 한 장뿐이라 Vibe 캡처 · 주입 대상이 없다
     try:
-        chars = [c for c in ((frozen_chars or {}).get("characters") or []) if _character_text(c)]
-        if not chars:
-            raise SequenceNeedsCharacter("캐릭터 프롬프트를 먼저 넣어 주세요 - Sequence 는 캐릭터 프롬프트로 인물을 정합니다.")
+        virtual = _inset_virtual_characters(session_context)
+        if virtual is not None:
+            # 인셋이 켜져 있으면 인물 = 인셋의 가상 캐릭터(사용자 결정 2026-10-18 - 화면에 보이는 그 인물). 인셋 그림은 싣지
+            # 않는다(만화 한 장 t2i 그대로 · 해상도도 장면 수 사양 그대로). 좌표는 AUTO - 인셋의 가상 캐릭터는 POS AUTO 만 쓴다.
+            if not virtual:
+                raise SequenceNeedsCharacter(
+                    "레퍼런스 인셋이 켜져 있습니다 - 인셋의 가상 캐릭터를 먼저 넣어 주세요 (Sequence 는 캐릭터 프롬프트로 인물을 정합니다).")
+            chars_all: list[Any] = [item["prompt"] for item in virtual]
+            ucs = [item["uc"] for item in virtual]
+            positions: list[Any] = []
+        else:
+            chars_all = list((frozen_chars or {}).get("characters") or [])
+            if not [c for c in chars_all if _character_text(c)]:
+                raise SequenceNeedsCharacter("캐릭터 프롬프트를 먼저 넣어 주세요 - Sequence 는 캐릭터 프롬프트로 인물을 정합니다.")
+            ucs = list((frozen_chars or {}).get("uc") or [])
+            positions = list((frozen_chars or {}).get("character_positions") or [])
         frames = [{"tags": str(src.get("prompt") or "").split(","), "rating": src.get("rating") or ""}
                   for src in sources["sources"]]
         n_scenes, body = build_comic_body(frames)
@@ -267,13 +319,12 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
             overrides["random_resolution"] = False
             overrides["width"], overrides["height"] = spec["size"]
             overrides["resolution"] = f"{spec['size'][0]} x {spec['size'][1]}"
-        ucs = list((frozen_chars or {}).get("uc") or [])
-        chars_all = list((frozen_chars or {}).get("characters") or [])
         overrides["characters"] = chars_all
         overrides["uc"] = (ucs + [""] * len(chars_all))[:len(chars_all)]
-        positions = (frozen_chars or {}).get("character_positions") or []
         if positions:
-            overrides["character_positions"] = list(positions)
+            overrides["character_positions"] = positions
+        elif virtual is not None:
+            overrides["character_positions"] = []   # 세션에 남은 메인 슬롯 좌표가 가상 캐릭터에 묻지 않게
         command = {
             "type": "generate",
             "api_mode": api_mode,
@@ -353,6 +404,13 @@ async def start_sequence_run(
                       total_frames=ok_count, auto_gen=auto_gen, use_vibe=use_vibe)
     if ok_count and session_context.headless_generation_execute_enabled:
         start_generation_runner(session_context, clients)
+    # '방금 생성' 칸(사용자 2026-10-18)이 그릴 요약 - SEQ Random 이 고른 그룹을 화면이 다시 찾을 수 있게.
+    group = None
+    if ok_count:
+        try:
+            group = (await run_in_thread(sequence_preset_service(session_context).group_summaries, [group_id]))[0]
+        except Exception:
+            group = None
     try:
         await broadcast_json(clients, session_context._sequence_run_module_state())
     except Exception:
@@ -361,6 +419,7 @@ async def start_sequence_run(
         "ok": ok_count > 0,
         "status": "sequence_run_started",
         "groupId": group_id,
+        "group": group,
         "runId": run_id if ok_count else "",
         "total": total,
         "enqueued": ok_count,
@@ -474,6 +533,34 @@ def register_sequence_preset_routes(
             return JSONResponse(
                 {"error": f"Sequence expand failed: {exc}"}, status_code=500
             )
+
+    @app.get("/api/sequence-preset/favorites")
+    async def api_sequence_preset_favorites():
+        try:
+            return await run_in_thread(_favorites_payload, session_context)
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence favorites failed: {exc}"}, status_code=500)
+
+    @app.post("/api/sequence-preset/favorites")
+    async def api_sequence_preset_favorite_mark(req: Request):
+        # 별 달기 / 떼기(사용자 2026-10-18). 답 = 바뀐 뒤의 즐겨찾기 전체(카드 요약).
+        payload = await _read_json(req)
+        try:
+            gid = int(payload.get("groupId"))
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "groupId is invalid."}, status_code=400)
+        favorite = session_context._coerce_bool(payload.get("favorite", True))
+
+        def _mark():
+            sequence_favorites_store(session_context).mark(gid, favorite)
+            return _favorites_payload(session_context)
+
+        try:
+            return await run_in_thread(_mark)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Sequence favorite failed: {exc}"}, status_code=500)
 
     @app.post("/api/sequence-preset/generate")
     async def api_sequence_preset_generate(req: Request):

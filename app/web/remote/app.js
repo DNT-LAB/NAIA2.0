@@ -3353,7 +3353,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqcomic3')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqpick1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -3361,7 +3361,12 @@ const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=2026
       showToast,
       bindTagAssist,
       getApiMode: () => currentMode || modeSelect?.value || '',
+      // 항목을 고르면 메인 Generate 글자가 `#id Generate` 가 된다(사용자 2026-10-18).
+      onSelectionChange: () => updateGenerateButtonMode(),
     });
+    // 패널이 늦게 떴으면 그 전에 온 런 상태(마지막 그룹)를 넘긴다 - '방금 생성' 칸.
+    const run = moduleStateCache.get('sequence_run');
+    if (run) sequencePresetControl.onRunState?.(run);
   })
   .catch(error => {
     console.error('Failed to initialize Sequence Preset panel', error);
@@ -9538,10 +9543,11 @@ function send(cmd, options = {}) {
     // 토스트로 안내하고 요청을 스킵한다(일반 생성 폴백 차단). Auto Gen(백엔드 연속 루프)은
     // 이 수동 Generate 분기를 타지 않으므로 영향 없음.
     if (activePromptTab === 'sequence') {
-      if (sequencePresetControl?.hasOpenGroup?.()) {
-        sequencePresetControl.generateOpenGroup();
+      // 메인 Generate = 고른 이야기(사용자 2026-10-18 - 항목을 누르면 고른다 · 단추 글자 `#id Generate`).
+      if (sequencePresetControl?.hasSelection?.()) {
+        sequencePresetControl.generateSelected();
       } else {
-        showToast('시퀀스에서는 목록의 [생성] 이나 SEQ Random (생성) 을 눌러 주세요.', 'error');
+        showToast('시퀀스에서는 항목을 눌러 고른 뒤 Generate 를 누르거나, [생성] · SEQ Random (생성) 을 눌러 주세요.', 'error');
       }
       return;
     }
@@ -9568,6 +9574,12 @@ function send(cmd, options = {}) {
     return;
   }
   if (cmd === 'random') {
+    // Sequence 탭의 Random 은 이벤트 맵 연결(EV · ST)보다 먼저다(사용자 2026-10-18 - 스테이징이 연결돼 있으면 SEQ 탭에서도
+    // ST Random 이 나갔다). 시퀀스는 검색 풀도 안 쓴다 - 풀 로딩 차단보다도 앞에 둔다.
+    if (activePromptTab === 'sequence' && sequencePresetControl?.randomGenerate) {
+      sequencePresetControl.randomGenerate();
+      return;
+    }
     if (window.eventMap?.isRandomLinked?.() || window.eventMap?.isRandomLinkPending?.()) {
       // 이벤트 맵이 Random 을 쥐고 있을 때도 **사람이 누른 Random** 이다 - '랜덤을 누를 때 생성합니다' 가 여기에도
       // 걸린다(사용자 지시 2026-10-11). 답을 기다리는 중의 재입력은 `requestRandomPrompt` 가 스스로 버린다.
@@ -9578,11 +9590,6 @@ function send(cmd, options = {}) {
     // (covers the ALT+ENTER shortcut, which bypasses the button's pointer-events).
     if (poolLoad.isActive()) {
       showToast('검색 풀을 불러오는 중입니다. 완료 후 다시 시도해주세요.', 'error');
-      return;
-    }
-    // Sequence 탭에서 메인 Random = 현재 매칭 전체에서 랜덤 그룹 연속 생성(req2/3).
-    if (activePromptTab === 'sequence' && sequencePresetControl?.randomGenerate) {
-      sequencePresetControl.randomGenerate();
       return;
     }
     if (activePromptTab === 'isequence' && inpaintSequenceControl?.randomGenerate) {
@@ -9679,7 +9686,9 @@ function updateGenerateButtonMode() {
   btnGen.classList.toggle('preset-mode', presetMode);
   if (btnRnd) {
     const promptFixed = getOptionChecked('prompt_fixed');
-    btnRnd.disabled = window.eventMap?.isRandomLinkPending?.() || (presetMode && !window.eventMap?.isRandomLinked?.()
+    // Sequence 탭은 이벤트 맵 연결을 기다리지 않는다 - 그 탭의 Random 은 시퀀스 것이다.
+    const linkPending = activePromptTab !== 'sequence' && window.eventMap?.isRandomLinkPending?.();
+    btnRnd.disabled = linkPending || (presetMode && !window.eventMap?.isRandomLinked?.()
       ? (promptFixed || !!presetGenerationPending || generating || !eventPresetPanel?.canRandomize?.())
       : (promptFixed || awaitingMyRandom));
     if (!rndTimer) btnRnd.innerHTML = randomButtonHtml();
@@ -9689,7 +9698,7 @@ function updateGenerateButtonMode() {
     btnGen.disabled = presetMode
       ? (promptFixed || !!presetGenerationPending || !eventPresetPanel?.canGenerate?.())
       : false;
-    btnGen.innerHTML = genButtonHtml('Generate');
+    btnGen.innerHTML = genButtonHtml(generateButtonLabel());
   } else {
     // 생성 중에 탭을 옮기면 쌓을 수 있는 자리인지가 바뀐다(프리셋·시퀀스 탭은 못 쌓는다).
     btnGen.disabled = !canQueueGenerate();
@@ -9871,12 +9880,17 @@ function stopRndTimer() {
  *  ST Random(사용자 지시 2026-10-14).
  *  ⚠️ 버튼 글자를 쓰는 자리가 둘이다(여기 · 스트림 배지). 리터럴 'Random' 을 쓰면 연결 표시가 지워진다. */
 function randomButtonLabel() {
-  if (!window.eventMap?.isRandomLinked?.()) {
-    // Sequence 탭의 Random 은 매칭 전체에서 이야기 하나를 골라 바로 생성한다(사용자 2026-10-18). 이벤트 맵이 Random 을
-    // 쥐고 있으면 실제로도 그쪽이 먼저 받으므로(`send('random')`) 글자도 그 순서를 따른다.
-    return activePromptTab === 'sequence' ? 'SEQ Random (생성)' : 'Random';
-  }
+  // Sequence 탭의 Random 은 매칭 전체에서 이야기 하나를 골라 바로 생성한다(사용자 2026-10-18). 이벤트 맵이 Random 을
+  // 쥐고 있어도 이 탭에서는 시퀀스가 먼저 받는다(`send('random')`) - 글자도 그 순서를 따른다.
+  if (activePromptTab === 'sequence') return 'SEQ Random (생성)';
+  if (!window.eventMap?.isRandomLinked?.()) return 'Random';
   return window.eventMap.randomLinkMode?.() === 'staging' ? 'ST Random' : 'EV Random';
+}
+
+/** Generate 버튼의 **기본 글자**. Sequence 탭에서 고른 이야기가 있으면 `#번호 Generate`(사용자 2026-10-18). */
+function generateButtonLabel() {
+  const seqId = activePromptTab === 'sequence' ? sequencePresetControl?.selectedGroupId?.() : 0;
+  return seqId ? `#${seqId} Generate` : 'Generate';
 }
 
 function randomButtonHtml() {
@@ -12715,6 +12729,8 @@ function onModuleState(m) {
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
+  // Sequence 런 상태 - Auto Gen 이 다음 라운드로 넘어가면 그 그룹이 '방금 생성' 칸에 뜬다(사용자 2026-10-18).
+  else if (m.module_id === 'sequence_run') sequencePresetControl?.onRunState?.(m);
   else if (m.module_id === 'character') {
     updateCharBadge(m);
     // 결과 화면 위 빠른 캐릭터 패널. 팝업이 열려 있든 말든 상태는 늘 최신이어야

@@ -608,7 +608,29 @@ def settled_tag_filter_rating_counts(context: WebSessionContext) -> dict[str, in
         state = context.normalize_search_filter_state(getattr(context, "search_filter_state", None))
         if not state.get("tag_filter_active"):
             return None
+        # 화면의 시작 재적용이 걸 조건(저장된 적용 분기, 없으면 칩 - quickFilter.applyPreferences)과 지금 걸린 조건이
+        # 같을 때만이다. 칩을 고친 직후(적용은 280ms 뒤) 새로고침하면 저장값은 새 칩 · 메모리는 옛 조건이라, 그때는
+        # 화면이 다시 걸어야 한다(Codex). 조건을 만드는 길은 재조립과 같다(normalize_filter_tags · 분기 정규화).
+        include = [str(tag) for tag in (state.get("tag_filter") or []) if str(tag).strip()]
+        exclude = [str(tag) for tag in (state.get("tag_filter_exclude") or []) if str(tag).strip()]
+        persisted = _tag_filter_condition_key(
+            WebSessionContext.normalize_filter_tags([*include, *[f"-{tag}" for tag in exclude]]),
+            normalize_tag_filter_branches(state.get("tag_filter_applied_branches")),
+        )
+        if persisted != _tag_filter_condition_key(tag_filter.get("tags"), tag_filter.get("branches")):
+            return None
         return {str(k): int(v or 0) for k, v in dict(tag_filter.get("rating_counts") or {}).items()}
+
+
+def _tag_filter_condition_key(tags: Any, branches: Any) -> tuple:
+    """걸리는 조건의 비교 열쇠 - 분기가 있으면 분기들(칩은 초안이라 안 본다), 없으면 칩 한 벌. 순서는 무관하다.
+    검색처럼 대소문자를 안 가리고 `_` 를 공백으로 보며 같은 태그는 한 번만 센다 - 저장은 `Solo`·`solo` 를 하나로
+    합치는데 걸린 쪽은 둘 다 남아, 같은 조건이 다르다고 나와 시작 재적용이 쓴 행을 되살렸다(Codex 재리뷰)."""
+    def canon(tag: Any) -> str:
+        return " ".join(str(tag).replace("_", " ").split()).lower()
+
+    groups = [list(b) for b in (branches or []) if b] or [list(tags or [])]
+    return tuple(sorted({tuple(sorted({canon(t) for t in group} - {""})) for group in groups}))
 
 
 def run_search_command(

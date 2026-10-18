@@ -200,6 +200,7 @@ export function createQuickFilterController(deps) {
   let searchSeq = 0;
   let latestSearchRequestId = '';
   let latestTagFilterRevision = 0;
+  let reapplySocket = null;          // '재적용 중…' 을 띄운 소켓(reapplyingShown)
   let searchDebounceTimer = null;
   let latestAcRequest = {target: '', query: ''};
   // 빠른 스테이징(사용자 지정 2026-09-25 - 📌 기준 고정은 회수). 결과 = 켜진 담은 것들 ∪ 지금 칩.
@@ -365,6 +366,8 @@ export function createQuickFilterController(deps) {
     renderBranches();
     const countEl = getEl('tagFilterCount');
     if (!countEl) return;
+    // 다시 거는 중('재적용 중…')이면 그사이 온 상태(get_search_state 등)의 옛 수로 덮지 않는다 - 끝나면 다시 그린다(Codex).
+    if (reapplyingShown(countEl)) return;
     // 머리줄 수 = **지금 풀에 걸린** 것. 커밋하면 달라지는 수는 스테이징 머리줄이 보인다.
     const hasTags = active;
     if (!hasTags) {
@@ -388,7 +391,9 @@ export function createQuickFilterController(deps) {
   // 다시 뽑힌다 - 묻지 않는다). 칩이 남았는데 풀에 안 걸려 있으면(Search [Restore] · green [검색] 이 푼 뒤) 수 자리에
   // '풀림' + 파란 단추 - 전에는 수가 말없이 사라져 필터가 날아간 줄 몰랐다. 다시 걸 것이 없으면 숨긴다.
   function renderReapply() {
-    const released = !active && reapplyTarget().length > 0;
+    // 꺼져 있을 때는 칩이나 담은 것이 있어야 '풀림' 이다 - 다시 거는 중에 다른 탭이 전부 지우면 lastApplied 가 남아
+    // 빈 칩 화면에 '풀림' 이 뜨고 지운 조건을 되살렸다(Codex 재리뷰).
+    const released = !active && hasFilter() && reapplyTarget().length > 0;
     const btn = getEl('tagFilterReapplyBtn');
     if (btn) {
       btn.hidden = !active && !released;
@@ -407,12 +412,20 @@ export function createQuickFilterController(deps) {
     countEl.classList.toggle('is-released', showReleased);
   }
 
+  /** '재적용 중…' 을 보이며 다시 거는 중인가 - 그사이 온 상태가 그 글을 지우지 않게 하는 판정.
+   *  그 글을 띄운 소켓이 아직 열려 있을 때만이다 - 끊겼다 다시 붙으면 응답이 영영 안 와 글에 멈췄다(Codex 재리뷰). */
+  function reapplyingShown(countEl) {
+    return !!applyInFlight && !!countEl && countEl.textContent === '재적용 중…'
+      && isSocketOpen() && deps.getWs() === reapplySocket;
+  }
+
   /** [재적용] 을 눌렀다 - 걸려 있으면 다시 채우고, 풀렸으면 다시 건다. 소켓이 끊겼으면 아무것도 바꾸지 않는다. */
   function reapplyNow() {
     const target = reapplyTarget();
-    if (!target.length) return false;
+    if (!target.length || (!active && !hasFilter())) return false;
     save();
     if (!applyConfig(target, tempSig ? 'temp' : 'reapply')) return false;
+    reapplySocket = deps.getWs();
     const countEl = getEl('tagFilterCount');
     if (countEl) {
       countEl.textContent = '재적용 중…';
@@ -1434,6 +1447,7 @@ export function createQuickFilterController(deps) {
       // 받아야 한다(계약 검사 tests/_quick_filter_contract_check.mjs).
       if (message.request_id && message.request_id === applyRequestId) {
         applyInFlight = null;
+        renderMatchedCount(active ? 'assigned' : 'matched');   // '재적용 중…' 동안 미룬 그리기(이 응답이 아닌 지금 상태로)
         if (previewQueued) { previewQueued = false; sendPreviewNow(); }
       }
       return true;
@@ -1589,6 +1603,9 @@ export function createQuickFilterController(deps) {
         ? [[...pref.tag_filter, ...pref.tag_filter_exclude.map(tag => '-' + tag)]] : [];
       appliedBranches = active ? cloneBranches(pref.tag_filter_applied_branches.length ? pref.tag_filter_applied_branches : legacy) : [];
       if (appliedBranches.length) lastApplied = cloneBranches(appliedBranches);
+      // 칩 · 담은 것 · 걸린 조합이 모두 빈 채 꺼졌다(다른 탭의 전체 Clear) - 마지막 조합도 버린다. 남기면 [재적용] 이
+      // 빈 칩 화면에 '풀림' 을 띄우고 지운 조건을 되살렸다(Codex).
+      else if (!active && !includeTags.length && !excludeTags.length && !stagedBranches.length) lastApplied = [];
       // 합쳐 둔 담은 것 = 걸린 조합 중 **담은 목록에 있는 것**(창을 다시 열어도 합친 상태가 남는다).
       // ⚠️ 여기서 담은 목록을 **늘리지 마라.** '지금 칩과 다른 조합' 을 전부 합쳐진 것으로 보고 목록에
       //    되살렸더니, 칩을 고칠 때마다 서버 메아리(search_state)가 싣고 온 **직전 칩 조합**이 담은 것으로
@@ -1615,7 +1632,7 @@ export function createQuickFilterController(deps) {
     if (sameTags) {
       // 칩 불변: 캐시된 등급별 카운트로 매치 라벨을 다시 그려 유지(reconcile 시 깜빡임/소실 방지).
       renderMatchedCount(active ? 'assigned' : 'matched');
-    } else if (countEl) {
+    } else if (countEl && !reapplyingShown(countEl)) {
       countEl.textContent = '';
       countEl.classList.remove('has-result');
     }

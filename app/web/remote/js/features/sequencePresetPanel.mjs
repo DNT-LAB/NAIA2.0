@@ -22,21 +22,24 @@ const STAGE_LABELS = {
 };
 const RATING_LABELS = {g: 'G', s: 'S', q: 'Q', e: 'E'};
 const ALL_RATINGS = ['e', 'q', 's', 'g'];
-const CUTS = [2, 3, 4, 5, 6];
+// 2~4컷만(사용자 2026-10-18 - 5 · 6컷은 모델이 받는지 검증되지 않았다. 백엔드도 데이터를 읽을 때 뺀다).
+const CUTS = [2, 3, 4];
 
 export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAssist, getApiMode}) {
   const state = {
     available: null,        // null=미확인
     presentRatings: [],
     groupCount: 0,
-    query: {include: '1girl', exclude: '', ratings: new Set(['s']), cuts: new Set()},
+    // G · S 이야기는 백엔드가 뺀다(사용자 2026-10-18) - 수위 칩은 Q · E 만 남고 기본은 Q.
+    query: {include: '1girl', exclude: '', ratings: new Set(['q']), cuts: new Set()},
     results: null,
     detail: null,
-    openGroupId: null,      // 우측 팝업에 열린 그룹 (카드 하이라이트용)
-    // 하단 '고정' 토글 — 생성 시 백엔드로 전달. SEED·해상도 기본 ON.
-    fixSeed: true,
-    fixResolution: true,
+    openGroupId: null,      // 미리보기 툴팁에 떠 있는 그룹
+    // 하단 '고정' 토글은 숨기고 강제 해제(사용자 2026-10-18). 백엔드도 요청 값을 받지 않는다.
+    fixSeed: false,
+    fixResolution: false,
     useVibe: false,
+    previews: new Map(),    // groupId -> /sequence 응답(미리보기 툴팁 캐시)
     busy: false,
   };
   let incEl = null, excEl = null, bodyEl = null, popupEl = null, dlTimer = null;
@@ -89,7 +92,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       }
       state.presentRatings = (st.ratings || []).filter(r => ALL_RATINGS.includes(r));
       state.groupCount = st.groupCount || 0;
-      if (!state.presentRatings.includes('s')) state.query.ratings.delete('s');
+      if (!state.presentRatings.includes('q')) state.query.ratings.delete('q');
       state.available = true;
       buildShell();
       await runSearch();
@@ -171,13 +174,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         </div>
       </div>
       <div class="seq-body" id="seqBody"></div>
-      <div class="seq-fixrow">
-        <span class="seq-fixlabel">고정</span>
-        <label class="seq-fixchk"><input type="checkbox" data-seq-fix="seed" ${state.fixSeed ? 'checked' : ''}> SEED</label>
-        <label class="seq-fixchk"><input type="checkbox" data-seq-fix="resolution" ${state.fixResolution ? 'checked' : ''}> 해상도</label>
-        <label class="seq-fixchk ${vibeAllowed() ? '' : 'seq-chk-disabled'}"><input type="checkbox" data-seq-fix="vibe" ${vibeAllowed() && state.useVibe ? 'checked' : ''} ${vibeAllowed() ? '' : 'disabled'}> 첫 이미지를 Vibe로 사용 <span class="seq-fixhint">(2 Anlas)</span></label>
-      </div>
-      <div class="seq-popup" id="seqPopup"></div>`;
+      <div class="seq-popup seq-peek" id="seqPopup"></div>`;
     incEl = panel.querySelector('#seqInclude');
     excEl = panel.querySelector('#seqExclude');
     bodyEl = panel.querySelector('#seqBody');
@@ -242,17 +239,19 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
   }
 
-  // 그룹 클릭 → 좌측 결과는 유지하고 우측 팝업에 상세+연속생성 표시(← 뒤로가기 불필요).
-  // 다른 카드를 누르면 팝업이 그 그룹으로 갱신된다.
+  // [미리보기] 에 마우스를 올리면 툴팁으로 그 그룹의 만화 한 장 구성을 보여 준다(사용자 2026-10-18 - 항목 클릭은 없앴다).
+  // 응답은 그룹별로 캐시한다. 늦게 온 응답은 지금 떠 있는 그룹일 때만 그린다(그새 다른 항목으로 옮겼을 수 있다).
   async function openGroup(groupId) {
     const id = Number(groupId);
     state.openGroupId = id;
-    state.detail = null;
+    state.detail = state.previews.get(id) || null;
     highlightCards();
-    renderPopup();              // 로딩 상태로 즉시 표시
+    renderPopup();
+    if (state.detail) return;
     try {
       const d = await postJson('/api/sequence-preset/sequence', {groupId: id});
-      if (state.openGroupId !== id) return;   // 그새 다른 카드를 누른 경우
+      state.previews.set(id, d);
+      if (state.openGroupId !== id) return;
       state.detail = d;
       renderPopup();
     } catch (error) {
@@ -263,7 +262,7 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
 
   async function generateGroup(groupId) {
     if (state.busy) return;
-    state.busy = true; renderPopup();
+    state.busy = true; syncGenerateButtons();
     try {
       const out = await postJson('/api/sequence-preset/generate',
         {groupId: Number(groupId), ...searchPayload()});
@@ -277,14 +276,19 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
         const detail = failed.map(f => `컷${f.index + 1}(${f.error || 'failed'})`).join(', ');
         showToast(`${out.total}컷 중 ${out.enqueued}컷 등록${skipNote} · 실패: ${detail}`, 'warning');
       } else {
+        const what = out.scenes ? `${out.scenes}장면 만화 1장` : `${out.enqueued}장`;
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
-                              : `${out.enqueued}컷 생성 큐 등록${skipNote}`, 'success');
+                              : `${what} 생성 큐 등록${skipNote}`, 'success');
       }
     } catch (error) {
       showToast(`생성 실패: ${error.message}`, 'error');
     } finally {
-      state.busy = false; renderPopup();
+      state.busy = false; syncGenerateButtons();
     }
+  }
+
+  function syncGenerateButtons() {
+    panel.querySelectorAll('[data-seq-generate]').forEach(b => { b.disabled = !!state.busy; });
   }
 
   // 메인 Random(Alt+Enter) — Sequence 컨텍스트. 현재 매칭 전체에서 랜덤 그룹 1개를 연속 생성.
@@ -301,8 +305,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
       if (!out.ok) {
         showToast(`연속 생성 실패: ${failed.length ? failed[0].error : (out.error || '매칭/자격증명/큐 확인')}`, 'error');
       } else {
+        const what = out.scenes ? `${out.scenes}장면 만화 1장` : `${out.enqueued}장`;
         showToast(out.autoGen ? `연속 생성 시작 (그룹 #${out.groupId}, Auto Gen)${skipNote}`
-                              : `${out.enqueued}컷 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
+                              : `${what} 생성 큐 등록 (그룹 #${out.groupId})${skipNote}`, 'success');
       }
     } catch (error) {
       showToast(`연속 생성 실패: ${error.message}`, 'error');
@@ -327,52 +332,64 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
     const head = `<div class="seq-rescount">${r.total.toLocaleString()}건 매칭 · ${r.groups.length} 표시
       ${state.groupCount ? `<span class="seq-count">전체 ${state.groupCount.toLocaleString()}</span>` : ''}</div>`;
-    const cards = r.groups.map(g => `
-      <button type="button" class="seq-flow-card ${state.openGroupId === g.groupId ? 'active' : ''}" data-seq-group="${escHtml(String(g.groupId))}">
-        <span class="seq-flow-meta">${ratingBadge(g.peakRating)} ${escHtml(String(g.frameCount))}컷
-          <span class="seq-arc">${g.stages.map(s => escHtml(STAGE_LABELS[s] || s)).join('›')}</span></span>
-        <span class="seq-flow-name">${escHtml(g.preview || '')}</span>
-      </button>`).join('');
+    // 항목 = 글 + 오른쪽 끝 [생성] [미리보기](사용자 2026-10-18). 항목 자체는 누르는 곳이 아니다.
+    const cards = r.groups.map(g => {
+      const id = escHtml(String(g.groupId));
+      return `
+      <div class="seq-flow-card seq-flow-item ${state.openGroupId === g.groupId ? 'active' : ''}" data-seq-group="${id}">
+        <div class="seq-flow-text">
+          <span class="seq-flow-meta">${ratingBadge(g.peakRating)} ${escHtml(String(g.frameCount))}컷
+            <span class="seq-arc">${g.stages.map(s => escHtml(STAGE_LABELS[s] || s)).join('›')}</span></span>
+          <span class="seq-flow-name">${escHtml(g.preview || '')}</span>
+        </div>
+        <div class="seq-flow-actions">
+          <button type="button" class="seq-btn primary seq-mini" data-seq-generate="${id}" ${state.busy ? 'disabled' : ''}>생성</button>
+          <button type="button" class="seq-btn seq-mini" data-seq-peek="${id}">미리보기</button>
+        </div>
+      </div>`;
+    }).join('');
     return head + `<div class="seq-flow-list">${cards}</div>`;
   }
 
-  // 우측 팝업: 결과 리스트는 그대로 두고 상세+연속생성을 보여준다. 헤더 ×로 닫고,
-  // 다른 카드를 누르면 openGroup 이 내용을 교체한다.
+  // 미리보기 툴팁(사용자 2026-10-18): 모양은 예전 우측 팝업 그대로. 캐릭터 특징은 뺀 채(백엔드 comic_preview)
+  //   character clothing 상자 · scene 1 = 실을 태그 · scene 2~ = `add :` / `rem :` 두 줄(옷은 rem 에 안 보인다).
+  //   생성 버튼은 없다 - 항목의 [생성] 이 한다.
   function renderPopup() {
     if (!popupEl) return;
     popupEl.classList.add('open');
     if (!state.detail) {
       popupEl.innerHTML = `
-        <div class="seq-popup-head">
-          <span class="seq-popup-title">불러오는 중…</span>
-          <button type="button" class="seq-popup-close" data-seq-popup-close aria-label="닫기">&times;</button>
-        </div>
-        <div class="seq-popup-body"><div class="seq-empty">시퀀스 불러오는 중…</div></div>`;
+        <div class="seq-popup-head"><span class="seq-popup-title">불러오는 중…</span></div>
+        <div class="seq-popup-body"><div class="seq-empty">미리보기 불러오는 중…</div></div>`;
       return;
     }
     const g = state.detail.group;
-    const frames = state.detail.frames.map(fr => `
+    const comic = state.detail.comic || {clothing: [], scenes: []};
+    const join = list => escHtml((list || []).join(', '));
+    const clothing = (comic.clothing || []).length ? `
+      <div class="seq-frame seq-clothing">
+        <div class="seq-frame-head"><span class="seq-frame-stage">character clothing</span></div>
+        <div class="seq-frame-prompt">${join(comic.clothing)}</div>
+      </div>` : '';
+    const scenes = (comic.scenes || []).map(sc => `
       <div class="seq-frame">
         <div class="seq-frame-head">
-          <span class="seq-frame-no">${escHtml(String(fr.index + 1))}</span>
-          ${ratingBadge(fr.rating)}
-          <span class="seq-frame-stage">${escHtml(fr.stageLabel || STAGE_LABELS[fr.stage] || fr.stage)}</span>
+          <span class="seq-frame-no">${escHtml(String(sc.index))}</span>
+          ${ratingBadge(sc.rating)}
+          <span class="seq-frame-stage">scene ${escHtml(String(sc.index))}</span>
         </div>
-        <div class="seq-frame-prompt">${escHtml(fr.preview)}</div>
+        ${sc.index === 1
+          ? `<div class="seq-frame-prompt">${join(sc.tags)}</div>`
+          : `<div class="seq-frame-prompt seq-add">add : ${join(sc.add)}</div>
+             <div class="seq-frame-prompt seq-rem">rem : ${join(sc.rem)}</div>`}
       </div>`).join('');
     popupEl.innerHTML = `
       <div class="seq-popup-head">
         <span class="seq-popup-title">group #${escHtml(String(g.groupId))}</span>
         ${ratingBadge(g.peakRating)}
-        <span class="seq-count">${escHtml(String(g.frameCount))}컷</span>
-        <button type="button" class="seq-popup-close" data-seq-popup-close aria-label="닫기">&times;</button>
+        <span class="seq-count">${escHtml(String((comic.scenes || []).length))}장면</span>
       </div>
-      <div class="seq-popup-body">${frames}</div>
-      <div class="seq-popup-foot">
-        <button type="button" class="seq-btn primary" data-seq-generate="${escHtml(String(g.groupId))}"
-          ${state.busy ? 'disabled' : ''}>${state.busy ? '처리 중…' : `연속 생성 (${g.frameCount}컷)`}</button>
-        <div class="seq-hint">정체성(작가/캐릭터)은 현재 PE·캐릭터 설정이 채웁니다. 장면만 흐름대로 진행됩니다.</div>
-      </div>`;
+      <div class="seq-popup-body">${clothing}${scenes}</div>`;
   }
 
   function closePopup() {
@@ -406,11 +423,20 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     }
     if (event.target.closest('[data-seq-search]')) { runSearch(); return; }
     if (event.target.closest('[data-seq-random]')) { runSearch({random: true}); return; }
-    if (event.target.closest('[data-seq-popup-close]')) { closePopup(); return; }
-    const card = event.target.closest('[data-seq-group]');
-    if (card) { openGroup(card.dataset.seqGroup); return; }
     const gen = event.target.closest('[data-seq-generate]');
     if (gen) { generateGroup(gen.dataset.seqGenerate); return; }
+  });
+
+  // [미리보기] 호버 = 툴팁. 버튼에 들어올 때 열고 버튼에서 나갈 때 닫는다(버튼 안의 자식 사이 이동은 무시).
+  panel.addEventListener('mouseover', event => {
+    const peek = event.target.closest('[data-seq-peek]');
+    if (!peek || (event.relatedTarget && peek.contains(event.relatedTarget))) return;
+    openGroup(peek.dataset.seqPeek);
+  });
+  panel.addEventListener('mouseout', event => {
+    const peek = event.target.closest('[data-seq-peek]');
+    if (!peek || (event.relatedTarget && peek.contains(event.relatedTarget))) return;
+    closePopup();
   });
 
   // 하단 '고정' 체크박스 — change 위임(라벨 클릭도 정확히 잡힘). 즉시 state 반영(검색 불필요).
@@ -421,6 +447,18 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     if (kind === 'seed') state.fixSeed = fix.checked;
     else if (kind === 'resolution') state.fixResolution = fix.checked;
     else if (kind === 'vibe') { if (!fix.disabled) state.useVibe = fix.checked; }  // 비NAI(disabled)면 값 보존
+  });
+
+  // 포함/제외 칸에서 Enter = 검색(사용자 2026-10-18 - 눌러도 아무 일이 없었다). 자동완성이 후보를 고른 Enter 는
+  // 그쪽이 칸에서 stopPropagation 으로 삼켜 여기까지 안 온다(그 Enter 는 태그 넣기). 조합 중(IME) · Ctrl/Alt+Enter
+  // (전역 생성 · 랜덤)는 건드리지 않는다.
+  panel.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.defaultPrevented) return;
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+    if (!event.target.closest('#seqInclude, #seqExclude')) return;
+    event.preventDefault();
+    runSearch();
   });
 
   // Esc로 우측 팝업 닫기(검색 입력 포커스 중에도). 패널은 1회 생성이라 리스너도 1회.
@@ -434,16 +472,9 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     onOpen() { ensureReady(); },
     onModeChange() { refreshVibeGate(); },   // app.js syncMode → Vibe 체크박스 NAI 게이트 갱신
     // 메인 하단 버튼 라우팅용(app.js). Sequence 탭 활성일 때 Ctrl/Alt+Enter 가 위임된다.
-    hasOpenGroup() {
-      return !!(popupEl && popupEl.classList.contains('open') && state.openGroupId != null);
-    },
-    generateOpenGroup() {  // req1: 보고 있는 그룹의 '연속 생성'. 열린 그룹 없으면 false(폴백).
-      if (popupEl && popupEl.classList.contains('open') && state.openGroupId != null) {
-        generateGroup(state.openGroupId);
-        return true;
-      }
-      return false;
-    },
+    // 열어 두는 그룹 팝업은 없어졌다(미리보기는 호버 툴팁) - 메인 Generate 는 app.js 가 안내만 한다.
+    hasOpenGroup() { return false; },
+    generateOpenGroup() { return false; },
     randomGenerate() { return runRandomGenerate(); },  // req2/3: 랜덤 그룹 연속 생성
   };
 }

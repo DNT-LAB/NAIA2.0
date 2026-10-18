@@ -3248,7 +3248,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20260607-seqvibe6')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-seqcomic3')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -9434,7 +9434,7 @@ function send(cmd, options = {}) {
       if (sequencePresetControl?.hasOpenGroup?.()) {
         sequencePresetControl.generateOpenGroup();
       } else {
-        showToast('시퀀스 프리셋에서는 Generate 대신 Random 버튼을 누르거나, 생성할 이벤트를 선택한 뒤 Generate를 눌러주세요.', 'error');
+        showToast('시퀀스에서는 목록의 [생성] 이나 SEQ Random (생성) 을 눌러 주세요.', 'error');
       }
       return;
     }
@@ -9764,7 +9764,11 @@ function stopRndTimer() {
  *  ST Random(사용자 지시 2026-10-14).
  *  ⚠️ 버튼 글자를 쓰는 자리가 둘이다(여기 · 스트림 배지). 리터럴 'Random' 을 쓰면 연결 표시가 지워진다. */
 function randomButtonLabel() {
-  if (!window.eventMap?.isRandomLinked?.()) return 'Random';
+  if (!window.eventMap?.isRandomLinked?.()) {
+    // Sequence 탭의 Random 은 매칭 전체에서 이야기 하나를 골라 바로 생성한다(사용자 2026-10-18). 이벤트 맵이 Random 을
+    // 쥐고 있으면 실제로도 그쪽이 먼저 받으므로(`send('random')`) 글자도 그 순서를 따른다.
+    return activePromptTab === 'sequence' ? 'SEQ Random (생성)' : 'Random';
+  }
   return window.eventMap.randomLinkMode?.() === 'staging' ? 'ST Random' : 'EV Random';
 }
 

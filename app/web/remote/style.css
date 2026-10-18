@@ -31480,3 +31480,19 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
   padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border-glow);
   background: rgba(10,10,15,0.85); color: var(--text-primary); font: 600 9.5px var(--font-mono); cursor: pointer;
 }
+
+/* Sequence 항목 = 글 + 오른쪽 끝 [생성] [미리보기] (사용자 2026-10-18). 항목은 누르는 곳이 아니다.
+   위쪽 .seq-flow-card 의 세로 배치를 가로로 되돌린다 - 파일 순서로 이긴다(뒤에 둔다). */
+.seq-flow-card.seq-flow-item {
+  flex-direction: row; align-items: center; gap: 8px; cursor: default;
+}
+.seq-flow-item .seq-flow-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.seq-flow-actions { flex: 0 0 auto; display: flex; gap: 5px; }
+.seq-btn.seq-mini { padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+/* 미리보기 = 호버 툴팁. 마우스를 받지 않는다(목록을 가리거나 호버를 빼앗지 않게). */
+.seq-popup.seq-peek { pointer-events: none; }
+.seq-popup.seq-peek .seq-popup-body { overflow: hidden; }
+.seq-frame.seq-clothing { background: var(--bg-surface); }
+/* add = 연노랑(앱의 길잡이 색) · rem = 메인 프롬프트 작가 태그의 옅은 붉은색 */
+.seq-frame-prompt.seq-add { color: #e8d98f; }
+.seq-frame-prompt.seq-rem { color: rgba(255, 205, 196, 1.00); }

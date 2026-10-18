@@ -54,8 +54,10 @@ _GS_PERSON_COUNT = _GS_GIRL_COUNT | _GS_BOY_COUNT
 class SequencePresetService:
     """이벤트 그룹 데이터셋 로드 + 태그 검색 + 그룹 펼침 + 프레임 source_row 산출."""
 
-    def __init__(self, repo_root: Path | str, *, data_root: Path | str | None = None):
+    def __init__(self, repo_root: Path | str, *, data_root: Path | str | None = None, drop_similar: bool = True):
         self.repo_root = Path(repo_root)
+        # 이웃 컷이 비슷한 이야기 버리기(_drop_similar_stories). 검색 · 필터 시험은 끄고 그 자체만 잰다.
+        self.drop_similar = bool(drop_similar)
         self.data_root = Path(data_root) if data_root is not None else self.repo_root / "data"
         runtime_ds = self.data_root / DATASET_RELPATH
         repo_ds = self.repo_root / "data" / DATASET_RELPATH
@@ -104,6 +106,15 @@ class SequencePresetService:
         df["peak_rating"] = df["peak_rating"].astype(str)
         df["search_tags"] = df["search_tags"].astype(str)
         df = self._filter_gs_coherent(df).reset_index(drop=True)  # g/s 여성-인원 비일관 그룹 드롭
+        df = self._drop_similar_stories(df).reset_index(drop=True)  # 이웃 컷이 비슷한 이야기 드롭(만화 한 장)
+        if self.drop_similar:
+            # 2~4컷만(사용자 2026-10-18: 5 · 6컷은 모델이 받는지 검증되지 않았다 - 칩을 빼고 검색 · 랜덤 모집단에서도 뺀다).
+            from utils.sequence_comic_prompt import MAX_SCENES
+
+            df = df[df["frame_count"] <= MAX_SCENES].reset_index(drop=True)
+            # G · S 이야기는 지원하지 않는다(사용자 2026-10-18 - 장면이 거의 안 바뀌어 같은 그림이 되풀이됐다).
+            # 이야기의 최고 등급이 Q · E 인 것만 - 그 안의 G · S 컷은 그대로 쓴다(사용자: 일부 사용은 허용).
+            df = df[df["peak_rating"].isin(["q", "e"])].reset_index(drop=True)
         self._df = df
         self._padded = " " + df["search_tags"] + " "
         if "person" in df.columns:
@@ -114,6 +125,53 @@ class SequencePresetService:
         self._idx = {int(g): i for i, g in enumerate(df["group_id"].values)}
         self._load_ok = len(df) > 0
         return self._load_ok
+
+    def _drop_similar_stories(self, df: pd.DataFrame) -> pd.DataFrame:
+        """이웃 컷이 비슷한 이야기를 통째로 버린다(사용자 2026-10-17 - Sequence 리메이크 = 이야기 하나를 만화 한 장).
+
+        기준은 utils.sequence_comic_prompt.has_similar_neighbors. 전체를 재면 5초쯤 들어(13만 그룹 JSON 파싱)
+        버릴 group_id 목록을 원본 옆 `<이름>.similar_drop.json` 에 둔다. 원본 크기 · 수정 시각 · 규칙 판이 같으면 읽기만 한다.
+        캐시를 못 쓰는 자리(읽기 전용 등)면 메모리에서만 쓴다 - 결과는 같다.
+        """
+        if not self.drop_similar or "frames" not in df.columns or not len(df):
+            return df
+        import json
+
+        from utils.sequence_comic_prompt import SIMILAR_RULE_VERSION, has_similar_neighbors
+
+        cache = self.dataset_path.with_name(self.dataset_path.stem + ".similar_drop.json")
+        try:
+            st = self.dataset_path.stat()
+            sig = f"r{SIMILAR_RULE_VERSION}:{st.st_size}:{int(st.st_mtime)}"
+        except OSError:
+            sig = ""
+        drop: set[int] | None = None
+        if sig and cache.exists():
+            try:
+                data = json.loads(cache.read_text(encoding="utf-8"))
+                if data.get("sig") == sig:
+                    drop = {int(g) for g in data.get("drop") or []}
+            except (OSError, ValueError, TypeError):
+                drop = None
+        if drop is None:
+            drop = set()
+            for gid, raw in zip(df["group_id"].tolist(), df["frames"].tolist()):
+                try:
+                    frames = json.loads(raw) if isinstance(raw, str) else list(raw)
+                except (ValueError, TypeError):
+                    continue
+                if has_similar_neighbors(frames):
+                    drop.add(int(gid))
+            if sig:
+                try:
+                    tmp = cache.with_suffix(".tmp")
+                    tmp.write_text(json.dumps({"sig": sig, "drop": sorted(drop)}), encoding="utf-8")
+                    tmp.replace(cache)
+                except OSError as exc:
+                    _log.warning("sequence similar-drop cache not written: %s", exc)
+        if not drop:
+            return df
+        return df[~df["group_id"].isin(drop)]
 
     @staticmethod
     def _filter_gs_coherent(df: pd.DataFrame) -> pd.DataFrame:
@@ -325,10 +383,16 @@ class SequencePresetService:
             "stageLabel": STAGE_LABELS.get(f.get("stage", ""), f.get("stage", "")),
             "preview": self._frame_general(f.get("tags", []), f.get("rating", row["peak_rating"])),
         } for i, f in enumerate(frames)]
+        # [미리보기] 툴팁(사용자 2026-10-18): 의상 상자 · scene 1 · scene 2~ 의 add / rem - 생성 프롬프트와 같은 계산.
+        from utils.sequence_comic_prompt import comic_preview
+
+        comic = comic_preview([{"tags": f.get("tags", []), "rating": f.get("rating", row["peak_rating"])}
+                               for f in frames])
         return {
             "ok": True,
             "group": self._group_summary(row),
             "frames": out_frames,
+            "comic": comic,
         }
 
     @staticmethod

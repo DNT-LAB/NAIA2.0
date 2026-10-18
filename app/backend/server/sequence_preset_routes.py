@@ -26,6 +26,7 @@ from fastapi.responses import JSONResponse
 
 from core.sequence_preset_service import SequencePresetService
 from core.web_session_context import WebSessionContext
+from utils.sequence_comic_prompt import build_comic_body, build_comic_prompt, comic_spec
 
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
@@ -86,6 +87,16 @@ async def _read_json(req: Request) -> dict[str, Any]:
 # Generate)와 러너(Auto Gen 자동 연속)가 겹쳐 서로의 freeze 를 짓밟지 않도록 한다. 모듈 레벨이라
 # 러너의 continue_sequence_run 도 같은 락을 공유한다(헤드리스 단일 세션).
 _SEQ_LOCK = asyncio.Lock()
+
+
+class SequenceNeedsCharacter(Exception):
+    """캐릭터 프롬프트가 비어 있어 Sequence 를 시작하지 않는다(사용자 2026-10-17 - 이 기능의 전제)."""
+
+
+def _character_text(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("prompt") or value.get("text") or ""
+    return str(value or "").strip()
 
 
 def _coerce_dim(value: Any) -> int | None:
@@ -185,107 +196,102 @@ async def _do_round(session_context: WebSessionContext, thread_run, *, group_id:
             pass
         raise
 
-    prev_prompt: str | None = None   # 라운드 내 직전 enqueue 프롬프트(연속 중복 skip용)
-    # 조립(assemble)과 enqueue 를 분리한다 — 첫 OK 프레임이 '마지막이 아닌지'(OK ≥ 2)를 알아야
-    # Vibe 캡처 stamp 를 달지 말지 정할 수 있기 때문(루프 도중엔 이후 OK 프레임 존재를 모름).
-    # enqueued 는 idx 순서를 유지(실패/중복은 즉시, OK 는 enqueue 후 placeholder 를 채움).
-    pending: list[dict[str, Any]] = []   # enqueue 대기 OK 프레임 {pos, command, idx, prompt}
+    # ⚠️ 2026-10-17 리메이크(사용자): 컷마다 한 장이던 것을 **이야기 하나 = 만화 한 장**으로 바꿨다.
+    #    컷들을 `scene 1 … scene n` 으로 한 프롬프트에 싣고 t2i 한 번(해상도는 사용자 설정) - 칸끼리 인물이 같다
+    #    (컷마다 따로 그리면 인물이 갈렸다). 규칙 · 시험 기록 = utils/sequence_comic_prompt.py.
+    #    인물은 캐릭터 프롬프트가 정한다(장면 태그에서 캐릭터 특징을 뺀다) - 비어 있으면 시작하지 않는다.
+    _ = use_vibe   # 한 장뿐이라 Vibe 캡처 · 주입 대상이 없다
     try:
-        for source in sources["sources"]:
-            idx = source["index"]
-            try:
-                source_row = source["sourceRow"]
-                request_id = f"{run_id[-12:]}-{idx}"
-                assembled = await thread_run(
-                    random.generate_from_source_row,
-                    source_row,
-                    active_ratings=active_ratings,
-                    random_request_id=request_id,
-                    source="sequence_preset",
-                    update_context=False,
-                )
-                if not assembled.success:
-                    enqueued.append({"index": idx, "ok": False,
-                                     "error": assembled.error or "assembly failed"})
-                    continue
-                # 라운드 내 직전 enqueue 프롬프트와 동일하면 skip. PE 태그 제거(작가/캐릭터/구도
-                # 압축 등)로 인접 프레임이 같은 최종 프롬프트가 되는 케이스 — 시드 고정 시 같은
-                # 시드/해상도라 동일 이미지다. skip 프레임은 ok=False+skipped 라 ok_count(=total_frames)
-                # 에서 빠져 라운드 완결·다음 freeze 갱신이 정확하다(2행/마지막행 케이스 포함).
-                # ※ 시드 미고정이면 프레임마다 시드가 달라 같은 프롬프트라도 다른 이미지 → dedup 안 함.
-                if fix_seed and assembled.prompt == prev_prompt:
-                    enqueued.append({"index": idx, "ok": False, "skipped": True,
-                                     "prompt": assembled.prompt})
-                    continue
-                prev_prompt = assembled.prompt
-                overrides: dict[str, Any] = {
-                    "input": assembled.prompt,
-                    "_raw_input": assembled.prompt,
-                    "_source_row_data": dict(source_row),
-                    "_source_name": request_id,
-                    "_remote_queue_source": "SequencePreset",
-                    "_remote_queue_label": "sequence_preset",
-                    "sequence_preset_request": True,
-                    "sequence_preset_request_id": request_id,
-                    "sequence_preset_group_id": str(group_id),
-                    "sequence_preset_frame": f"{idx + 1}/{total}",
-                    # Auto Gen 연속 바인딩 키 — 러너가 이 stamp 로 라운드 완료를 카운트한다.
-                    "sequence_run_id": run_id,
-                }
-                # 모델 고정(라운드 단위): 전 프레임 동일 모델 → 정체성 일관 + Vibe 캡처/주입 모델 일치.
-                overrides["model"] = round_model
-                # 고정 토글(하단 UI): SEED 고정 시 라운드 단위 시드 박기, 해상도 고정 시 width/height
-                # 박고 per-frame auto-fit 차단. 미체크면 기본 동작(프레임별 시드/해상도)에 맡긴다.
-                if fix_seed:
-                    overrides["seed"] = pinned_seed
-                    overrides["seed_fixed"] = True
-                if fix_resolution:
-                    overrides["auto_fit_resolution"] = False
-                    if fixed_w:
-                        overrides["width"] = fixed_w
-                    if fixed_h:
-                        overrides["height"] = fixed_h
-                    if fixed_w and fixed_h:
-                        overrides["resolution"] = f"{fixed_w} x {fixed_h}"
-                if frozen_chars and frozen_chars.get("characters"):
-                    chars = list(frozen_chars.get("characters") or [])
-                    ucs = list(frozen_chars.get("uc") or [])
-                    ucs = (ucs + [""] * len(chars))[:len(chars)]
-                    overrides["characters"] = chars
-                    overrides["uc"] = ucs
-                    positions = frozen_chars.get("character_positions") or []
-                    if positions:
-                        overrides["character_positions"] = list(positions)
-                command = {
-                    "type": "generate",
-                    "api_mode": api_mode,
-                    "prompt": assembled.prompt,
-                    "negative_prompt": session_context.negative_prompt_text,
-                    "overrides": overrides,
-                }
-                if assembled.prompt_run_id:
-                    command["prompt_run_id"] = assembled.prompt_run_id
-                pos = len(enqueued)
-                enqueued.append({"index": idx, "ok": False, "prompt": assembled.prompt})  # placeholder
-                pending.append({"pos": pos, "command": command, "idx": idx, "prompt": assembled.prompt})
-            except Exception as exc:  # 프레임 단위 격리
-                enqueued.append({"index": idx, "ok": False, "error": f"frame error: {exc}"})
-        # Vibe 사용: 첫 OK 프레임이 '마지막이 아닐 때'(OK ≥ 2)만 캡처 stamp. OK 1개면 적용 대상이
-        # 없으므로 인코딩하지 않는다(Anlas 낭비 방지 — 사용자 사양 "자신이 큐의 마지막이 아닐 때").
-        if vibe_enabled and len(pending) >= 2:
-            pending[0]["command"]["overrides"]["sequence_vibe_capture"] = run_id
-        # enqueue (idx 순서 유지). 첫 OK 프레임이 큐의 맨 앞 → 가장 먼저 생성·인코딩된다.
-        for item in pending:
-            try:
-                dispatch = await thread_run(generation.enqueue_remote_request, item["command"])
-                enqueued[item["pos"]] = {
-                    "index": item["idx"], "ok": bool(dispatch.ok), "prompt": item["prompt"],
-                    "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
-                    "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
-                }
-            except Exception as exc:
-                enqueued[item["pos"]] = {"index": item["idx"], "ok": False,
-                                         "prompt": item["prompt"], "error": f"enqueue error: {exc}"}
+        chars = [c for c in ((frozen_chars or {}).get("characters") or []) if _character_text(c)]
+        if not chars:
+            raise SequenceNeedsCharacter("캐릭터 프롬프트를 먼저 넣어 주세요 - Sequence 는 캐릭터 프롬프트로 인물을 정합니다.")
+        frames = [{"tags": str(src.get("prompt") or "").split(","), "rating": src.get("rating") or ""}
+                  for src in sources["sources"]]
+        n_scenes, body = build_comic_body(frames)
+        if not n_scenes:
+            enqueued.append({"index": 0, "ok": False, "error": "no usable scenes"})
+            return enqueued, total, pinned_seed
+        first = sources["sources"][0]
+        source_row = dict(first["sourceRow"])
+        request_id = f"{run_id[-12:]}-comic"
+        # 조립은 첫 컷으로 한 번 - PE prefix/postfix · 조건부 프롬프트를 그대로 받고, 본문 자리만 만화 본문으로 바꾼다.
+        assembled = await thread_run(
+            random.generate_from_source_row,
+            source_row,
+            active_ratings=active_ratings,
+            random_request_id=request_id,
+            source="sequence_preset",
+            update_context=False,
+        )
+        if not assembled.success:
+            enqueued.append({"index": 0, "ok": False, "error": assembled.error or "assembly failed"})
+            return enqueued, total, pinned_seed
+        prompt = build_comic_prompt(assembled.prompt, n_scenes, body)
+        overrides: dict[str, Any] = {
+            "input": prompt,
+            "_raw_input": prompt,
+            "_source_row_data": source_row,
+            "_source_name": request_id,
+            "_remote_queue_source": "SequencePreset",
+            "_remote_queue_label": "sequence_preset",
+            "sequence_preset_request": True,
+            "sequence_preset_request_id": request_id,
+            "sequence_preset_group_id": str(group_id),
+            "sequence_preset_frame": f"{n_scenes} scenes",
+            "sequence_comic_scenes": n_scenes,
+            # Auto Gen 연속 바인딩 키 — 러너가 이 stamp 로 라운드 완료를 카운트한다.
+            "sequence_run_id": run_id,
+            "model": round_model,
+        }
+        if fix_seed:
+            overrides["seed"] = pinned_seed
+            overrides["seed_fixed"] = True
+        else:
+            # 시드 고정 해제 = 라운드마다 새 시드. 안 박으면 메인 Seed Fixed 를 따라 연속 생성이 한 시드를 되풀이한다.
+            overrides["seed"] = _rng.randint(0, 9_999_999_999)
+            overrides["seed_fixed"] = True
+            pinned_seed = overrides["seed"]   # 응답 seed = 실제로 쓴 시드
+        # 해상도는 사용자 자유(사용자 2026-10-17 - 832x1216 고정 해제) - 옛 Sequence 의 해상도 고정 토글 그대로.
+        if fix_resolution:
+            overrides["auto_fit_resolution"] = False
+            if fixed_w:
+                overrides["width"] = fixed_w
+            if fixed_h:
+                overrides["height"] = fixed_h
+            if fixed_w and fixed_h:
+                overrides["resolution"] = f"{fixed_w} x {fixed_h}"
+        # 장면 수별 고정 해상도(사용자 2026-10-17: 4 = 1024x1024 · 3 = 832x1216 · 2 = 896x1152). 사양 없는 수는 위 그대로.
+        spec = comic_spec(n_scenes)
+        if spec:
+            overrides["auto_fit_resolution"] = False
+            overrides["random_resolution"] = False
+            overrides["width"], overrides["height"] = spec["size"]
+            overrides["resolution"] = f"{spec['size'][0]} x {spec['size'][1]}"
+        ucs = list((frozen_chars or {}).get("uc") or [])
+        chars_all = list((frozen_chars or {}).get("characters") or [])
+        overrides["characters"] = chars_all
+        overrides["uc"] = (ucs + [""] * len(chars_all))[:len(chars_all)]
+        positions = (frozen_chars or {}).get("character_positions") or []
+        if positions:
+            overrides["character_positions"] = list(positions)
+        command = {
+            "type": "generate",
+            "api_mode": api_mode,
+            "prompt": prompt,
+            "negative_prompt": session_context.negative_prompt_text,
+            "overrides": overrides,
+        }
+        if assembled.prompt_run_id:
+            command["prompt_run_id"] = assembled.prompt_run_id
+        try:
+            dispatch = await thread_run(generation.enqueue_remote_request, command)
+            enqueued.append({
+                "index": 0, "ok": bool(dispatch.ok), "prompt": prompt, "scenes": n_scenes,
+                "requestId": getattr(dispatch.request, "request_id", "") if dispatch.ok else "",
+                "error": "" if dispatch.ok else (dispatch.blocked_reason or "enqueue blocked"),
+            })
+        except Exception as exc:
+            enqueued.append({"index": 0, "ok": False, "prompt": prompt, "error": f"enqueue error: {exc}"})
     finally:
         try:
             event_stream.stop()
@@ -327,14 +333,16 @@ async def start_sequence_run(
         # REST 하드닝: 문자열 "false"/"0" 등도 정확히 해석(_coerce_bool) — UI는 실제 boolean 을
         # 보내지만 외부 REST 호출 방어(Codex LOW).
         coerce = session_context._coerce_bool
-        fix_seed = coerce(query.get("fixSeed", True))
-        fix_resolution = coerce(query.get("fixResolution", True))
-        use_vibe = coerce(query.get("useVibe", False))
+        # 하단 고정 옵션(SEED · 해상도 · Vibe)은 강제 해제(사용자 2026-10-18 - 화면에서도 숨긴다). 요청 값은 받지 않는다.
+        _ = coerce
+        fix_seed = fix_resolution = use_vibe = False
         try:
             enqueued, total, pinned_seed = await _do_round(
                 session_context, run_in_thread, group_id=group_id, run_id=run_id,
                 fix_seed=fix_seed, fix_resolution=fix_resolution, use_vibe=use_vibe,
             )
+        except SequenceNeedsCharacter as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"error": f"Sequence freeze/assemble failed: {exc}"}, status_code=500)
         ok_count = sum(1 for e in enqueued if e["ok"])
@@ -356,6 +364,7 @@ async def start_sequence_run(
         "runId": run_id if ok_count else "",
         "total": total,
         "enqueued": ok_count,
+        "scenes": next((e.get("scenes") for e in enqueued if e.get("scenes")), 0),
         "seed": pinned_seed,
         "autoGen": bool(auto_gen),
         "frames": enqueued,
@@ -376,9 +385,8 @@ async def continue_sequence_run(session_context: WebSessionContext, clients, run
         return False
     group_id = int(pick["groupId"])
     coerce = session_context._coerce_bool
-    fix_seed = coerce(query.get("fixSeed", True))
-    fix_resolution = coerce(query.get("fixResolution", True))
-    use_vibe = coerce(query.get("useVibe", False))
+    _ = coerce
+    fix_seed = fix_resolution = use_vibe = False   # 강제 해제(위 시작 경로와 같다)
     async with _SEQ_LOCK:
         if not svc.is_running(run_id):
             return False

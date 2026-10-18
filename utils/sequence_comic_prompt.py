@@ -5,8 +5,8 @@
 
     <PE prefix>                                 (맨 앞의 `{n}koma, {n} panel comic, sequential` 은 회수 - 사용자 2026-10-17)
     character clothing: <scene 1 의 옷>,        <- 본문(build_comic_body)
-    scene 1: <태그>, rating:x,
-    scene 2: <직전 장면에서 바뀐 태그만>, rating:y,
+    scene 1: (layout:top panel), sequential, <태그>, rating:x,
+    scene 2: (layout:bottom panel), sequential, <직전 장면에서 바뀐 태그만>, rating:y,
     ...
     <PE postfix>
 
@@ -41,6 +41,13 @@ COMIC_SPECS: dict[int, dict[str, Any]] = {
 # 가중치가 붙은 것(`0.8::1girl ::` · `-0.8::` · `.8::`)은 가중치째 그 앞에 넣는다 - 부호 · 소수점 가운데서 다시 맞추면
 # `-2::2koma ::, 0.8::1girl` 처럼 부호가 koma 로 넘어갔다(Codex 리뷰). `artist:2girls` 처럼 `:` 뒤에 붙은 글자는 인원 태그가 아니다.
 _PERSON_TAG = r"(?<![\w:+.\-])(?:-?(?:\d+(?:\.\d*)?|\.\d+)::\s*)?\d+\+?(?:girl|boy|other)s?(?![\w])"
+# 장면마다 칸의 자리(사용자 2026-10-18): `scene k: (layout:<자리>), sequential, …`. 장면 수(합친 뒤의 수)로 고른다.
+# 3장면 가운데 = `middle tier`(사용자 지정) · 4장면 = 2x2(왼쪽 위부터 Z 차례). 표에 없는 수(1)는 자리를 안 붙인다.
+SCENE_LAYOUTS: dict[int, tuple[str, ...]] = {
+    2: ("top panel", "bottom panel"),
+    3: ("top panel", "middle tier", "bottom panel"),
+    4: ("top-left panel", "top-right panel", "bottom-left panel", "bottom-right panel"),
+}
 COMIC_SENTENCE = ("A {n}-panel comic strip separated by thick, bold black borders. The panels are arranged "
                   "sequentially from top to bottom to show a continuous progression of events with the same, "
                   "sequential, silent comic")
@@ -237,9 +244,11 @@ def build_comic_body(frames: list[dict[str, Any]]) -> tuple[int, str]:
     lines: list[str] = []
     if plan["clothing"]:
         lines.append(f"character clothing: {', '.join(plan['clothing'])}")
+    layouts = SCENE_LAYOUTS.get(len(scenes), ())
     for k, scene in enumerate(scenes, start=1):
         rating_tag = RATING_TAGS.get(scene["rating"].lower()[:1], "")
-        lines.append(f"scene {k}: {', '.join(scene['shown'] + ([rating_tag] if rating_tag else []))}")
+        head = [f"(layout:{layouts[k - 1]})", "sequential"] if layouts else []
+        lines.append(f"scene {k}: {', '.join(head + scene['shown'] + ([rating_tag] if rating_tag else []))}")
     return len(scenes), ",\n\n".join(lines)
 
 

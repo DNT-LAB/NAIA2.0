@@ -19443,6 +19443,19 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .tag-filter-count.has-result {
   color: #f5e6a3; border-color: rgba(245, 230, 163, 0.4); background: rgba(245, 230, 163, 0.08);
 }
+/* Tag Filter [재적용](사용자 지정 2026-10-18) - 걸려 있으면 다시 채우고, 풀리면('풀림') 파랗게 다시 걸기를 권한다. */
+.tag-filter-count.is-released { color: var(--text-dim); border-style: dashed; }
+.tag-filter-reapply {
+  flex: 0 0 auto; height: 22px; padding: 0 9px;
+  border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-elevated); color: var(--text-main);
+  font-family: var(--font-mono); font-size: 11px; white-space: nowrap; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.tag-filter-reapply:hover { border-color: var(--accent-blue); }
+.tag-filter-reapply.is-released { background: var(--accent-blue); border-color: var(--accent-blue); color: #fff; }
+.tag-filter-reapply.is-released:hover { filter: brightness(1.15); }
+.tag-filter-reapply[hidden] { display: none; }
 .tag-filter-btn-action {
   padding: 5px 14px; border: 1px solid var(--border-dim); border-radius: 6px;
   background: var(--bg-elevated); color: var(--text-main);

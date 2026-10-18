@@ -278,6 +278,12 @@ export function createQuickFilterController(deps) {
     if (hasChips() && !on.some(tags => branchSig(tags) === branchSig(payload()))) on.push(payload());
     return on;
   }
+  /** [재적용] 이 다시 걸 조합 - 걸려 있으면 그 조합, 풀렸으면 마지막에 걸렸던 조합, 그것도 없으면(새로고침 뒤) 지금 칩. */
+  function reapplyTarget() {
+    if (active && hasApplied()) return cloneBranches(appliedBranches);
+    if (lastApplied.length) return cloneBranches(lastApplied);
+    return liveTarget();
+  }
   /** '커밋하면 몇 행' 을 따로 세야 하나 - 커밋이 걸 조건이 지금 걸 조건과 **다를 때만**.
    *  (담은 것이 없거나 이미 다 합쳐졌으면 커밋해도 같은 조건이라 검색을 한 번 더 돌릴 이유가 없다.) */
   function previewNeeded() {
@@ -351,6 +357,11 @@ export function createQuickFilterController(deps) {
   // RATING 옆 매치 카운트 라벨. 캐시된 per-rating counts + 현재 활성 등급으로 즉시 재계산하므로
   // G/S/Q/E 토글에 라이브로 반응하고, search_state reconcile 때도 사라지지 않는다(칩이 있는 한 유지).
   function renderMatchedCount(label = 'matched') {
+    paintMatchedCount(label);
+    renderReapply();
+  }
+
+  function paintMatchedCount(label) {
     renderBranches();
     const countEl = getEl('tagFilterCount');
     if (!countEl) return;
@@ -371,6 +382,44 @@ export function createQuickFilterController(deps) {
       countEl.textContent = 'No matches';
       countEl.classList.remove('has-result');
     }
+  }
+
+  // [재적용](사용자 지정 2026-10-18) - RATING 옆. 걸려 있으면 같은 조건으로 다시 걸어 **처음 수로 채운다**(쓴 행도
+  // 다시 뽑힌다 - 묻지 않는다). 칩이 남았는데 풀에 안 걸려 있으면(Search [Restore] · green [검색] 이 푼 뒤) 수 자리에
+  // '풀림' + 파란 단추 - 전에는 수가 말없이 사라져 필터가 날아간 줄 몰랐다. 다시 걸 것이 없으면 숨긴다.
+  function renderReapply() {
+    const released = !active && reapplyTarget().length > 0;
+    const btn = getEl('tagFilterReapplyBtn');
+    if (btn) {
+      btn.hidden = !active && !released;
+      btn.classList.toggle('is-released', released);
+    }
+    const countEl = getEl('tagFilterCount');
+    if (!countEl) return;
+    // 도는 적용('재적용 중…')은 덮지 않는다 - 끝나면 assigned 가 다시 그린다.
+    const showReleased = released && !applyInFlight;
+    if (showReleased) {
+      countEl.textContent = '풀림';
+      countEl.classList.remove('has-result');
+    } else if (!active && countEl.textContent === '풀림') {
+      countEl.textContent = '';
+    }
+    countEl.classList.toggle('is-released', showReleased);
+  }
+
+  /** [재적용] 을 눌렀다 - 걸려 있으면 다시 채우고, 풀렸으면 다시 건다. 소켓이 끊겼으면 아무것도 바꾸지 않는다. */
+  function reapplyNow() {
+    const target = reapplyTarget();
+    if (!target.length) return false;
+    save();
+    if (!applyConfig(target, tempSig ? 'temp' : 'reapply')) return false;
+    const countEl = getEl('tagFilterCount');
+    if (countEl) {
+      countEl.textContent = '재적용 중…';
+      countEl.classList.remove('has-result', 'is-released');
+    }
+    getEl('tagFilterReapplyBtn')?.classList.remove('is-released');
+    return true;
   }
 
   // 외부(검색 패널 등급 토글)에서 호출 — 팝업이 열려 있고 칩이 있으면 매치 카운트를 다시 계산한다.
@@ -822,6 +871,7 @@ export function createQuickFilterController(deps) {
     const restored = deps.computeLocalFilteredCount();
     if (restored !== null && restored !== undefined) deps.updateSearchCount(restored);
     renderBranches();
+    renderReapply();
     notifyFilterChanged();
     flushAssignedOnce();
     // 떼고 나서도 담은 것이 남아 있으면 '커밋하면 N행' 은 다시 세야 한다(안 세면 '…' 로 굳는다).
@@ -1009,6 +1059,12 @@ export function createQuickFilterController(deps) {
     bindAutocompleteInput('tagFilterInput', 'include');
     bindAutocompleteInput('tagFilterExcludeInput', 'exclude');
     bindPresetTooltip();
+    const reapplyBtn = getEl('tagFilterReapplyBtn');
+    if (reapplyBtn && !reapplyBtn.dataset.bound) {
+      reapplyBtn.dataset.bound = '1';
+      reapplyBtn.addEventListener('click', () => reapplyNow());
+    }
+    renderReapply();
     // 저장된 필터 창의 이름 찾기 - 창은 처음 열 때 만들어지므로 문서에 위임으로 받는다.
     doc.addEventListener('input', event => {
       if (!event.target || event.target.id !== 'tagFilterPresetSearch') return;
@@ -1100,6 +1156,7 @@ export function createQuickFilterController(deps) {
     }
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
+    renderReapply();
 
     const restored = deps.computeLocalFilteredCount();
     if (restored !== null && restored !== undefined) deps.updateSearchCount(restored);
@@ -1313,6 +1370,7 @@ export function createQuickFilterController(deps) {
       toggleBtn.classList.remove('active');
       toggleBtn.classList.remove('assigned');
     }
+    renderReapply();
     setReleasedOverlay(true);
     return true;
   }
@@ -1561,6 +1619,7 @@ export function createQuickFilterController(deps) {
       countEl.textContent = '';
       countEl.classList.remove('has-result');
     }
+    renderReapply();
     const assignBtn = getEl('tagFilterAssignBtn');
     if (assignBtn) assignBtn.disabled = true;
     const toggleBtn = getEl('tagFilterToggle');
@@ -1876,6 +1935,7 @@ export function createQuickFilterController(deps) {
     onSearchReleased,
     reapplyReleased,
     resetReleased,
+    reapplyNow,
     assign,
     onResult,
     onAssigned,

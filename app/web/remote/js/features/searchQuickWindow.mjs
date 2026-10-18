@@ -167,10 +167,16 @@ export function createSearchQuickWindow({
     ];
     for (const [source, target, format] of pairs) {
       if (!source || !target) continue;
-      const sync = () => { target.textContent = format((source.textContent || '').trim()); };
+      // '풀림'(Tag Filter 가 풀렸다)은 색도 비춘다 - 접힌 층 머리줄에서 걸린 수와 헷갈리지 않게.
+      const sync = () => {
+        target.textContent = format((source.textContent || '').trim());
+        target.classList.toggle('is-released', source.classList.contains('is-released'));
+      };
       sync();
       if (typeof MutationObserver === 'function') {
-        new MutationObserver(sync).observe(source, { childList: true, characterData: true, subtree: true });
+        new MutationObserver(sync).observe(source, {
+          childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'],
+        });
       }
     }
   }
@@ -552,6 +558,7 @@ const SQW_CSS = `
 .sqw-name{flex:0 0 auto}
 .sqw-meta{margin-left:auto;font-family:var(--font-mono,monospace);font-size:10px;font-weight:500;
   color:var(--accent-green,#5a9e6f);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sqw-meta.is-released{color:var(--text-dim,#8a8c99)}
 .sqw-body{display:none;min-height:0;overflow:auto;padding:7px 9px 9px;position:relative}
 .sqw-sec.is-open .sqw-body{display:flex;flex-direction:column;gap:7px;flex:1 1 auto}
 

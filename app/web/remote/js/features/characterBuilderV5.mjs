@@ -741,7 +741,7 @@ export function createCharacterBuilderV5({
       // 저장하기 전에 바로 써 본다: 이 그림을 만든 글을 C1 에, 그림을 레퍼런스 인셋에(사용자 지시 2026-10-11).
       + `<button type="button" class="cb5-btn" data-cb-act="cand-apply"`
       + `${current?.status === 'done' && current.historyId && !applying ? '' : ' disabled'}`
-      + ` title="이 그림을 만든 프롬프트를 C1 에 넣고(쓰던 슬롯은 한 칸씩 밀려 꺼집니다) 그림을 레퍼런스 인셋으로 고정합니다">`
+      + ` title="이 그림을 만든 프롬프트를 인셋의 가상 C1 에 넣고 그림을 레퍼런스 인셋으로 고정합니다 (메인 캐릭터 슬롯은 그대로)">`
       + `C1 + 레퍼런스 인셋 적용</button>`
       + `<button type="button" class="cb5-btn is-primary" data-cb-act="save"${canSave ? '' : ' disabled'}>`
       + `${saveLabel}</button></div>`;
@@ -1024,7 +1024,7 @@ export function createCharacterBuilderV5({
       + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1"${applyOff}`
       + ` data-naia-title="C1 에 넣습니다. 쓰던 캐릭터 프롬프트는 한 칸씩 밀려 꺼집니다">C1 적용 (단독)</button>`
       + `<button type="button" class="mod-btn-sm mod-btn-encode" data-cb-act="apply-c1-inset"${applyOff}`
-      + ` data-naia-title="C1 에 넣고 이 그림을 레퍼런스 인셋으로 고정합니다 - 켜져 있던 Character Reference 는 꺼집니다">`
+      + ` data-naia-title="인셋의 가상 C1 에 넣고 이 그림을 레퍼런스 인셋으로 고정합니다 - 메인 캐릭터 슬롯은 그대로 · 켜져 있던 Character Reference 는 꺼집니다">`
       + `C1 + 레퍼런스 인셋 적용</button></div>`;
   }
 
@@ -1546,7 +1546,8 @@ export function createCharacterBuilderV5({
       // 같은 캐릭터가 이미 슬롯에 있으면 서버가 새로 넣지 않고 그 슬롯을 켠다(2026-10-15).
       const dedupe = String(result?.dedupe_notice || '');
       if (withInset) {
-        showToast(`${dedupe ? `${dedupe} ` : 'C1 에 적용하고 '}레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다`, 'success');
+        // 인셋과 함께면 가상 C1 에 들어간다(사용자 결정 2026-10-18 - 메인 슬롯은 그대로).
+        showToast('가상 C1 에 넣고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋 · 가상 캐릭터로 생성됩니다', 'success');
         if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
       } else {
         showToast(dedupe || 'C1 에 적용했습니다', dedupe ? 'info' : 'success');
@@ -1570,8 +1571,7 @@ export function createCharacterBuilderV5({
       const result = await postJson('/api/character-asset/v5/candidate/apply', {
         history_id: candidate.historyId, builder: candidate.builder, with_inset: true,
       });
-      const dedupe = String(result?.dedupe_notice || '');
-      showToast(`${dedupe ? `${dedupe} ` : 'C1 에 적용하고 '}레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋으로 생성됩니다`, 'success');
+      showToast('가상 C1 에 넣고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋 · 가상 캐릭터로 생성됩니다', 'success');
       if (result?.reference_inset) onReferenceInsetPin(result.reference_inset);
     } catch (error) {
       showToast(`적용 실패: ${error.message}`, 'error');

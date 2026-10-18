@@ -41,7 +41,7 @@ Important interpretation:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from typing import Iterable, Sequence
 
@@ -120,6 +120,16 @@ REFERENCE_INSET_CANVAS_KINDS: tuple[tuple[str, tuple[tuple[int, int], ...]], ...
 )
 REFERENCE_INSET_CANVAS_SIZES: tuple[tuple[int, int], ...] = tuple(
     size for _label, sizes in REFERENCE_INSET_CANVAS_KINDS for size in sizes
+)
+# 상하 모드(사용자 지시 2026-10-18): 칸이 위 · 그릴 곳이 아래. 같은 목록을 **전치**해 쓴다(1:1 · 7:9 · 2:3 · 9:16).
+# 굽기는 가로 모델 공간에서 하고 결과만 돌려 세운다(`core/headless_character_asset_service.set_reference_inset_pin`).
+REFERENCE_INSET_ORIENTATIONS: tuple[str, ...] = ("horizontal", "vertical")
+REFERENCE_INSET_VERTICAL_CANVAS_KINDS: tuple[tuple[str, tuple[tuple[int, int], ...]], ...] = tuple(
+    (":".join(reversed(label.split(":"))), tuple((h, w) for w, h in sizes))
+    for label, sizes in REFERENCE_INSET_CANVAS_KINDS
+)
+REFERENCE_INSET_VERTICAL_CANVAS_SIZES: tuple[tuple[int, int], ...] = tuple(
+    size for _label, sizes in REFERENCE_INSET_VERTICAL_CANVAS_KINDS for size in sizes
 )
 # 기본 캔버스 = 3:2 의 1MP(사용자 지시 2026-10-11 "편의를 위해 기본값은 3:2로"). 예전에는 9:7 의 1152x896 이었다.
 # 세로 캐릭터(768x1344)를 놓으면 칸이 488px · 그릴 곳이 60% 다 - 9:7(55%)보다 그릴 자리가 넓다.
@@ -327,9 +337,15 @@ def prepare_reference_inpaint_canvas(
     spec: ReferenceInsetPreprocessSpec | None = None,
     box: dict | None = None,
     divider: object = None,
+    second: tuple[Image.Image, dict] | None = None,
+    split: object = None,
 ) -> ReferenceInsetPreprocessResult:
     """
     Create the left-anchored reference canvas and matching full/small masks.
+
+    ``second`` = ``(그림, 자리)`` - 칸에 **둘째 그림**을 놓는다(사용자 결정 2026-10-18 · 칸 방식에서만). 칸은 ``split``
+    (캔버스 y)에서 두 칸으로 나뉘고, 첫 그림은 위 칸 · 둘째 그림은 아래 칸 안에서만 보인다. 보존(마스크)은 칸 전체
+    그대로다. 두 칸 사이에는 칸 선과 같은 굵기의 선을 긋는다.
 
     ``box``(칸 안의 그림 자리 · 높이) 나 ``divider``(경계선 = 칸의 너비)를 주면 **칸** 방식으로 굽는다
     (사용자 지정 2026-10-09): 왼쪽 가장자리부터 경계선까지가 칸이고, 그림은 칸 안에서만 보이며, 칸은
@@ -355,13 +371,35 @@ def prepare_reference_inpaint_canvas(
         divider_px = normalize_reference_inset_divider(divider, reference.size, spec)
         placed = normalize_reference_inset_box(box, reference.size, spec, divider=divider_px)
         placement = _panel_placement(placed, divider_px, spec)
+    cells = None
+    if second is not None and panelled:
+        split_px = normalize_reference_inset_split(split, spec)
+        reference2 = flatten_on(second[0], spec.panel_rgb)
+        top = normalize_reference_inset_cell_box(box, reference.size, spec, divider_px, 0, split_px)
+        bottom = normalize_reference_inset_cell_box(
+            second[1], reference2.size, spec, divider_px, split_px, spec.canvas_height)
+        cells = (
+            (reference, replace(_panel_placement(top, divider_px, spec), visible_bottom=split_px)),
+            (reference2, replace(_panel_placement(bottom, divider_px, spec), visible_top=split_px)),
+        )
 
     canvas = Image.new("RGB", (spec.canvas_width, spec.canvas_height), spec.background_rgb)
     if panelled and tuple(spec.panel_rgb) != tuple(spec.background_rgb):
         # 칸 전체가 그 바탕색이다 - 그림이 덮지 않은 자리도. 안 칠하면 검은 그림 상자가 흰 칸 위에 떠 있게 된다.
         canvas.paste(tuple(int(v) for v in spec.panel_rgb), (
             placement.visible_left, placement.visible_top, placement.visible_right, placement.visible_bottom))
-    if panelled:
+    if cells is not None:
+        # 두 장: 그림마다 제 칸 안에서만 보인다. 칸 사이에 칸 선과 같은 굵기의 선을 긋는다.
+        for picture, cell in cells:
+            visible = _resize_visible_part(picture, cell)
+            if visible is not None:
+                canvas.paste(visible[0], visible[1])
+        line = max(1, int(spec.seam_edge_line_px))
+        split_px = cells[0][1].visible_bottom
+        ImageDraw.Draw(canvas).rectangle(
+            (placement.visible_left, split_px - line // 2, placement.visible_right - 1, split_px - line // 2 + line - 1),
+            fill=spec.seam_edge_line_rgb)
+    elif panelled:
         # 그림은 칸 안에서만 보인다 - **보이는 부분만** 줄여(늘려) 놓는다. 통째로 줄인 뒤 자르면 안 된다.
         visible = _resize_visible_part(reference, placement)
         if visible is not None:
@@ -775,6 +813,64 @@ def normalize_reference_inset_box(
     x = max(keep - width, min(int(divider) - keep, _round_half_up(_finite(data.get("x"), float(base["x"])))))
     y = max(keep - height, min(spec.canvas_height - keep, _round_half_up(_finite(data.get("y"), float(base["y"])))))
     return {"x": x, "y": y, "width": width, "height": height}
+
+
+# 두 장일 때 칸을 나누는 선(사용자 결정 2026-10-18 - 기본 반반 · 끌어서 조절)의 범위: 캔버스 높이의 이만큼 안.
+REFERENCE_INSET_SPLIT_MIN_PERCENT = 25
+REFERENCE_INSET_SPLIT_MAX_PERCENT = 75
+
+
+def reference_inset_split_limits(spec: ReferenceInsetPreprocessSpec | None = None) -> dict[str, int]:
+    """두 칸을 나누는 선(캔버스 y)의 범위 · 기본값. 격자에 맞춘다."""
+    spec = spec or ReferenceInsetPreprocessSpec()
+    grid = REFERENCE_INSET_BOX_GRID_PX
+    return {
+        "min_split": -(-spec.canvas_height * REFERENCE_INSET_SPLIT_MIN_PERCENT // (100 * grid)) * grid,
+        "max_split": spec.canvas_height * REFERENCE_INSET_SPLIT_MAX_PERCENT // (100 * grid) * grid,
+        "default_split": _round_half_up(spec.canvas_height / (2 * grid)) * grid,
+    }
+
+
+def normalize_reference_inset_split(value: object, spec: ReferenceInsetPreprocessSpec | None = None) -> int:
+    """나누는 선을 격자와 범위에 맞춘다. 못 읽으면 반반이다."""
+    limits = reference_inset_split_limits(spec)
+    grid = REFERENCE_INSET_BOX_GRID_PX
+    wanted = _finite(value, float(limits["default_split"]))
+    return max(limits["min_split"], min(limits["max_split"], _round_half_up(wanted / grid) * grid))
+
+
+def default_reference_inset_cell_box(
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec,
+    divider: int,
+    top: int,
+    bottom: int,
+) -> dict[str, int]:
+    """한 칸(경계선 왼쪽 · 캔버스 y top ~ bottom)의 기본 그림 자리: 칸 안에 **통째로 들어가게** 가운데에 놓는다."""
+    src_w, src_h = max(1, int(source_size[0])), max(1, int(source_size[1]))
+    grid = REFERENCE_INSET_BOX_GRID_PX
+    fit = min(float(bottom - top), divider * src_h / float(src_w))
+    height = max(grid, int(fit // grid) * grid)
+    width = max(1, int(round(src_w * height / src_h)))
+    return normalize_reference_inset_cell_box(
+        {"x": (divider - width) // 2, "y": top + (bottom - top - height) // 2, "height": height},
+        (src_w, src_h), spec, divider, top, bottom,
+    )
+
+
+def normalize_reference_inset_cell_box(
+    box: object,
+    source_size: tuple[int, int],
+    spec: ReferenceInsetPreprocessSpec,
+    divider: int,
+    top: int,
+    bottom: int,
+) -> dict[str, int]:
+    """`normalize_reference_inset_box` 에 더해, 그림의 `min_visible` 만큼은 **제 칸 안에** 남긴다."""
+    placed = normalize_reference_inset_box(box, source_size, spec, divider=divider)
+    keep = int(reference_inset_box_limits(spec)["min_visible"])
+    y = max(top + keep - placed["height"], min(bottom - keep, placed["y"]))
+    return {**placed, "y": y}
 
 
 def reference_inset_open_ratio(divider: int, spec: ReferenceInsetPreprocessSpec | None = None) -> float:

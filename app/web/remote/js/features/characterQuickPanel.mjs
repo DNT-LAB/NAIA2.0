@@ -1024,6 +1024,7 @@ export function createCharacterQuickPanel({
     const res = resolutionNow();
     // ⚠️ `reroll_on_generate` 도 넣는다 - 모듈 창에서 바꾸면 이쪽 체크도 따라와야 한다.
     return `${open ? 1 : 0}${state && state.activated ? 1 : 0}${state && state.virtual ? 1 : 0}`
+      + `${state && state.virtual_label ? state.virtual_label : ''}`
       + `${state && state.reroll_on_generate ? 1 : 0}`
       + `${posModeOf(state)}${posEditing ? 1 : 0}${posBlockedByRandom() ? 'R' : '-'}`
       + `${res ? `${res.w}x${res.h}` : '-'}#${slots}`;
@@ -1785,7 +1786,10 @@ export function createCharacterQuickPanel({
       // ⚠️ 머리 **버튼 안이 아니라 줄의 형제**로 둔다. 버튼은 `flex:1` 로 눌리는데
       //    안에는 `min-width:78px` 인 제목이 있어, 배지를 넣으면 버튼 밖으로 삐져나와
       //    옆의 `활성화` 를 덮는다(실측: 버튼 오른쪽 끝 145 vs 배지 161).
-      + (lastState && lastState.virtual ? `<span class="cq-virtual">가상</span>` : '')
+      // `virtual_label` = 어느 쪽의 가상인가(인셋 - 2026-10-18). 없으면 인페인트 세션이다.
+      + (lastState && lastState.virtual
+        ? `<span class="cq-virtual">가상${lastState.virtual_label ? ` · ${escHtml(lastState.virtual_label)}` : ''}</span>`
+        : '')
       + `<label class="cq-enable"><input type="checkbox" data-cq-enable="1"`
       + `${enabled ? ' checked' : ''}><span>활성화</span></label>`
       // POS 세 상태. AUTO 는 고정 자리, CUSTOM 은 슬롯이 기억한 자리, RAND 는

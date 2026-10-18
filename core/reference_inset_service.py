@@ -13,6 +13,10 @@ REFERENCE_INSET_TAGS = ("borderless panels",)
 # `borderless panels` 대신 `split screen` 을, 인물 태그 뒤가 아니라
 # **사용자 prefix 프롬프트 바로 뒤**에. 화면에는 안 보이고 나갈 때만 실린다.
 REFERENCE_INSET_V5_TAGS = ("split screen",)
+# 상하 모드(칸이 위)의 V5 태그 = 좌우와 **같은** `split screen`(사용자 결정 2026-10-18 - 무료 비교 뒤).
+# `2koma` 도 시험했다: 깨끗한 참조에선 비슷했고, 지저분한 참조에선 인물이 흔들렸다(붉은 머리 · 여우귀).
+# 이름은 남겨 둔다 - 다시 갈라야 하면 여기만 바꾸면 된다. 자리는 V5 와 같다(prefix 뒤).
+REFERENCE_INSET_V5_VERTICAL_TAGS = REFERENCE_INSET_V5_TAGS
 # 파이프라인이 main_tags 앞에 꽂는 표식. 최종 문자열에서 **prefix 가 끝나는 자리**다
 # (`prompt_processor._step_final_format`). 문자열 경로는 이걸 기준으로 넣는다.
 MAIN_TAGS_MARKER = "#랜덤프롬프트"
@@ -91,7 +95,7 @@ def apply_reference_inset_to_prompt_context(context, app_context=None):
     if reference_inset_context_already_present(context, tags):
         return context
     # V5 는 **prefix 끝**에 붙인다. 그 밖에는 예전대로 인물 태그 연속 구간 뒤.
-    after_prefix = tags is REFERENCE_INSET_V5_TAGS
+    after_prefix = tags is REFERENCE_INSET_V5_TAGS or tags is REFERENCE_INSET_V5_VERTICAL_TAGS
     inject_reference_inset_into_context(context, tags, after_prefix=after_prefix)
     return context
 
@@ -194,7 +198,8 @@ def reference_inset_tags_for(params: Dict[str, Any], app_context=None) -> tuple[
     흐린다. 대신 `split screen` 을 쓰고, 자리도 인물 태그 뒤가 아니라 **prefix 뒤**다.
     """
     if reference_inset_model_is_v5(params, app_context=app_context):
-        return REFERENCE_INSET_V5_TAGS
+        # 상하 모드도 지금은 `split screen` 이다(사용자 결정 2026-10-18 - 위 상수의 주석).
+        return REFERENCE_INSET_V5_VERTICAL_TAGS if params.get("reference_inset_vertical") else REFERENCE_INSET_V5_TAGS
     return REFERENCE_INSET_TAGS
 
 

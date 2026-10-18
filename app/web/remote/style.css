@@ -31033,6 +31033,59 @@ html.is-drag-brokering, html.is-drag-brokering * { user-select: none !important;
   content: ''; position: absolute; left: 2px; top: 50%; width: 10px; height: 36px; margin-top: -18px;
   box-sizing: border-box; border-radius: 5px; background: #8b76ff; border: 2px solid #ffffff;
 }
+/* 상하 모드(사용자 지시 2026-10-18): 칸이 위 · 경계선이 가로줄. 세운 캔버스는 높이로 맞춘다 - 너비로 맞추면
+   2:3 이 창 높이를 두 배로 늘린다. 칸 · 그림 · 경계선의 자리는 창이 인라인으로 놓는다. */
+.riw-stage.is-vertical { width: auto; height: min(460px, 56vh); align-self: center; }
+.riw-stage.is-vertical .riw-divider {
+  left: 0; top: 0; width: 100%; height: 14px; margin-left: 0; margin-top: -8px; cursor: ns-resize;
+}
+.riw-stage.is-vertical .riw-divider::before { left: 0; top: 6px; width: 100%; height: 2px; }
+.riw-stage.is-vertical .riw-divider::after {
+  left: 50%; top: 2px; width: 36px; height: 10px; margin-top: 0; margin-left: -18px;
+}
+/* 그림 두 장(사용자 결정 2026-10-18): 칸 하나에 그림 하나 - 칸이 그림을 자른다. 자리는 창이 인라인으로 놓는다. */
+.riw-cell { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; }
+.riw-cell[hidden], .riw-split[hidden], .riw-result[hidden] { display: none !important; }
+/* 두 칸 사이의 선 - 좌우 모드 = 가로줄(위아래로 끈다) · 상하 모드 = 세로줄(좌우로 끈다). */
+.riw-split { position: absolute; left: 0; width: 100%; height: 12px; margin-top: -6px; cursor: ns-resize; z-index: 1; }
+.riw-split::before { content: ''; position: absolute; left: 0; top: 5px; width: 100%; height: 2px; background: #111111; }
+.riw-split::after {
+  content: ''; position: absolute; left: 50%; top: 1px; width: 30px; height: 10px; margin-left: -15px;
+  box-sizing: border-box; border-radius: 5px; background: #8b76ff; border: 2px solid #ffffff;
+}
+.riw-stage.is-vertical .riw-split { top: 0; width: 12px; height: 100%; margin-top: 0; margin-left: -6px; cursor: ew-resize; }
+.riw-stage.is-vertical .riw-split::before { left: 5px; top: 0; width: 2px; height: 100%; }
+.riw-stage.is-vertical .riw-split::after { left: 1px; top: 50%; width: 10px; height: 30px; margin-left: 0; margin-top: -15px; }
+.riw-stage.is-locked .riw-split { display: none; }
+/* 그릴 곳의 마지막 결과 - 칸 밑에 깔린다(칸이 위에 그려진다). */
+.riw-result { position: absolute; max-width: none; pointer-events: none; user-select: none; opacity: 0.85; }
+/* [특징 추출] 결과(사용자 결정 2026-10-18): 켜진 칩 = 가상 캐릭터에 넣을 것. 누르면 켜고 끈다. */
+.riw-extract { display: flex; flex-direction: column; gap: 6px; padding: 6px 0; border-top: 1px solid var(--border-glow); }
+.riw-extract[hidden] { display: none !important; }
+.riw-extract-src { color: var(--text-muted); font: 500 11px var(--font-mono); }
+.riw-extract-src a { color: inherit; }
+.riw-extract-body { display: flex; flex-direction: column; gap: 4px; max-height: 160px; overflow-y: auto; }
+.riw-feature-group { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.riw-feature-label { color: var(--text-muted); font: 500 11px var(--font-mono); margin-right: 2px; }
+.riw-feature {
+  border: 1px dashed var(--border-glow); border-radius: 999px; padding: 1px 8px; background: transparent;
+  color: var(--text-muted); font: 500 11px var(--font-mono); cursor: pointer; text-decoration: line-through;
+}
+.riw-feature.is-on {
+  border-style: solid; border-color: rgba(93, 202, 165, 0.8); color: #ffffff; background: rgba(29, 158, 117, 0.28);
+  text-decoration: none;
+}
+/* 머리줄의 [좌우 | 상하]. 켜고 끄기 스위치와 같은 알약 모양. */
+.riw-orient {
+  display: inline-flex; border: 1px solid var(--border-glow); border-radius: 999px; overflow: hidden; margin-right: 4px;
+}
+.riw-orient-btn {
+  border: 0; background: transparent; color: var(--text-muted); font: 700 11px var(--font-mono);
+  padding: 2px 8px; cursor: pointer;
+}
+.riw-orient-btn + .riw-orient-btn { border-left: 1px solid var(--border-glow); }
+.riw-orient-btn.is-on { color: #ffffff; background: rgba(139, 118, 255, 0.22); }
+.riw-orient-btn:disabled { opacity: 0.45; cursor: default; }
 /* 잠김(업스케일을 기다리는 중): 끌 것을 감춘다. */
 .riw-stage.is-locked .riw-panel { cursor: default; }
 .riw-stage.is-locked .riw-divider, .riw-stage.is-locked .riw-frame { display: none; }

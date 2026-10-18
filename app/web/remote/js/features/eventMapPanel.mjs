@@ -852,7 +852,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
         ${row.dataset.emPath ? `<div class="em-tip-path">${esc(row.dataset.emPath)}</div>` : ''}
         ${info?.desc ? `<div class="em-tip-desc">${esc(info.desc)}</div>` : (info === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : '')}
         <div class="em-tip-stats">${row.dataset.emLift ? `lift ${esc(row.dataset.emLift)} · ` : ''}${info?.count ? `Danbooru ${fmt(info.count)}` : ''}</div>
-        <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : (simpleMode && row.classList.contains('emt-row') ? "단순 검색 모드 - [복사] · [삽입]" : "클릭 꽂기 · 우클릭 제외")}</div></div>
+        <div class="em-tip-foot">${returning ? "" : tipComboLine(row)}<div class="em-tip-hint">${returning ? "이 단계로 돌아가기" : row.classList.contains('emt-rest') ? "이 인원·등급에서는 안 나온 태그 - [복사] · [삽입]" : (simpleMode && row.classList.contains('emt-row') ? "단순 검색 모드 - [복사] · [삽입]" : "클릭 꽂기 · 우클릭 제외")}</div></div>
       </div>${thumb}</div>`;
     // 툴팁은 곁에 뜨는 창들(소분류 · 옆 패널 · 인원 팝업, 모두 overlay+1)보다 **한 칸 위**다. 같은 칸이면
     // body 에 나중에 붙은 쪽이 이겨, 창을 다시 열면 소분류 창이 툴팁을 덮었다(사용자 제보 2026-10-07).
@@ -1361,7 +1361,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (!simpleMode || !rest || d.has_more || !rest.total) return '';
     const more = rest.total - rest.tags.length;
     return `<div class="emt-d3h emt-rest-h"><span>검색 결과 외</span><small title="이 인원·등급에서는 후보로 나오지 않은 태그 - 코퍼스에 흔한 순">${fmt(rest.total)}</small></div>`
-      + rest.tags.map(tag => `<div class="em-row emt-row emt-rest" title="이 인원·등급에서는 후보로 나오지 않았습니다">
+      // 툴팁 = 결과 줄과 같은 태그 툴팁(설명 · Danbooru 수 · 썸네일). title 은 앱 전역의 큰 툴팁이 되어 아래 줄을 가렸다(사용자 제보 2026-10-18).
+      + rest.tags.map(tag => `<div class="em-row emt-row emt-rest" data-em-tip-tag="${esc(tag)}">
           <span class="em-tag">${esc(tag)}</span>
           <span class="emt-quick"><button type="button" data-emt-copy="${esc(tag)}" title="이 태그를 클립보드로">복사</button><button type="button" data-emt-insert="${esc(tag)}" title="프롬프트 커서 자리에 ', 태그'">삽입</button></span>
         </div>`).join('')

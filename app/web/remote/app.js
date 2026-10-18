@@ -601,6 +601,90 @@ function virtualCharacterState(session) {
   };
 }
 
+// ── 레퍼런스 인셋의 가상 캐릭터 프롬프트 (사용자 결정 2026-10-18) ───────────────
+//
+// 인셋이 켜져 있는 동안 생성은 메인 캐릭터 슬롯 대신 **인셋의 가상 캐릭터만** 쓴다(우회 모드 - 위 인페인트 세션의
+// 가상 캐릭터와 같은 방식). 퀵 패널은 같은 UI 로 그것을 보여 주고(머리말 `가상 · 인셋`), 편집은 인셋으로 간다.
+// POS 는 AUTO 만이다(좌표를 싣지 않는다). ⚠️ 인페인트 세션이 열려 있으면 그쪽이 먼저다(그때 인셋은 안 실린다).
+function insetVirtualCharacters() {
+  if (virtualCharacterSession()) return null;
+  const state = referenceInsetState;           // 켜져 있을 때만 값이 있다(`setReferenceInsetBadge`)
+  return state && state.configured && Array.isArray(state.characters) ? state : null;
+}
+
+function insetVirtualCharacterState(inset) {
+  return {
+    type: 'module_state',
+    module_id: 'character',
+    virtual: true,
+    virtual_label: '인셋',
+    activated: true,
+    position_mode: 'auto',
+    characters: inset.characters.map(c => ({
+      prompt: String(c.prompt || ''), uc: String(c.uc || ''), active: true, muted: false, position: null,
+    })),
+  };
+}
+
+/** 퀵 패널이 보낸 가상 캐릭터 편집을 인셋으로 보낸다. 답(인셋 상태)이 띠 · 창 · 패널을 함께 맞춘다.
+ *
+ *  ⚠️ **누른 차례대로 한 줄로 보낸다**(Codex 리뷰). 글자마다 따로 보내면 서버가 `g` 를 `girl` 뒤에 받아 옛 글로
+ *     덮고, 그 답은 더 높은 차례 번호라 화면도 받아들인다 - 생성에는 옛 글이 나간다. 아직 안 나간 같은 칸의 글은
+ *     마지막 값 하나로 합치고, 뒤에 기다리는 편집이 있으면 앞의 답은 그리지 않는다(입력 중인 글을 옛 메아리가 덮지 않게). */
+let insetCharacterChain = Promise.resolve();
+let insetCharacterWaiting = 0;
+const insetCharacterQueuedText = new Map();     // 아직 안 나간 글 편집: key -> 마지막 값
+// 줄 안의 어느 편집이 실패했나 - 그러면 앞서 성공한 답을 안 그렸을 수 있다(뒤에 기다리는 편집이 있어 건너뛰었다).
+// 줄이 비는 순간 서버의 지금 상태를 다시 받아 맞춘다(Codex 리뷰 2차: 서버 6명 · 화면 5명).
+let insetCharacterFailed = false;
+
+async function refreshInsetAfterCharacterFailure() {
+  try {
+    const response = await fetch('/api/character-asset/inset/state');
+    const fresh = response.ok ? await response.json().catch(() => null) : null;
+    if (fresh) setReferenceInsetBadge(fresh);
+  } catch (_error) { /* 다음 편집의 답이 맞춘다 */ }
+}
+
+function insetCharacterParam(key, value) {
+  const text = /^(char_prompt_|char_uc_)\d+$/.test(key);
+  if (text && insetCharacterQueuedText.has(key)) {
+    insetCharacterQueuedText.set(key, value);   // 줄에 이미 있다 - 그 자리에서 마지막 값으로 나간다
+    return insetCharacterChain;
+  }
+  if (text) insetCharacterQueuedText.set(key, value);
+  insetCharacterWaiting += 1;
+  const run = insetCharacterChain.then(async () => {
+    const sentValue = text ? insetCharacterQueuedText.get(key) : value;
+    if (text) insetCharacterQueuedText.delete(key);
+    try {
+      const response = await fetch('/api/character-asset/inset/character', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key, value: sentValue}),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.error) {
+        showToast(data?.error || `가상 캐릭터를 바꾸지 못했습니다 (${response.status})`, 'error');
+        insetCharacterFailed = true;
+        return null;
+      }
+      if (insetCharacterWaiting <= 1) setReferenceInsetBadge(data);   // 뒤에 더 새 편집이 있으면 그 답이 맞춘다
+      return data;
+    } catch (error) {
+      showToast(`가상 캐릭터를 바꾸지 못했습니다: ${error.message}`, 'error');
+      insetCharacterFailed = true;                // 답을 못 받았다 - 서버는 바꿨을 수 있다
+      return null;
+    } finally {
+      insetCharacterWaiting -= 1;
+      if (insetCharacterWaiting === 0 && insetCharacterFailed) {
+        insetCharacterFailed = false;
+        await refreshInsetAfterCharacterFailure();
+      }
+    }
+  });
+  insetCharacterChain = run.catch(() => null);
+  return run;
+}
+
 /** 인페인트 세션이 화면을 잡고 있는 동안 잠가 두는 것들(사용자 지정 2026-08-26).
  *
  *  ⚠️ 인페인트는 **이 세션의 그림**을 고치는 일이다. 그 사이에 프롬프트를 새로 굴리거나
@@ -680,14 +764,28 @@ function applyInpaintSessionLock() {
 function renderCharacterQuickPanel() {
   if (!characterQuickPanel) return;
   const session = virtualCharacterSession();
+  const inset = session ? null : insetVirtualCharacters();
   characterQuickPanel.render(session
     ? virtualCharacterState(session)
-    : (moduleStateCache.get('character') || {module_id: 'character', characters: []}));
+    : inset ? insetVirtualCharacterState(inset)
+      : (moduleStateCache.get('character') || {module_id: 'character', characters: []}));
 }
 
 /** 퀵 패널이 `character` 로 쓰려는 것을 인페인트 세션으로 돌린다. */
 function virtualSetModuleParam(moduleId, key, value, options) {
   const session = virtualCharacterSession();
+  if (moduleId === 'character' && !session && insetVirtualCharacters()) {
+    // 인셋의 가상 캐릭터: 프롬프트 · UC · 더하기 · 빼기 · POS AUTO 만. 나머지는 말해 준다.
+    if (/^(char_prompt_|char_uc_|remove_character_)\d+$/.test(key) || key === 'add_character') {
+      return insetCharacterParam(key, key === 'add_character' ? '' : value);
+    }
+    if (key === 'position_mode') {
+      if (String(value) !== 'auto') showToast('인셋의 가상 캐릭터는 POS AUTO 만 씁니다', 'info');
+      return undefined;
+    }
+    showToast('인셋의 가상 캐릭터에는 없는 기능입니다', 'error');
+    return undefined;
+  }
   // `options.slotUuid` 도 넘긴다 - 퀵 패널의 Find 가 보관함 줄을 올릴 때 그 캐릭터의 uuid 를 싣는다(번호는 낡을 수 있다).
   if (moduleId !== 'character' || !session) return setModuleParam(moduleId, key, value, options);
   const w = Number(session.canvas_width) || 0;
@@ -727,6 +825,10 @@ function virtualSetModuleParam(moduleId, key, value, options) {
 /** 퀵 패널의 프롬프트/네거티브 편집을 인페인트 세션으로 돌린다. */
 function virtualModTextEdit(moduleId, field, value, slotUuid) {
   const session = virtualCharacterSession();
+  if (moduleId === 'character' && !session && insetVirtualCharacters()
+      && /^(char_prompt_|char_uc_)\d+$/.test(String(field))) {
+    return insetCharacterParam(String(field), value);
+  }
   if (moduleId !== 'character' || !session) return onModTextEdit(moduleId, field, value, undefined, slotUuid);
   const map = {char_prompt_: 'char_prompt_', char_uc_: 'char_uc_'};
   for (const prefix of Object.keys(map)) {
@@ -1000,7 +1102,7 @@ document.getElementById('charAssetSpecTabs')?.addEventListener('click', event =>
   if (assetSpecTab === 'legacy') characterAssetControl?.load?.();
 });
 
-const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261015-find1')
+const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=20261018-insetvc1')
   .then(({createCharacterBuilderV5}) => {
     characterBuilderV5Control = createCharacterBuilderV5({
       document,
@@ -1027,7 +1129,7 @@ const characterBuilderV5Ready = import('./js/features/characterBuilderV5.mjs?v=2
     if (assetSpecTab === 'v5') characterAssetControl?.load?.();      // 구 사양 화면으로 떨어진다 - 목록을 채운다
   });
 
-const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261015-find1')
+const characterAssetReady = import('./js/features/characterAssetTab.mjs?v=20261018-insetvc1')
   .then(({createCharacterAssetTabController}) => {
     characterAssetControl = createCharacterAssetTabController({
       document,
@@ -1129,6 +1231,8 @@ function setReferenceInsetBadge(state) {
   renderReferenceInsetBadge();
   // 창이 떠 있으면 같은 상태를 본다. 꺼져도 창은 닫히지 않는다 - 거기서 다시 켠다.
   referenceInsetWindow?.sync(referenceInsetFull);
+  // 퀵 패널: 인셋이 켜져 있으면 가상 캐릭터, 꺼지면 메인(사용자 결정 2026-10-18 - 우회 모드).
+  try { renderCharacterQuickPanel(); } catch (_) { /* 패널이 아직 없다 */ }
 }
 
 /** 레퍼런스 인셋 창(사용자 지정 2026-10-09 · 10-10 개편). Fn > 레퍼런스 인셋 · 띠의 이름을 누르면 뜬다.
@@ -1165,7 +1269,7 @@ async function openReferenceInsetWindow() {
   }
   if (!referenceInsetWindow) {
     try {
-      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261012-inset24');
+      const {createReferenceInsetWindow} = await import('./js/features/referenceInsetWindow.mjs?v=20261018-inset28');
       referenceInsetWindow = createReferenceInsetWindow({
         document, window, fetch: window.fetch.bind(window), escHtml, showToast,
         onState: state => setReferenceInsetBadge(state),
@@ -1173,11 +1277,12 @@ async function openReferenceInsetWindow() {
         openAssets: () => switchRightTab('charAssets'),
         // [붙여넣기] - 클립보드를 읽어 **이 창으로만** 넘긴다. 받는 쪽을 지목한 붙여넣기라 앱의 평소 붙여넣기
         // (이미지 동작 팝업 · 인페인트 레이어)로 가지 않는다. ⚠️ Ctrl+V 는 이리로 오지 않는다(회수 - 사용자 결정).
-        requestPaste: () => {
+        // `pressed` = 누른 순간의 {epoch, slot} - 그 붙여넣기의 답에 그대로 돌려준다(요청마다 따로).
+        requestPaste: pressed => {
           if (!resultImageInput) { showToast('Image input is not ready', 'error'); return; }
           resultImageInput.pasteFromClipboard({
             label: 'Reference Inset',
-            onImageBlob: blob => { referenceInsetWindow?.acceptPastedImage?.(blob); },
+            onImageBlob: blob => { referenceInsetWindow?.acceptPastedImage?.(blob, pressed); },
           });
         },
       });
@@ -1454,7 +1559,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261017-resthead1')
+import('./js/features/eventMapPanel.mjs?v=20261018-resttip1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -2804,7 +2909,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261015-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261017-findlib1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261018-insetvc1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -4593,6 +4698,8 @@ function handleWsBlob(data) {
   if (characterViewerControl && typeof characterViewerControl.handleResultBlob === 'function') {
     characterViewerControl.handleResultBlob(data);
   }
+  // 레퍼런스 인셋 창의 그릴 곳에도 얹는다(사용자 결정 2026-10-18) - 인셋이 켜져 있을 때 온 결과만 쥔다.
+  referenceInsetWindow?.showResult?.(data);
   preview.src = url;
   preview.dataset.source = 'current';
   preview.dataset.path = '';

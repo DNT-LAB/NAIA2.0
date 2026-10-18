@@ -29,6 +29,7 @@ from core.nai_transparent_background import (
 )
 from core.reference_inset_service import (
     REFERENCE_INSET_V5_TAGS,
+    REFERENCE_INSET_V5_VERTICAL_TAGS,
     inject_reference_inset_into_prompt,
     reference_inset_should_inject_params,
     reference_inset_tags_for,
@@ -1188,7 +1189,8 @@ class APIService:
                     cleaned_input = inject_reference_inset_into_prompt(
                         params.get('input', '') or '',
                         _inset_tags,
-                        after_prefix=(_inset_tags is REFERENCE_INSET_V5_TAGS),
+                        after_prefix=(_inset_tags is REFERENCE_INSET_V5_TAGS
+                                      or _inset_tags is REFERENCE_INSET_V5_VERTICAL_TAGS),
                     )
                     if cleaned_input != params.get('input', ''):
                         params['input'] = cleaned_input
@@ -1315,7 +1317,8 @@ class APIService:
                         character_positions = params.get('character_positions', [])
                         character_ids = list(params.get('_executed_character_ids') or params.get('character_ids') or [])
 
-                    elif params.get('_skip_character_late_binding'):
+                    elif params.get('_skip_character_late_binding') or params.get('_reference_inset_skip_characters'):
+                        # (인셋의 가상 캐릭터가 비어 있을 때도 여기다 - 우회 모드는 메인 슬롯을 쓰지 않는다. 2026-10-18)
                         # 4-1) 캐릭터 소유자가 요청자 자신인 경우(Interactive 모드) — 모듈/스냅샷/
                         # 스트림 freeze 에서 캐릭터를 끌어오지 않는다. 캐릭터가 있으면 위의
                         # EarlyBinding/SavedParams 로 이미 실렸고, 없으면 '없는 것'이 정답이다.
@@ -2718,6 +2721,8 @@ class APIService:
         """
         divider = int(parameters.pop('_reference_inset_crop_left', 0) or 0)
         expected = str(parameters.pop('_reference_inset_crop_canvas', '') or '')
+        # 상하 모드면 칸이 **위**다 - 돌려 눕혀서 같은 길(왼쪽 자르기)로 자르고 다시 세운다.
+        vertical = str(parameters.pop('_reference_inset_crop_axis', '') or '') == 'y'
         try:
             import hashlib
 
@@ -2730,10 +2735,13 @@ class APIService:
             if (not expected or not isinstance(sent, (bytes, bytearray))
                     or hashlib.sha1(bytes(sent)).hexdigest()[:16] != expected):
                 return result                      # 인셋 캔버스를 보낸 요청이 아니다(Enhance 등) - 자르지 않는다
-            box = reference_inset_result_crop_box(generated, divider)
+            work = generated.transpose(Image.Transpose.TRANSPOSE) if vertical else generated
+            box = reference_inset_result_crop_box(work, divider)
             if divider <= 0 or box[2] - box[0] < 64:
                 return result                      # 남길 것이 없다 - 자르지 않는다
-            cropped = generated.crop(box)
+            cropped = work.crop(box)
+            if vertical:
+                cropped = cropped.transpose(Image.Transpose.TRANSPOSE)
             if cropped.mode not in ('RGB', 'RGBA'):
                 cropped = cropped.convert('RGB')
             pnginfo = self._build_nai_pnginfo_for_cropped_image(generated, parameters)

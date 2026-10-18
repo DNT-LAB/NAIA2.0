@@ -652,6 +652,21 @@
         },
         {
           "method": "POST",
+          "path": "/api/character-asset/inset/orientation",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/character",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
+          "path": "/api/character-asset/inset/extract-features",
+          "smoke": "state_mutation"
+        },
+        {
+          "method": "POST",
           "path": "/api/character-asset/inset/enabled",
           "smoke": "state_mutation"
         },

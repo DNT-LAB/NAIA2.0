@@ -452,7 +452,8 @@ export function createCharacterAssetTabController({
       if (dedupe && !withInset && !withReference) {
         showToast(dedupe, 'info');
       } else if (withInset) {
-        showToast(`${dedupe ? `${dedupe} ` : 'C1 슬롯 적용 + '}레퍼런스 인셋 고정됨 - 해제 전까지 인셋으로 생성됩니다`, 'success');
+        // 인셋과 함께면 메인 C1 이 아니라 인셋의 가상 C1 에 들어간다(사용자 결정 2026-10-18 - 메인 슬롯은 그대로).
+        showToast('가상 C1 에 넣고 레퍼런스 인셋으로 고정했습니다 - 해제 전까지 인셋 · 가상 캐릭터로 생성됩니다', 'success');
         // Result 탭 좌상단 핀 배지 갱신(앱 셸 소유)
         if (result.reference_inset) onReferenceInsetPin(result.reference_inset);
       } else if (withReference) {
@@ -1808,7 +1809,7 @@ export function createCharacterAssetTabController({
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-cr" ${applyDisabled} ${applyTitle}
           title="C1 슬롯 적용 + 이 이미지를 Character Reference로 등록 (해상도는 자동 정규화)">C1 + CR 적용</button>
         <button class="mod-btn-sm mod-btn-encode" data-action="apply-c1-inset" ${applyDisabled} ${applyTitle}
-          title="C1 슬롯 적용 + 이 이미지를 레퍼런스 인셋으로 고정 - 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
+          title="인셋의 가상 C1 에 넣고 이 이미지를 레퍼런스 인셋으로 고정 - 메인 캐릭터 슬롯은 그대로 · 기존 CR은 전부 비활성화">C1 + 레퍼런스 인셋 적용</button>
         <button class="mod-btn-sm" data-action="apply-add" ${applyDisabled} ${applyTitle}>새 슬롯으로 추가</button>
       </div>
     `;

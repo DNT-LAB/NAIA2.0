@@ -486,8 +486,12 @@ def register_character_asset_routes(
         box = None if payload.get("reset") else {
             key: payload.get(key) for key in ("x", "y", "height", "divider")
         }
+        # 둘째 그림이 있으면: `second` = 그 그림의 자리 `{x, y, height}` · `split` = 두 칸을 나누는 선(모델 공간 y).
+        second_box = payload.get("second") if isinstance(payload.get("second"), dict) else None
         try:
-            state = await run_in_thread(_asset_service(session_context).set_reference_inset_box, box)
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_box, box, second_box, payload.get("split")
+            )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except FileNotFoundError as exc:
@@ -567,11 +571,13 @@ def register_character_asset_routes(
                     payload = {}
                 if not isinstance(payload, dict) or not payload.get("reset"):
                     return JSONResponse({"error": "그림은 본문 바이트로 보냅니다."}, status_code=400)
-                state = await run_in_thread(service.set_reference_inset_source, None)
+                # `?slot=2` 의 reset = 둘째 그림 빼기.
+                state = await run_in_thread(service.set_reference_inset_source, None, None, req.query_params.get("slot"))
             else:
                 # `?toggle=` = 화면이 [붙여넣기] 를 누른 순간에 알던 켜고 끄기 차례(그 뒤에 껐으면 켜지 않는다).
+                # `?slot=2` = 둘째 그림으로 넣는다.
                 state = await run_in_thread(
-                    service.set_reference_inset_source, body, req.query_params.get("toggle")
+                    service.set_reference_inset_source, body, req.query_params.get("toggle"), req.query_params.get("slot")
                 )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
@@ -582,10 +588,10 @@ def register_character_asset_routes(
         return await _inset_reply(state)
 
     @app.get("/api/character-asset/inset/source")
-    async def api_character_asset_inset_source_image(v: str = ""):
-        # 칸에 놓인 그림(붙여넣은 그림이면 그것, 아니면 에셋의 그림). 인셋 창이 이것을 놓아 보여 준다.
+    async def api_character_asset_inset_source_image(v: str = "", slot: str = ""):
+        # 칸에 놓인 그림(붙여넣은 그림이면 그것, 아니면 에셋의 그림). 인셋 창이 이것을 놓아 보여 준다. `slot=2` = 둘째 그림.
         try:
-            data, media = await run_in_thread(_asset_service(session_context).reference_inset_source_image)
+            data, media = await run_in_thread(_asset_service(session_context).reference_inset_source_image, slot or 1)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         if not data:
@@ -622,6 +628,52 @@ def register_character_asset_routes(
             return JSONResponse({"error": f"Reference inset background failed: {exc}"}, status_code=500)
         return {"ok": True, **state}
 
+    @app.post("/api/character-asset/inset/orientation")
+    async def api_character_asset_inset_orientation(req: Request):
+        # 칸의 방향(`{orientation: horizontal | vertical}` - 사용자 지시 2026-10-18 상하 모드). 이 세션의 설정.
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_orientation, payload.get("orientation")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset orientation failed: {exc}"}, status_code=500)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/character")
+    async def api_character_asset_inset_character(req: Request):
+        # 인셋의 가상 캐릭터를 고친다(`{key, value}` - 캐릭터 퀵 패널의 키 그대로 · 사용자 결정 2026-10-18).
+        payload = await _read_json(req)
+        try:
+            state = await run_in_thread(
+                _asset_service(session_context).set_reference_inset_character, payload.get("key"), payload.get("value")
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        return {"ok": True, **state}
+
+    @app.post("/api/character-asset/inset/extract-features")
+    async def api_character_asset_inset_extract_features(req: Request):
+        # [특징 추출]: 칸의 그림(`{slot}`)을 WD 태거에 보내 캐릭터 특징만 고른다. ⚠️ 그림이 huggingface 로 나간다.
+        from core.wd_tagger_service import TaggerError
+
+        payload = await _read_json(req)
+        try:
+            result = await run_in_thread(
+                _asset_service(session_context).extract_reference_inset_features, payload.get("slot") or 1
+            )
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except TaggerError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        except Exception as exc:
+            return JSONResponse({"error": f"Reference inset feature extraction failed: {exc}"}, status_code=500)
+        return {**result, "space_url": "https://huggingface.co/spaces/SmilingWolf/wd-tagger", "notice": "웹에서 사용"}
+
     @app.post("/api/character-asset/inset/enabled")
     async def api_character_asset_inset_enabled(req: Request):
         # 인셋을 켜고 끈다(`{enabled}`). 꺼도 그림 · 배치 · 해상도는 남는다.
@@ -639,10 +691,13 @@ def register_character_asset_routes(
         return await run_in_thread(_asset_service(session_context).reference_inset_storage_list)
 
     @app.post("/api/character-asset/inset/storage")
-    async def api_character_asset_inset_storage_save():
-        # 지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만).
+    async def api_character_asset_inset_storage_save(req: Request):
+        # 지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만). `{slot: 2}` = 둘째 그림.
+        payload = await _read_json(req)
         try:
-            state = await run_in_thread(_asset_service(session_context).save_reference_inset_to_storage)
+            state = await run_in_thread(
+                _asset_service(session_context).save_reference_inset_to_storage, payload.get("slot") or 1
+            )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except FileNotFoundError as exc:
@@ -680,7 +735,8 @@ def register_character_asset_routes(
         payload = await _read_json(req)
         try:
             state = await run_in_thread(
-                _asset_service(session_context).apply_reference_inset_storage, payload.get("id"), payload.get("toggle")
+                _asset_service(session_context).apply_reference_inset_storage, payload.get("id"), payload.get("toggle"),
+                payload.get("slot") or 1,
             )
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)

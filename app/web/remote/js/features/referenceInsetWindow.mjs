@@ -45,6 +45,18 @@
  *  ⚠️ 끄는 동안 · 휠을 굴리는 동안은 **화면이 직접 그린다**(그림 한 장을 CSS 로 놓을 뿐이라 서버를 안 부른다).
  *     놓거나 휠이 멎으면 한 번만 보내고, 그 답(서버가 한계에 맞춘 값)으로 화면을 다시 맞춘다.
  *  ⚠️ 창은 캔버스를 **미리 보여 주는 것**이지 나가는 그림 자체가 아니다 - 칸 선은 화면에서 얇게만 긋는다.
+ *
+ *  상하 모드(사용자 지시 2026-10-18 - 머리줄의 [좌우 | 상하]): 칸이 **위**에 붙고 경계선은 가로줄이다. 서버는 원본을
+ *    전치해 가로로 굽고 돌려 세운다 - 그래서 `box` · `divider` · `limits` · `source_*` 는 **눕힌 모델 공간** 값이고,
+ *    `width` · `height` · `sizes` 만 실제(세로) 캔버스다. 위의 계산 함수들은 모델 공간에서 그대로 돌고(`geo()`),
+ *    그리기와 포인터만 축을 바꾼다(모델 x = 화면 y). 방향은 세션 설정이다(앱을 다시 켜면 좌우).
+ *
+ *  그림 두 장(사용자 결정 2026-10-18 - "같은 인물을 두 장" · 두 장 상한 · 크롭 대신 칸 안 피벗): [+ 한 장 더] 로 둘째
+ *    그림을 넣으면 칸이 모델 y 에서 두 칸으로 나뉜다(좌우 모드 = 위아래 칸 · 상하 모드 = 좌우 칸 · 기본 반반 · 사이 선을
+ *    끌어 조절). 그림마다 제 칸 안에서만 보이고, 끌기 · 휠 · 손잡이는 **누른 칸의 그림**을 움직인다(휠은 커서 밑의 점이
+ *    피벗). [그림 1] [그림 2] 칩이 [붙여넣기] · [Storage] · [저장] 이 어느 그림에 가는지 정한다. 업스케일은 첫 그림만.
+ *  그릴 곳 = 마지막 결과(사용자 결정 2026-10-18 "결과물이 우측 윈도우에도"): 인셋으로 만든 결과가 오면 미리보기의 그릴
+ *    곳에 얹는다([결과 보기] 로 끄고 켠다). 칸을 빼고 남긴 결과는 그 자리(오른쪽 · 아래)에 맞춰 놓는다.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
@@ -140,7 +152,14 @@ export function createReferenceInsetWindow({
   let storedSeq = 0;
   let armedDelete = '';     // x 를 한 번 누른 보관본의 id - 한 번 더 눌러야 지운다
   let armedTimer = 0;
-  let draft = null;         // 끄는 중 · 보내는 중인 배치 {box, divider} - 있으면 이것을 그린다
+  let draft = null;         // 끄는 중 · 보내는 중인 배치 {box, divider, box2, split} - 있으면 이것을 그린다
+  let slot = 1;             // 고른 그림(1 | 2) - [붙여넣기] · [Storage] · [저장] 이 가는 곳
+  let wantSecond = false;   // [+ 한 장 더] 를 눌렀고 둘째 그림이 아직 없다
+  let lastResult = null;    // 인셋으로 만든 마지막 결과 {url, width, height} - 그릴 곳에 얹는다
+  let resultSeq = 0;        // 결과를 풀어 볼 때마다 올라가는 번호 - 늦게 풀린 옛 결과가 새것을 덮지 않게
+  // [특징 추출] 의 결과 {keep, unknown, dropped, on: Set(켜진 태그), url} - 가상 캐릭터에 넣기 전에 사람이 고른다.
+  let extracted = null;
+  let extracting = false;
   let drag = null;
   let wheelTimer = 0;
   let wheelAnchor = null;   // 휠을 굴리기 시작한 순간의 닻 - 멎을 때까지 쥔다
@@ -166,14 +185,43 @@ export function createReferenceInsetWindow({
   const toggleEpoch = () => (Number.isFinite(state?.toggle_epoch) ? state.toggle_epoch : null);
   // [붙여넣기] 를 **누른 순간**의 차례. 클립보드를 읽는 데도 시간이 걸린다(권한 창이 뜨기도 한다) - 그림을 받은
   // 뒤에 읽으면 그 사이에 끈 것을 놓친다(Codex 리뷰 4차). undefined = 누른 것이 없다.
-  let pressedPasteEpoch;
   // 지금 칸에 놓인 그림 · 캔버스의 표식. 배치는 이것이 같을 때만 뜻이 있다(다른 그림 · 다른 캔버스의 좌표다).
+  // 방향도 넣는다 - 정사각 캔버스는 방향을 바꿔도 치수가 같다(옛 방향의 좌표가 새 방향으로 나간다 - Codex 리뷰).
   const identity = () => (configured()
-    ? [state.width, state.height, state.source_revision, state.character_id, state.variation].join('|') : '');
+    ? [state.width, state.height, state.source_revision, state.character_id, state.variation, state.orientation,
+      state.second?.source_revision || ''].join('|') : '');
   // 답을 못 받은 요청은 서버가 나중에 끝낼 수 있다 - 그때의 상태를 받아 오려고 몇 번 더 묻는다(ms 뒤).
   const FOLLOW_UP_MS = [2000, 5000, 15000, 30000, 60000];
   let followTimers = [];
-  const layout = () => draft || {box: state.box, divider: state.divider};
+  const layout = () => draft
+    || {box: state.box, divider: state.divider, box2: state.second?.box || null, split: state.second ? state.split : null};
+  // 상하 모드인가 · 계산 함수에 넘길 **모델 공간** 상태(세로면 캔버스의 너비 · 높이를 맞바꾼 것 - 머리 주석).
+  const vertical = () => state?.orientation === 'vertical';
+  const geo = () => (vertical() ? {...state, width: state.height, height: state.width} : state);
+  // 그림 n 의 모델 공간 상태(둘째 그림이면 그 그림의 비율) · 그 그림의 칸(모델 y 범위).
+  const geoOf = n => (n === 2 && state.second
+    ? {...geo(), source_width: state.second.source_width, source_height: state.second.source_height} : geo());
+  const cellOf = (n, lay) => {
+    const whole = Number(geo().height) || 1;
+    if (!lay.box2) return {top: 0, bottom: whole};
+    return n === 2 ? {top: lay.split, bottom: whole} : {top: 0, bottom: lay.split};
+  };
+  /** 그림 n 의 자리를 한계와 **제 칸**에 맞춘다(그림의 min_visible 만큼은 칸 안에 남긴다 - 서버와 같은 규칙). */
+  const clampCell = (box, divider, n, lay) => {
+    const placed = clampInsetBox(box, divider, geoOf(n));
+    const {top, bottom} = cellOf(n, lay);
+    const keep = Number(state.limits?.min_visible) || 0;
+    return {...placed, y: Math.max(top + keep - placed.height, Math.min(bottom - keep, placed.y))};
+  };
+  /** 그림 n 의 칸 안에서 보이는 부분(모델 px). */
+  const cellSeen = (box, divider, n, lay) => {
+    const {top, bottom} = cellOf(n, lay);
+    const left = Math.max(0, box.x);
+    const right = Math.min(divider, box.x + box.width);
+    const upper = Math.max(top, box.y);
+    const lower = Math.min(bottom, box.y + box.height);
+    return right > left && lower > upper ? {left, top: upper, right, bottom: lower} : null;
+  };
   // 업스케일을 기다리는 동안만 배치가 잠긴다. 업스케일해 둔 뒤에는 마음대로 바꾼다(원본을 올려 둔 것이라 유지된다).
   const locked = () => busy;
 
@@ -188,6 +236,12 @@ export function createReferenceInsetWindow({
     });
     // 머리줄의 켜고 끄기. `data-nodrag` 가 없으면 스위치를 누르려다 창을 끈다.
     panel.slot.innerHTML = `
+      <span class="riw-orient" data-nodrag role="group" aria-label="칸의 방향">
+        <button type="button" class="riw-orient-btn" data-riw-orient="horizontal"
+                data-naia-title="칸이 왼쪽 · 그릴 곳이 오른쪽">좌우</button>
+        <button type="button" class="riw-orient-btn" data-riw-orient="vertical"
+                data-naia-title="칸이 위 · 그릴 곳이 아래 (캔버스를 세웁니다 - 배치는 기본으로 돌아갑니다)">상하</button>
+      </span>
       <label class="riw-switch" data-nodrag data-riw-switch>
         <input type="checkbox" data-riw-enabled>
         <span class="riw-switch-text" data-riw-enabled-text>끔</span>
@@ -195,8 +249,12 @@ export function createReferenceInsetWindow({
     panel.body.innerHTML = `
       <div class="riw-main" data-riw-main>
         <div class="riw-stage" data-riw-stage>
+          <img class="riw-result" data-riw-result alt="" draggable="false" hidden>
           <div class="riw-panel" data-riw-panel data-naia-title="끌어서 칸 안의 그림을 옮깁니다 · 휠로 크기를 바꿉니다">
-            <img class="riw-pic" alt="레퍼런스 인셋 그림" draggable="false">
+            <div class="riw-cell" data-riw-cell="1"><img class="riw-pic" alt="레퍼런스 인셋 그림" draggable="false"></div>
+            <div class="riw-cell" data-riw-cell="2" hidden><img class="riw-pic" data-riw-pic2 alt="둘째 그림"
+                 draggable="false"></div>
+            <div class="riw-split" data-riw-split hidden data-naia-title="끌어서 두 칸의 크기를 나눕니다"></div>
           </div>
           <div class="riw-frame" data-riw-frame>
             <span class="riw-handle" data-riw-handle data-naia-title="끌어서 그림의 크기를 바꿉니다"></span>
@@ -217,12 +275,15 @@ export function createReferenceInsetWindow({
         </div>
         <div class="riw-row" data-riw-row>
           <span class="riw-label">칸의 그림</span>
+          <span class="riw-sizes" data-riw-slots></span>
           <button type="button" class="riw-chip" data-riw-paste
                   data-naia-title="클립보드의 그림(캡쳐 · 복사한 것)으로 인셋 칸의 그림을 바꿉니다">붙여넣기</button>
           <button type="button" class="riw-chip" data-riw-save
                   data-naia-title="지금 칸의 그림을 Storage 에 넣어 둡니다 - 앱을 다시 켜도 꺼내 쓸 수 있습니다 (그림만 기억합니다 · 업스케일해 뒀으면 올려 둔 판을 넣습니다)">저장</button>
           <button type="button" class="riw-chip" data-riw-storage
                   data-naia-title="저장해 둔 그림에서 고릅니다">Storage</button>
+          <button type="button" class="riw-chip" data-riw-extract-run
+                  data-naia-title="고른 그림을 WD 태거(huggingface - 그림이 외부로 나갑니다)에 보내 캐릭터 특징만 뽑습니다 - 확인한 뒤 가상 캐릭터에 넣습니다">특징 추출</button>
           <button type="button" class="riw-chip" data-riw-upscale
                   data-naia-title="레퍼런스 원본을 NAI 업스케일에 한 번 보내 두고, 그 뒤로는 거기서 줄여 칸에 놓습니다 - 그림을 키워도 흐려지지 않습니다 (Anlas 가 듭니다 · 그림 하나에 한 번)">업스케일</button>
           <button type="button" class="riw-chip" data-riw-bg
@@ -247,6 +308,27 @@ export function createReferenceInsetWindow({
           <span class="riw-cost" data-riw-cost
                 data-naia-title="이 캔버스(1MP 를 넘는 해상도)로 생성하면 Anlas 를 소모합니다"></span>
         </div>
+        <div class="riw-extract" data-riw-extract hidden>
+          <div class="riw-row">
+            <span class="riw-label">추출된 특징</span>
+            <span class="riw-extract-src" data-riw-extract-src></span>
+            <span class="riw-read" data-riw-extract-note></span>
+          </div>
+          <div class="riw-extract-body" data-riw-extract-body></div>
+          <div class="riw-row">
+            <button type="button" class="riw-chip is-on" data-riw-extract-c1
+                    data-naia-title="켜진 칩을 가상 C1 에 넣습니다 (C1 을 덮습니다)">가상 C1 에 넣기</button>
+            <button type="button" class="riw-chip" data-riw-extract-add
+                    data-naia-title="켜진 칩을 새 가상 캐릭터로 넣습니다">가상 캐릭터로 추가</button>
+            <button type="button" class="riw-chip" data-riw-extract-close>닫기</button>
+          </div>
+        </div>
+        <div class="riw-row" data-riw-row>
+          <span class="riw-label">그릴 곳</span>
+          <label class="riw-check" data-naia-title="인셋으로 만든 마지막 결과를 미리보기의 그릴 곳에 얹어 보여 줍니다">
+            <input type="checkbox" data-riw-show-result checked> 결과 보기</label>
+          <span class="riw-read" data-riw-result-note></span>
+        </div>
       </div>
       <div class="riw-store" data-riw-store hidden>
         <div class="riw-row">
@@ -266,6 +348,19 @@ export function createReferenceInsetWindow({
       rows: [...panel.body.querySelectorAll('[data-riw-row]')],
       panel: find('[data-riw-panel]'),
       pic: find('.riw-pic'),
+      pic2: find('[data-riw-pic2]'),
+      cell1: find('[data-riw-cell="1"]'),
+      cell2: find('[data-riw-cell="2"]'),
+      split: find('[data-riw-split]'),
+      slots: find('[data-riw-slots]'),
+      result: find('[data-riw-result]'),
+      showResult: find('[data-riw-show-result]'),
+      extractRun: find('[data-riw-extract-run]'),
+      extract: find('[data-riw-extract]'),
+      extractBody: find('[data-riw-extract-body]'),
+      extractSrc: find('[data-riw-extract-src]'),
+      extractNote: find('[data-riw-extract-note]'),
+      resultNote: find('[data-riw-result-note]'),
       frame: find('[data-riw-frame]'),
       divider: find('[data-riw-divider]'),
       kinds: find('[data-riw-kinds]'),
@@ -284,6 +379,7 @@ export function createReferenceInsetWindow({
       enabled: panel.slot.querySelector('[data-riw-enabled]'),
       enabledText: panel.slot.querySelector('[data-riw-enabled-text]'),
       switchBox: panel.slot.querySelector('[data-riw-switch]'),
+      orients: [...panel.slot.querySelectorAll('[data-riw-orient]')],
       store: find('[data-riw-store]'),
       storeGrid: find('[data-riw-store-grid]'),
       storeCount: find('[data-riw-store-count]'),
@@ -295,13 +391,28 @@ export function createReferenceInsetWindow({
     el.stage.addEventListener('pointercancel', onPointerUp);
     el.stage.addEventListener('wheel', onWheel, {passive: false});
     el.sizes.addEventListener('click', onPickSize);
+    el.slots.addEventListener('click', onPickSlot);
+    el.showResult.addEventListener('change', () => { render(); });
+    el.extractRun.addEventListener('click', runExtract);
+    el.extractBody.addEventListener('click', event => {
+      const chip = event.target.closest('[data-riw-feature]');
+      if (!chip || !extracted) return;
+      const tag = chip.dataset.riwFeature;
+      if (extracted.on.has(tag)) extracted.on.delete(tag); else extracted.on.add(tag);
+      renderExtract();
+    });
+    find('[data-riw-extract-c1]').addEventListener('click', () => useExtracted('virtual_c1'));
+    find('[data-riw-extract-add]').addEventListener('click', () => useExtracted('add_character'));
+    find('[data-riw-extract-close]').addEventListener('click', () => { extracted = null; renderExtract(); });
     el.kinds.addEventListener('click', onPickKind);
     el.reset.addEventListener('click', () => { if (!locked()) send({reset: true}, null); });
     el.upscale.addEventListener('click', runUpscale);
     el.pastes.forEach(button => button.addEventListener('click', () => {
       if (locked()) return;
-      pressedPasteEpoch = toggleEpoch();
-      if (typeof requestPaste === 'function') requestPaste();
+      // 누른 순간의 차례 · 고른 그림을 **이 요청에만** 묶어 넘긴다 - 클립보드를 읽는 사이에 칩을 바꾸거나 한 번 더 눌러도
+      // 각 붙여넣기는 제가 눌린 그림으로 간다(Codex 리뷰 - 공용 변수 하나로 쥐면 두 번째 누름이 첫 번째를 덮었다).
+      const pressed = {epoch: toggleEpoch(), slot};
+      if (typeof requestPaste === 'function') requestPaste(pressed);
       else showToast('이 화면에서는 붙여넣기를 쓸 수 없습니다', 'error');
     }));
     el.storages.forEach(button => button.addEventListener('click', () => { if (!locked()) showStorage(); }));
@@ -310,6 +421,15 @@ export function createReferenceInsetWindow({
       else showToast('이 화면에서는 Assets 탭을 열 수 없습니다', 'error');
     }));
     el.back.addEventListener('click', () => showMain());
+    // 칸의 방향. 꽂아 둔 것이 없어도 정해 둔다(다음에 꽂는 그림이 그 방향으로 선다).
+    el.orients.forEach(button => button.addEventListener('click', () => {
+      const wanted = button.dataset.riwOrient;
+      if (locked() || wanted === (state?.orientation || 'horizontal')) return;
+      win?.clearTimeout(wheelTimer);
+      wheelAnchor = null;
+      draft = null;
+      send({orientation: wanted}, null, '/api/character-asset/inset/orientation');
+    }));
     // [폴더 열기](사용자 지시 2026-10-12) - Storage 의 그림이 저장된 폴더를 탐색기로 연다.
     find('[data-riw-store-folder]').addEventListener('click', async () => {
       try {
@@ -359,6 +479,15 @@ export function createReferenceInsetWindow({
       : on ? '켜져 있습니다 - 다음 생성이 인셋으로 나갑니다 (끄면 일반 생성 · 그림과 배치는 남습니다)'
         : '꺼져 있습니다 - 일반 생성으로 나갑니다 (켜면 이 그림 · 배치 그대로 이어집니다)';
     el.crop.checked = !!state.crop_result;
+    // 머리줄의 방향 - 아래의 일찍 돌아가는 길(Storage · 빈 상태)보다 먼저 맞춘다.
+    const vert = vertical();
+    el.orients.forEach(button => {
+      const on = button.dataset.riwOrient === (vert ? 'vertical' : 'horizontal');
+      button.classList.toggle('is-on', on);
+      button.setAttribute('aria-pressed', on ? 'true' : 'false');
+      button.disabled = locked();
+    });
+    if (!state.second && !wantSecond) slot = 1;
     if (view === 'storage') { renderStorage(); return; }
     el.stage.hidden = !ready;
     el.empty.hidden = ready;
@@ -367,8 +496,12 @@ export function createReferenceInsetWindow({
     el.stage.classList.toggle('is-off', !on);
     const canvasW = Number(state.width) || 1;
     const canvasH = Number(state.height) || 1;
-    const {box, divider} = layout();
+    const lay = layout();
+    const {box, divider} = lay;
+    const modelW = vert ? canvasH : canvasW;       // 모델 공간(칸이 왼쪽인 눕힌 캔버스)
+    const modelH = vert ? canvasW : canvasH;
     el.stage.style.aspectRatio = `${canvasW} / ${canvasH}`;
+    el.stage.classList.toggle('is-vertical', vert);
     // 칸에 놓인 그림 = 붙여넣은 그림이면 그것, 아니면 에셋의 그림. 주소의 `v` 가 그림이 바뀔 때마다 달라진다
     // (캐릭터 · 바리에이션 · 붙여넣은 그림의 지문) - 캐시가 옛 그림을 주지 않게.
     const src = '/api/character-asset/inset/source?v=' + encodeURIComponent(
@@ -376,20 +509,49 @@ export function createReferenceInsetWindow({
     if (el.pic.getAttribute('src') !== src) el.pic.setAttribute('src', src);
     const pct = (value, whole) => `${(value / whole) * 100}%`;
     // 칸 = 왼쪽 가장자리 ~ 경계선. 그림은 칸이 자른다(칸 기준 % 로 놓는다).
-    el.panel.style.width = pct(divider, canvasW);
-    el.pic.style.left = pct(box.x, divider);
-    el.pic.style.top = pct(box.y, canvasH);
-    el.pic.style.width = pct(box.width, divider);
-    el.pic.style.height = pct(box.height, canvasH);
-    el.divider.style.left = pct(divider, canvasW);
+    // 상하 모드는 같은 모델 값을 **축을 바꿔** 놓는다(모델 x · 너비 -> 화면 y · 높이).
+    el.panel.style.width = vert ? '100%' : pct(divider, canvasW);
+    el.panel.style.height = vert ? pct(divider, modelW) : '';
+    // 칸 하나에 그림 하나. 둘째 그림이 없으면 첫 칸이 칸 전체다(예전과 같은 자리).
+    const placeCell = (cellEl, picEl, picBox, n) => {
+      const {top, bottom} = cellOf(n, lay);
+      const span = Math.max(1, bottom - top);
+      cellEl.style.left = vert ? pct(top, modelH) : '0';
+      cellEl.style.top = vert ? '0' : pct(top, modelH);
+      cellEl.style.width = vert ? pct(span, modelH) : '100%';
+      cellEl.style.height = vert ? '100%' : pct(span, modelH);
+      picEl.style.left = vert ? pct(picBox.y - top, span) : pct(picBox.x, divider);
+      picEl.style.top = vert ? pct(picBox.x, divider) : pct(picBox.y - top, span);
+      picEl.style.width = vert ? pct(picBox.height, span) : pct(picBox.width, divider);
+      picEl.style.height = vert ? pct(picBox.width, divider) : pct(picBox.height, span);
+    };
+    placeCell(el.cell1, el.pic, box, 1);
+    const two = !!lay.box2 && !!state.second;
+    el.cell2.hidden = !two;
+    el.split.hidden = !two;
+    if (two) {
+      const src2 = '/api/character-asset/inset/source?slot=2&v=' + encodeURIComponent(state.second.source_revision || '');
+      if (el.pic2.getAttribute('src') !== src2) el.pic2.setAttribute('src', src2);
+      placeCell(el.cell2, el.pic2, lay.box2, 2);
+      el.split.style.left = vert ? pct(lay.split, modelH) : '';
+      el.split.style.top = vert ? '' : pct(lay.split, modelH);
+      el.split.dataset.naiaTitle = vert ? '좌우로 끌어 두 칸의 너비를 나눕니다' : '위아래로 끌어 두 칸의 높이를 나눕니다';
+    } else {
+      el.pic2.removeAttribute('src');
+    }
+    el.divider.style.left = vert ? '' : pct(divider, canvasW);
+    el.divider.style.top = vert ? pct(divider, modelW) : '';
+    el.divider.dataset.naiaTitle = vert ? '위아래로 끌어 인셋 칸의 높이를 정합니다' : '좌우로 끌어 인셋 칸의 너비를 정합니다';
     // 테두리 · 손잡이는 그림의 **칸 안에 보이는 부분**에 붙는다 - 잘려 나간 모서리는 잡을 수 없다.
-    const seen = visibleInsetRect(box, divider, canvasH);
+    // 고른 그림의 테두리 · 손잡이만 보인다(두 장이면 [그림 1] · [그림 2] 칩 · 누른 칸이 정한다).
+    const picked = two && slot === 2 ? 2 : 1;
+    const seen = cellSeen(picked === 2 ? lay.box2 : box, divider, picked, lay);
     el.frame.hidden = !seen;
     if (seen) {
-      el.frame.style.left = pct(seen.left, canvasW);
-      el.frame.style.top = pct(seen.top, canvasH);
-      el.frame.style.width = pct(seen.right - seen.left, canvasW);
-      el.frame.style.height = pct(seen.bottom - seen.top, canvasH);
+      el.frame.style.left = vert ? pct(seen.top, modelH) : pct(seen.left, canvasW);
+      el.frame.style.top = vert ? pct(seen.left, modelW) : pct(seen.top, canvasH);
+      el.frame.style.width = vert ? pct(seen.bottom - seen.top, modelH) : pct(seen.right - seen.left, canvasW);
+      el.frame.style.height = vert ? pct(seen.right - seen.left, modelW) : pct(seen.bottom - seen.top, canvasH);
     }
     // 업스케일을 기다리는 동안: 끌 것(경계선 · 테두리)을 감춘다.
     const lock = locked();
@@ -427,14 +589,24 @@ export function createReferenceInsetWindow({
     el.upscale.textContent = busy ? '업스케일 중…' : state.upscaled ? '업스케일됨' : '업스케일';
     el.pastes.forEach(button => { button.disabled = lock; });
     el.storages.forEach(button => { button.disabled = lock; });
-    el.save.disabled = lock || !!state.saved;                // 이미 Storage 에 있는 그림이다
-    el.save.textContent = state.saved ? '저장됨' : '저장';
+    const onSecond = slot === 2;
+    const savedNow = onSecond ? !!state.second?.saved : !!state.saved;
+    el.save.disabled = lock || savedNow || (onSecond && !state.second);   // 이미 Storage 에 있는 그림이다
+    el.save.textContent = savedNow ? '저장됨' : '저장';
+    el.upscale.disabled = el.upscale.disabled || onSecond;   // 업스케일은 첫 그림만
     // 그림이 어디서 왔고, 앱을 끄면 남는가.
-    const origin = state.saved ? 'Storage 의 그림' : state.standalone ? '붙여넣은 그림 · 저장 안 됨'
-      : state.overridden ? '붙여넣은 그림 · 저장 안 됨' : '에셋의 그림';
+    const origin = onSecond ? (!state.second ? '둘째 그림을 넣어 주세요 (붙여넣기 · Storage)'
+      : state.second.saved ? '둘째 그림 · Storage 의 그림' : '둘째 그림 · 저장 안 됨')
+      : state.saved ? 'Storage 의 그림' : state.standalone ? '붙여넣은 그림 · 저장 안 됨'
+        : state.overridden ? '붙여넣은 그림 · 저장 안 됨' : '에셋의 그림';
     el.note.textContent = busy ? 'NAI 업스케일을 기다리는 중…'
       : [on ? '' : '꺼져 있음', origin, state.upscaled ? '업스케일해 둠' : ''].filter(Boolean).join(' · ');
-    el.read.textContent = `칸 ${divider}px · 그릴 곳 ${Math.round(insetOpenRatio(divider, canvasW) * 100)}%`;
+    el.read.textContent = `칸 ${divider}px · 그릴 곳 ${Math.round(insetOpenRatio(divider, modelW) * 100)}%`;
+    renderSlots(two, lock);
+    renderResult(canvasW, canvasH);
+    el.extractRun.disabled = lock || extracting || (slot === 2 && !state.second);
+    el.extractRun.textContent = extracting ? '특징 추출 중…' : '특징 추출';
+    renderExtract();
   }
 
   // ── 끌기 ──────────────────────────────────────────────────────────────
@@ -443,10 +615,13 @@ export function createReferenceInsetWindow({
     return rect.width > 0 ? (Number(state.width) || 1) / rect.width : 1;
   }
 
+  /** 포인터 자리(모델 공간 캔버스 px). 상하 모드면 화면의 y 가 모델의 x 다. */
   function canvasPoint(event) {
     const rect = el.stage.getBoundingClientRect();
     const scale = canvasScale();
-    return {x: (event.clientX - rect.left) * scale, y: (event.clientY - rect.top) * scale};
+    const x = (event.clientX - rect.left) * scale;
+    const y = (event.clientY - rect.top) * scale;
+    return vertical() ? {x: y, y: x} : {x, y};
   }
 
   function onPointerDown(event) {
@@ -454,8 +629,11 @@ export function createReferenceInsetWindow({
     // 경계선 → 칸의 너비 · 손잡이 → 그림 크기 · 칸 안 → 그림 옮기기. 경계선 오른쪽(그릴 곳)은 아무것도 아니다.
     const kind = event.target.closest?.('[data-riw-divider]') ? 'divider'
       : event.target.closest?.('[data-riw-handle]') ? 'size'
+      : event.target.closest?.('[data-riw-split]') ? 'split'
       : event.target.closest?.('[data-riw-panel]') ? 'pan' : '';
     if (!kind) return;
+    // 두 장이면 누른 칸의 그림을 고른다(손잡이는 지금 고른 그림의 것이다).
+    if (kind === 'pan') slot = slotAt(canvasPoint(event));
     event.preventDefault();
     win?.clearTimeout(wheelTimer);
     wheelAnchor = null;
@@ -464,7 +642,9 @@ export function createReferenceInsetWindow({
     // `made` = 누른 순간의 그림 · 캔버스. 끄는 동안 그것이 바뀌면(붙여넣기의 답이 왔다) 놓을 때 이 배치를 버린다 -
     // 옛 그림의 좌표를 새 그림에 보내지 않는다(Codex 리뷰 5차).
     drag = {kind, startX: event.clientX, startY: event.clientY, box: {...from.box}, divider: from.divider,
+      box2: from.box2 ? {...from.box2} : null, split: from.split, slot: from.box2 ? slot : 1,
       moved: false, made: identity()};
+    render();
     try { el.stage.setPointerCapture(event.pointerId); } catch (_error) { /* 못 잡아도 끌린다 */ }
     el.stage.classList.add('is-dragging');
   }
@@ -474,19 +654,50 @@ export function createReferenceInsetWindow({
     if (!drag.moved && Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 3) return;
     drag.moved = true;
     const scale = canvasScale();
-    const dx = (event.clientX - drag.startX) * scale;
-    const dy = (event.clientY - drag.startY) * scale;
-    if (drag.kind === 'divider') {
-      const divider = clampInsetDivider(drag.divider + dx, state);
+    const screenX = (event.clientX - drag.startX) * scale;
+    const screenY = (event.clientY - drag.startY) * scale;
+    // 모델 공간의 움직임 - 상하 모드면 축이 바뀐다(위아래로 끌면 경계선이 움직인다).
+    const [dx, dy] = vertical() ? [screenY, screenX] : [screenX, screenY];
+    const model = geo();
+    if (drag.box2) {
+      onTwoPictureMove(dx, dy);
+    } else if (drag.kind === 'divider') {
+      const divider = clampInsetDivider(drag.divider + dx, model);
       // 경계선이 그림을 지나쳐 좁아지면 그림을 칸 안으로 데려온다(그림을 잃어버리지 않게).
-      draft = {divider, box: clampInsetBox(drag.box, divider, state)};
+      draft = {divider, box: clampInsetBox(drag.box, divider, model)};
     } else if (drag.kind === 'size') {
-      draft = {divider: drag.divider, box: resizeInsetBox(drag.box, dx, dy, drag.divider, state)};
+      draft = {divider: drag.divider, box: resizeInsetBox(drag.box, dx, dy, drag.divider, model)};
     } else {
       draft = {divider: drag.divider,
-        box: clampInsetBox({x: drag.box.x + dx, y: drag.box.y + dy, height: drag.box.height}, drag.divider, state)};
+        box: clampInsetBox({x: drag.box.x + dx, y: drag.box.y + dy, height: drag.box.height}, drag.divider, model)};
     }
     render();
+  }
+
+  /** 두 장일 때의 끌기: 경계선(두 그림 모두 맞춘다) · 사이 선 · 고른 그림의 손잡이 · 누른 칸의 그림. */
+  function onTwoPictureMove(dx, dy) {
+    const base = {box: drag.box, box2: drag.box2, divider: drag.divider, split: drag.split};
+    if (drag.kind === 'divider') {
+      const divider = clampInsetDivider(drag.divider + dx, geo());
+      const lay = {...base, divider};
+      draft = {...lay, box: clampCell(drag.box, divider, 1, lay), box2: clampCell(drag.box2, divider, 2, lay)};
+      return;
+    }
+    if (drag.kind === 'split') {
+      const limits = state.split_limits || {};
+      const grid = Number(state.limits?.grid) || 8;
+      const split = Math.max(Number(limits.min_split) || grid, Math.min(Number(limits.max_split) || drag.split,
+        Math.round((drag.split + dy) / grid) * grid));
+      const lay = {...base, split};
+      draft = {...lay, box: clampCell(drag.box, drag.divider, 1, lay), box2: clampCell(drag.box2, drag.divider, 2, lay)};
+      return;
+    }
+    const n = drag.slot;
+    const from = n === 2 ? drag.box2 : drag.box;
+    const moved = drag.kind === 'size'
+      ? clampCell(resizeInsetBox(from, dx, dy, drag.divider, geoOf(n)), drag.divider, n, base)
+      : clampCell({x: from.x + dx, y: from.y + dy, height: from.height}, drag.divider, n, base);
+    draft = {...base, [n === 2 ? 'box2' : 'box']: moved};
   }
 
   function onPointerUp() {
@@ -508,26 +719,202 @@ export function createReferenceInsetWindow({
     event.preventDefault();
     if (locked()) return;
     const from = layout();
+    if (from.box2) { onTwoPictureWheel(event, from); return; }
     if (!wheelAnchor) {
       // 포인터가 칸 안의 그림 위면 그 점을, 아니면 보이는 그림의 가운데를 붙잡는다.
       const point = canvasPoint(event);
-      const seen = visibleInsetRect(from.box, from.divider, Number(state.height) || 0);
+      const seen = visibleInsetRect(from.box, from.divider, Number(geo().height) || 0);
       const inside = seen && point.x >= seen.left && point.x <= seen.right && point.y >= seen.top && point.y <= seen.bottom;
       const held = inside || !seen ? point : {x: (seen.left + seen.right) / 2, y: (seen.top + seen.bottom) / 2};
       wheelAnchor = insetZoomAnchor(from.box, held);
     }
-    draft = {divider: from.divider, box: zoomInsetBox(from.box, event.deltaY < 0 ? 1 : -1, wheelAnchor, from.divider, state)};
+    draft = {divider: from.divider, box: zoomInsetBox(from.box, event.deltaY < 0 ? 1 : -1, wheelAnchor, from.divider, geo())};
     render();
     // 휠은 여러 번 온다 - 멎은 뒤에 한 번만 보낸다.
     win?.clearTimeout(wheelTimer);
     wheelTimer = win?.setTimeout(() => { wheelAnchor = null; commit(); }, 220) || 0;
   }
 
+  /** 두 장일 때의 휠: 커서 밑 칸의 그림을, 커서 밑의 점(피벗)을 붙잡고 키우거나 줄인다. */
+  function onTwoPictureWheel(event, from) {
+    const point = canvasPoint(event);
+    if (!wheelAnchor) {
+      // 칸 안이면 커서 밑 칸의 그림, 칸 밖이면 고른 그림. 피벗 = 그 그림 위의 커서, 아니면 보이는 부분의 가운데.
+      const inside = point.x >= 0 && point.x <= from.divider;
+      const n = inside ? slotAt(point) : slot;
+      slot = n;
+      const picBox = n === 2 ? from.box2 : from.box;
+      const seen = cellSeen(picBox, from.divider, n, from);
+      const over = seen && point.x >= seen.left && point.x <= seen.right && point.y >= seen.top && point.y <= seen.bottom;
+      const held = over || !seen ? point : {x: (seen.left + seen.right) / 2, y: (seen.top + seen.bottom) / 2};
+      wheelAnchor = {...insetZoomAnchor(picBox, held), slot: n};
+    }
+    const n = wheelAnchor.slot;
+    const picBox = n === 2 ? from.box2 : from.box;
+    const zoomed = clampCell(zoomInsetBox(picBox, event.deltaY < 0 ? 1 : -1, wheelAnchor, from.divider, geoOf(n)),
+      from.divider, n, from);
+    draft = {...from, [n === 2 ? 'box2' : 'box']: zoomed};
+    render();
+    win?.clearTimeout(wheelTimer);
+    wheelTimer = win?.setTimeout(() => { wheelAnchor = null; commit(); }, 220) || 0;
+  }
+
+  /** 모델 공간의 점이 든 칸(두 장일 때). 한 장이면 늘 1. */
+  function slotAt(point) {
+    const lay = layout();
+    return lay.box2 && point.y >= lay.split ? 2 : 1;
+  }
+
   function commit() {
     if (!draft || !configured()) { draft = null; return lastSend; }
     const sent = draft;
-    lastSend = send({x: sent.box.x, y: sent.box.y, height: sent.box.height, divider: sent.divider}, sent);
+    lastSend = sent.box2
+      ? send({x: sent.box.x, y: sent.box.y, height: sent.box.height, divider: sent.divider, split: sent.split,
+        second: {x: sent.box2.x, y: sent.box2.y, height: sent.box2.height}}, sent)
+      : send({x: sent.box.x, y: sent.box.y, height: sent.box.height, divider: sent.divider}, sent);
     return lastSend;
+  }
+
+  // ── 그림 칩 · 결과 ─────────────────────────────────────────────────────
+  function renderSlots(two, lock) {
+    const chip = (key, label, on, title = '') => `<button type="button" class="riw-chip${on ? ' is-on' : ''}"
+      data-riw-slot="${key}" aria-pressed="${on ? 'true' : 'false'}"${lock ? ' disabled' : ''}${
+      title ? ` data-naia-title="${escHtml(title)}"` : ''}>${label}</button>`;
+    const html = two || wantSecond
+      ? chip('1', '그림 1', slot === 1) + chip('2', two ? '그림 2' : '그림 2 · 비어 있음', slot === 2)
+        + (two ? chip('remove', '&times; 빼기', false, '둘째 그림을 뺍니다 - 칸이 다시 하나가 됩니다') : '')
+      : chip('add', '+ 한 장 더', false, '같은 인물의 둘째 그림을 칸에 함께 넣습니다 (두 장까지) - 붙여넣기 · Storage 로 넣습니다');
+    if (el.slots.innerHTML !== html) el.slots.innerHTML = html;
+  }
+
+  function onPickSlot(event) {
+    const pick = event.target.closest('[data-riw-slot]');
+    if (!pick || !configured() || locked()) return;
+    const key = pick.dataset.riwSlot;
+    if (key === 'add') { wantSecond = true; slot = 2; render(); return; }
+    if (key === 'remove') {
+      win?.clearTimeout(wheelTimer);
+      wheelAnchor = null;
+      draft = null;
+      wantSecond = false;
+      slot = 1;
+      send({reset: true}, null, '/api/character-asset/inset/source?slot=2').then(data => {
+        if (data) showToast('둘째 그림을 뺐습니다', 'success');
+      });
+      return;
+    }
+    slot = key === '2' ? 2 : 1;
+    if (slot === 1 && !state.second) wantSecond = false;
+    render();
+  }
+
+  /** 마지막 결과를 그릴 곳에 얹는다. 크기가 이 캔버스(또는 칸을 뺀 그릴 곳)와 맞을 때만 - 다른 캔버스의 결과는 감춘다. */
+  function renderResult(canvasW, canvasH) {
+    const want = !!el.showResult.checked && !!lastResult;
+    let place = null;
+    if (want) {
+      const {width: rw, height: rh} = lastResult;
+      if (rw === canvasW && rh === canvasH) place = {left: 0, top: 0, width: canvasW, height: canvasH};
+      else if (!vertical() && rh === canvasH && rw < canvasW) place = {left: canvasW - rw, top: 0, width: rw, height: rh};
+      else if (vertical() && rw === canvasW && rh < canvasH) place = {left: 0, top: canvasH - rh, width: rw, height: rh};
+    }
+    el.result.hidden = !place;
+    if (place) {
+      if (el.result.getAttribute('src') !== lastResult.url) el.result.setAttribute('src', lastResult.url);
+      el.result.style.left = `${(place.left / canvasW) * 100}%`;
+      el.result.style.top = `${(place.top / canvasH) * 100}%`;
+      el.result.style.width = `${(place.width / canvasW) * 100}%`;
+      el.result.style.height = `${(place.height / canvasH) * 100}%`;
+    }
+    el.resultNote.textContent = !el.showResult.checked ? ''
+      : !lastResult ? '인셋으로 생성하면 여기에 보입니다'
+        : place ? `마지막 결과 ${lastResult.width}x${lastResult.height}` : '다른 캔버스의 결과라 감췄습니다';
+  }
+
+  // ── 특징 추출 (사용자 결정 2026-10-18) ──────────────────────────────────
+  /** 고른 그림을 WD 태거에 보내 캐릭터 특징만 받는다. ⚠️ 그림이 외부(huggingface)로 나간다 - 단추를 누를 때만. */
+  async function runExtract() {
+    if (!configured() || locked() || extracting) return;
+    extracting = true;
+    render();
+    showToast('특징 추출 중… 외부 태거의 답을 기다립니다(보통 4초)', 'info');
+    try {
+      const response = await fetchImpl('/api/character-asset/inset/extract-features', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({slot}),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || data.error) {
+        showToast(`특징을 뽑지 못했습니다: ${data?.error || response.status}`, 'error');
+        return;
+      }
+      extracted = {
+        keep: data.keep || [], unknown: data.unknown || [], dropped: data.dropped || [],
+        on: new Set(data.keep || []), url: String(data.space_url || ''), notice: String(data.notice || ''),
+      };
+    } catch (error) {
+      showToast(`특징을 뽑지 못했습니다: ${error.message}`, 'error');
+    } finally {
+      extracting = false;
+      render();
+    }
+  }
+
+  function renderExtract() {
+    el.extract.hidden = !extracted || view !== 'main' || !configured();
+    if (el.extract.hidden) return;
+    const chip = tag => `<button type="button" class="riw-feature${extracted.on.has(tag) ? ' is-on' : ''}"
+      data-riw-feature="${escHtml(tag)}" aria-pressed="${extracted.on.has(tag) ? 'true' : 'false'}">${escHtml(tag)}</button>`;
+    const group = (label, tags) => (tags.length
+      ? `<div class="riw-feature-group"><span class="riw-feature-label">${escHtml(label)}</span>${tags.map(chip).join('')}</div>` : '');
+    const html = group('남김', extracted.keep)
+      + group('사전에 없음 (눌러서 켜기)', extracted.unknown)
+      + group('뺌: 의상 · 표정 · 포즈 · 배경 · 메타', extracted.dropped.map(row => row.tag));
+    if (el.extractBody.innerHTML !== html) el.extractBody.innerHTML = html;
+    el.extractNote.textContent = `켜짐 ${extracted.on.size}개`;
+    const src = extracted.url
+      ? `[ ${escHtml(extracted.notice || '웹에서 사용')} : <a href="${escHtml(extracted.url)}" target="_blank"
+         rel="noopener noreferrer">WD 태거</a> ]` : '';
+    if (el.extractSrc.innerHTML !== src) el.extractSrc.innerHTML = src;
+  }
+
+  /** 켜진 칩을 태거의 차례대로 이어 가상 캐릭터에 넣는다. */
+  async function useExtracted(key) {
+    if (!extracted) return;
+    const ordered = [...extracted.keep, ...extracted.unknown, ...extracted.dropped.map(row => row.tag)]
+      .filter(tag => extracted.on.has(tag));
+    if (!ordered.length) { showToast('켜진 특징이 없습니다', 'error'); return; }
+    const prompt = ordered.join(', ');
+    const data = await send({key, value: key === 'virtual_c1' ? {prompt} : prompt}, KEEP_DRAFT,
+      '/api/character-asset/inset/character');
+    if (!data) return;
+    extracted = null;
+    render();
+    showToast(key === 'virtual_c1' ? '가상 C1 에 넣었습니다' : '가상 캐릭터로 추가했습니다', 'success');
+  }
+
+  /** 앱이 새 결과를 받을 때마다 부른다. 인셋이 켜져 있을 때 온 결과만 쥔다(그 결과가 이 캔버스로 나간 것이다). */
+  function showResult(blob) {
+    if (!configured() || !state.active || !blob || typeof URL === 'undefined') return;
+    const seq = ++resultSeq;
+    const url = URL.createObjectURL(blob);
+    const probe = new Image();
+    probe.onload = () => {
+      // 그 사이에 더 새 결과가 왔거나 인셋을 껐다 - 이 결과는 버린다(Codex 리뷰).
+      if (seq !== resultSeq || !configured() || !state.active) { URL.revokeObjectURL(url); return; }
+      if (lastResult?.url) URL.revokeObjectURL(lastResult.url);
+      lastResult = {url, width: probe.naturalWidth, height: probe.naturalHeight};
+      if (panel?.isOpen()) render();
+    };
+    probe.onerror = () => { URL.revokeObjectURL(url); };
+    probe.src = url;
+  }
+
+  /** 쥔 결과를 놓는다(인셋을 껐거나 꽂아 둔 것이 없어졌다) - 풀리는 중인 것도 버린다. */
+  function clearResult() {
+    resultSeq += 1;
+    if (lastResult?.url && typeof URL !== 'undefined') URL.revokeObjectURL(lastResult.url);
+    lastResult = null;
+    el?.result?.removeAttribute('src');
   }
 
   async function runUpscale() {
@@ -685,7 +1072,7 @@ export function createReferenceInsetWindow({
 
   /** [붙여넣기] 로 읽어 온 그림을 받는다. 꽂아 둔 것이 없으면 이 그림만으로 인셋이 선다(서버가 켠다).
    *  ⚠️ 앱의 Ctrl+V 훅에 이것을 물리지 말 것 - 단추로만 받는다(머리 주석). */
-  function acceptPastedImage(blob) {
+  function acceptPastedImage(blob, pressed = null) {
     if (!panel || !panel.isOpen()) return false;
     if (!blob || !String(blob.type || '').startsWith('image/')) {
       showToast('클립보드에 그림이 없습니다', 'error');
@@ -697,11 +1084,15 @@ export function createReferenceInsetWindow({
     draft = null;                              // 그림이 바뀌면 배치는 기본으로 돌아간다 - 끌던 것을 버린다
     const fresh = !configured();
     // 단추를 누른 순간의 차례(클립보드를 읽기 전에 잡아 둔 것). 단추 없이 불렸으면 지금 값 - 어느 쪽이든 줄을 서기 전이다.
-    const epoch = pressedPasteEpoch !== undefined ? pressedPasteEpoch : toggleEpoch();
-    pressedPasteEpoch = undefined;
-    send(blob, null, '/api/character-asset/inset/source' + (epoch === null ? '' : `?toggle=${epoch}`)).then(data => {
+    const epoch = pressed ? pressed.epoch : toggleEpoch();
+    const target = pressed ? pressed.slot : slot;
+    // 둘째 그림 자리를 골랐으면(첫 그림이 있을 때만) 그리로 간다.
+    const toSecond = target === 2 && !fresh;
+    const query = [epoch === null ? '' : `toggle=${epoch}`, toSecond ? 'slot=2' : ''].filter(Boolean).join('&');
+    send(blob, null, '/api/character-asset/inset/source' + (query ? `?${query}` : '')).then(data => {
       if (!data) return;
       view = 'main';
+      if (toSecond) { wantSecond = false; render(); showToast('둘째 그림을 넣었습니다', 'success'); return; }
       render();
       // 켜졌는지는 서버의 답이 말한다 - 그 사이에 사용자가 껐으면 그림만 바뀌고 꺼진 채다.
       showToast(!data.active ? '인셋 칸의 그림을 바꿨습니다 - 인셋은 꺼져 있습니다'
@@ -712,8 +1103,9 @@ export function createReferenceInsetWindow({
 
   // ── Storage ───────────────────────────────────────────────────────────
   async function saveToStorage() {
-    if (!configured() || locked() || state.saved) return;
-    const data = await send({}, KEEP_DRAFT, '/api/character-asset/inset/storage');
+    const onSecond = slot === 2;
+    if (!configured() || locked() || (onSecond ? !state.second || state.second.saved : state.saved)) return;
+    const data = await send(onSecond ? {slot: 2} : {}, KEEP_DRAFT, '/api/character-asset/inset/storage');
     if (data) showToast('Storage 에 저장했습니다', 'success');
   }
 
@@ -765,7 +1157,8 @@ export function createReferenceInsetWindow({
       return;
     }
     // 지금 칸에 놓인 그림 = 인셋 상태의 `saved` 가 가리키는 한 장(목록의 `current`).
-    const current = state?.saved ? String(stored.current || '') : '';
+    const current = slot === 2 ? (state?.second?.saved ? String(stored.current2 || '') : '')
+      : state?.saved ? String(stored.current || '') : '';
     el.storeGrid.innerHTML = items.map(item => {
       const id = escHtml(item.id);
       const armed = armedDelete === item.id;
@@ -802,9 +1195,11 @@ export function createReferenceInsetWindow({
     win?.clearTimeout(wheelTimer);
     wheelAnchor = null;
     draft = null;
-    const data = await send({id: pick.dataset.riwPick, toggle: toggleEpoch()}, null,
+    const toSecond = slot === 2 && configured();
+    const data = await send({id: pick.dataset.riwPick, toggle: toggleEpoch(), ...(toSecond ? {slot: 2} : {})}, null,
       '/api/character-asset/inset/storage/apply');
     if (!data) { loadStorage(); return; }      // 그 사이에 지워졌을 수 있다 - 목록을 다시 받는다
+    if (toSecond) wantSecond = false;
     view = 'main';
     render();
     showToast(data.active ? 'Storage 의 그림을 인셋 칸에 놓았습니다'
@@ -834,13 +1229,15 @@ export function createReferenceInsetWindow({
   function sync(next) {
     const before = state;
     state = next && typeof next === 'object' ? next : null;
+    if (!configured() || !state.active) clearResult();     // 꺼지면 마지막 결과도 놓는다(Codex 리뷰)
     if (!panel) return;
     if (!configured()) draft = null;       // 놓을 그림이 없다 - 닫으면서 보낼 배치도 없다
     // 캔버스나 그림이 바뀌었으면(띠의 해상도 메뉴 · 다른 창) 끌어 놓은 배치는 **옛 캔버스의 값**이다 - 버린다.
     // 안 버리면 새 캔버스 위에 옛 배치가 그려진다(Codex 리뷰 3차). 끄는 중인 손은 놓을 때 새 한계에 맞춰진다.
     if (draft && !drag && before && state && (before.width !== state.width || before.height !== state.height
         || before.source_revision !== state.source_revision || before.character_id !== state.character_id
-        || before.variation !== state.variation)) {
+        || before.variation !== state.variation || before.orientation !== state.orientation
+        || before.second?.source_revision !== state.second?.source_revision)) {
       win?.clearTimeout(wheelTimer);
       wheelAnchor = null;
       draft = null;
@@ -865,5 +1262,5 @@ export function createReferenceInsetWindow({
     if (panel?.isOpen()) panel.close();
   }
 
-  return {open, close, sync, isOpen: () => !!panel?.isOpen(), acceptPastedImage};
+  return {open, close, sync, isOpen: () => !!panel?.isOpen(), acceptPastedImage, showResult};
 }

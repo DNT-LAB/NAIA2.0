@@ -254,6 +254,14 @@ class HeadlessCharacterAssetService:
         # 칸의 바탕색("white" | "black" - 사용자 결정 2026-10-11). 핀이 아니라 이 세션의 설정이다(그림을 바꿔 꽂아도
         # 유지된다). 투명한 그림의 뒤와 그림이 덮지 않은 칸이 이 색으로 나간다. 앱을 다시 켜면 흰색이다.
         self._reference_inset_background = "white"
+        # 칸의 방향("horizontal" = 칸이 왼쪽 | "vertical" = 칸이 위 - 사용자 지시 2026-10-18). 이 세션의 설정이다 -
+        # 앱을 다시 켜면 좌우다. 세로는 가로 모델 공간에서 굽고 돌려 세운다(`set_reference_inset_pin`).
+        self._reference_inset_orientation = "horizontal"
+        # 인셋의 **가상 캐릭터 프롬프트**(사용자 결정 2026-10-18) `[{prompt, uc}]`. 인셋이 켜져 있는 동안 생성은 메인
+        # 캐릭터 슬롯 대신 이것만 쓴다(우회 모드 - 인페인트 세션의 가상 캐릭터와 같은 길). 인셋에 붙은 세션 설정이다:
+        # 그림을 바꿔도 남고 앱을 다시 켜면 사라진다. POS 는 AUTO 만이다(좌표를 싣지 않는다).
+        self._reference_inset_characters: list[dict[str, str]] = []
+        self._reference_inset_extracting = False
         # 인셋이 **켜져 있는가**. 꽂아 둔 것(`_reference_inset_pin` - 그림 · 배치 · 해상도)과 따로다:
         # 꺼도 꽂아 둔 것은 남고, 다시 켜면 그대로 이어진다(사용자 결정 2026-10-10). 앱을 켜면 꺼진 채다.
         self._reference_inset_enabled = False
@@ -369,6 +377,9 @@ class HeadlessCharacterAssetService:
         stored_id: str = "",
         enable: Optional[bool] = None,
         character_layout: bool = False,
+        orientation: Optional[str] = None,
+        second: Optional[dict[str, Any]] = None,
+        split: Any = None,
     ) -> dict[str, Any]:
         """선택 이미지를 레퍼런스 인셋 소스로 고정한다(Dev0714 Comic Panel 계보).
 
@@ -395,6 +406,9 @@ class HeadlessCharacterAssetService:
 
         ``character_id`` 가 비어 있으면 **에셋 없는 인셋**이다 - 붙여넣은 그림(`source_override`)만으로 선다
         (사용자 결정 2026-10-10: Fn 에서 바로 연다). ``enable`` 은 켜짐을 함께 정한다(None = 지금 그대로).
+        ``orientation`` = 이 방향으로 굽고, **핀과 함께** 세션의 방향으로 싣는다(방향 바꾸기 - None = 지금 방향).
+        ``second`` = 칸의 **둘째 그림** `{png, stored_id, box}`(사용자 결정 2026-10-18 - 두 장 상한). 있으면 칸이 ``split``
+        (모델 공간 y)에서 두 칸으로 나뉘고 그림마다 제 칸 안에 놓인다(`box` 없으면 기본 = 칸 안에 통째로 들어가게).
         """
         import hashlib
 
@@ -405,7 +419,11 @@ class HeadlessCharacterAssetService:
             character_reference_inset_box,
             classic_reference_inset_layout,
             default_reference_inset_box,
+            default_reference_inset_cell_box,
             default_reference_inset_divider,
+            normalize_reference_inset_cell_box,
+            normalize_reference_inset_split,
+            reference_inset_split_limits,
             normalize_reference_inset_box,
             normalize_reference_inset_divider,
             prepare_reference_inpaint_canvas,
@@ -420,7 +438,11 @@ class HeadlessCharacterAssetService:
             path = self.resolve_image_path(character_id, variation)
         else:
             character_id, variation, path = "", "", None      # 에셋 없는 인셋 - 붙여넣은 그림뿐이다
-        canvas_w, canvas_h = resolve_reference_inset_canvas(width, height)
+        # 상하 모드: width · height 는 실제(세로) 캔버스다. 굽기는 **전치한 가로 모델 공간**에서 예전 코드 그대로 하고
+        # 캔버스 · 마스크만 다시 전치한다. box · divider 는 모델 공간 값이다(화면도 같은 값으로 그린다).
+        orientation = orientation or self._reference_inset_orientation
+        vertical = orientation == "vertical"
+        canvas_w, canvas_h = resolve_reference_inset_canvas(*((height, width) if vertical else (width, height)))
         from utils.reference_inpaint_preprocess import REFERENCE_INSET_PANEL_COLORS
 
         background = self._reference_inset_background
@@ -434,7 +456,8 @@ class HeadlessCharacterAssetService:
             )
         with (Image.open(io.BytesIO(override)) if override else Image.open(path)) as opened:
             opened.load()
-            source_size = (int(opened.width), int(opened.height))
+            source = opened.transpose(Image.Transpose.TRANSPOSE) if vertical else opened
+            source_size = (int(source.width), int(source.height))
             classic_box, classic_divider = classic_reference_inset_layout(source_size, spec)
             # 칸에 든 것이 에셋의 캐릭터면(붙여넣은 그림으로 덮지 않았으면) 가운데 · 살짝 키운 자리가 기본이다.
             as_character = bool(character_layout) or bool(character_id and not override)
@@ -453,8 +476,33 @@ class HeadlessCharacterAssetService:
             # 51 ~ 60%)에 맞추느라 경계가 옮겨졌으면 칸 방식으로 굽는다.
             panelled = placed != classic_box or divider != classic_divider
             open_ratio = reference_inset_open_ratio(divider, spec)
+            # 둘째 그림: 칸을 두 칸으로 나누고 그림마다 제 칸에 놓는다. 기본 = 반반 · 칸 안에 통째로.
+            second_png = bytes(second["png"]) if second and second.get("png") else None
+            second_image = None
+            split_px = default_split = None
+            placed2 = None
+            if second_png:
+                with Image.open(io.BytesIO(second_png)) as opened2:
+                    opened2.load()
+                    second_image = (opened2.transpose(Image.Transpose.TRANSPOSE) if vertical else opened2.copy())
+                second_size = (int(second_image.width), int(second_image.height))
+                default_split = int(reference_inset_split_limits(spec)["default_split"])
+                split_px = normalize_reference_inset_split(split, spec) if split is not None else default_split
+                cell1 = default_reference_inset_cell_box(source_size, spec, divider, 0, split_px)
+                cell2 = default_reference_inset_cell_box(second_size, spec, divider, split_px, spec.canvas_height)
+                placed = cell1 if box is None else normalize_reference_inset_cell_box(
+                    box, source_size, spec, divider, 0, split_px)
+                placed2 = cell2 if not second.get("box") else normalize_reference_inset_cell_box(
+                    second["box"], second_size, spec, divider, split_px, spec.canvas_height)
+                custom = (placed != cell1 or placed2 != cell2 or divider != default_divider
+                          or split_px != default_split)
+                panelled = True
 
             def bake(image: Any) -> Any:
+                if second_image is not None:
+                    return prepare_reference_inpaint_canvas(
+                        image, spec, box=placed, divider=divider, second=(second_image, placed2), split=split_px
+                    )
                 return prepare_reference_inpaint_canvas(
                     image, spec, box=placed if panelled else None, divider=divider if panelled else None
                 )
@@ -463,13 +511,17 @@ class HeadlessCharacterAssetService:
             if upscaled_png:
                 with Image.open(io.BytesIO(upscaled_png)) as big:
                     big.load()
-                    result = bake(big)
+                    result = bake(big.transpose(Image.Transpose.TRANSPOSE) if vertical else big)
             else:
-                result = bake(opened)
+                result = bake(source)
+        canvas_image, mask_image = result.canvas_image, result.small_mask_image
+        if vertical:
+            canvas_image = canvas_image.transpose(Image.Transpose.TRANSPOSE)
+            mask_image = mask_image.transpose(Image.Transpose.TRANSPOSE)
         canvas_buffer = io.BytesIO()
-        result.canvas_image.save(canvas_buffer, format="PNG")
+        canvas_image.save(canvas_buffer, format="PNG")
         mask_buffer = io.BytesIO()
-        result.small_mask_image.save(mask_buffer, format="PNG")
+        mask_image.save(mask_buffer, format="PNG")
         pin = {
             "character_id": character_id,
             "variation": variation,
@@ -488,17 +540,32 @@ class HeadlessCharacterAssetService:
             # 이 캔버스를 구운 바탕색.
             "background": background,
             "mask_png": mask_buffer.getvalue(),
-            "width": int(result.canvas_image.width),
-            "height": int(result.canvas_image.height),
+            # 실제 캔버스(세로 모드면 세운 것). box · divider · source 는 모델 공간이다.
+            "width": int(canvas_image.width),
+            "height": int(canvas_image.height),
+            "orientation": "vertical" if vertical else "horizontal",
             "box": dict(placed),
             "divider": int(divider),
             "default_divider": int(default_divider),
             "custom": custom,
             "source": source_size,
             "open_ratio": open_ratio,
+            # 둘째 그림(없으면 None) - 그림 · 지문 · Storage 의 어느 것 · 자리(모델 공간) · 크기(모델 공간).
+            "second": {
+                "png": second_png,
+                "source_id": hashlib.sha1(second_png).hexdigest()[:16],
+                "stored_id": str(second.get("stored_id") or ""),
+                "box": dict(placed2),
+                "source": (int(second_image.width), int(second_image.height)),
+            } if second_png else None,
+            # 두 칸을 나누는 선(모델 공간 y) · 기본값. 둘째 그림이 없으면 None.
+            "split": split_px,
+            "default_split": default_split,
         }
         with self._retain_lock:
             self._reference_inset_pin = pin
+            # 방향은 핀과 **함께** 바뀐다 - 굽는 동안 상태가 새 방향 · 옛 캔버스로 섞여 나가지 않게(Codex 리뷰 1차).
+            self._reference_inset_orientation = orientation
             # 켜짐은 이 일이 시작된 뒤로 사용자가 켜고 끄지 않았을 때만 정한다 - 그 사이의 손이 이긴다.
             started_at = getattr(_INSET_OP, "toggle_epoch", self._reference_inset_toggle_epoch)
             if enable is not None and started_at == self._reference_inset_toggle_epoch:
@@ -507,13 +574,28 @@ class HeadlessCharacterAssetService:
         return self.reference_inset_state()
 
     @staticmethod
-    def _inset_carry(pin: dict[str, Any]) -> dict[str, Any]:
-        """배치 · 해상도를 바꿀 때 지금 핀에서 이어 갈 것(업스케일 · 붙여넣은 그림 · Storage 의 어느 것인가)."""
+    def _inset_carry(pin: dict[str, Any], keep_layout: bool = True) -> dict[str, Any]:
+        """배치 · 해상도를 바꿀 때 지금 핀에서 이어 갈 것(업스케일 · 붙여넣은 그림 · Storage 의 어느 것인가 · 둘째 그림).
+        ``keep_layout`` = 둘째 그림의 자리 · 나누는 선도 들고 간다(사용자가 정한 배치일 때만 - 첫 그림의 `box` 와 같은 규칙)."""
         return {
             "use_upscaled": bool(pin.get("upscaled")),
             "source_override": pin.get("source_override"),
             "stored_id": str(pin.get("stored_id") or ""),
             "character_layout": bool(pin.get("character_layout")),
+            **HeadlessCharacterAssetService._second_carry(pin, keep_layout),
+        }
+
+    @staticmethod
+    def _second_carry(pin: Optional[dict[str, Any]], keep_layout: bool = True) -> dict[str, Any]:
+        """지금 핀의 둘째 그림을 다시 굽는 길로 넘길 꼴 `{second, split}`."""
+        second = (pin or {}).get("second")
+        if not second:
+            return {"second": None, "split": None}
+        keep = bool(keep_layout and pin.get("custom"))
+        return {
+            "second": {"png": second["png"], "stored_id": second.get("stored_id") or "",
+                       "box": dict(second["box"]) if keep else None},
+            "split": pin.get("split") if keep else None,
         }
 
     # ------------------------------------------------- 켜짐 / 꺼짐
@@ -568,14 +650,30 @@ class HeadlessCharacterAssetService:
         with self._retain_lock:
             pin = self._reference_inset_pin
             current = str(pin.get("stored_id") or "") if pin else ""
-        return {"items": self._inset_storage().list(), "current": current}
+            second = (pin or {}).get("second")
+            current2 = str(second.get("stored_id") or "") if second else ""
+        # `current2` = 둘째 그림이 Storage 의 어느 것인가(목록에서 고른 그림 쪽을 표시한다).
+        return {"items": self._inset_storage().list(), "current": current, "current2": current2}
 
-    def save_reference_inset_to_storage(self) -> dict[str, Any]:
+    def save_reference_inset_to_storage(self, slot: Any = 1) -> dict[str, Any]:
         """지금 칸에 있는 그림을 Storage 에 넣는다(사용자가 [저장] 을 눌렀을 때만 - 자동으로 넣지 않는다).
 
         업스케일해 뒀으면 **올려 둔 판**을 넣는다 - 다음에 꺼낼 때 Anlas 를 다시 쓰지 않는다(사용자 결정).
-        에셋으로 꽂은 그림도 넣을 수 있다. 배치는 넣지 않는다.
+        에셋으로 꽂은 그림도 넣을 수 있다. 배치는 넣지 않는다. ``slot`` = 2 면 둘째 그림을 넣는다.
         """
+        if self._inset_slot(slot) == 2:
+            with self._retain_lock:
+                pin = self._reference_inset_pin
+                second = (pin or {}).get("second")
+                if not second:
+                    raise ValueError("저장할 둘째 그림이 없습니다.")
+                data = bytes(second["png"])
+            item = self._inset_storage().save(data)
+            with self._retain_lock:
+                if self._reference_inset_pin is pin:
+                    second["stored_id"] = item["id"]
+                self._reference_inset_sync_seq += 1
+            return {"item": item, **self.reference_inset_state()}
         with self._retain_lock:
             pin = self._reference_inset_pin
             if not pin:
@@ -597,9 +695,10 @@ class HeadlessCharacterAssetService:
         return {"item": item, **self.reference_inset_state()}
 
     @_inset_serialized
-    def apply_reference_inset_storage(self, item_id: Any, toggle_epoch: Any = None) -> dict[str, Any]:
+    def apply_reference_inset_storage(self, item_id: Any, toggle_epoch: Any = None, slot: Any = 1) -> dict[str, Any]:
         """Storage 의 그림을 칸의 그림으로 쓴다. 인셋을 켜고, 배치는 기본으로 놓는다(배치는 기억하지 않는다).
-        ``toggle_epoch`` = 화면이 누른 순간에 알던 켜고 끄기 차례 - 그 뒤에 사용자가 껐으면 켜지 않는다."""
+        ``toggle_epoch`` = 화면이 누른 순간에 알던 켜고 끄기 차례 - 그 뒤에 사용자가 껐으면 켜지 않는다.
+        ``slot`` = 2 면 **둘째 그림**으로 놓는다(첫 그림이 있어야 한다)."""
         self._started_at_toggle_epoch(toggle_epoch)
         storage = self._inset_storage()
         data = storage.read(item_id)
@@ -609,9 +708,19 @@ class HeadlessCharacterAssetService:
             character_id = str(pin["character_id"]) if pin else ""
             variation = str(pin["variation"]) if pin else ""
             width, height = (pin["width"], pin["height"]) if pin else (0, 0)
-        state = self.set_reference_inset_pin(
-            character_id, variation, width, height, source_override=data, stored_id=stored, enable=True
-        )
+            carry = self._inset_carry(pin, keep_layout=False) if pin else {}
+        if self._inset_slot(slot) == 2:
+            if not pin:
+                raise ValueError("첫 그림을 먼저 넣어 주세요.")
+            # 붙여넣기와 같은 한계(크기 · 픽셀 · 긴 변)로 맞춘다 - Storage 의 그림은 업스케일본처럼 클 수 있다(Codex 리뷰).
+            # Storage 의 어느 것인가는 원본의 지문으로 남긴다.
+            carry["second"] = {"png": self._normalize_inset_source(data), "stored_id": stored, "box": None}
+            state = self.set_reference_inset_pin(character_id, variation, width, height, enable=True, **carry)
+        else:
+            state = self.set_reference_inset_pin(
+                character_id, variation, width, height, source_override=data, stored_id=stored, enable=True,
+                **self._second_carry(pin, keep_layout=False),
+            )
         if state["active"]:
             state["references_disabled"] = self._release_character_references_for_inset()
         return state
@@ -674,6 +783,112 @@ class HeadlessCharacterAssetService:
         if not pin:
             return self.reference_inset_state()
         return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
+
+    @_inset_serialized
+    def set_reference_inset_orientation(self, orientation: Any) -> dict[str, Any]:
+        """칸의 방향을 바꾼다(`horizontal` = 칸이 왼쪽 | `vertical` = 칸이 위). 꽂아 둔 것이 있으면 캔버스를 돌려
+        (1216x832 -> 832x1216) 다시 굽는다 - 그림은 그대로, 배치는 기본으로 돌아간다(그림의 비율이 모델 공간에서 뒤집힌다)."""
+        from utils.reference_inpaint_preprocess import REFERENCE_INSET_ORIENTATIONS
+
+        name = str(orientation or "").strip().lower()
+        if name not in REFERENCE_INSET_ORIENTATIONS:
+            raise ValueError("방향은 horizontal 또는 vertical 입니다.")
+        with self._retain_lock:
+            pin = self._reference_inset_pin
+            baked = pin.get("orientation", "horizontal") if pin else name
+            if pin and baked != name:
+                character_id, variation = str(pin["character_id"]), str(pin["variation"])
+                # 돌린 캔버스. 옛 방향의 캔버스 그대로 넘기면 목록에 없어 기본으로 떨어진다.
+                width, height = pin["height"], pin["width"]
+                carry = self._inset_carry(pin, keep_layout=False)
+            else:
+                # 다시 구울 것이 없다(꽂아 둔 것이 없거나 이미 그 방향) - 설정만 바꾼다.
+                if self._reference_inset_orientation != name:
+                    self._reference_inset_orientation = name
+                    self._reference_inset_sync_seq += 1
+                pin = None
+        if not pin:
+            return self.reference_inset_state()
+        # 방향은 다 구운 핀과 함께 싣는다. 굽다 실패하면 옛 방향 · 옛 핀 그대로다.
+        return self.set_reference_inset_pin(character_id, variation, width, height, orientation=name, **carry)
+
+    # 가상 캐릭터는 NAI 의 캐릭터 상한(6)까지.
+    REFERENCE_INSET_MAX_CHARACTERS = 6
+
+    def set_reference_inset_character(self, key: Any, value: Any = None) -> dict[str, Any]:
+        """인셋의 가상 캐릭터를 고친다 - 캐릭터 퀵 패널이 (가상) 인셋일 때 보내는 키 그대로 받는다.
+
+        `char_prompt_N` · `char_uc_N` · `add_character`(값 = 새 칸의 프롬프트, 없으면 빈 칸) · `remove_character_N` ·
+        `virtual_c1`(값 = 프롬프트 또는 `{prompt, uc}` - C1 을 덮는다, 없으면 만든다) · `position_mode`(auto 만).
+        """
+        name = str(key or "").strip()
+
+        def index_of(prefix: str) -> int:
+            try:
+                return int(name[len(prefix):])
+            except ValueError as exc:
+                raise ValueError(f"잘못된 칸 번호: {name}") from exc
+
+        with self._retain_lock:
+            chars = self._reference_inset_characters
+            if name.startswith("char_prompt_") or name.startswith("char_uc_"):
+                field = "prompt" if name.startswith("char_prompt_") else "uc"
+                index = index_of("char_prompt_" if field == "prompt" else "char_uc_")
+                if not 0 <= index < len(chars):
+                    raise ValueError("그 가상 캐릭터가 없습니다.")
+                chars[index][field] = str(value or "")
+            elif name == "add_character":
+                if len(chars) >= self.REFERENCE_INSET_MAX_CHARACTERS:
+                    raise ValueError(f"가상 캐릭터는 최대 {self.REFERENCE_INSET_MAX_CHARACTERS}명입니다.")
+                chars.append({"prompt": value if isinstance(value, str) else "", "uc": ""})
+            elif name.startswith("remove_character_"):
+                index = index_of("remove_character_")
+                if not 0 <= index < len(chars):
+                    raise ValueError("그 가상 캐릭터가 없습니다.")
+                chars.pop(index)
+            elif name == "virtual_c1":
+                entry = value if isinstance(value, dict) else {"prompt": value}
+                prompt, uc = str(entry.get("prompt") or ""), str(entry.get("uc") or "")
+                if chars:
+                    chars[0] = {"prompt": prompt, "uc": uc}
+                else:
+                    chars.append({"prompt": prompt, "uc": uc})
+            elif name == "position_mode":
+                if str(value or "").strip().lower() != "auto":
+                    raise ValueError("인셋의 가상 캐릭터는 POS AUTO 만 씁니다.")
+            else:
+                raise ValueError(f"가상 캐릭터에 없는 기능입니다: {name}")
+            self._reference_inset_sync_seq += 1
+        return self.reference_inset_state()
+
+    def extract_reference_inset_features(self, slot: Any = 1) -> dict[str, Any]:
+        """칸의 그림(``slot``)을 WD 태거에 보내 캐릭터 특징만 고른다(사용자 결정 2026-10-18 - [특징 추출] 단추).
+
+        ⚠️ 그림이 외부(huggingface Space)로 나간다 - 화면이 출처를 함께 띄운다(`tagger_routes` 와 같은 고지).
+        고른 결과를 돌려줄 뿐 가상 캐릭터에 넣지는 않는다 - 넣는 것은 사람이 확인하고 누른다(`virtual_c1` · `add_character`).
+        """
+        from core.inset_feature_extract import split_character_features
+        from core.wd_tagger_service import tag_image
+
+        data, _media = self.reference_inset_source_image(slot)
+        if not data:
+            raise ValueError("특징을 뽑을 그림이 없습니다.")
+        with self._retain_lock:
+            if self._reference_inset_extracting:
+                raise ValueError("특징 추출이 이미 진행 중입니다.")
+            self._reference_inset_extracting = True
+        try:
+            result = tag_image(bytes(data))
+        finally:
+            with self._retain_lock:
+                self._reference_inset_extracting = False
+        split = split_character_features(
+            [row["tag"] for row in result.character],
+            [row["tag"] for row in result.general],
+            getattr(self.context, "filter_data_manager", None),
+            getattr(self.context, "repo_root", None),
+        )
+        return {"ok": True, **split, "elapsed_ms": result.elapsed_ms}
 
     # 업스케일해 둔 원본을 몇 장까지 쥘까. 한 장이 수 MB 라 많이 쥐지 않는다(오래된 것부터 버린다).
     REFERENCE_INSET_UPSCALED_SOURCE_LIMIT = 2
@@ -748,11 +963,12 @@ class HeadlessCharacterAssetService:
                     width, height = current["width"], current["height"]
                     # 기다리는 동안 배치를 바꿨으면 **지금의** 배치로 굽는다.
                     box = {**current["box"], "divider": current["divider"]} if current.get("custom") else None
+                    second = self._second_carry(current)
             if not same:
                 # 올려 둔 원본은 쥐고 있다 - 그 그림을 다시 꽂고 누르면 새로 부르지 않고 바로 된다.
                 raise ValueError("업스케일하는 동안 인셋이 바뀌었습니다 - 그 그림을 다시 꽂고 눌러 주세요.")
             return self.set_reference_inset_pin(
-                key[0], key[1], width, height, box=box, use_upscaled=True, source_override=override
+                key[0], key[1], width, height, box=box, use_upscaled=True, source_override=override, **second
             )
 
     def reference_inset_canvas_png(self) -> bytes:
@@ -761,8 +977,15 @@ class HeadlessCharacterAssetService:
             pin = self._reference_inset_pin
             return bytes(pin["canvas_png"]) if pin else b""
 
+    @staticmethod
+    def _inset_slot(slot: Any) -> int:
+        try:
+            return 2 if int(slot) == 2 else 1
+        except (TypeError, ValueError):
+            return 1
+
     @_inset_serialized
-    def set_reference_inset_box(self, box: Any) -> dict[str, Any]:
+    def set_reference_inset_box(self, box: Any, second_box: Any = None, split: Any = None) -> dict[str, Any]:
         """핀과 캔버스는 그대로 두고 인셋의 **배치만** 바꾼다(`{x, y, height, divider}`). ``None`` 이면 기본
         배치로 돌아간다. 그림과 마스크가 통째로 달라지므로 같은 원본으로 다시 만든다. 한계를 넘는 값은
         거절하지 않고 한계에 맞춘다(경계선은 그릴 곳이 남는 데까지만 간다).
@@ -773,13 +996,23 @@ class HeadlessCharacterAssetService:
                 raise ValueError("고정된 레퍼런스 인셋이 없습니다.")
             character_id, variation = str(pin["character_id"]), str(pin["variation"])
             width, height = pin["width"], pin["height"]
-            carry = self._inset_carry(pin)
+            # [기본값](box=None) 이면 둘째 그림의 자리 · 나누는 선도 기본으로.
+            carry = self._inset_carry(pin, keep_layout=False)
         if box is not None and not isinstance(box, dict):
             raise ValueError("인셋 배치는 x · y · height · divider 로 보냅니다.")
+        if box is not None and carry.get("second"):
+            # 둘째 그림의 자리 · 나누는 선: 안 보내면 지금 것 그대로(같은 경계선 위의 값이다).
+            if isinstance(second_box, dict):
+                carry["second"]["box"] = second_box
+            else:
+                carry["second"]["box"] = dict(pin["second"]["box"])
+            carry["split"] = split if split is not None else pin.get("split")
         return self.set_reference_inset_pin(character_id, variation, width, height, box=box, **carry)
 
     @_inset_serialized
-    def set_reference_inset_source(self, image_bytes: Optional[bytes], toggle_epoch: Any = None) -> dict[str, Any]:
+    def set_reference_inset_source(
+        self, image_bytes: Optional[bytes], toggle_epoch: Any = None, slot: Any = 1
+    ) -> dict[str, Any]:
         """인셋 칸의 그림을 **붙여넣은 그림으로 덮어쓴다**(사용자 지정 2026-10-09 - 캡쳐 · 복사해 붙여넣기).
 
         ``None`` 이면 에셋의 그림으로 돌아간다. 그림의 비율이 달라지므로 배치는 기본으로 돌아가고, 업스케일도
@@ -793,14 +1026,31 @@ class HeadlessCharacterAssetService:
             character_id = str(pin["character_id"]) if pin else ""
             variation = str(pin["variation"]) if pin else ""
             width, height = (pin["width"], pin["height"]) if pin else (0, 0)
+            carry = self._inset_carry(pin, keep_layout=False) if pin else {}
+        if self._inset_slot(slot) == 2:
+            # 둘째 그림: 넣기(그림) · 빼기(None). 첫 그림 · 업스케일은 그대로, 배치는 기본으로.
+            if not pin:
+                raise ValueError("첫 그림을 먼저 넣어 주세요.")
+            carry["second"] = (
+                None if image_bytes is None
+                else {"png": self._normalize_inset_source(image_bytes), "stored_id": "", "box": None}
+            )
+            carry["split"] = None
+            state = self.set_reference_inset_pin(
+                character_id, variation, width, height, enable=None if image_bytes is None else True, **carry
+            )
+            if image_bytes is not None and state["active"]:
+                state["references_disabled"] = self._release_character_references_for_inset()
+            return state
+        second = self._second_carry(pin, keep_layout=False)
         if image_bytes is None:
             if not character_id:
                 raise ValueError("돌아갈 에셋의 그림이 없습니다.")
-            return self.set_reference_inset_pin(character_id, variation, width, height)
+            return self.set_reference_inset_pin(character_id, variation, width, height, **second)
         # 꽂아 둔 것이 없어도 된다 - 붙여넣은 그림만으로 인셋을 만든다(Fn 에서 바로 여는 길). 그림을 넣으면 켠다.
         state = self.set_reference_inset_pin(
             character_id, variation, width, height,
-            source_override=self._normalize_inset_source(image_bytes), enable=True,
+            source_override=self._normalize_inset_source(image_bytes), enable=True, **second,
         )
         if state["active"]:
             state["references_disabled"] = self._release_character_references_for_inset()
@@ -843,12 +1093,16 @@ class HeadlessCharacterAssetService:
         image.save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def reference_inset_source_image(self) -> tuple[bytes, str]:
-        """칸에 놓인 그림 `(bytes, media_type)` - 붙여넣은 그림이면 그것, 아니면 에셋의 그림. 핀이 없으면 빈 bytes."""
+    def reference_inset_source_image(self, slot: Any = 1) -> tuple[bytes, str]:
+        """칸에 놓인 그림 `(bytes, media_type)` - 붙여넣은 그림이면 그것, 아니면 에셋의 그림. 핀이 없으면 빈 bytes.
+        ``slot`` = 2 면 둘째 그림(없으면 빈 bytes)."""
         with self._retain_lock:
             pin = self._reference_inset_pin
             if not pin:
                 return b"", "image/png"
+            if self._inset_slot(slot) == 2:
+                second = pin.get("second")
+                return (bytes(second["png"]) if second else b""), "image/png"
             override = pin.get("source_override")
             character_id, variation = str(pin["character_id"]), str(pin["variation"])
         if override:
@@ -909,7 +1163,10 @@ class HeadlessCharacterAssetService:
         """
         try:
             from core.nai_anlas_cost import cost_snapshot_for_context, estimate_anlas_cost
-            from utils.reference_inpaint_preprocess import REFERENCE_INSET_CANVAS_SIZES
+            from utils.reference_inpaint_preprocess import (
+                REFERENCE_INSET_CANVAS_SIZES,
+                REFERENCE_INSET_VERTICAL_CANVAS_SIZES,
+            )
 
             context = self.context
             # 지금 나갈 금액 + 그 금액의 차례(`nai_cost_rev`) - 파라미터 메시지와 **같은 계산 · 같은 번호 줄**이다.
@@ -919,7 +1176,12 @@ class HeadlessCharacterAssetService:
             if str(context.get_api_mode() or "").upper() != "NAI":
                 return {"canvas_costs": {}, **snapshot}
             costs = {}
-            for width, height in REFERENCE_INSET_CANVAS_SIZES:
+            # 지금 방향의 목록만(상태의 `sizes` 와 같은 열쇠). 세로면 세운 캔버스다.
+            with self._retain_lock:
+                pin = self._reference_inset_pin
+                vertical = (pin.get("orientation") if pin else self._reference_inset_orientation) == "vertical"
+            listed = REFERENCE_INSET_VERTICAL_CANVAS_SIZES if vertical else REFERENCE_INSET_CANVAS_SIZES
+            for width, height in listed:
                 sized = {**base, "width": width, "height": height, "resolution": f"{width} x {height}"}
                 costs[f"{width}x{height}"] = int(estimate_anlas_cost(context, sized))
             return {"canvas_costs": costs, **snapshot}
@@ -931,8 +1193,11 @@ class HeadlessCharacterAssetService:
         from utils.reference_inpaint_preprocess import (
             REFERENCE_INSET_CANVAS_KINDS,
             REFERENCE_INSET_CANVAS_SIZES,
+            REFERENCE_INSET_VERTICAL_CANVAS_KINDS,
+            REFERENCE_INSET_VERTICAL_CANVAS_SIZES,
             ReferenceInsetPreprocessSpec,
             reference_inset_box_limits,
+            reference_inset_split_limits,
         )
 
         with self._retain_lock:
@@ -941,14 +1206,25 @@ class HeadlessCharacterAssetService:
             sync = {"sync_session": self._reference_inset_sync_session, "sync_seq": self._reference_inset_sync_seq,
                     # 켜고 끌 때마다 올라가는 차례. 화면은 붙여넣기 · Storage 꺼내기를 보낼 때 **누른 순간의** 이 값을
                     # 함께 보낸다 - 그 사이에 끈 것을 서버가 알아보게(`_started_at_toggle_epoch`).
-                    "toggle_epoch": self._reference_inset_toggle_epoch}
+                    "toggle_epoch": self._reference_inset_toggle_epoch,
+                    # 칸의 방향(이 세션의 설정). 세로면 box · divider · limits · source_* 는 **전치한 모델 공간** 값이다.
+                    "orientation": self._reference_inset_orientation,
+                    # 가상 캐릭터(꽂아 둔 것이 없어도 남아 있다 - 인셋의 세션 설정).
+                    "characters": [dict(item) for item in self._reference_inset_characters],
+                    "max_characters": self.REFERENCE_INSET_MAX_CHARACTERS}
             if not pin:
                 # 꽂아 둔 것이 없다. 창은 이 상태로도 열린다('그림을 넣어 주세요').
                 return {"active": False, "configured": False, "background": self._reference_inset_background,
                         "crop_result": bool(self._reference_inset_crop_result), **sync}
             stored_id = str(pin.get("stored_id") or "")
+            vertical = pin.get("orientation") == "vertical"
+            kinds = REFERENCE_INSET_VERTICAL_CANVAS_KINDS if vertical else REFERENCE_INSET_CANVAS_KINDS
+            second = pin.get("second")
+            model_w, model_h = (pin["height"], pin["width"]) if vertical else (pin["width"], pin["height"])
             return {
                 **sync,
+                # 방향은 이 핀을 구운 방향이다(아래 치수 · 배치와 같은 방향).
+                "orientation": "vertical" if vertical else "horizontal",
                 # 켜져 있는가(= 다음 생성이 인셋으로 나가는가) / 꽂아 둔 것이 있는가. 꺼도 꽂아 둔 것은 남는다.
                 "active": bool(self._reference_inset_enabled),
                 "configured": True,
@@ -968,12 +1244,13 @@ class HeadlessCharacterAssetService:
                 "height": pin["height"],
                 # 고를 수 있는 목록을 함께 싣는다 - 화면이 표를 따로 들면 한쪽만
                 # 고쳐져 서로 다른 말을 한다(SSOT 는 reference_inpaint_preprocess).
-                "sizes": [list(size) for size in REFERENCE_INSET_CANVAS_SIZES],
+                "sizes": [list(size) for size in (
+                    REFERENCE_INSET_VERTICAL_CANVAS_SIZES if vertical else REFERENCE_INSET_CANVAS_SIZES)],
                 # 같은 목록을 비율(종류)별로 묶은 것 - 화면이 비율을 먼저 고르고 그 안에서 크기를 고른다.
                 # 묶음 안의 차례 = 급(1MP · Large · Wallpaper).
                 "size_groups": [
                     {"label": label, "sizes": [list(size) for size in sizes]}
-                    for label, sizes in REFERENCE_INSET_CANVAS_KINDS
+                    for label, sizes in kinds
                 ],
                 # 칸 안의 그림(`box`)과 경계선(`divider` = 왼쪽에 붙은 칸의 너비) - 캔버스 px. 화면이 같은
                 # 계산을 하도록 한계 값과 기본 경계도 싣는다.
@@ -987,7 +1264,21 @@ class HeadlessCharacterAssetService:
                 "source_height": pin["source"][1],
                 "open_ratio": round(float(pin["open_ratio"]), 4),
                 "limits": reference_inset_box_limits(
-                    ReferenceInsetPreprocessSpec(canvas_width=pin["width"], canvas_height=pin["height"])
+                    ReferenceInsetPreprocessSpec(canvas_width=model_w, canvas_height=model_h)
+                ),
+                # 둘째 그림(사용자 결정 2026-10-18 - 두 장 상한). 자리 · 크기는 모델 공간. 없으면 None.
+                "second": {
+                    "box": dict(second["box"]),
+                    "source_width": second["source"][0],
+                    "source_height": second["source"][1],
+                    "source_revision": second["source_id"],
+                    "saved": bool(second.get("stored_id")) and self._inset_storage().has(second["stored_id"]),
+                } if second else None,
+                # 두 칸을 나누는 선(모델 공간 y) · 기본값 · 범위. 둘째 그림이 없으면 split 은 None.
+                "split": pin.get("split"),
+                "default_split": pin.get("default_split"),
+                "split_limits": reference_inset_split_limits(
+                    ReferenceInsetPreprocessSpec(canvas_width=model_w, canvas_height=model_h)
                 ),
             }
 
@@ -1023,6 +1314,20 @@ class HeadlessCharacterAssetService:
                 #    만들기 때문에, 자리만 실으면 다듬어진 그림을 한 번 더 잘라 낸다(사용자 제보 2026-10-09).
                 params["_reference_inset_crop_left"] = int(pin["divider"])
                 params["_reference_inset_crop_canvas"] = str(pin["canvas_id"])
+                if pin.get("orientation") == "vertical":
+                    params["_reference_inset_crop_axis"] = "y"      # 칸이 위 - 위를 잘라 낸다
+            if pin.get("orientation") == "vertical":
+                params["reference_inset_vertical"] = True           # V5 태그 = 2koma
+            # 가상 캐릭터 = 우회 모드(사용자 결정 2026-10-18): 메인 캐릭터 슬롯을 건너뛰고 이것만 싣는다. 좌표는 안 싣는다
+            # (AUTO - 전원분 좌표가 없으면 api_service 가 use_coords 를 끈다). 비어 있으면 **캐릭터 없이** 나간다.
+            characters = [
+                {"prompt": str(item.get("prompt") or "").strip(), "uc": str(item.get("uc") or "").strip()}
+                for item in self._reference_inset_characters if str(item.get("prompt") or "").strip()
+            ]
+            if characters:
+                params["sketchbook_character_prompts"] = characters
+            else:
+                params["_reference_inset_skip_characters"] = True
             return params
 
     def pinned_candidate(self, pin_id: str) -> Optional[dict[str, Any]]:
@@ -1641,7 +1946,13 @@ class HeadlessCharacterAssetService:
             from core.character_outfit_filter import strip_outfit_tags
 
             prompt = strip_outfit_tags(prompt, getattr(context, "repo_root", None))
-        state = context._character_service().apply_asset(prompt, uc, mode)
+        if with_inset:
+            # 인셋과 함께면 메인 C1 이 아니라 인셋의 **가상 C1** 에 넣는다(사용자 결정 2026-10-18 - 우회 모드).
+            # 메인 캐릭터 슬롯은 건드리지 않는다 - 인셋을 끄면 그대로 돌아온다.
+            self.set_reference_inset_character("virtual_c1", {"prompt": prompt, "uc": uc})
+            state: dict[str, Any] = {}
+        else:
+            state = context._character_service().apply_asset(prompt, uc, mode)
         reference_attached = False
         references_disabled = False
         if with_reference:
@@ -1805,7 +2116,12 @@ class HeadlessCharacterAssetService:
         if str(context.get_api_mode() or "").upper() != "NAI":
             raise ValueError("character slot apply requires NAI mode")
         prompt = builder_v5.character_prompt(builder, self.parts_catalog())
-        state = context._character_service().apply_asset(prompt, "", "c1")
+        # 인셋과 함께면 가상 C1 에(우회 모드 - 위 `apply_to_slot` 과 같다). 아니면 예전대로 메인 C1.
+        if with_inset:
+            self.set_reference_inset_character("virtual_c1", {"prompt": prompt, "uc": ""})
+            state: dict[str, Any] = {}
+        else:
+            state = context._character_service().apply_asset(prompt, "", "c1")
         references_disabled = False
         try:
             references_disabled = self._disable_all_character_reference_frames()

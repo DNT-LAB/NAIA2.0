@@ -59,6 +59,12 @@ REFERENCE_INSET_LIVE_REFETCH_KEYS = (
     # 결과에서 인셋 칸을 잘라 내는 설정 - 중간에 켜고 끈 것이 다음 장부터 반영돼야 한다.
     "_reference_inset_crop_left",
     "_reference_inset_crop_canvas",
+    # 상하 모드(칸이 위) - 자르는 방향과 V5 태그(`2koma`)가 이것을 본다. 중간에 바꾼 것이 다음 장부터 반영돼야 한다.
+    "_reference_inset_crop_axis",
+    "reference_inset_vertical",
+    # 인셋의 가상 캐릭터(우회 모드) - 중간에 고친 것이 다음 장부터 실려야 한다.
+    "sketchbook_character_prompts",
+    "_reference_inset_skip_characters",
     "_reference_inset_pin",
 )
 
@@ -124,6 +130,16 @@ class HeadlessImageModuleParamService:
             return
         if is_special_request(params, getattr(self.context, "_coerce_bool", None)):
             return
+        # 줄글 시퀀스(`:begin/:seq/:end`)도 대상 밖이다 - 이 단계 뒤에 컷 N 개로 갈라지며 여기서 실은 캔버스 · 가상
+        # 캐릭터가 모든 컷에 복사된다(Codex 리뷰 2026-10-18).
+        try:
+            from core.sequence_parser import SequenceParser
+
+            raw = params.get("_raw_input")
+            if isinstance(raw, str) and raw.strip() and SequenceParser.is_sequence_prompt(raw):
+                return
+        except Exception:      # noqa: BLE001 - 판정 실패가 생성을 막으면 안 된다
+            pass
         try:
             asset_service = asset_service_getter()
             if params.get("director_reference_descriptions"):

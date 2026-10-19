@@ -2090,7 +2090,7 @@ export function createCharacterQuickPanel({
           + (findExpand === key
             ? `<div class="cq-find-acts" data-cqf-acts="1">`
               + `<button type="button" class="cq-find-act${row.favorite ? ' is-on' : ''}" data-cqf-act="fav"${findActBusy ? ' disabled' : ''}>`
-              + `${row.favorite ? '★ Favorite 에서 빼기' : '★ 이 캐릭터를 Favorite로'}</button>`
+              + `${row.favorite ? '★ Favorite 해제' : '★ Favorite에 추가'}</button>`
               + `<button type="button" class="cq-find-act is-hide" data-cqf-act="hide"${findActBusy ? ' disabled' : ''}>이 캐릭터 숨김</button></div>`
             : '');
       }).join('') + (findDexMoreLoading ? empty('더 불러오는 중…') : '');

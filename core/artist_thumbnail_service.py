@@ -1459,8 +1459,10 @@ class ArtistThumbnailService:
         base_list = sorted(base_list, key=lambda artist: weights.get(artist, 0), reverse=True)
         return base_list, filter_name, weights, thumb_data
 
-    def pick_random_artist(self, mode: str = "", filter_key: str = "all", query: str = "") -> dict | None:
-        """지금 목록에서 한 명(제외 작가는 빠진다 · 최근에 뽑힌 몇 명은 피한다). 비면 None."""
+    def pick_random_artist(self, mode: str = "", filter_key: str = "all", query: str = "",
+                           per_page: int = 48) -> dict | None:
+        """지금 목록에서 한 명(제외 작가는 빠진다 · 최근에 뽑힌 몇 명은 피한다). 비면 None.
+        `page` = 격자(같은 정렬 · `per_page`)에서 그 작가가 있는 쪽 - 화면이 그 쪽으로 넘겨 카드를 고른다(사용자 지시 2026-10-19)."""
         mode_key = str(mode or "").strip()
         filter_key = str(filter_key or "all").strip() or "all"
         query_text = str(query or "").strip().lower().replace("_", " ")
@@ -1469,6 +1471,8 @@ class ArtistThumbnailService:
         if not picked:
             return None
         artist = picked[0]
+        per_page = max(12, min(96, int(per_page or 48)))       # build_list 와 같은 범위
+        index = artists.index(artist)
         image_url = self._image_url_resolver(mode_key, filter_key, thumb_data)(artist)
         return {
             "artist": artist,
@@ -1478,6 +1482,8 @@ class ArtistThumbnailService:
             "has_image": bool(image_url),
             "image_url": image_url,
             "total": len(artists),
+            "index": index,
+            "page": index // per_page,
         }
 
     def build_list(

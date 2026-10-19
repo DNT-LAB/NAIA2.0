@@ -1191,6 +1191,7 @@ def register_artist_thumbnail_routes(
                 str(payload.get("mode") or ""),
                 str(payload.get("filter") or "all"),
                 str(payload.get("query") or ""),
+                int(payload.get("per_page") or 48),
             )
         except ArtistLoadCancelled as exc:
             return JSONResponse({"error": str(exc), "cancelled": True}, status_code=409)

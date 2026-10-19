@@ -1983,7 +1983,8 @@ export function createArtistThumbController({
       try {
         const picked = await pickRandomArtist();
         if (!picked) return;
-        selectArtist(picked);
+        // 뽑은 작가의 쪽으로 넘기고 그 카드를 누른 것처럼 고른다(사용자 지시 2026-10-19) - 무엇이 나가는지 격자에서 보인다.
+        await focusPickedArtist(picked);
       } finally {
         pickingArtist = false;
       }
@@ -2120,11 +2121,11 @@ export function createArtistThumbController({
     if (weight) weight.hidden = ranged;
   }
 
-  /** 지금 목록(모드 · 필터 · 이름 검색 · 제외 작가 빼고)에서 한 명. 실패하면 알리고 null. */
+  /** 지금 목록(모드 · 필터 · 이름 검색 · 제외 작가 빼고)에서 한 명. 실패하면 알리고 null. `page` = 격자에서 그 작가의 쪽. */
   async function pickRandomArtist() {
     try {
       return await postJson('/api/artist-thumb/random-pick', {
-        mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim(),
+        mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim(), per_page: PAGE_SIZE,
       });
     } catch (error) {
       showToast?.(error.message || '랜덤 작가를 뽑지 못했습니다.', 'error');
@@ -2138,6 +2139,24 @@ export function createArtistThumbController({
     if (randomToolsLoaded) return;
     try { await fetchState(); } catch (_) { /* 상태를 못 받아도 누른 값은 살린다 */ }
     randomToolsLoaded = true;
+  }
+
+  /** 뽑은 작가 = 그 카드를 누른 것과 같게. 격자에 없으면 그 쪽을 불러온 뒤 누른다.
+   *  ⚠️ 매칭 검색 판이 격자를 쥐고 있으면 쪽 번호가 다르다 - 그때는 있으면 누르고, 없으면 고르기만 한다. */
+  async function focusPickedArtist(picked) {
+    const findCard = () => gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(picked.artist)}"]`) || null;
+    let card = findCard();
+    if (!card && !searchQuery && Number.isInteger(picked.page)) {
+      await loadPage(picked.page, {anchor: 'top'});
+      card = findCard();
+    }
+    if (card && !selectionMode) {
+      card.click();                                   // 격자 클릭과 같은 길(selectArtist · 가중치 뽑기 · 기억된 결과)
+      // ⚠️ 쪽을 새로 불렀으면 loadPage 의 scrollGrid 가 다음 프레임에 맨 위로 올린다 - 그 뒤 프레임에 카드로 굴린다.
+      requestAnimationFrame(() => requestAnimationFrame(() => card.scrollIntoView({block: 'center'})));
+      return;
+    }
+    selectArtist(picked);
   }
 
   function bindRandomTools() {

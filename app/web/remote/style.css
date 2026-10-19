@@ -24624,7 +24624,7 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 /* 이름 줄 = 접기 손잡이(사용자 지시 2026-10-19). 접히면 흐리게 - CHARACTER 접힌 상자(.cq-box)와 같은 결. */
 .cq-roll-head { cursor: pointer; }
 .cq-roll-btn.is-on { color: #fff; border-color: rgba(124,106,239,0.7); background: rgba(124,106,239,0.25); }
-/* [자세히] - 이번 캐릭터 태그 줄(읽기 전용 · 복사 가능). */
+/* [자세히] - 이번 캐릭터 태그 줄(읽기 전용 · 직접 골라 복사). */
 .cq-roll-detail { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; }
 .cq-roll-tags {
   flex: 1; min-width: 0; resize: vertical; box-sizing: border-box; padding: 4px 6px; border-radius: 4px;

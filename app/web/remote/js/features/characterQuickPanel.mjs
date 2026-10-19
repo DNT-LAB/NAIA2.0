@@ -1202,15 +1202,6 @@ export function createCharacterQuickPanel({
       return;
     }
     if (event.target.closest('[data-cq-roll-detail]')) { rollDetail = !rollDetail; renderRoll(); fitGridHeight(); return; }
-    if (event.target.closest('[data-cq-roll-copy]')) {
-      const text = String(rollInfo?.item?.line || '');
-      if (text) {
-        navigator.clipboard?.writeText(text)
-          .then(() => showToast('태그를 복사했습니다.', 'info'))
-          .catch(() => showToast('복사하지 못했습니다 - 칸에서 직접 골라 복사하세요.', 'error'));
-      }
-      return;
-    }
     if (event.target.closest('[data-cq-roll-pin]')) { void pinRoll(); return; }
     const soptKey = event.target.closest('[data-cq-sopt-k]');
     if (soptKey) { void setSessionOptions(soptKey.dataset.cqSoptK); return; }
@@ -2300,7 +2291,7 @@ export function createCharacterQuickPanel({
         + `<span class="cq-roll-dim">${Number(rollInfo && rollInfo.count || 0).toLocaleString()}명</span>`
         + (item
           ? `<button type="button" class="cq-roll-btn${rollDetail ? ' is-on' : ''}" data-cq-roll-detail="1"`
-            + ` aria-pressed="${rollDetail ? 'true' : 'false'}" title="이번 캐릭터에 쓴 태그를 아래에 펼칩니다(복사할 수 있습니다)">자세히</button>`
+            + ` aria-pressed="${rollDetail ? 'true' : 'false'}" title="이번 캐릭터에 쓴 태그를 아래에 펼칩니다">자세히</button>`
             + `<button type="button" class="cq-roll-btn" data-cq-roll-pin="1"${rollBusy || rollStale || soptBusy || !item.line ? ' disabled' : ''}`
             + ` title="랜덤 슬롯을 끄고 이 캐릭터를 맨 아래 슬롯에 켭니다">📌 고정</button>`
             + `<button type="button" class="cq-roll-btn${item.favorite ? ' is-fav' : ''}" data-cq-roll-fav="1"${rollBusy || rollStale ? ' disabled' : ''}>`
@@ -2309,11 +2300,11 @@ export function createCharacterQuickPanel({
             + `${item.hidden ? '숨김 됨 · 되돌리기' : '숨김'}</button>`
           : '')
         + `</div>`;
-    // [자세히] 를 켜면 셋째 칸 = 태그 줄(읽기 전용 textarea - 고르고 복사할 수 있다) + [복사].
+    // [자세히] 를 켜면 셋째 칸 = 태그 줄(읽기 전용 textarea - 사용자가 직접 골라 복사한다).
+    // [복사] 단추는 두지 않는다 - 그대로 쓰려면 [📌 고정] 이 있다(사용자 지시 2026-10-19).
     const detail = !rollFold && rollDetail && item && item.line
       ? `<div class="cq-roll-detail"><textarea class="cq-roll-tags" readonly rows="3" spellcheck="false"`
-        + ` aria-label="이번 캐릭터 태그">${escHtml(item.line)}</textarea>`
-        + `<button type="button" class="cq-roll-btn" data-cq-roll-copy="1">복사</button></div>`
+        + ` aria-label="이번 캐릭터 태그">${escHtml(item.line)}</textarea></div>`
       : '';
     const html = line1 + line2 + detail;
     if (el._cqHtml !== html) { el._cqHtml = html; el.innerHTML = html; }
@@ -2326,13 +2317,24 @@ export function createCharacterQuickPanel({
   //   [괄호 제거] 체크 · [작품명 제거] [캐릭터명 제거] 는 함께 켤 수 있다 · [이름+작품만] [이름만] 은 묶음(누르면 나머지를 끈다).
   //   수명 = 그 슬롯(풀). 서버가 풀을 원래 줄에서 다시 만든다(`/api/character-viewer/session-options`).
   let soptBusy = false;
+  // 사용자가 고른 옵션 {key, options} - 누르는 즉시 화면에 보이고, 서버로는 가장 마지막 것만 차례로 보낸다(사용자 제보 2026-10-19:
+  // 보내고 다시 읽는 동안 단추를 잠갔더니 그사이 누른 것이 버려지고(괄호 제거가 세 번 안 먹음) 잠금/풀림이 깜박였다).
+  let soptWanted = null;
+
+  function soptShown() {
+    const key = rollInfo && rollInfo.key;
+    if (soptWanted && soptWanted.key === key) return soptWanted.options;
+    if (soptLast && soptLast.key === key) return soptLast.options;
+    return (rollInfo && rollInfo.options) || {};
+  }
+
   function paintSessionOptions() {
     const box = mount && mount.querySelector('[data-cq-sopt]');
     if (!box) return;
-    const o = (soptLast && rollInfo && soptLast.key === rollInfo.key ? soptLast.options : null)
-      || (rollInfo && rollInfo.options) || {};
+    const o = soptShown();
     const preset = o.drop_features ? (o.drop_copyright ? 'no' : 'nc') : '';
-    const locked = soptBusy || !rollInfo || !rollInfo.key;
+    // 첫 조회 전(풀 키를 모른다)에만 막는다 - 보내는 중에는 막지 않는다(누른 것은 모아 두었다가 이어서 보낸다).
+    const locked = !rollInfo || !rollInfo.key;
     const btn = (key, label, on) => `<button type="button" class="cq-sopt-btn${on ? ' is-on' : ''}" data-cq-sopt-k="${key}"`
       + `${locked ? ' disabled' : ''}>${label}</button>`;
     const html = `<div class="cq-sopt-row">`
@@ -2346,53 +2348,68 @@ export function createCharacterQuickPanel({
       + btn('no', '이름만', preset === 'no')
       + `</div>`;
     if (box._cqHtml !== html) { box._cqHtml = html; box.innerHTML = html; }
+    // 브라우저가 먼저 바꿔 둔 체크 상태를 보이는 값에 맞춘다(같은 HTML 이면 갈아 끼우지 않으므로).
+    const check = box.querySelector('[data-cq-sopt-paren]');
+    if (check && check.checked !== !!o.parens) check.checked = !!o.parens;
   }
 
-  async function setSessionOptions(key) {
+  function setSessionOptions(key) {
     // 첫 조회가 오기 전(풀 키를 모른다)에는 못 바꾼다 - 빈 옵션 · 빈 키로 서버 설정을 덮었다(Codex 리뷰 23차).
-    if (soptBusy || !rollInfo || !rollInfo.key) return;
-    const confirmed = soptLast && rollInfo && soptLast.key === rollInfo.key ? soptLast.options : null;
-    const o = {...(confirmed || (rollInfo && rollInfo.options) || {})};
+    if (!rollInfo || !rollInfo.key) return;
+    const o = {...soptShown()};
     if (key === 'paren') o.parens = !o.parens;
     if (key === 'cp') { o.drop_copyright = !(o.drop_copyright && !o.drop_features); o.drop_features = false; }
     if (key === 'nm') { o.drop_name = !o.drop_name; o.drop_features = false; }
     if (key === 'nc') { const on = !(o.drop_features && !o.drop_copyright); o.drop_features = on; o.drop_copyright = false; o.drop_name = false; }
     if (key === 'no') { const on = !(o.drop_features && o.drop_copyright); o.drop_features = on; o.drop_copyright = on; o.drop_name = false; }
-    const sentInfo = rollInfo;
-    const item = rollInfo && rollInfo.item;
-    soptBusy = true;
-    // 지금 날아오는 조회 답은 옛 옵션의 줄을 든다 - 버린다. 끝날 때까지 [📌 고정] 도 막는다(Codex 리뷰 15차).
-    rollSeq += 1;
+    soptWanted = {key: rollInfo.key, options: o};
     paintSessionOptions();
+    if (!soptBusy) void flushSessionOptions();
+  }
+
+  const sameOptions = (a, b) => ['parens', 'drop_copyright', 'drop_name', 'drop_features']
+    .every(name => !!(a && a[name]) === !!(b && b[name]));
+
+  /** 고른 옵션을 서버로 - 보내는 사이 또 누르면 끝난 뒤 마지막 것을 이어서 보낸다. 다 보내면 결과를 서버에서 다시 읽는다. */
+  async function flushSessionOptions() {
+    soptBusy = true;
+    // 지금 날아오는 조회 답은 옛 옵션의 줄을 든다 - 버린다. 끝날 때까지 [📌 고정] 은 막는다(Codex 리뷰 15차).
+    rollSeq += 1;
     renderRoll();
     try {
-      const res = await fetch('/api/character-viewer/session-options', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({...o, key: sentInfo?.key || '', group: item?.group || '', character: item?.character || ''}),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '옵션을 바꾸지 못했습니다.');
-      soptLast = {key: data.key, options: data.options || o};
-      // 응답이 왔을 때 줄이 다른 풀을 보고 있으면 덮지 않는다(옛 풀 2명이 새 풀 20명을 덮었다 - Codex 리뷰 15차).
-      if (rollInfo && rollInfo === sentInfo && rollInfo.key === data.key) {
-        rollInfo.options = data.options || o;
-        if (Number.isFinite(Number(data.count))) rollInfo.count = Number(data.count);
-        if (rollInfo.item && rollInfo.item === item && data.line) rollInfo.item.line = data.line;
+      while (soptWanted && rollInfo && soptWanted.key === rollInfo.key
+             && !(soptLast && soptLast.key === soptWanted.key && sameOptions(soptLast.options, soptWanted.options))) {
+        const wanted = soptWanted;
+        const item = rollInfo.item;
+        const res = await fetch('/api/character-viewer/session-options', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({...wanted.options, key: wanted.key, group: item?.group || '', character: item?.character || ''}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || '옵션을 바꾸지 못했습니다.');
+        soptLast = {key: data.key, options: data.options || wanted.options};
+        if (rollInfo && rollInfo.key === data.key) {
+          rollInfo.options = soptLast.options;
+          if (Number.isFinite(Number(data.count))) rollInfo.count = Number(data.count);
+          if (rollInfo.item && rollInfo.item === item && data.line) rollInfo.item.line = data.line;
+        }
       }
+      soptWanted = null;
     } catch (error) {
+      soptWanted = null;            // 서버 값으로 되돌려 보인다
       showToast(error.message || String(error), 'error');
+    }
+    // 줄 · 옵션 · 수를 **서버에서 다시 읽는다**(서버가 진실 - 그사이 시작한 조회가 옛 옵션을 들고 와도 덮인다 · Codex 리뷰 16차).
+    rollStale = true;
+    renderRoll();
+    try {
+      await (rollLastAsk === 'image' && previewMetaUrl() ? rollFromImage() : fetchRoll(null));
     } finally {
-      // 옵션이 바뀌면 줄 · 옵션 · 수를 **서버에서 다시 읽는다**(서버가 진실 - 그사이 시작한 조회가 옛 옵션을 들고 와도 덮인다,
-      // Codex 리뷰 16차). 다 읽을 때까지 옵션 단추 · [📌 고정] 은 잠근다(읽기 전 또 누르면 옛 옵션 위에 얹혔다 - 21차).
-      rollStale = true;
+      soptBusy = false;
       renderRoll();
-      try {
-        await (rollLastAsk === 'image' && previewMetaUrl() ? rollFromImage() : fetchRoll(null));
-      } finally {
-        soptBusy = false;
-        renderRoll();
-      }
+      // 다시 읽는 사이 또 눌렀으면 이어서 보낸다.
+      if (soptWanted) void flushSessionOptions();
     }
   }
 

@@ -1201,6 +1201,16 @@ export function createCharacterQuickPanel({
       fitGridHeight();
       return;
     }
+    if (event.target.closest('[data-cq-roll-detail]')) { rollDetail = !rollDetail; renderRoll(); fitGridHeight(); return; }
+    if (event.target.closest('[data-cq-roll-copy]')) {
+      const text = String(rollInfo?.item?.line || '');
+      if (text) {
+        navigator.clipboard?.writeText(text)
+          .then(() => showToast('태그를 복사했습니다.', 'info'))
+          .catch(() => showToast('복사하지 못했습니다 - 칸에서 직접 골라 복사하세요.', 'error'));
+      }
+      return;
+    }
     if (event.target.closest('[data-cq-roll-pin]')) { void pinRoll(); return; }
     const soptKey = event.target.closest('[data-cq-sopt-k]');
     if (soptKey) { void setSessionOptions(soptKey.dataset.cqSoptK); return; }
@@ -2098,6 +2108,8 @@ export function createCharacterQuickPanel({
   //   접으면 이름만(접힘은 이 브라우저에 기억한다).
   const ROLL_FOLD_KEY = 'naia.cq.rollFold';
   let rollFold = false;
+  // [자세히] - 이번 캐릭터의 태그 줄을 줄 아래 임시 칸(읽기 전용 · 복사 가능)에 펼친다(사용자 지시 2026-10-19). 이 창에서만.
+  let rollDetail = false;
   try { rollFold = localStorage.getItem(ROLL_FOLD_KEY) === '1'; } catch (error) { /* 못 읽으면 펼친 채로 */ }
   // 서버가 마지막으로 확인해 준 옵션 {key, options} - 다음 조작의 바탕. 재조회 답이 늦거나 실패해도 옛 옵션으로 덮지 않는다(Codex 리뷰 21차).
   let soptLast = null;
@@ -2287,7 +2299,9 @@ export function createCharacterQuickPanel({
       : `<div class="cq-roll-l"><span class="cq-roll-k">랜덤</span>`
         + `<span class="cq-roll-dim">${Number(rollInfo && rollInfo.count || 0).toLocaleString()}명</span>`
         + (item
-          ? `<button type="button" class="cq-roll-btn" data-cq-roll-pin="1"${rollBusy || rollStale || soptBusy || !item.line ? ' disabled' : ''}`
+          ? `<button type="button" class="cq-roll-btn${rollDetail ? ' is-on' : ''}" data-cq-roll-detail="1"`
+            + ` aria-pressed="${rollDetail ? 'true' : 'false'}" title="이번 캐릭터에 쓴 태그를 아래에 펼칩니다(복사할 수 있습니다)">자세히</button>`
+            + `<button type="button" class="cq-roll-btn" data-cq-roll-pin="1"${rollBusy || rollStale || soptBusy || !item.line ? ' disabled' : ''}`
             + ` title="랜덤 슬롯을 끄고 이 캐릭터를 맨 아래 슬롯에 켭니다">📌 고정</button>`
             + `<button type="button" class="cq-roll-btn${item.favorite ? ' is-fav' : ''}" data-cq-roll-fav="1"${rollBusy || rollStale ? ' disabled' : ''}>`
             + `${item.favorite ? '★ favorite 됨' : '★ favorite'}</button>`
@@ -2295,7 +2309,13 @@ export function createCharacterQuickPanel({
             + `${item.hidden ? '숨김 됨 · 되돌리기' : '숨김'}</button>`
           : '')
         + `</div>`;
-    const html = line1 + line2;
+    // [자세히] 를 켜면 셋째 칸 = 태그 줄(읽기 전용 textarea - 고르고 복사할 수 있다) + [복사].
+    const detail = !rollFold && rollDetail && item && item.line
+      ? `<div class="cq-roll-detail"><textarea class="cq-roll-tags" readonly rows="3" spellcheck="false"`
+        + ` aria-label="이번 캐릭터 태그">${escHtml(item.line)}</textarea>`
+        + `<button type="button" class="cq-roll-btn" data-cq-roll-copy="1">복사</button></div>`
+      : '';
+    const html = line1 + line2 + detail;
     if (el._cqHtml !== html) { el._cqHtml = html; el.innerHTML = html; }
     // 접히면 흐리게 · CHARACTER 도 접혀 있으면 그 접힌 폭과 맞춘다(style.css `.cq-roll.is-fold`).
     el.classList.toggle('is-fold', rollFold);

@@ -222,6 +222,13 @@ export function createArtistThumbController({
     `<label class="rctl-tg" data-rt="${key}" title="${escHtml(title)}">`
     + `<input type="checkbox" data-rt-k="${key}"><span>${escHtml(label)}</span></label>`)).join('');
   // [랜덤 가중치] 켬 = 이름 줄의 슬라이더 자리에 start · end · step.
+  // [랜덤] - 지금 목록에서 작가 한 명을 뽑아 그 쪽으로 넘겨 고른다(생성은 안 한다 · 사용자 지시 2026-10-19).
+  //  Generate with Random Prompt 왼쪽 · [생성 버튼 → 랜덤 아티스트] 의 '뽑기' 만 손으로 하는 단추.
+  const pickBtn = document.createElement('button');
+  pickBtn.type = 'button';
+  pickBtn.className = 'artist-thumb-btn artist-hand-pick';
+  pickBtn.textContent = '랜덤';
+  pickBtn.title = '지금 목록(모드 · 필터 · 이름 검색)에서 작가 한 명을 무작위로 골라 그 쪽으로 넘깁니다. 생성은 하지 않습니다.';
   const weightRangeEl = document.createElement('span');
   weightRangeEl.className = 'artist-thumb-wrange';
   weightRangeEl.hidden = true;
@@ -2248,7 +2255,30 @@ export function createArtistThumbController({
     }, 1500);
   }
 
+  /** [랜덤] - 뽑아서 고르기만(카드를 누른 것과 같다 · [랜덤 가중치] 면 가중치도 뽑힌다). */
+  async function pickArtistByHand() {
+    if (pickingArtist) return;
+    // 손으로 골랐으면 생성 버튼이 또 무작위로 바꾸지 않게 - [생성 버튼 → 랜덤 아티스트] 를 끈다(사용자 지시 2026-10-19).
+    if (randomTools.gen_pick) {
+      await ensureRandomToolsLoaded();
+      randomTools.gen_pick = false;
+      paintRandomTools();
+      scheduleSaveRandomTools({now: true});
+      showToast?.('[생성 버튼 → 랜덤 아티스트] 를 껐습니다 - 고른 작가로 생성합니다.', 'info');
+    }
+    pickingArtist = true;
+    pickBtn.disabled = true;
+    try {
+      const picked = await pickRandomArtist();
+      if (picked) await focusPickedArtist(picked);
+    } finally {
+      pickingArtist = false;
+      pickBtn.disabled = false;
+    }
+  }
+
   function bindRandomTools() {
+    pickBtn.addEventListener('click', () => { void pickArtistByHand(); });
     // 사람이 목록 조건을 바꿨다(프로그램이 값을 넣을 때는 이 이벤트가 안 온다).
     const follow = () => { randomPoolFollow = true; };
     modeEl?.addEventListener('change', follow);
@@ -2997,7 +3027,7 @@ export function createArtistThumbController({
         ],
       },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
-      {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
+      {nodes: [pickBtn, randomGenerateBtn], className: 'rctl-row-split rctl-gen-row'},
       // 하단 바 - S · 조합 창의 바닥 줄과 같은 결(사용자 지정 2026-10-19).
       {nodes: [randomToolsEl], className: 'rctl-foot'},
     ];

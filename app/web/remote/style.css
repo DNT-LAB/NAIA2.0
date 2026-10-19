@@ -29682,6 +29682,10 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .rctl-row.rctl-fill > * { min-height: 0; max-height: 100%; }
 /* 단추 줄은 반반으로 나눠 가진다(글자 길이가 제각각이라 그냥 두면 들쭉날쭉하다). */
 .rctl-row-split > button { flex: 1 1 0; }
+/* [랜덤] | Generate with Random Prompt = 1 : 3 (사용자 지정 2026-10-19). */
+.rctl-row-split.rctl-gen-row { align-items: stretch; }
+.rctl-row-split.rctl-gen-row > .artist-hand-pick { flex: 1 1 0; }
+.rctl-row-split.rctl-gen-row > .artist-thumb-random-generate { flex: 3 3 0; }
 
 /* 조각이 빠져나간 자리에 남기는 표식. 큰 구멍(격자)에만 쓴다 - 단추 자리까지 남기면
    원래 화면이 점선으로 뒤덮인다. */

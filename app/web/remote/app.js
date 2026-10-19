@@ -983,7 +983,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rtools8')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rtools9')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -4907,6 +4907,8 @@ function afterWsJsonMessage(m) {
   }
   // Random 이 굴린 캐릭터 · 조건부 override 는 캐릭터 상태로 오지 않는다 - [적용 상태] · 토큰 칸을 위해 새로 청한다.
   if (m.type === 'prompt_generated') scheduleCharacterStateRefresh();
+  // [메인 랜덤 버튼 연결] + [생성 버튼 → 랜덤 아티스트] - 서버가 뽑은 작가로 아티스트 창의 격자를 넘겨 고른다.
+  if (m.type === 'prompt_generated' && m.random_artist) void artistThumbControl?.focusRandomArtist?.(m.random_artist);
 }
 
 function onWsMessageError(error) {

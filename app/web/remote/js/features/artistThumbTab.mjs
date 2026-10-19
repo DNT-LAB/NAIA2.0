@@ -204,6 +204,8 @@ export function createArtistThumbController({
   // 사용자가 모드 · 필터 · 이름 검색을 바꿨다 - 다음 목록이 오면 그것을 메인 Random 의 목록으로 삼는다.
   // ⚠️ 새로고침 뒤 기본 화면이 저장된 목록을 덮지 않게, 화면이 스스로 그린 목록은 따라가지 않는다(Codex 재리뷰).
   let randomPoolFollow = false;
+  // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
+  let keepWeightOnce = false;
   let randomToolsSaved = '';
   let randomToolsTimer = null;
   let pickingArtist = false;
@@ -1277,8 +1279,12 @@ export function createArtistThumbController({
 
   function selectArtist(item, options = {}) {
     selected = item;
+    scheduleSaveRandomTools();                 // [메인 랜덤 버튼 연결] 이 붙일 작가(`focus`)
     // [랜덤 가중치] - 고를 때마다 새로 뽑는다(믹스 모드는 큐가 칸마다 가중치를 쥔다).
-    if (randomWeightActive() && !mixOn) paintWeightControls(drawToolWeight());
+    // 메인 Random 이 뽑아 프롬프트에 이미 쓴 가중치를 보일 때는 새로 뽑지 않는다(keepWeight).
+    const keepWeight = Boolean(options.keepWeight) || keepWeightOnce;
+    keepWeightOnce = false;
+    if (randomWeightActive() && !mixOn && !keepWeight) paintWeightControls(drawToolWeight());
     if (mixOn && mixQueue) {
       // 격자에서 고른 작가는 **임시 블럭** 한 자리를 차지하고 다음 선택에 갈린다.
       mixQueue.setTempArtist(item.artist, item.image_url || '');
@@ -2080,6 +2086,7 @@ export function createArtistThumbController({
       weight_step: Number(randomTools.weight_step),
       weight: Number.isFinite(weight) ? weight : 1,
       pool: randomTools.pool || currentRandomPool(),
+      focus: String(selected?.artist || randomTools.focus || ''),
     };
   }
 
@@ -2143,7 +2150,7 @@ export function createArtistThumbController({
 
   /** 뽑은 작가 = 그 카드를 누른 것과 같게. 격자에 없으면 그 쪽을 불러온 뒤 누른다.
    *  ⚠️ 매칭 검색 판이 격자를 쥐고 있으면 쪽 번호가 다르다 - 그때는 있으면 누르고, 없으면 고르기만 한다. */
-  async function focusPickedArtist(picked) {
+  async function focusPickedArtist(picked, options = {}) {
     const findCard = () => gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(picked.artist)}"]`) || null;
     let card = findCard();
     if (!card && !searchQuery && Number.isInteger(picked.page)) {
@@ -2151,12 +2158,29 @@ export function createArtistThumbController({
       card = findCard();
     }
     if (card && !selectionMode) {
+      keepWeightOnce = Boolean(options.keepWeight);
       card.click();                                   // 격자 클릭과 같은 길(selectArtist · 가중치 뽑기 · 기억된 결과)
       // ⚠️ 쪽을 새로 불렀으면 loadPage 의 scrollGrid 가 다음 프레임에 맨 위로 올린다 - 그 뒤 프레임에 카드로 굴린다.
       requestAnimationFrame(() => requestAnimationFrame(() => card.scrollIntoView({block: 'center'})));
       return;
     }
-    selectArtist(picked);
+    selectArtist(picked, {keepWeight: Boolean(options.keepWeight)});
+  }
+
+  /** 메인 Random 이 [생성 버튼 → 랜덤 아티스트] 로 무작위 작가를 뽑았다 - 격자를 그 작가로 넘겨 고른다(사용자 지시 2026-10-19).
+   *  가중치는 서버가 프롬프트에 쓴 값을 그대로 보인다(고르면서 새로 뽑지 않는다). 격자가 안 보이면 고르기만. */
+  async function focusRandomArtist(info) {
+    const artist = String(info?.artist || '').trim();
+    if (!artist) return;
+    const picked = {artist, image_url: info.image_url || '', weight: '', favorite: false, banned: false,
+      page: Number.isInteger(info.page) ? info.page : null};
+    const weight = Number(info.weight);
+    if (gridVisible()) {
+      await focusPickedArtist(picked, {keepWeight: true});
+    } else {
+      selectArtist(picked, {keepWeight: true});
+    }
+    if (Number.isFinite(weight) && !mixOn) setArtistWeight(weight);
   }
 
   function bindRandomTools() {
@@ -3955,6 +3979,8 @@ export function createArtistThumbController({
     setActive,
     requestArtistsTab,
     syncPromptFormat,
+    /** 메인 Random 이 [메인 랜덤 버튼 연결] + [생성 버튼 → 랜덤 아티스트] 로 뽑은 작가를 고른다. */
+    focusRandomArtist,
     /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
      *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도
      *  NAI 의 모델 목록·썸네일이 그대로 남았다(Codex #5).

@@ -53,6 +53,8 @@ class HeadlessRandomPromptResult:
     reset_resolution_detected: bool = False
     extra_messages: list[dict[str, Any]] = field(default_factory=list)
     event_map_revision: int | None = None
+    # [메인 랜덤 버튼 연결] 이 무작위로 뽑은 작가 - 화면(아티스트 창)이 그 작가로 격자를 넘겨 고른다.
+    random_artist: dict[str, Any] | None = None
 
     def websocket_payload(self) -> dict[str, Any]:
         if not self.success:
@@ -72,6 +74,8 @@ class HeadlessRandomPromptResult:
         if self.random_request_id:
             payload["random_request_id"] = self.random_request_id
             payload["requestId"] = self.random_request_id
+        if self.random_artist:
+            payload["random_artist"] = dict(self.random_artist)
         if self.prompt_run_id:
             payload["prompt_run_id"] = self.prompt_run_id
             payload["promptRunId"] = self.prompt_run_id
@@ -223,9 +227,17 @@ class HeadlessRandomPromptService:
         """메인 Random. [메인 랜덤 버튼 연결](아티스트 리모컨 · 사용자 지시 2026-10-19)이 켜져 있으면 이번 한 번만
         뽑은 작가를 PE 프리픽스 앞에 얹는다(`random_artist_link`).
         ⚠️ 부른 쪽이 이미 PE 오버라이드를 걸었으면(아티스트 창 · 외부 ComfyUI) 얹지 않는다 - 그쪽이 작가를 정했다."""
-        with self.random_artist_link():
-            return self._generate(active_ratings=active_ratings, overrides=overrides,
-                                  random_request_id=random_request_id, source_row_override=source_row_override)
+        with self.random_artist_link() as picked:
+            result = self._generate(active_ratings=active_ratings, overrides=overrides,
+                                    random_request_id=random_request_id, source_row_override=source_row_override)
+            return self.attach_random_artist(result, picked)
+
+    @staticmethod
+    def attach_random_artist(result, picked):
+        """무작위로 뽑은 작가면 결과에 싣는다(화면이 그 작가를 고른다). 고른 작가를 붙인 것이면 화면이 이미 그것을 보고 있다."""
+        if isinstance(picked, dict) and picked.get("pick") and getattr(result, "success", False):
+            result.random_artist = {key: picked.get(key) for key in ("artist", "weight", "page", "image_url")}
+        return result
 
     @contextmanager
     def random_artist_link(self):
@@ -236,19 +248,22 @@ class HeadlessRandomPromptService:
         ⚠️ 공용 `session_p_eng_override` 를 쓰지 않는다 - 겹친 요청끼리 되돌리기가 엇갈려 오버라이드가 남았고, PE 설정을
            미리 베껴 두어 `*randomized` 프리셋이 한 번 늦게 먹었다(Codex 재리뷰)."""
         provider = getattr(self.context, "random_artist_override_provider", None)
-        token = None
+        picked = None
         if callable(provider) and getattr(self.context, "session_p_eng_override", None) is None:
             try:
-                token = provider()
+                picked = provider()
             except Exception as exc:
                 print(f"[WARN] random artist link skipped: {type(exc).__name__}")
+        if isinstance(picked, str):            # 옛 공급자(토큰만) 호환
+            picked = {"token": picked, "pick": False}
+        token = str((picked or {}).get("token") or "")
         if not token:
             yield None
             return
         previous = getattr(_RANDOM_ARTIST, "token", None)
-        _RANDOM_ARTIST.token = str(token)
+        _RANDOM_ARTIST.token = token
         try:
-            yield token
+            yield picked
         finally:
             _RANDOM_ARTIST.token = previous
 

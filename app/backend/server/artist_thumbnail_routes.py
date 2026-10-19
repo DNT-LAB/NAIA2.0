@@ -638,7 +638,8 @@ def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServi
 
 
 def _main_random_artist_override(context: WebSessionContext):
-    """[메인 랜덤 버튼 연결] - 메인 Random 이 부른다(`HeadlessRandomPromptService.random_artist_link`). 작가 토큰 · 꺼져 있으면 None."""
+    """[메인 랜덤 버튼 연결] - 메인 Random 이 부른다(`HeadlessRandomPromptService.random_artist_link`).
+    {token, artist, weight, pick, page?} · 꺼져 있으면 None."""
     return artist_thumbnail_service(context).main_random_token(context.get_api_mode())
 
 

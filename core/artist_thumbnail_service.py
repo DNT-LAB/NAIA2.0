@@ -598,6 +598,8 @@ class ArtistThumbnailService:
                 "filter": str(pool.get("filter") or "all").strip()[:200] or "all",
                 "query": str(pool.get("query") or "").strip()[:200],
             },
+            # 아티스트 창에서 지금 고른 작가 - [메인 랜덤 버튼 연결] 이 이 작가를 붙인다(창을 닫아도 마지막 것).
+            "focus": str(source.get("focus") or "").strip()[:300],
         }
 
     def draw_random_weight(self, tools: dict) -> float:
@@ -633,17 +635,27 @@ class ArtistThumbnailService:
     def random_tools(self) -> dict:
         return self.load_options().get("random_tools") or self._normalize_random_tools({})
 
-    def main_random_token(self, api_mode: str) -> str | None:
-        """[메인 랜덤 버튼 연결] 이 켜져 있으면 저장된 목록 조건에서 한 명을 뽑아 이번 랜덤 한 번에 얹을 작가 토큰을 만든다.
-        아티스트 창이 닫혀 있어도 돈다(사용자 결정 2026-10-19). 꺼져 있거나 목록이 비면 None."""
+    def main_random_token(self, api_mode: str) -> dict | None:
+        """[메인 랜덤 버튼 연결] - 이번 랜덤 한 번에 얹을 작가 토큰(사용자 지정 2026-10-19).
+
+        - [생성 버튼 → 랜덤 아티스트] 끔 = 아티스트 창에서 **고른 작가**(`focus`). 가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다.
+        - 켬 = 저장된 목록에서 **무작위** 한 명 - 화면이 그 작가로 격자를 넘겨 고른다(`pick` · `page`).
+        꺼져 있거나 고른 작가 · 목록이 없으면 None. 아티스트 창이 닫혀 있어도 돈다(사용자 결정)."""
         tools = self.random_tools()
         if not tools.get("main_link"):
             return None
+        weight = self.draw_random_weight(tools)
+        if not tools.get("gen_pick"):
+            artist = str(tools.get("focus") or "").strip()
+            token = self.format_artist_token(artist, weight, api_mode) if artist else ""
+            return {"token": token, "artist": artist, "weight": weight, "pick": False} if token else None
         pool = tools.get("pool") or {}
         item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""))
         if not item:
             return None
-        return self.format_artist_token(item["artist"], self.draw_random_weight(tools), api_mode) or None
+        token = self.format_artist_token(item["artist"], weight, api_mode)
+        return {"token": token, "artist": item["artist"], "weight": weight, "pick": True,
+                "page": item.get("page"), "image_url": item.get("image_url", "")} if token else None
 
     def load_options(self, mode: str = "") -> dict:
         path = self._options_path()

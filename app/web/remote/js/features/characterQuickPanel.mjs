@@ -2276,12 +2276,13 @@ export function createCharacterQuickPanel({
     const empty = !rollInfo ? '…'
       : rollInfo.source === 'image' ? '이 그림에는 랜덤 캐릭터가 없습니다'
         : rollInfo.unresolved ? '어느 캐릭터인지 알 수 없습니다(출력 옵션)' : '아직 뽑히지 않았습니다';
-    const line1 = `<div class="cq-roll-l"><span class="cq-roll-k">C${ordinal}</span>`
+    // 첫 줄(이름 줄)을 누르면 접고 편다 - 따로 접기 단추를 두지 않는다 · 슬롯 번호(C{n})는 숨긴다(사용자 지시 2026-10-19).
+    const line1 = `<div class="cq-roll-l cq-roll-head" data-cq-roll-fold="1" role="button" tabindex="0"`
+      + ` aria-expanded="${rollFold ? 'false' : 'true'}" title="${rollFold ? '펼치기' : '접기'}">`
       + (item ? `<b class="cq-roll-name">${escHtml(item.character)}</b>${rollFold ? '' : posts}`
         + (rollFold ? '' : `<span class="cq-roll-g">${escHtml(item.group)}</span>`)
         : `<span class="cq-roll-dim">${escHtml(empty)}</span>`)
-      + `<button type="button" class="cq-roll-fold" data-cq-roll-fold="1" aria-label="${rollFold ? '펼치기' : '접기'}">`
-      + `${rollFold ? '▸' : '▾'}</button></div>`;
+      + `</div>`;
     const line2 = rollFold ? ''
       : `<div class="cq-roll-l"><span class="cq-roll-k">랜덤</span>`
         + `<span class="cq-roll-dim">${Number(rollInfo && rollInfo.count || 0).toLocaleString()}명</span>`
@@ -2296,6 +2297,8 @@ export function createCharacterQuickPanel({
         + `</div>`;
     const html = line1 + line2;
     if (el._cqHtml !== html) { el._cqHtml = html; el.innerHTML = html; }
+    // 접히면 흐리게 · CHARACTER 도 접혀 있으면 그 접힌 폭과 맞춘다(style.css `.cq-roll.is-fold`).
+    el.classList.toggle('is-fold', rollFold);
     paintSessionOptions();
   }
 

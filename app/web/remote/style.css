@@ -24621,6 +24621,12 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   color: #9aa0b2; font-size: 11px; line-height: 1; cursor: pointer;
 }
 .cq-roll-fold:hover { color: #fff; }
+/* 이름 줄 = 접기 손잡이(사용자 지시 2026-10-19). 접히면 흐리게 - CHARACTER 접힌 상자(.cq-box)와 같은 결. */
+.cq-roll-head { cursor: pointer; }
+.cq-roll.is-fold { opacity: 0.5; transition: opacity 0.16s ease; }
+.cq-roll.is-fold:hover { opacity: 0.9; }
+/* CHARACTER 도 접혀 있으면(.cq-box 58%) 그 폭과 맞춘다. */
+.cq-box:not(.is-open) + .cq-roll.is-fold { width: 58%; }
 .cq-roll-btn {
   flex: none; padding: 0 7px; border: 1px solid rgba(255,255,255,0.16); border-radius: 4px;
   background: none; color: #cfd2de; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.5; cursor: pointer;

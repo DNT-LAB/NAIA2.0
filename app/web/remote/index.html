@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261019-gen1">
+<link rel="stylesheet" href="style.css?v=20261019-pill1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -994,6 +994,10 @@
             <span class="seedlock-pill-icon" aria-hidden="true">&#127793;</span>
             <span class="seedlock-pill-seed" id="seedLockPillSeed"></span>
           </button>
+          <!-- [아티스트 탭 연동됨](사용자 지시 2026-10-19) - [메인 랜덤 버튼 연결] 이 켜져 있는데 아티스트 리모컨 창이
+               닫혀 있으면 시드 고정 알약 옆에 뜬다. 누르면 리모컨을 다시 띄운다(접혀 있으면 편다). artistThumbTab 이 그린다. -->
+          <button type="button" class="artist-link-pill" id="artistLinkPill" hidden
+                  title="메인 Random 이 아티스트 창에서 고른 작가를 붙이고 있습니다. 누르면 아티스트 창을 다시 엽니다.">아티스트 탭 연동됨</button>
           <div class="stats-island" id="statsIsland">
             <button type="button" class="stats-pill stats-history-toggle" id="statsGenCount" title="Total generations this session" onclick="toggleMobileHistoryRail()" aria-label="Open result history"></button>
           </div>
@@ -1556,6 +1560,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261019-link2"></script>
+<script src="app.js?v=20261019-pill1"></script>
 </body>
 </html>

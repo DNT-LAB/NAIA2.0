@@ -57,6 +57,9 @@ export function createArtistThumbController({
   const nextRowEl = document.getElementById('artistThumbUpdateNext');
   const randomBtn = document.getElementById('artistThumbRandomBtn');
   const remoteBtn = document.getElementById('artistThumbRemoteBtn');
+  // Result 의 [아티스트 탭 연동됨](사용자 지시 2026-10-19) - 연결이 켜져 있고 리모컨 창이 닫혀 있을 때만.
+  const linkPillEl = document.getElementById('artistLinkPill');
+  const seedPillEl = document.getElementById('seedLockPill');
   const groupsBtn = document.getElementById('artistThumbGroupsBtn');
   const selectBtn = document.getElementById('artistThumbSelectBtn');
   const batchBtn = document.getElementById('artistThumbBatchBtn');
@@ -204,6 +207,8 @@ export function createArtistThumbController({
   // 사용자가 모드 · 필터 · 이름 검색을 바꿨다 - 다음 목록이 오면 그것을 메인 Random 의 목록으로 삼는다.
   // ⚠️ 새로고침 뒤 기본 화면이 저장된 목록을 덮지 않게, 화면이 스스로 그린 목록은 따라가지 않는다(Codex 재리뷰).
   let randomPoolFollow = false;
+  // 앱을 켠 뒤 아직 아티스트 창을 안 열었을 때의 연결 상태 - 가벼운 조회(`/random-tools`)로 안다.
+  let linkHint = false;
   // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
   let keepWeightOnce = false;
   let randomToolsSaved = '';
@@ -2110,7 +2115,21 @@ export function createArtistThumbController({
     }, 400);
   }
 
+  /** [아티스트 탭 연동됨] - 연결이 켜져 있고 리모컨 창이 안 보이면(닫힘 · 리모컨 내림) 시드 고정 알약 옆에 띄운다. */
+  function syncLinkPill() {
+    if (!linkPillEl) return;
+    const linked = randomToolsLoaded ? Boolean(randomTools.main_link) : linkHint;
+    const remote = getRemoteController?.();
+    const windowShown = remoteOnboarded && remote?.isOpen?.() !== false;
+    const show = linked && !windowShown;
+    linkPillEl.hidden = !show;
+    if (!show || !seedPillEl) return;
+    // 시드 알약은 켜면 시드 번호만큼 길어진다 - 그 오른쪽 끝에 붙인다.
+    linkPillEl.style.left = `${seedPillEl.offsetLeft + seedPillEl.offsetWidth + 6}px`;
+  }
+
   function paintRandomTools() {
+    syncLinkPill();
     randomToolsEl.querySelectorAll('[data-rt]').forEach(label => {
       const on = Boolean(randomTools[label.dataset.rt]);
       label.classList.toggle('is-on', on);
@@ -2181,6 +2200,33 @@ export function createArtistThumbController({
       selectArtist(picked, {keepWeight: true});
     }
     if (Number.isFinite(weight) && !mixOn) setArtistWeight(weight);
+  }
+
+  function bindLinkPill() {
+    linkPillEl?.addEventListener('click', () => {
+      // 리모컨을 다시 올리고, 닫혀 있으면 열고, 접혀 있으면 편다(requestArtistsTab 이 셋 다 한다).
+      requestArtistsTab();
+      const remote = getRemoteController?.();
+      if (remote?.isCollapsed?.()) { remote.expand?.(); remote.raise?.(); }
+      syncLinkPill();
+    });
+    // 시드 알약 폭이 바뀌면(고정 켜고 끔 · 시드 번호) 옆자리도 따라간다. 크기 감시만으로는 한 박자 늦어 겹쳤다(실측) -
+    // 알약의 클래스 · 글자가 바뀌는 것도 본다. 폭은 읽는 순간 배치가 끝나 바로 잰다 - rAF 는 창이 뒤에 있으면 안 돈다(실측).
+    if (seedPillEl) {
+      const later = () => syncLinkPill();
+      if (typeof ResizeObserver === 'function') new ResizeObserver(later).observe(seedPillEl);
+      if (typeof MutationObserver === 'function') {
+        new MutationObserver(later).observe(seedPillEl, {attributes: true, childList: true, characterData: true, subtree: true});
+      }
+    }
+    // 앱을 켠 직후 - 창을 안 열어도 연결 상태를 안다(가벼운 조회 · 잠깐 뒤에).
+    setTimeout(async () => {
+      try {
+        const res = await fetch('/api/artist-thumb/random-tools', {cache: 'no-store'});
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) { linkHint = Boolean(data.main_link); syncLinkPill(); }
+      } catch (_) { /* 표시는 다음 기회에 */ }
+    }, 1500);
   }
 
   function bindRandomTools() {
@@ -3972,6 +4018,7 @@ export function createArtistThumbController({
 
   bind();
   bindRandomTools();
+  bindLinkPill();
 
   return {
     load,

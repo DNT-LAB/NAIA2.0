@@ -394,6 +394,7 @@
         {"method": "GET", "path": "/api/artist-thumb/download", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/artist-thumb/download/cancel", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/artist-thumb/random-tools", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/random-pick", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/random-prompt", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/describe", "smoke": "non_destructive"},

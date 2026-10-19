@@ -1177,6 +1177,15 @@ def register_artist_thumbnail_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb download cancel failed: {exc}"}, status_code=500)
 
+    # 랜덤 도구만 가볍게(사용자 지시 2026-10-19) - Result 의 [아티스트 탭 연동됨] 표시가 앱을 켤 때 묻는다.
+    # `/state` 는 팩 · 관심 작가 썸네일까지 훑어서 무겁다.
+    @app.get("/api/artist-thumb/random-tools")
+    async def api_artist_thumb_random_tools():
+        try:
+            return await run_in_thread(artist_thumbnail_service(session_context).random_tools)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb random tools failed: {exc}"}, status_code=500)
+
     # [생성 버튼 -> 랜덤 아티스트] - 지금 목록에서 한 명(사용자 지시 2026-10-19).
     @app.post("/api/artist-thumb/random-pick")
     async def api_artist_thumb_random_pick(req: Request):

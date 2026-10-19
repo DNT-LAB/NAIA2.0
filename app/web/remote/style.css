@@ -21149,6 +21149,16 @@ body.detached-module .mod-grid-3 {
    구분이 안 된다. */
 #resultViewer:has(> .ia-assets:not([hidden])) .seedlock-pill { display: none; }
 .seedlock-pill:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+/* [아티스트 탭 연동됨](사용자 지시 2026-10-19) - 시드 고정 알약 옆 · 연노랑 바탕 검은 글자 · 반투명.
+   left 는 artistThumbTab syncLinkPill() 이 알약 오른쪽 끝에 맞춰 넣는다(알약 폭이 시드 번호로 바뀐다). */
+.artist-link-pill {
+  position: absolute; bottom: calc(10px + var(--inpaint-dock-lift, 0px)); z-index: 6;
+  height: 26px; padding: 0 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(160,130,30,0.55); background: rgba(255,240,170,0.78); color: #111;
+  font-size: 11.5px; font-weight: 600; white-space: nowrap; opacity: 0.72;
+}
+.artist-link-pill:hover { opacity: 1; }
+.artist-link-pill[hidden] { display: none; }
 .seedlock-pill-icon {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; flex: 0 0 24px; font-size: 12px;

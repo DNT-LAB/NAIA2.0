@@ -29230,6 +29230,22 @@ b.emt-crumb { color: var(--text-primary); font-weight: 600; }
 .st-search input { flex: 1; min-width: 0; cursor: text; }
 .st-edit input { cursor: text; min-width: 0; flex: 1 1 120px; }
 .st-empty { padding: 14px 10px; color: var(--text-dim); font-size: 11px; line-height: 1.5; }
+/* 추가 프롬프트(사용자 지시 2026-10-19): 펼친 줄의 [추가 프롬프트] 칸 · 하단 공통 칸 · [옵션](확장 기능 팝업과 같은 옷). */
+.st-extra { flex: 1 0 100%; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border-dim); cursor: default; }
+.st-extra-on { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--text-secondary); cursor: pointer; }
+.st-extra-on input { width: 12px; height: 12px; margin: 0; accent-color: #9b88ee; }
+.st-extra-on span { color: var(--text-dim); }
+.st-extra-text { display: block; width: 100%; box-sizing: border-box; margin-top: 5px; min-height: 38px; max-height: 120px; resize: vertical;
+  padding: 4px 6px; border: 1px solid var(--border-dim); border-radius: 5px; background: rgba(0,0,0,0.26);
+  color: #ebe9ff; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.4; }
+.st-extra-text:focus { outline: none; border-color: var(--accent); }
+.st-foot { flex-wrap: wrap; align-items: center; }
+.st-common { flex: 1 0 100%; padding-bottom: 6px; border-bottom: 1px dashed var(--border-dim); }
+.st-common.is-off .st-extra-text { opacity: 0.45; }
+.st-foot .st-foot-gap { flex: 1 1 auto; }
+.st-window button.st-opt-btn.has-on { color: #e6a84a; border-color: rgba(230,168,74,0.55); }
+.st-chip.st-xp { color: #c9bdff; border-color: rgba(139,118,255,0.45); background: rgba(88,76,170,0.18); cursor: help; }
+.ia-alt-popup.st-opt-popup .st-opt-hint { color: var(--text-dim); }
 /* 인원 · 등급 칩(사용자 지시 2026-10-14): 여성 연분홍 · 남성 연녹색 · 혼성 연노랑 · 기타 회색 / 등급은 G S Q E 단추 색을 옅게. */
 .st-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .st-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }

@@ -9,7 +9,7 @@ from core.prompt_category_annotation import build_annotated_main_tags
 from core.prompt_context import PromptContext
 from core.safe_console import safe_print
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 파이프라인 seam 계측
-from core.wildcard_processor import WildcardProcessor # 이전 단계에서 생성
+from core.wildcard_processor import WildcardProcessor, split_tags_smart # 이전 단계에서 생성
 from core.resolution_utils import (
     MAX_1MP_PIXELS,
     nearest_anima_preset_resolution,
@@ -361,6 +361,49 @@ def _source_rating_tags(context: PromptContext) -> list[str]:
     return [t.strip() for t in value if isinstance(t, str) and t.strip()]
 
 
+def _staging_extra_key(tag: str) -> str:
+    """core/event_map/extra_prompt.tag_key 와 같은 규칙 - 와일드카드 구문은 글 그대로(`__sweat__` != sweat)."""
+    text = tag.strip().lower()
+    return text if any(m in text for m in ('__', '<', '$', '{')) else ' '.join(text.replace('_', ' ').split())
+
+
+def _apply_staging_extra(context: PromptContext, expand) -> PromptContext:
+    """source_row['staging_extra'] — S · 조합 창의 추가 프롬프트(core/event_map/extra_prompt.py · 사용자 지시 2026-10-19).
+
+    PE(post_processing) **뒤**에 메인 끝으로 붙인다: 사용자가 쓴 글이라 Auto Hide · remove_* 에 지워지지 않는다.
+    ⚠️ 메인 태그는 Random 단계의 와일드카드 전개(_step_3)를 **안 탄다**(prefix/postfix 만 - 메인 칸의 와일드카드는 Generate 때
+    펼친다). 그래서 붙이는 태그만 `expand`(= wildcard_processor.expand_tags, location main)로 여기서 펼친다 - PE 앞뒤 칸처럼
+    Random 결과에 실제 태그가 보인다(Codex 5차). 앞뒤 칸 · 메인에 이미 있는 태그는 다시 붙이지 않는다(집합 - 펼치기 전 · 후 둘 다).
+    """
+    row = getattr(context, 'source_row', None)
+    try:
+        value = row.get('staging_extra') if row is not None else None
+    except Exception:
+        return context
+    if not isinstance(value, (list, tuple)) or not value:
+        return context
+    present = {_staging_extra_key(t) for t in list(context.prefix_tags) + list(context.main_tags)
+               + list(context.postfix_tags) if isinstance(t, str)}
+    fresh = []
+    for tag in value:
+        if isinstance(tag, str) and tag.strip() and _staging_extra_key(tag) not in present:
+            present.add(_staging_extra_key(tag))
+            fresh.append(tag.strip())
+    if not fresh:
+        return context
+    expanded = []
+    for item in expand(fresh):
+        # `__wc__` 는 한 줄(쉼표로 이은 글)로 돌아온다 - 태그로 다시 나눈다
+        expanded.extend(split_tags_smart(item) if isinstance(item, str) and ',' in item else [item])
+    seen = {_staging_extra_key(t) for t in list(context.prefix_tags) + list(context.main_tags)
+            + list(context.postfix_tags) if isinstance(t, str)}
+    for tag in expanded:
+        if isinstance(tag, str) and tag.strip() and _staging_extra_key(tag) not in seen:
+            seen.add(_staging_extra_key(tag))
+            context.main_tags.append(tag.strip())
+    return context
+
+
 # LoRA 예약어 조각(lora:KW:강도, 관리형 ANIMA - core/anima_engine/prompt_loras.py)은 태그가 아니라 지시어다.
 _LORA_CONTROL_RE = re.compile(r"\s*lora:", re.IGNORECASE)
 
@@ -461,6 +504,12 @@ class PromptProcessor:
 
         context = self._run_hooks('post_processing', context)
         tracer.record('post_processing', context)
+
+        _main_before = len(context.main_tags or [])
+        context = _apply_staging_extra(
+            context, lambda tags: self.wildcard_processor.expand_tags(tags, context, location='main'))
+        if len(context.main_tags or []) != _main_before:   # 붙인 것이 있을 때만 - 없으면 트레이스 단계를 늘리지 않는다
+            tracer.record('staging_extra', context)
 
         context = self._step_3_expand_wildcards(context)
         _wc_rolls = _trace_wildcard_rolls(context)

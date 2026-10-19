@@ -168,13 +168,15 @@ class HeadlessRandomPromptService:
         return set(str(value or "").replace(",", "").replace(" ", ""))
 
     @staticmethod
-    def _staging_sample(service: Any, store: Any, label: str) -> tuple[list, dict]:
+    def _staging_sample(service: Any, store: Any, label: str) -> tuple[list, dict, list]:
         """[ST Random] - 스테이징 조합 중 **맞는 게시물이 있는 것** 하나를 같은 확률로 골라 그 게시물 하나.
 
         조합을 섞어 차례로 해 보고 처음 나온 것을 쓴다(= 게시물이 있는 조합들 사이에서 같은 확률). 넣은 뒤 영구 제외가
         늘었거나 색인이 바뀌어 0건이 된 조합을 뽑아도 실패로 끝내지 않는다 - 실패하면 Auto Gen 이 꺼진다(리뷰 2026-10-14).
         조합은 **목록 그대로** 넘긴다 - 쉼표로 이었다 다시 자르면 쉼표가 든 태그가 갈라진다.
+        셋째 값 = 그 조합의 추가 프롬프트 태그(공통 · 개별 · 방식 - 뽑은 **뒤** 읽은 파일 기준, 사용자 지시 2026-10-19).
         """
+        from core.event_map.extra_prompt import resolve
         from core.event_map.service import MapQueryError
         items = [r for r in store.list()["items"] if r.get("enabled", True)]   # 꺼진 조합은 후보가 아니다
         if not items:
@@ -194,9 +196,11 @@ class HeadlessRandomPromptService:
             # 뽑는 사이에 이 조합을 [제외] 했으면 버리고 다음 조합으로(리뷰 2026-10-14). 연결 판 번호를 올려 취소하면
             # 실패로 끝나 Auto Gen 이 꺼지므로 그 길은 쓰지 않는다.
             # 그 사이에 끈 조합도 같다(Codex 3차 2026-10-15).
-            if not any(r["id"] == item["id"] and r.get("enabled", True) for r in store.list()["items"]):
+            now = store.list()
+            row = next((r for r in now["items"] if r["id"] == item["id"] and r.get("enabled", True)), None)
+            if row is None:
                 continue
-            return samples, combo
+            return samples, combo, resolve(now.get("extra"), row.get("extra"))
         raise MapQueryError("no_match", f"{label}: 스테이징된 조합 모두 맞는 게시물이 없습니다.")
 
     def generate(
@@ -223,8 +227,9 @@ class HeadlessRandomPromptService:
                                                  event_map_revision=revision)
             try:
                 service = ensure_event_map_service(self.context)
+                extra: list = []
                 if link.get("mode") == "staging":
-                    samples, combo = self._staging_sample(service, staging_store(self.context), label)
+                    samples, combo, extra = self._staging_sample(service, staging_store(self.context), label)
                 else:
                     combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}
                     body = service.sample(**combo, n=1, permanent=True)
@@ -238,6 +243,8 @@ class HeadlessRandomPromptService:
                        "rating": str(sample.get("partition") or "s")[:1],
                        "character": None, "copyright": None, "artist": None, "meta": None,
                        "event_map_combo": True}
+                if extra:   # 스테이징 추가 프롬프트 - 파이프라인이 PE 필터 뒤 · 와일드카드 앞에 붙인다(prompt_processor)
+                    row["staging_extra"] = extra
                 result = self.generate_from_source_row(
                     row, overrides={**(overrides or {}), "wildcard_standalone": False},
                     active_ratings=self._combo_ratings(combo.get("ratings")) or set(DEFAULT_RATINGS),

@@ -307,13 +307,15 @@ def register_event_map_routes(
             return state
         return None
 
-    async def _staging_reply(data, with_counts=True, unlinked=None):
-        """잠금 밖: 풀린 연결 · 스테이징 수를 모든 창에 알리고, 청하면 수를 센다."""
+    async def _staging_reply(data, with_counts=True, unlinked=None, same_counts=False):
+        """잠금 밖: 풀린 연결 · 스테이징 수를 모든 창에 알리고, 청하면 수를 센다.
+
+        `same_counts` = 게시물 수가 안 바뀌는 변경(추가 프롬프트) - 다른 창이 수를 다시 세지 않게 알린다."""
         items = data.get("items") or []
         if unlinked:
             await _broadcast({"type": "event_map_random_link", **unlinked})
         await _broadcast({"type": "event_map_staging", "count": sum(1 for r in items if r.get("enabled", True)),
-                          "total": len(items)})
+                          "total": len(items), **({"same_counts": True} if same_counts else {})})
         reply = {**data, "random_link": link_state(session_context)}
         if with_counts:
             reply["counts"] = await _staging_counts(items)
@@ -343,11 +345,14 @@ def register_event_map_routes(
         unlinked = None
         try:
             if action == "save_bundle":   # 풀을 읽기만 한다 - 잠그지 않는다
-                items = (await run_in_thread(store.list))["items"]
+                listed = await run_in_thread(store.list)
+                items = listed["items"]
                 saved = await run_in_thread(library.save_bundle, {
                     "id": body.get("id"), "name": body.get("name") or "", "category": body.get("category") or "",
                     "selections": [r["selection"] for r in items],
-                    "enabled": [r.get("enabled", True) for r in items]})   # 켜고 끈 상태도(사용자 지정 2026-10-15)
+                    "enabled": [r.get("enabled", True) for r in items],    # 켜고 끈 상태도(사용자 지정 2026-10-15)
+                    "extras": [r.get("extra") for r in items],             # 추가 프롬프트도(사용자 지정 2026-10-19)
+                    "extra": listed["extra"]})
                 return JSONResponse({**saved, "items": items, "saved": saved["items"]}, headers=_no_store())
             if action == "stage_saved":
                 row = await run_in_thread(library.find, str(body.get("id") or ""))
@@ -358,9 +363,14 @@ def register_event_map_routes(
                     data = await run_in_thread(store.add_many, [body.get("selection")])
                 elif action == "stage_saved":
                     data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]],
-                                               row.get("enabled"))
+                                               row.get("enabled"), row.get("extras"), row.get("extra"))
                 elif action == "toggle":
                     data = await run_in_thread(store.toggle, str(body.get("id") or ""), body.get("enabled") is not False)
+                elif action == "extra":    # 줄의 추가 프롬프트(사용자 지시 2026-10-19)
+                    data = await run_in_thread(store.set_extra, str(body.get("id") or ""), body.get("on"),
+                                               body.get("text", ""))
+                elif action == "common":   # 공통 추가 프롬프트 · 방식 - 준 것만 바꾼다
+                    data = await run_in_thread(store.set_common, body.get("on"), body.get("text"), body.get("mode"))
                 elif action == "remove":
                     data = await run_in_thread(store.remove, str(body.get("id") or ""))
                 elif action == "clear":
@@ -370,7 +380,9 @@ def register_event_map_routes(
                 unlinked = _unlink_if_empty(data)
         except MapQueryError as exc:
             return _error(exc)
-        return await _staging_reply(data, with_counts=body.get("counts", True) is not False, unlinked=unlinked)
+        same = action in ("extra", "common")
+        return await _staging_reply(data, with_counts=not same and body.get("counts", True) is not False,
+                                    unlinked=unlinked, same_counts=same)
 
     @app.get("/api/event-map/suggest")
     async def api_event_map_suggest(q: str = "", limit: int = 20):
@@ -504,6 +516,30 @@ def register_event_map_routes(
                                 status_code=500, headers=_no_store())
         return JSONResponse(payload, headers=_no_store())
 
+    def _extra_for(payload: dict[str, Any]) -> list[str]:
+        """S 창의 [랜덤] 이 보낸 조합의 추가 프롬프트(사용자 지시 2026-10-19) - 글은 서버 것을 쓴다(창은 어느 줄인지만).
+
+        stagingId = 스테이징 줄 · savedId + index = 저장된 묶음의 몇 번째 조합(묶음에 저장해 둔 공통 · 개별 글).
+        줄이 그 사이 빠졌거나 파일을 못 읽으면 붙이지 않는다 - 랜덤 자체는 그대로 한다."""
+        from core.event_map.extra_prompt import resolve
+        from core.event_map.library import EventMapLibrary
+        try:
+            staging_id = str(payload.get("stagingId") or "")
+            if staging_id:
+                data = staging_store(session_context).list()
+                row = next((r for r in data["items"] if r["id"] == staging_id), None)
+                return resolve(data["extra"], row.get("extra")) if row else []
+            saved_id = str(payload.get("savedId") or "")
+            if saved_id:
+                row = EventMapLibrary(session_context._save_path("event_map", "combinations.json")).find(saved_id)
+                index = payload.get("index")
+                texts = (row or {}).get("extras") or []
+                own = texts[index] if isinstance(index, int) and 0 <= index < len(texts) else None
+                return resolve(row.get("extra"), own) if row else []
+        except MapQueryError:
+            return []
+        return []
+
     @app.post("/api/event-map/apply")
     async def api_event_map_apply(req: Request):
         """[적용] 조합 → 랜덤 프롬프트와 **같은** 파이프라인(PE 앞뒤·auto hide·remove_*·와일드카드·
@@ -514,6 +550,9 @@ def register_event_map_routes(
         except ValueError as exc:
             return JSONResponse({"ok": False, "code": "bad_request", "message": str(exc)},
                                 status_code=400, headers=_no_store())
+        extra = await run_in_thread(_extra_for, payload)
+        if extra:
+            source_row["staging_extra"] = extra
         from app.backend.server.generation_commands import (
             _broadcast_wildcard_state, random_service)
 

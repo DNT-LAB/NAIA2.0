@@ -2,6 +2,9 @@
 
 묶음(kind = "bundle", 사용자 지시 2026-10-14): 스테이징을 통째로 저장한 것. `selections` 에 조합 전부를 담고,
 `selection` 에는 첫 조합을 그대로 둔다 - 묶음을 모르는 옛 판이 읽어도 파일 전체를 거부하지 않는다(첫 조합으로 보인다).
+
+묶음의 추가 프롬프트(사용자 지시 2026-10-19 - `extra_prompt`): `extras` = 조합마다 `{on, text}`(selections 와 같은 길이),
+`extra` = 공통 `{on, text, mode}`. 기본값뿐이면 두지 않는다. 이상하면 그 키만 버린다(파일 전체를 못 읽게 하지 않는다).
 """
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.event_map.extra_prompt import common_of, extra_of, is_blank
 from core.event_map.service import MapQueryError
 from core.tag_combo.person import PERSON_GROUPS, normalize_tag
 
@@ -84,6 +88,17 @@ class EventMapLibrary:
                     if flags is not None and not (isinstance(flags, list) and len(flags) == len(bundle)
                                                   and all(isinstance(f, bool) for f in flags)):
                         row.pop("enabled", None)
+                    texts = row.get("extras")
+                    if texts is not None:
+                        if isinstance(texts, list) and len(texts) == len(bundle) and all(isinstance(t, dict) for t in texts):
+                            row["extras"] = [extra_of(t) for t in texts]
+                        else:
+                            row.pop("extras", None)
+                    if row.get("extra") is not None:
+                        if isinstance(row["extra"], dict):
+                            row["extra"] = common_of(row["extra"])
+                        else:
+                            row.pop("extra", None)
             categories = data.get("categories", [])
             if not isinstance(categories, list) or len(categories) > 500:
                 raise ValueError("categories")
@@ -144,6 +159,14 @@ class EventMapLibrary:
                "kind": "bundle", "selection": selected[0], "selections": selected}
         if len(flags) == len(selected) and not all(flags):
             row["enabled"] = flags   # 꺼진 조합이 있을 때만 - 다시 스테이징하면 그 상태로 들어간다
+        # 추가 프롬프트(2026-10-19) - 하나라도 기본값이 아닐 때만 둔다.
+        texts = payload.get("extras")
+        texts = [extra_of(t) for t in texts][:len(selected)] if isinstance(texts, list) else []
+        if len(texts) == len(selected) and not all(is_blank(t) for t in texts):
+            row["extras"] = texts
+        common = common_of(payload.get("extra"))
+        if not is_blank(common, common=True):
+            row["extra"] = common
         with _LOCK:
             items = self._read()
             if any(old["id"] == item_id for old in items):

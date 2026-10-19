@@ -983,7 +983,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rtools5')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rtools6')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -1048,7 +1048,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rto
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261019-hid2')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261019-open1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -2921,7 +2921,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261019-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261019-zoom2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261019-gen1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2941,6 +2941,11 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
       //    기본값이 빈 함수라 아무 일도 안 일어났다 - 오류도 안 난다.
       bindTagAssist,
       showToast,
+      // Find 의 [생성 설정] - Characters 탭의 그 캐릭터 상세(Prefix · Postfix)를 연다(사용자 지시 2026-10-19).
+      openCharacterPage: (group, character) => {
+        switchRightTab('characters');
+        void characterViewerReady.then(() => characterViewerControl?.openCharacter?.(group, character));
+      },
     });
     syncCharacterQuickPanelVisibility();
     // ⚠️ 여기서 메인 캐시를 바로 그리면 안 된다 - 이 import 는 늦게 끝나서, 이미 열려
@@ -5257,6 +5262,7 @@ const wsMessageHandlers = {
     if (sm === 'eps' || sm === 'v_prediction' || sm === 'anima') setSamplingMode(sm);
   },
   character_viewer_error: m => {
+    characterQuickPanel?.noteCharacterError?.(m);
     if (characterViewerControl && typeof characterViewerControl.handleGenerationError === 'function') {
       characterViewerControl.handleGenerationError(m);
     } else {
@@ -5396,6 +5402,8 @@ function updateMeta(m) {
   if (characterViewerControl && typeof characterViewerControl.handleResultMeta === 'function') {
     characterViewerControl.handleResultMeta(m);
   }
+  // Find 의 [생성] 이 기다리는 결과 - 썸네일이 저장됐으면 그 줄을 새로 그린다.
+  characterQuickPanel?.noteCharacterResult?.(m);
   if (characterAssetControl && typeof characterAssetControl.handleResultMeta === 'function') {
     characterAssetControl.handleResultMeta(m);
   }

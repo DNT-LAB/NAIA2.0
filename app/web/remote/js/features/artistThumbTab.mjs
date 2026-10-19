@@ -1987,6 +1987,10 @@ export function createArtistThumbController({
       } finally {
         pickingArtist = false;
       }
+    } else if (randomWeightActive() && !mixOn && selected) {
+      // [랜덤 가중치] - 누를 때마다 새로 뽑는다. 예전에는 작가를 고를 때만 뽑아 같은 작가로 다시 누르면
+      // 처음 값(예: 0.85)이 그대로 나갔다(사용자 제보 2026-10-19).
+      setArtistWeight(drawToolWeight());
     }
     const item = selectedPayload();
     if (!item) return;

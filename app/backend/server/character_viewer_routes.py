@@ -1055,6 +1055,59 @@ def register_character_viewer_routes(
             )
         return {"ok": True, **result}
 
+    @app.post("/api/character-viewer/quick-generate")
+    async def api_character_viewer_quick_generate(req: Request):
+        """Find 의 [생성](사용자 지시 2026-10-19) - 썸네일이 없는 캐릭터를 **Characters 탭 Generate 와 같은 사양**으로 한 장.
+        저장된 Prefix · Postfix · 옵션(작품명 · 특징 자동 · 코스프레 …)으로 프롬프트를 만들고 896x1152 로 큐에 넣는다.
+        나머지(모델 · 스텝 · 샘플러 · 네거티브)는 메인 생성 설정. 생성되면 그 캐릭터의 썸네일로 저장된다
+        (generation_runner - 단 저장 안 함 · 캐릭터명 숨김 · 코스프레가 켜져 있으면 저장하지 않는다 → `save_blocked`)."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        group_key = str(payload.get("group") or "").strip()
+        name = str(payload.get("character") or "").strip()
+        if not group_key or not name:
+            return JSONResponse({"error": "group and character are required"}, status_code=400)
+        service = character_viewer_service(session_context)
+        api_mode = session_context.get_api_mode()
+
+        def build() -> tuple[dict[str, Any], dict[str, Any]]:
+            options = service.load_options()
+            prompt = service.build_prompt(group_key, name, "", options, api_mode)
+            excluded = prompt.get("cosplay_excluded_pc")
+            request = {
+                **options,
+                "request_id": f"character-quick-{_uuid.uuid4().hex[:16]}",
+                "group": group_key,
+                "character": name,
+                "variant": "",
+                "character_prompt": str(prompt.get("character_prompt") or ""),
+                "prefix": str(prompt.get("prefix") or ""),
+                "postfix": str(prompt.get("postfix") or ""),
+                "character_uc": ", ".join(excluded) if isinstance(excluded, list) else "",
+            }
+            return request, service.build_generation_overrides(request, api_mode)
+
+        try:
+            request, overrides = await run_in_thread(build)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        dispatch = await run_in_thread(
+            _generation_service(session_context).enqueue_remote_request,
+            {"type": "generate", "overrides": overrides},
+        )
+        if not dispatch.ok:
+            return JSONResponse(dispatch.websocket_payload(), status_code=409)
+        if session_context.headless_generation_execute_enabled:
+            start_generation_runner(session_context, clients)
+        return {"ok": True, **dispatch.websocket_payload(), "request_id": request["request_id"],
+                "save_blocked": bool(overrides.get("_character_viewer_snapshot", {}).get("save_blocked"))}
+
     @app.post("/api/character-viewer/generate")
     async def api_character_viewer_generate(req: Request):
         try:

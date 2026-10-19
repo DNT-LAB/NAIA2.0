@@ -24731,6 +24731,20 @@ button.cq-wcs-row:hover { background: rgba(255,255,255,0.05); }
 .cq-find-rw:hover:not(:disabled) { background: rgba(124,106,239,0.32); }
 .cq-find-rw:disabled { opacity: 0.6; cursor: progress; }
 .cq-find-rw[hidden] { display: none; }
+/* Find 바닥 줄 = [생성 설정] + [현재 결과 → 랜덤 와일드카드] (사용자 지시 2026-10-19). */
+.cq-find-foot { display: flex; gap: 5px; flex: none; }
+.cq-find-foot[hidden] { display: none; }
+.cq-find-foot .cq-find-rw { flex: 1 1 auto; width: auto; min-width: 0; }
+.cq-find-gset {
+  flex: none; width: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border-radius: 6px; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-dim);
+}
+.cq-find-gset:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.6); background: rgba(124,106,239,0.16); }
+.cq-find-gset svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+/* 썸네일 없는 줄의 [생성] - [+ 슬롯] 왼쪽. */
+.cq-find-tag.cq-find-gen { border-color: rgba(201,120,58,0.6); color: rgb(240,190,150); cursor: pointer; }
+.cq-find-tag.cq-find-gen:hover { background: rgba(201,120,58,0.2); color: #fff; }
+.cq-find-tag.cq-find-gen.is-busy { border-color: rgba(255,255,255,0.16); color: var(--text-dim); cursor: progress; }
 .cq-manage {
   flex: none; padding: 6px 9px; cursor: pointer;
   border-radius: 5px; border: 1px solid rgba(255,255,255,0.16);

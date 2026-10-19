@@ -1374,6 +1374,8 @@ export function createCharacterViewerController({
     load,
     reload: () => load({force: true}),
     setActive,
+    /** 밖(캐릭터 퀵 패널 Find 의 생성 설정)에서 그 캐릭터의 상세(Prefix · Postfix 편집)를 연다. */
+    openCharacter: (group, character) => selectCharacter(group, character, '', {openDetail: true}),
     handleResultMeta,
     handleResultBlob,
     handleGenerationError,

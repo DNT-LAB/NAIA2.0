@@ -71,6 +71,7 @@ export function createCharacterQuickPanel({
   restoreCanvasViewMode = () => {},
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
+  openCharacterPage = () => {},    // Find [생성 설정] - Characters 탭의 그 캐릭터 상세를 연다(app.js)
 }) {
   let mount = null;
   let keyGuard = null;               // 랜덤 슬롯 키 지킴이(`sessionKeyGuard.mjs`)
@@ -1815,7 +1816,12 @@ export function createCharacterQuickPanel({
       + `<input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
       + `<div class="cq-find-list" data-cqf-list="1"></div>`
       // [현재 결과 -> 랜덤 와일드카드](사용자 지시 2026-10-19) - [캐릭터 · 작품] 에서만 보인다.
-      + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button>`;
+      // [생성 설정](사용자 지시 2026-10-19) - [생성] 이 쓰는 Prefix · Postfix 를 Characters 탭 상세에서 고친다.
+      + `<div class="cq-find-foot" data-cqf-foot="1" hidden>`
+      + `<button type="button" class="cq-find-gset" data-cqf-gset="1" title="생성 설정 - Characters 탭에서 Prefix · Postfix 를 고칩니다"`
+      + ` aria-label="생성 설정"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/>`
+      + `<path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>`
+      + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button></div>`;
     document.body.appendChild(findEl);
     findEl.addEventListener('click', onFindClick);
     findEl.addEventListener('mouseover', onFindHover);
@@ -2025,6 +2031,11 @@ export function createCharacterQuickPanel({
             : `<span class="cq-find-img is-initial">${escHtml(String(row.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
           + `<span class="cq-find-text"><b>${escHtml(row.character)}</b>`
           + `<span>${escHtml(row.group)} · ${Number(row.count) || 0}</span></span>`
+          // 썸네일이 없으면 [생성](사용자 지시 2026-10-19) - Characters 탭 Generate 와 같은 사양으로 한 장, 썸네일로 저장.
+          // 줄이 <button> 이라 안에 단추를 못 둔다 - span + role. 누르면 줄의 [+ 슬롯] 으로 번지지 않는다(onFindClick).
+          + (row.thumbnail_url ? '' : (findGenWaiting(key)
+            ? `<span class="cq-find-tag cq-find-gen is-busy">생성 중…</span>`
+            : `<span class="cq-find-tag cq-find-gen" role="button" data-cqf-gen="1">생성</span>`))
           + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
       }).join('');
     }
@@ -2068,6 +2079,8 @@ export function createCharacterQuickPanel({
   }
 
   function renderFindFoot() {
+    const foot = findEl?.querySelector('[data-cqf-foot]');
+    if (foot) foot.hidden = findTab !== 'dex';
     const button = findEl?.querySelector('[data-cqf-rw]');
     if (!button) return;
     const show = findTab === 'dex' && !!findDexTotal;
@@ -2081,6 +2094,18 @@ export function createCharacterQuickPanel({
 
   function onFindClick(event) {
     if (event.target.closest('[data-cqf-rw]')) { void makeRandomWildcard(); return; }
+    if (event.target.closest('[data-cqf-gset]')) {
+      // 예시 캐릭터의 상세를 연다 - Prefix · Postfix 는 모든 캐릭터에 같이 쓰인다(사용자 지정: hatsune miku).
+      closeFind();
+      openCharacterPage('vocaloid', 'hatsune miku');
+      return;
+    }
+    const gen = event.target.closest('[data-cqf-gen]');
+    if (gen) {
+      const row = gen.closest('[data-cqf-char]');
+      if (row) void generateFindThumb(row.dataset.cqfGroup || '', row.dataset.cqfChar || '');
+      return;
+    }
     const tab = event.target.closest('[data-cqf-tab]');
     if (tab) { setFindTab(tab.dataset.cqfTab); findEl?.querySelector('[data-cqf-q]')?.focus(); return; }
     const hid = event.target.closest('[data-cqf-hid-char]');
@@ -2089,6 +2114,67 @@ export function createCharacterQuickPanel({
     if (lib) { pickFindLib(Number(lib.dataset.cqfLib), lib.dataset.cqfUuid || ''); return; }
     const dex = event.target.closest('[data-cqf-char]');
     if (dex) void pickFindDex(dex.dataset.cqfGroup || '', dex.dataset.cqfChar || '');
+  }
+
+  // ── Find [생성](사용자 지시 2026-10-19) ─────────────────────────────────────
+  //  썸네일이 없는 캐릭터를 Characters 탭 Generate 와 같은 사양으로 한 장 - 누른 만큼 생성 큐에 순서대로 쌓인다(사용자 결정).
+  //  결과가 오면(app.js updateMeta -> noteCharacterResult) 기다림을 풀고, 썸네일이 저장됐으면 목록을 새로 받는다.
+  const findGenPending = new Map();     // request_id -> {key, timer}
+
+  function findGenWaiting(key) {
+    for (const entry of findGenPending.values()) if (entry.key === key) return true;
+    return false;
+  }
+
+  function clearFindGen(requestId) {
+    const entry = findGenPending.get(requestId);
+    if (!entry) return null;
+    clearTimeout(entry.timer);
+    findGenPending.delete(requestId);
+    return entry;
+  }
+
+  async function generateFindThumb(group, character) {
+    const key = `${group}\u0000${character}`;
+    if (!group || !character || findGenWaiting(key)) return;
+    const placeholder = `pending-${Date.now()}`;
+    findGenPending.set(placeholder, {key, timer: 0});
+    renderFindList();
+    try {
+      const res = await fetch('/api/character-viewer/quick-generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group, character}),
+      });
+      const data = await res.json().catch(() => ({}));
+      clearFindGen(placeholder);
+      if (!res.ok || !data.request_id) throw new Error(data.error || data.message || '생성 요청을 보내지 못했습니다.');
+      // 결과 소식을 놓쳐도(창을 닫았다 열었다) 단추가 영영 '생성 중' 으로 남지 않게 - 5분 뒤 풀고 목록을 새로 받는다.
+      const timer = setTimeout(() => { clearFindGen(data.request_id); if (findEl && findTab === 'dex') scheduleFindDex(); }, 300000);
+      findGenPending.set(data.request_id, {key, timer});
+      // 기본안(사용자 결정 2026-10-19): Characters 탭 옵션이 썸네일 저장을 막고 있으면 알리고 생성은 한다.
+      if (data.save_blocked) {
+        showToast('Characters 탭에서 저장 안 함 · 캐릭터명 숨김 · 코스프레 중 하나가 켜져 있어 썸네일로 저장되지 않습니다.', 'info');
+      }
+    } catch (error) {
+      clearFindGen(placeholder);
+      showToast(error.message || String(error), 'error');
+    }
+    renderFindList();
+  }
+
+  /** app.js 가 결과 메타마다 부른다. Find [생성] 이 기다리던 것이면 풀고, 썸네일이 저장됐으면 목록을 새로 받는다. */
+  function noteCharacterResult(meta) {
+    if (!meta || !meta.character_viewer_request) return;
+    const entry = clearFindGen(String(meta.character_viewer_request_id || ''));
+    if (!entry) return;
+    if (meta.character_viewer_thumbnail_saved && findEl && findTab === 'dex') scheduleFindDex();
+    else renderFindList();
+  }
+
+  function noteCharacterError(meta) {
+    const entry = clearFindGen(String((meta && (meta.character_viewer_request_id || meta.request_id)) || ''));
+    if (entry) renderFindList();
   }
 
   /** 보관함 -> 슬롯. Manage 의 ↩ 와 같은 명령이다(★ · 그룹은 사본, 히스토리는 옮김 - 서버 규칙). */
@@ -2971,5 +3057,5 @@ export function createCharacterQuickPanel({
   }
 
   // noteRandom - Random 이 굴렸다(그림이 없어도) - 마지막으로 뽑힌 캐릭터를 보인다(A).
-  return {render, setVisible, isOpen: () => open, noteRandom};
+  return {render, setVisible, isOpen: () => open, noteRandom, noteCharacterResult, noteCharacterError};
 }

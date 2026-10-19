@@ -441,6 +441,7 @@
         {"method": "POST", "path": "/api/character-viewer/session-roll", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/character-viewer/session-options", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/character-viewer/session-pin", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/character-viewer/quick-generate", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/character-viewer/session-save", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/character-viewer/session-save", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/character-viewer/hidden", "smoke": "asset_runtime"},

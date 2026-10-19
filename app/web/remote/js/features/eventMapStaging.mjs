@@ -164,6 +164,17 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       if (event.target.matches('[data-st-extra-text]')) drafts.set(event.target.closest('[data-st-id]')?.dataset.stId, event.target.value);
       if (event.target.matches('[data-st-common-text]')) drafts.set('common', event.target.value);
     });
+    // 자동완성 목록은 캐럿 자리에 fixed 로 뜬다 - 목록 칸(.st-body)을 굴리면 칸을 따라 다시 놓고, 칸이 화면 밖으로 나가면
+    // 칸을 떠나 목록을 닫는다(떠나면 저장된다). 하단 공통 칸은 굴러가지 않는다.
+    const scroller = panel.body.querySelector('.st-body');
+    scroller.addEventListener('scroll', () => {
+      const field = document.activeElement;
+      if (!field?.matches?.('.st-extra-text') || !scroller.contains(field)) return;
+      if (typeof globalThis.isTagAutocompleteOpen === 'function' && !globalThis.isTagAutocompleteOpen()) return;
+      const box = scroller.getBoundingClientRect(), r = field.getBoundingClientRect();
+      if (r.bottom <= box.top || r.top >= box.bottom) field.blur();
+      else globalThis.positionTagTooltip?.();
+    }, { passive: true });
     panel.body.addEventListener('focusout', event => {
       if (event.target.matches?.('[data-st-extra-text], [data-st-common-text]')) commitText(event.target);
     });
@@ -241,27 +252,23 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   function paintBody() {
     const body = panel.body.querySelector('.st-body'), foot = panel.body.querySelector('.st-foot');
     panel.body.inert = busy > 0;
-    if (tab === 'stage') {
-      // 추가 프롬프트 칸에서 치던 중이면 다시 그린 뒤 초점 · 커서를 돌려준다(저장 응답 · 다른 창의 알림으로 다시 그린다).
-      const act = document.activeElement;
-      const focusKey = act?.matches?.('[data-st-common-text]') ? 'common'
-        : act?.matches?.('[data-st-extra-text]') ? act.closest('[data-st-id]')?.dataset.stId || '' : '';
-      const caret = focusKey ? [act.selectionStart, act.selectionEnd, act.scrollTop] : null;
-      paintStage(body, foot);
-      if (focusKey) {
-        const field = focusKey === 'common' ? foot.querySelector('[data-st-common-text]')
-          : [...body.querySelectorAll('[data-st-extra-text]')].find(f => f.closest('[data-st-id]')?.dataset.stId === focusKey);
-        if (field) { field.focus({ preventScroll: true }); field.setSelectionRange(caret[0], caret[1]); field.scrollTop = caret[2]; }
-      }
-      return;
-    }
+    if (tab === 'stage') { paintStage(body, foot); return; }
     paintSavedTab(body, foot);
+  }
+  /** 추가 프롬프트 칸에 태그 자동완성(사용자 지시 2026-10-19). 다시 그리면 칸이 새것이라 새 칸에만 붙인다. */
+  function bindExtraAutocomplete(root) {
+    if (typeof globalThis.bindTagAssist !== 'function') return;
+    root.querySelectorAll('.st-extra-text').forEach(el => {
+      if (el._stAc) return;
+      el._stAc = true;
+      globalThis.bindTagAssist(el);
+    });
   }
   function paintStage(body, foot) {
     // 줄은 태그 · 칩만. 누르면 펼쳐져 단추가 아래 줄에 나온다(마우스를 대면 펼치면 줄이 밀려 다른 줄을 집는다).
     // 맨 앞 스위치 = 켜기 · 끄기(사용자 지시 2026-10-15). 꺼진 줄은 흐리게 - 랜덤 후보 · 전체 수에서 빠진다.
     // 펼친 줄 맨 아래 = [추가 프롬프트] 체크(켜면 칸이 열린다 - 사용자 지시 2026-10-19).
-    body.innerHTML = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}" data-st-id="${esc(r.id)}" data-st-pick
+    const rowsHtml = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}" data-st-id="${esc(r.id)}" data-st-pick
         aria-expanded="${openRow === r.id}" title="${openRow === r.id ? '' : '눌러서 랜덤 · 랜덤+생성 · 맵에서 열기 · 제외 · 추가 프롬프트'}">
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
@@ -273,16 +280,56 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       </div>`).join('')
       : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
     // 하단 = 공통 추가 프롬프트(켜기 · 끄기 - 꺼도 글은 남는다) + [통째로 저장] [비우기] ...... [옵션]
-    foot.innerHTML = `<div class="st-common${common.on ? '' : ' is-off'}">
+    const commonHtml = `<div class="st-common${common.on ? '' : ' is-off'}">
         <label class="st-extra-on"><input type="checkbox" data-st-common-on ${common.on ? 'checked' : ''}>추가 프롬프트 <span>· 공통 - 뽑힌 조합 뒤에 붙습니다</span></label>
         <textarea class="st-extra-text" data-st-common-text rows="2" maxlength="2000" spellcheck="false" aria-label="공통 추가 프롬프트"
           placeholder="모든 조합 뒤에 붙일 태그 - 예: masterpiece, detailed background">${esc(extraText('common', common))}</textarea>
-      </div>
-      <button type="button" data-st-bundle ${staged.length ? '' : 'disabled'} title="지금 스테이징을 저장된 조합의 '묶음' 하나로(추가 프롬프트 포함)">통째로 저장</button>
+      </div>`;
+    const buttonsHtml = `<button type="button" data-st-bundle ${staged.length ? '' : 'disabled'} title="지금 스테이징을 저장된 조합의 '묶음' 하나로(추가 프롬프트 포함)">통째로 저장</button>
       <button type="button" data-st-clear ${staged.length ? '' : 'disabled'} title="조합만 비웁니다 - 공통 추가 프롬프트는 남습니다">비우기</button>
       <span class="st-foot-gap"></span>
       <button type="button" class="st-opt-btn${common.mode !== 'merge' ? ' has-on' : ''}" data-st-opt aria-haspopup="true"
         aria-expanded="${optOpen}" title="개별 추가 프롬프트가 있을 때 무엇을 붙일지">옵션</button>`;
+
+    // 치던 칸은 **노드째** 살린다(저장 응답 · 다른 창의 알림으로 다시 그려도). 갈아 끼우면 초점 · 캐럿 · 칸 스크롤이 날아가고,
+    // 열려 있던 자동완성 목록이 떼어 낸 칸을 가리켜 고른 후보가 사라진다(사용자 지시 2026-10-19 - 자동완성 · 스크롤 주의).
+    const act = document.activeElement;
+    const keep = act?.matches?.('.st-extra-text') && panel.body.contains(act) ? act : null;
+    const keepRowId = keep?.matches('[data-st-extra-text]') ? keep.closest('[data-st-id]')?.dataset.stId : null;
+    const keepRow = keepRowId ? keep.closest('[data-st-id]') : null;
+    const rowStays = keepRowId && openRow === keepRowId && staged.some(r => r.id === keepRowId && r.extra?.on === true);
+    if (keepRow && rowStays && body.contains(keepRow)) {
+      const tpl = document.createElement('template');
+      tpl.innerHTML = rowsHtml;
+      const fresh = [...tpl.content.children];
+      const freshRow = fresh.find(el => el.dataset.stId === keepRowId);
+      const liveExtra = keep.closest('.st-extra');
+      // 그 줄: 겉(클래스 · 제목)과 칸 밖 자식은 새것으로, 추가 프롬프트 칸(.st-extra)만 산 채로
+      keepRow.className = freshRow.className;
+      keepRow.title = freshRow.title;
+      keepRow.setAttribute('aria-expanded', freshRow.getAttribute('aria-expanded'));
+      [...keepRow.children].forEach(child => { if (child !== liveExtra) child.remove(); });
+      [...freshRow.children].forEach(child => { if (!child.classList.contains('st-extra')) liveExtra.before(child); });
+      // 나머지 줄: 산 줄 앞뒤로 새것
+      [...body.children].forEach(child => { if (child !== keepRow) child.remove(); });
+      const at = fresh.indexOf(freshRow);
+      keepRow.before(...fresh.slice(0, at));
+      keepRow.after(...fresh.slice(at + 1));
+    } else {
+      body.innerHTML = rowsHtml;
+    }
+    const liveCommon = keep?.matches('[data-st-common-text]') ? keep.closest('.st-common') : null;
+    if (liveCommon && foot.contains(liveCommon)) {
+      liveCommon.classList.toggle('is-off', !common.on);
+      const box = liveCommon.querySelector('[data-st-common-on]');
+      if (box) box.checked = common.on;
+      [...foot.children].forEach(child => { if (child !== liveCommon) child.remove(); });
+      liveCommon.insertAdjacentHTML('afterend', buttonsHtml);
+    } else {
+      foot.innerHTML = commonHtml + buttonsHtml;
+    }
+    bindExtraAutocomplete(body);
+    bindExtraAutocomplete(foot);
   }
   function paintSavedTab(body, foot) {
     const options = (selected, all) => (all ? `<option value="*">전체 분류</option>` : '')

@@ -24589,6 +24589,25 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 }
 .cq-find-row:hover { background: rgba(124,106,239,0.14); border-color: rgba(124,106,239,0.35); }
 .cq-find-row.is-busy { opacity: 0.6; cursor: progress; }
+/* Find 썸네일 미리보기 - 판 왼쪽에 크게(사용자 지시 2026-10-19). 아티스트 리모컨의 확대(.rctl-zoom 320px)와
+   같은 결로 조금 작게. 썸네일이 없으면 No Image(아티스트 격자와 같은 말). */
+.cq-find-zoom {
+  position: fixed; z-index: var(--z-floating-module-tooltip); width: 260px; max-width: 36vw; pointer-events: none;
+  background: var(--bg-elevated); border: 1px solid var(--border-glow);
+  border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,0.6); overflow: hidden;
+}
+.cq-find-zoom[hidden] { display: none !important; }
+.cq-find-zoom img { display: block; width: 100%; max-height: 56vh; object-fit: contain; background: var(--bg-deep); }
+.cq-find-zoom-none {
+  display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 896 / 1152; max-height: 56vh;
+  background: var(--bg-deep); font-size: 13px; color: var(--text-dim);
+}
+.cq-find-zoom-cap {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 6px 10px 7px; border-top: 1px solid var(--border-dim);
+}
+.cq-find-zoom-cap b { min-width: 0; font-size: 12px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-find-zoom-cap span { margin-left: auto; flex: none; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
 .cq-find-img { flex: none; width: 26px; height: 32px; border-radius: 3px; object-fit: cover; background: rgba(255,255,255,0.06); }
 .cq-find-img.is-initial {
   display: flex; align-items: center; justify-content: center;
@@ -24655,6 +24674,53 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-sopt-btn:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.6); }
 .cq-sopt-btn.is-on { color: var(--text-primary); background: rgba(124,106,239,0.28); border-color: rgba(124,106,239,0.7); }
 .cq-sopt-btn:disabled { opacity: 0.5; cursor: default; }
+/* [와일드카드로 저장] - 둘째 줄 끝 · 팝업(와일드카드 관리 모듈의 폴더 목록 + 이름). 사용자 지시 2026-10-19. */
+.cq-sopt-btn.cq-sopt-save { margin-left: auto; border-color: rgba(124,106,239,0.55); color: var(--text-primary); }
+.cq-wcs-back {
+  position: fixed; inset: 0; z-index: var(--z-app-confirm); background: rgba(5,5,10,0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.cq-wcs {
+  width: 380px; max-width: calc(100vw - 32px); max-height: calc(100vh - 48px); display: flex; flex-direction: column;
+  background: var(--bg-elevated); border: 1px solid var(--border-glow); border-radius: 12px; overflow: hidden;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.55); font-family: var(--font-mono); font-size: 12px; color: var(--text-primary);
+}
+.cq-wcs-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--border-dim); }
+.cq-wcs-dim { color: var(--text-dim); font-size: 11px; }
+.cq-wcs-x { margin-left: auto; background: none; border: 0; color: var(--text-dim); font-size: 16px; cursor: pointer; padding: 0 2px; }
+.cq-wcs-x:hover { color: var(--text-primary); }
+.cq-wcs-tree {
+  margin: 8px 12px; padding: 4px; border: 1px solid var(--border-dim); border-radius: 6px; background: rgba(0,0,0,0.22);
+  max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 1px;
+}
+.cq-wcs-row {
+  display: block; width: 100%; text-align: left; padding: 4px 8px; border: 0; border-radius: 4px; background: none;
+  font: inherit; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+button.cq-wcs-row { cursor: pointer; }
+button.cq-wcs-row:hover { background: rgba(255,255,255,0.05); }
+.cq-wcs-row.is-folder { color: #8fb4ff; }
+.cq-wcs-row.is-file { color: var(--text-dim); cursor: default; }
+.cq-wcs-row.is-in { padding-left: 24px; }
+.cq-wcs-row.is-sel { background: rgba(124,106,239,0.28); color: #fff; }
+.cq-wcs-n { color: var(--text-dim); }
+.cq-wcs-form { display: flex; flex-direction: column; gap: 5px; padding: 0 12px; }
+.cq-wcs-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.cq-wcs-line > .cq-wcs-dim:first-child { width: 30px; flex: 0 0 auto; }
+.cq-wcs-name {
+  flex: 1 1 auto; min-width: 0; height: 28px; padding: 0 8px; border-radius: 6px; font: inherit;
+  border: 1px solid var(--border-dim); background: rgba(0,0,0,0.22); color: var(--text-primary);
+}
+.cq-wcs-name:focus { outline: none; border-color: var(--accent); }
+.cq-wcs-err { min-height: 15px; font-size: 11px; color: #f09595; }
+.cq-wcs-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border-dim); }
+.cq-wcs-btn {
+  padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border-dim); background: none; font: inherit;
+  color: var(--text-secondary); cursor: pointer;
+}
+.cq-wcs-btn:hover { color: var(--text-primary); border-color: var(--border-glow); }
+.cq-wcs-btn.is-ok { background: var(--accent); border-color: var(--accent); color: #fff; }
+.cq-wcs-btn:disabled { opacity: 0.5; cursor: default; }
 .cq-find-empty { padding: 10px 6px; font-size: 10.5px; color: var(--text-dim); }
 /* [현재 결과 -> 랜덤 와일드카드] - Find 목록 아래(사용자 지시 2026-10-19). */
 .cq-find-rw {
@@ -29707,6 +29773,34 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .dragpanel.rctl .rctl-artist-head .rctl-weight .artist-thumb-weight-input::-webkit-inner-spin-button {
   -webkit-appearance: none; margin: 0;
 }
+/* [랜덤 가중치] - 이름 줄의 슬라이더 자리에 start · end · step(사용자 지시 2026-10-19). 이름 칸이 줄어든다.
+   ⚠️ 리모컨이 만든 노드는 부모가 없어 `rctl-<tag>` 를 못 받는다 - 제 클래스로 가린다. */
+.dragpanel.rctl .rctl-artist-head:has(> .artist-thumb-wrange:not([hidden])) { grid-template-columns: minmax(0, 1fr) auto; }
+.dragpanel.rctl .rctl-artist-head > .rctl-weight[hidden],
+.artist-thumb-wrange[hidden] { display: none !important; }
+.artist-thumb-wrange { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.artist-thumb-wrange label { display: inline-flex; align-items: center; gap: 3px; margin: 0; }
+.artist-thumb-wrange label > span { font-size: 10.5px; color: var(--text-dim); }
+.artist-thumb-wrange input.artist-thumb-weight-input {
+  width: 46px; height: 30px; padding: 0 3px; font-size: 11px; text-align: center;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.artist-thumb-wrange input::-webkit-outer-spin-button,
+.artist-thumb-wrange input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+/* 하단 바 - S · 조합 창의 바닥 줄(`.st-foot`)과 같은 결: 창 끝까지 닿는 얇은 띠 + 작은 토글. */
+.dragpanel.rctl .rctl-foot {
+  margin: 0 -8px -8px; padding: 6px 8px; border-top: 1px solid var(--border-dim);
+  background: rgba(255, 255, 255, 0.02);
+}
+.rctl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.rctl-tg {
+  display: inline-flex; align-items: center; gap: 5px; margin: 0; cursor: pointer; white-space: nowrap;
+  padding: 2px 8px; border: 1px solid var(--border-dim); border-radius: 5px;
+  font-size: 11px; color: var(--text-secondary, #cfcde0); user-select: none;
+}
+.rctl-tg input { margin: 0; accent-color: var(--accent); }
+.rctl-tg:hover { border-color: var(--border-glow); }
+.rctl-tg.is-on { border-color: rgba(124, 106, 239, 0.7); background: rgba(124, 106, 239, 0.22); color: #fff; }
 /* 격자 스크롤 - 기존 탭과 같은 얇은 막대. 리모컨에서는 조금 더 굵게 잡아야 손이 닿는다. */
 .dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar { width: 7px; }
 .dragpanel.rctl .artist-thumb-grid::-webkit-scrollbar-thumb {

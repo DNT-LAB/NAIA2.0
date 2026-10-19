@@ -211,6 +211,38 @@ def _session_line_for(roster: dict[str, Any], identity: tuple[str, str]) -> str:
     return ""
 
 
+# [와일드카드로 저장](사용자 지시 2026-10-19) - 파일 이름에 못 쓰는 글자.
+_SAVE_NAME_BAD = set('/\\:*?"<>|')
+
+
+def _session_save_lines(service: CharacterViewerService, roster: dict[str, Any]) -> list[str]:
+    """[와일드카드로 저장] 이 쓸 줄 - 지금 풀에 있는 캐릭터(숨긴 것은 빠진다)를 **지금 출력 옵션**으로(사용자 결정 2026-10-19).
+    풀(`_rebuild_session_pool`)과 같은 줄이다 - 저장한 파일을 쓰면 세션 슬롯과 같은 분포가 나온다."""
+    options = roster.get("options") or {}
+    present = roster.get("present") or set()
+    lines: list[str] = []
+    for line, identity in roster.get("source") or []:
+        identity = tuple(identity)
+        # 풀에서 빠진 것(숨김)은 물론, 다른 화면에서 숨겼지만 아직 풀에 남은 것도 뺀다.
+        if identity not in present or service.is_hidden(*identity):
+            continue
+        text = transform_session_line(line, identity, options, (roster.get("series") or {}).get(identity, ""),
+                                      (roster.get("works") or {}).get(identity, "")).strip()
+        # 출력 옵션으로 줄이 비면 뺀다 - 와일드카드 파일은 빈 줄을 버린다(전부 비면 저장을 거절한다 · Codex 재리뷰).
+        if text:
+            lines.append(text)
+    return lines
+
+
+def _clean_save_name(name: str) -> str:
+    clean = str(name or "").strip()
+    if clean.lower().endswith(".txt"):
+        clean = clean[:-4].strip()
+    if not clean or clean.startswith(".") or any(ch in _SAVE_NAME_BAD for ch in clean):
+        raise ValueError("이름에 / \\ : * ? \" < > | 는 쓸 수 없습니다.")
+    return clean
+
+
 def _roll_item(service: CharacterViewerService, roster: dict[str, Any], prompt: str) -> dict[str, Any] | None:
     hit = _roll_identity(roster, prompt)
     if not hit:
@@ -702,6 +734,81 @@ def register_character_viewer_routes(
         if not placed:
             return JSONResponse({"error": f"활성 캐릭터 슬롯이 꽉 차 고정하지 못했습니다."}, status_code=409)
         return {"ok": True, "character": identity[1]}
+
+    @app.get("/api/character-viewer/session-save")
+    async def api_character_viewer_session_save_info():
+        """[와일드카드로 저장] 팝업 - 저장될 인원 수와 와일드카드 폴더 목록(와일드카드 관리 모듈의 Browse Files 와 같은 것)."""
+        service = character_viewer_service(session_context)
+
+        def info() -> dict[str, Any]:
+            roster, _manager = _session_roster(session_context)
+            if roster is None:
+                raise KeyError("랜덤 슬롯이 없습니다.")
+            return {"key": roster["pool_id"], "count": len(_session_save_lines(service, roster)),
+                    "tree": session_context._wildcard_service().scan_tree()}
+
+        try:
+            return await run_in_thread(info)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Session save info failed: {exc}"}, status_code=500)
+
+    @app.post("/api/character-viewer/session-save")
+    async def api_character_viewer_session_save(req: Request):
+        """[와일드카드로 저장] - 지금 세션 풀(숨김 뺀 인원 · 지금 출력 옵션의 줄)을 와일드카드 파일로 쓴다.
+        폴더는 최상층 폴더 하나 또는 비움(= 최상층). ⚠️ 같은 폴더에 같은 이름이 있으면 덮지 않고 거절한다(사용자 지정).
+        랜덤 슬롯은 그대로 둔다(사용자 결정)."""
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        pool_key = str(payload.get("key") or "")
+        folder = str(payload.get("folder") or "").strip().strip("/\\")
+        service = character_viewer_service(session_context)
+
+        def apply() -> dict[str, Any]:
+            name = _clean_save_name(str(payload.get("name") or ""))
+            if folder and (any(ch in _SAVE_NAME_BAD for ch in folder) or folder.startswith(".")):
+                raise ValueError("폴더를 다시 고르세요.")
+            wildcards = session_context._wildcard_service()
+            with _HIDE_LOCK:
+                roster, _manager = _session_roster(session_context)
+                if roster is None or pool_key != roster["pool_id"]:
+                    raise LookupError("랜덤 슬롯이 새로 바뀌었습니다. 다시 열어 주세요.")
+                lines = _session_save_lines(service, roster)
+            if not lines:
+                raise ValueError("저장할 줄이 없습니다. 출력 옵션(이름만 · 캐릭터명 제거 등)을 확인하세요.")
+            if folder:
+                folder_path = wildcards.validate_path(folder)
+                if folder_path is None or not folder_path.is_dir():
+                    raise ValueError("그 폴더가 없습니다. 목록을 새로 열어 주세요.")
+            rel = f"{folder}/{name}.txt" if folder else f"{name}.txt"
+            target = wildcards.validate_path(rel)
+            if target is None:
+                raise ValueError("저장할 수 없는 위치입니다.")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                # 'x' = 있으면 실패 - 확인과 쓰기 사이에 같은 이름이 생겨도 덮지 않는다.
+                with target.open("x", encoding="utf-8", newline="\n") as handle:
+                    handle.write("\n".join(lines) + "\n")
+            except FileExistsError:
+                raise FileExistsError("이 폴더에 같은 이름이 있습니다.") from None
+            wildcards.reload_manager()
+            return {"ok": True, "path": rel, "wildcard": f"__{rel[:-4]}__", "count": len(lines)}
+
+        try:
+            return await run_in_thread(apply)
+        except FileExistsError as exc:
+            return JSONResponse({"error": str(exc), "exists": True}, status_code=409)
+        except LookupError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Session save failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/hidden")
     async def api_character_viewer_hidden_list():

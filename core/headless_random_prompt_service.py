@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import random
-from contextlib import nullcontext
+import threading
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock, RLock
@@ -126,6 +127,14 @@ def pipeline_swap_lock(context: Any) -> Any:
     return lock
 
 
+# [메인 랜덤 버튼 연결] 의 작가 토큰 - 생성 한 번(한 스레드)에만 산다. PE 훅이 `current_random_artist_token()` 으로 읽는다.
+_RANDOM_ARTIST = threading.local()
+
+
+def current_random_artist_token() -> str:
+    return str(getattr(_RANDOM_ARTIST, "token", None) or "")
+
+
 class HeadlessRandomPromptService:
     """Generate Remote Web random prompts without RemoteBridge or Qt widgets."""
 
@@ -204,6 +213,46 @@ class HeadlessRandomPromptService:
         raise MapQueryError("no_match", f"{label}: 스테이징된 조합 모두 맞는 게시물이 없습니다.")
 
     def generate(
+        self,
+        *,
+        active_ratings: set[str] | None = None,
+        overrides: dict[str, Any] | None = None,
+        random_request_id: str = "",
+        source_row_override: Any = None,
+    ) -> HeadlessRandomPromptResult:
+        """메인 Random. [메인 랜덤 버튼 연결](아티스트 리모컨 · 사용자 지시 2026-10-19)이 켜져 있으면 이번 한 번만
+        뽑은 작가를 PE 프리픽스 앞에 얹는다(`random_artist_link`).
+        ⚠️ 부른 쪽이 이미 PE 오버라이드를 걸었으면(아티스트 창 · 외부 ComfyUI) 얹지 않는다 - 그쪽이 작가를 정했다."""
+        with self.random_artist_link():
+            return self._generate(active_ratings=active_ratings, overrides=overrides,
+                                  random_request_id=random_request_id, source_row_override=source_row_override)
+
+    @contextmanager
+    def random_artist_link(self):
+        """[메인 랜덤 버튼 연결] - 켜져 있으면 이 안에서 한 번만 뽑은 작가 토큰을 **이 스레드에만** 싣는다. PE 훅이 그 토큰을
+        프리픽스 맨 앞에 붙인다(`core.prompt_engineering_runtime`).
+        메인 Random(`generate`)과 Auto Gen 이 미리 만드는 다음 컷(`generation_runner._prefetch_v2_cut`)이 같이 쓴다 -
+        미리 만든 컷을 수동 Random 이 그대로 가져가므로 한쪽만 걸면 작가가 빠진다(Codex 리뷰).
+        ⚠️ 공용 `session_p_eng_override` 를 쓰지 않는다 - 겹친 요청끼리 되돌리기가 엇갈려 오버라이드가 남았고, PE 설정을
+           미리 베껴 두어 `*randomized` 프리셋이 한 번 늦게 먹었다(Codex 재리뷰)."""
+        provider = getattr(self.context, "random_artist_override_provider", None)
+        token = None
+        if callable(provider) and getattr(self.context, "session_p_eng_override", None) is None:
+            try:
+                token = provider()
+            except Exception as exc:
+                print(f"[WARN] random artist link skipped: {type(exc).__name__}")
+        if not token:
+            yield None
+            return
+        previous = getattr(_RANDOM_ARTIST, "token", None)
+        _RANDOM_ARTIST.token = str(token)
+        try:
+            yield token
+        finally:
+            _RANDOM_ARTIST.token = previous
+
+    def _generate(
         self,
         *,
         active_ratings: set[str] | None = None,

@@ -329,6 +329,19 @@ class PromptEngineeringHeadlessPostHook:
             return context
 
         options = self._current_options()
+        # [메인 랜덤 버튼 연결](아티스트 리모컨 · 2026-10-19) - 이번 생성에 뽑힌 작가를 프리픽스 맨 앞에. 토큰은 이 스레드의
+        # 생성 한 번에만 실려 있다(`core.headless_random_prompt_service.random_artist_link`).
+        from core.headless_random_prompt_service import current_random_artist_token
+
+        artist_token = current_random_artist_token()
+        if artist_token:
+            options = dict(options)
+            pre = options.get("pre_prompt")
+            if isinstance(pre, list):
+                options["pre_prompt"] = [artist_token, *pre]
+            else:
+                pre_text = str(pre or "").strip()
+                options["pre_prompt"] = split_tags_smart(f"{artist_token}, {pre_text}" if pre_text else artist_token)
         # E621 directly authored selections/templates are authoritative, unlike
         # sampled source tags. Still run this hook's prefix/suffix and wildcards.
         skip_preprocessing = bool(getattr(self.app_context, "skip_prompt_engineering_auto_hide", False)

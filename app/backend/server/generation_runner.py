@@ -381,15 +381,21 @@ async def _prefetch_v2_cut(context: WebSessionContext, source_row, overrides, ra
 
     from app.backend.server.boost_v2_service import apply_boost_v2, boost_v2_settings
 
-    result = await asyncio.to_thread(
-        random_service(context).generate_from_source_row,
-        source_row,
-        active_ratings=ratings,
-        overrides=overrides,
-        random_request_id=f"prefetch-{uuid.uuid4().hex[:12]}",
-        source="random",
-        update_context=False,
-    )
+    service = random_service(context)
+
+    def build():
+        # [메인 랜덤 버튼 연결] - 미리 만드는 컷도 메인 Random 과 같이 작가를 얹는다(수동 Random 이 이것을 가져간다).
+        with service.random_artist_link():
+            return service.generate_from_source_row(
+                source_row,
+                active_ratings=ratings,
+                overrides=overrides,
+                random_request_id=f"prefetch-{uuid.uuid4().hex[:12]}",
+                source="random",
+                update_context=False,
+            )
+
+    result = await asyncio.to_thread(build)
     if getattr(result, "success", False) and getattr(context, "ollama_auto_boost", False):
         await apply_boost_v2(context, result, boost_v2_settings(context), update_context=False)
     return result

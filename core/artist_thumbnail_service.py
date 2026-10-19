@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import math
 import os
 import random
 import re
@@ -229,6 +230,8 @@ class ArtistThumbnailService:
         self._load_cancel = False
         self._random_history: dict[tuple[str, str, str, int], list[str]] = {}
         self._lock = threading.RLock()
+        # generate_options.json 은 읽고-고치고-쓰는 파일이다 - 프리픽스 저장과 랜덤 도구 저장이 겹치면 한쪽이 사라진다.
+        self._options_lock = threading.Lock()
         self._download_thread: threading.Thread | None = None
         self._download_cancel = threading.Event()
         self._download_state = {
@@ -552,7 +555,95 @@ class ArtistThumbnailService:
             "prefix": selected["prefix"],
             "postfix": selected["postfix"],
             "modes": modes,
+            "random_tools": self._normalize_random_tools(source.get("random_tools")),
         }
+
+    # ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
+    #  [생성 버튼 -> 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 셋 다 다음 실행에도 남는다(사용자 결정).
+    #  `pool` 은 리모컨이 보고 있던 목록 조건(모드 · 필터 · 이름 검색)이다 - 창을 닫아도 메인 Random 이 이것으로 뽑는다.
+    RANDOM_TOOL_DEFAULTS = {
+        "gen_pick": False,
+        "random_weight": False,
+        "main_link": False,
+        "weight_start": 0.85,
+        "weight_end": 1.15,
+        "weight_step": 0.05,
+        "weight": 1.0,
+    }
+
+    def _normalize_random_tools(self, raw: Any) -> dict:
+        source = raw if isinstance(raw, dict) else {}
+        defaults = self.RANDOM_TOOL_DEFAULTS
+
+        def number(key: str, low: float, high: float) -> float:
+            try:
+                value = float(source.get(key, defaults[key]))
+            except (TypeError, ValueError):
+                value = float(defaults[key])
+            if not math.isfinite(value):
+                value = float(defaults[key])
+            return round(min(high, max(low, value)), 4)
+
+        pool = source.get("pool") if isinstance(source.get("pool"), dict) else {}
+        return {
+            "gen_pick": bool(source.get("gen_pick", False)),
+            "random_weight": bool(source.get("random_weight", False)),
+            "main_link": bool(source.get("main_link", False)),
+            "weight_start": number("weight_start", 0.0, 5.0),
+            "weight_end": number("weight_end", 0.0, 5.0),
+            "weight_step": number("weight_step", 0.01, 5.0),
+            "weight": number("weight", 0.0, 5.0),
+            "pool": {
+                "mode": str(pool.get("mode") or "").strip()[:200],
+                "filter": str(pool.get("filter") or "all").strip()[:200] or "all",
+                "query": str(pool.get("query") or "").strip()[:200],
+            },
+        }
+
+    def draw_random_weight(self, tools: dict) -> float:
+        """[랜덤 가중치] 켬 = start ~ end 를 step 간격으로 고른다. 끔 = 저장된 손잡이 값."""
+        tools = self._normalize_random_tools(tools)
+        if not tools["random_weight"]:
+            return tools["weight"]
+        start, end, step = tools["weight_start"], tools["weight_end"], tools["weight_step"]
+        if end < start:
+            start, end = end, start
+        steps = int(math.floor((end - start) / step + 1e-9))
+        return round(start + random.SystemRandom().randint(0, max(0, steps)) * step, 4)
+
+    @staticmethod
+    def format_artist_token(artist: str, weight: float, api_mode: str = "NAI") -> str:
+        """화면의 `formatArtistToken` 과 같은 서식. NAI = `w::artist:x ::` · 그 밖 = `(x:w)`(괄호 이스케이프).
+        ⚠️ ANIMA 의 '@' 는 여기서 붙이지 않는다 - 보낼 때 `core.anima_artist_tags` 가 붙인다."""
+        name = str(artist or "").strip()
+        if not name:
+            return ""
+        try:
+            value = float(weight)
+        except (TypeError, ValueError):
+            value = 1.0
+        weighted = abs(value - 1.0) > 1e-9
+        text = f"{value:.2f}".rstrip("0").rstrip(".") or "0"
+        if str(api_mode or "NAI").strip().upper() == "NAI":
+            body = f"artist:{name}"
+            return f"{text}::{body} ::" if weighted else body
+        body = re.sub(r"([()])", r"\\\1", name)
+        return f"({body}:{text})" if weighted else body
+
+    def random_tools(self) -> dict:
+        return self.load_options().get("random_tools") or self._normalize_random_tools({})
+
+    def main_random_token(self, api_mode: str) -> str | None:
+        """[메인 랜덤 버튼 연결] 이 켜져 있으면 저장된 목록 조건에서 한 명을 뽑아 이번 랜덤 한 번에 얹을 작가 토큰을 만든다.
+        아티스트 창이 닫혀 있어도 돈다(사용자 결정 2026-10-19). 꺼져 있거나 목록이 비면 None."""
+        tools = self.random_tools()
+        if not tools.get("main_link"):
+            return None
+        pool = tools.get("pool") or {}
+        item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""))
+        if not item:
+            return None
+        return self.format_artist_token(item["artist"], self.draw_random_weight(tools), api_mode) or None
 
     def load_options(self, mode: str = "") -> dict:
         path = self._options_path()
@@ -568,6 +659,10 @@ class ArtistThumbnailService:
             return self._normalize_options({}, mode)
 
     def save_options(self, options: dict) -> dict:
+        with self._options_lock:
+            return self._save_options_locked(options)
+
+    def _save_options_locked(self, options: dict) -> dict:
         requested_mode = options.get("mode") if isinstance(options, dict) else ""
         mode = self._options_mode(requested_mode)
         current = self.load_options(mode)
@@ -577,6 +672,10 @@ class ArtistThumbnailService:
                 mode_values["prefix"] = str(options.get("prefix") or "")
             if "postfix" in options:
                 mode_values["postfix"] = str(options.get("postfix") or "")
+            # 랜덤 도구는 보낸 칸만 바꾼다(프리픽스 저장이 이것을 지우지 않게 · 반대도).
+            if isinstance(options.get("random_tools"), dict):
+                current["random_tools"] = self._normalize_random_tools(
+                    {**current.get("random_tools", {}), **options["random_tools"]})
         selected = current["modes"].get(mode, {"prefix": "", "postfix": ""})
         current["version"] = 2
         current["mode"] = mode
@@ -1342,16 +1441,8 @@ class ArtistThumbnailService:
             "favorite_thumbnail_cache": favorite_thumbnail_cache,
         }
 
-    def build_list(
-        self,
-        mode: str = "",
-        filter_key: str = "all",
-        query: str = "",
-        page: int = 0,
-        per_page: int = 48,
-        random_sample: bool = False,
-    ) -> dict:
-        mode_key = str(mode or "").strip()
+    def _list_artists(self, mode_key: str, filter_key: str, query_text: str, *, random_sample: bool):
+        """목록 조건(모드 · 필터 · 이름 검색)에 드는 작가 - 격자 · 랜덤 한 명 뽑기가 **같은 길**을 쓴다."""
         thumb_data = self.load_data(mode_key) if mode_key else {}
         weights = self._artist_weights(mode_key)
         base_list, filter_name = self._base_list(
@@ -1363,10 +1454,45 @@ class ArtistThumbnailService:
         if thumb_data:
             thumb_keys = set(thumb_data.keys())
             base_list = [artist for artist in base_list if artist in thumb_keys]
-        query_text = str(query or "").strip().lower().replace("_", " ")
         if query_text:
             base_list = [artist for artist in base_list if query_text in artist.lower().replace("_", " ")]
         base_list = sorted(base_list, key=lambda artist: weights.get(artist, 0), reverse=True)
+        return base_list, filter_name, weights, thumb_data
+
+    def pick_random_artist(self, mode: str = "", filter_key: str = "all", query: str = "") -> dict | None:
+        """지금 목록에서 한 명(제외 작가는 빠진다 · 최근에 뽑힌 몇 명은 피한다). 비면 None."""
+        mode_key = str(mode or "").strip()
+        filter_key = str(filter_key or "all").strip() or "all"
+        query_text = str(query or "").strip().lower().replace("_", " ")
+        artists, _name, weights, thumb_data = self._list_artists(mode_key, filter_key, query_text, random_sample=True)
+        picked = self._random_sample(artists, 1, (mode_key, filter_key, query_text, 1))
+        if not picked:
+            return None
+        artist = picked[0]
+        image_url = self._image_url_resolver(mode_key, filter_key, thumb_data)(artist)
+        return {
+            "artist": artist,
+            "weight": self._format_count(weights.get(artist, 0)),
+            "favorite": artist in set(self._favorites()),
+            "banned": False,
+            "has_image": bool(image_url),
+            "image_url": image_url,
+            "total": len(artists),
+        }
+
+    def build_list(
+        self,
+        mode: str = "",
+        filter_key: str = "all",
+        query: str = "",
+        page: int = 0,
+        per_page: int = 48,
+        random_sample: bool = False,
+    ) -> dict:
+        mode_key = str(mode or "").strip()
+        query_text = str(query or "").strip().lower().replace("_", " ")
+        base_list, filter_name, weights, thumb_data = self._list_artists(
+            mode_key, filter_key, query_text, random_sample=random_sample)
         total = len(base_list)
         per_page = max(12, min(96, int(per_page or 48)))
         page = max(0, int(page or 0))

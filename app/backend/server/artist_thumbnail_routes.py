@@ -637,6 +637,11 @@ def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServi
     return service
 
 
+def _main_random_artist_override(context: WebSessionContext):
+    """[메인 랜덤 버튼 연결] - 메인 Random 이 부른다(`HeadlessRandomPromptService.random_artist_link`). 작가 토큰 · 꺼져 있으면 None."""
+    return artist_thumbnail_service(context).main_random_token(context.get_api_mode())
+
+
 def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
     service = getattr(context, "headless_random_prompt_service", None)
     if service is None:
@@ -661,6 +666,9 @@ def register_artist_thumbnail_routes(
     clients: set[Any],
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
+    # [메인 랜덤 버튼 연결] - 메인 Random 이 이 공급자를 부른다(core 는 app.backend 를 모른다).
+    session_context.random_artist_override_provider = partial(_main_random_artist_override, session_context)
+
     @app.get("/api/artist-thumb/state")
     async def api_artist_thumb_state(req: Request):
         try:
@@ -1127,9 +1135,15 @@ def register_artist_thumbnail_routes(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            return await run_in_thread(artist_thumbnail_service(session_context).save_options, payload)
+            saved = await run_in_thread(artist_thumbnail_service(session_context).save_options, payload)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb options failed: {exc}"}, status_code=500)
+        if isinstance(payload.get("random_tools"), dict):
+            # [메인 랜덤 버튼 연결] 설정이 바뀌었다 - Auto Gen 이 옛 설정으로 미리 만든 컷을 버린다(Codex 리뷰).
+            from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+            invalidate_auto_gen_prefetch(session_context)
+        return saved
 
     @app.get("/api/artist-thumb/download")
     async def api_artist_thumb_download_state():
@@ -1161,6 +1175,32 @@ def register_artist_thumbnail_routes(
             return await run_in_thread(artist_thumbnail_service(session_context).cancel_download)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb download cancel failed: {exc}"}, status_code=500)
+
+    # [생성 버튼 -> 랜덤 아티스트] - 지금 목록에서 한 명(사용자 지시 2026-10-19).
+    @app.post("/api/artist-thumb/random-pick")
+    async def api_artist_thumb_random_pick(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        try:
+            item = await run_in_thread(
+                artist_thumbnail_service(session_context).pick_random_artist,
+                str(payload.get("mode") or ""),
+                str(payload.get("filter") or "all"),
+                str(payload.get("query") or ""),
+            )
+        except ArtistLoadCancelled as exc:
+            return JSONResponse({"error": str(exc), "cancelled": True}, status_code=409)
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb random pick failed: {exc}"}, status_code=500)
+        if not item:
+            return JSONResponse({"error": "지금 목록에 뽑을 작가가 없습니다."}, status_code=404)
+        return item
 
     @app.post("/api/artist-thumb/random-prompt")
     async def api_artist_thumb_random_prompt(req: Request):

@@ -1203,6 +1203,7 @@ export function createCharacterQuickPanel({
     }
     if (event.target.closest('[data-cq-roll-detail]')) { rollDetail = !rollDetail; renderRoll(); fitGridHeight(); return; }
     if (event.target.closest('[data-cq-roll-pin]')) { void pinRoll(); return; }
+    if (event.target.closest('[data-cq-wcsave]')) { void openWcSave(); return; }
     const soptKey = event.target.closest('[data-cq-sopt-k]');
     if (soptKey) { void setSessionOptions(soptKey.dataset.cqSoptK); return; }
     if (event.target.closest('[data-cq-sopt-paren]')) { void setSessionOptions('paren'); return; }
@@ -1750,7 +1751,52 @@ export function createCharacterQuickPanel({
     findHeldRender = false;
     findEl?.remove();
     findEl = null;
+    hideFindZoom();
     mount?.querySelector('[data-cq-find]')?.classList.remove('is-on');
+  }
+
+  // ── Find 썸네일 미리보기(사용자 지시 2026-10-19) ─────────────────────────────
+  //  캐릭터 줄에 마우스를 올리면 Find 판 왼쪽에 크게(아티스트 리모컨 확대와 같은 결). 썸네일이 없으면 No Image.
+  //  [히스토리 · 즐겨찾기] 줄은 사전 캐릭터가 아니라 슬롯 보관함이라 띄우지 않는다.
+  let findZoomEl = null;
+
+  function hideFindZoom() {
+    if (findZoomEl) findZoomEl.hidden = true;
+  }
+
+  function showFindZoom(rowEl) {
+    if (!findEl) return;
+    if (!findZoomEl) {
+      findZoomEl = document.createElement('div');
+      findZoomEl.className = 'cq-find-zoom';
+      findZoomEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(findZoomEl);
+    }
+    const el = findZoomEl;
+    const img = rowEl.querySelector('img.cq-find-img');
+    const name = rowEl.querySelector('.cq-find-text b')?.textContent || '';
+    const sub = rowEl.querySelector('.cq-find-text span')?.textContent || '';
+    const html = (img ? `<img alt="" decoding="async" src="${escAttr(img.getAttribute('src') || '')}">`
+      : `<div class="cq-find-zoom-none">No Image</div>`)
+      + `<div class="cq-find-zoom-cap"><b>${escHtml(name)}</b><span>${escHtml(sub)}</span></div>`;
+    if (el._cqHtml !== html) { el._cqHtml = html; el.innerHTML = html; }
+    el.hidden = false;
+    // 자리 = Find 판 왼쪽 · 줄 높이 가운데 · 화면 안. 왼쪽에 자리가 없으면 오른쪽.
+    const margin = 8;
+    const panel = findEl.getBoundingClientRect();
+    const row = rowEl.getBoundingClientRect();
+    const width = el.offsetWidth;
+    const height = el.offsetHeight;
+    let left = panel.left - width - margin;
+    if (left < margin) left = Math.min(window.innerWidth - width - margin, panel.right + margin);
+    const top = Math.min(Math.max(margin, row.top + row.height / 2 - height / 2), window.innerHeight - height - margin);
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+  }
+
+  function onFindHover(event) {
+    const row = event.target.closest('[data-cqf-char], [data-cqf-hid-char]');
+    if (row && findEl && findEl.contains(row)) showFindZoom(row); else hideFindZoom();
   }
 
   function openFind() {
@@ -1772,6 +1818,10 @@ export function createCharacterQuickPanel({
       + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button>`;
     document.body.appendChild(findEl);
     findEl.addEventListener('click', onFindClick);
+    findEl.addEventListener('mouseover', onFindHover);
+    findEl.addEventListener('mouseleave', hideFindZoom);
+    // 목록을 굴리면 줄이 마우스 밑에서 바뀐다 - 미리보기는 다음 mouseover 가 다시 띄운다.
+    findEl.addEventListener('wheel', hideFindZoom, {passive: true});
     findEl.addEventListener('mousedown', () => {
       findHeld = true;
       clearTimeout(findHeldTimer);
@@ -2349,6 +2399,9 @@ export function createCharacterQuickPanel({
       + `</div><div class="cq-sopt-row">`
       + btn('nc', '이름+작품만', preset === 'nc')
       + btn('no', '이름만', preset === 'no')
+      // 지금 풀(숨김 뺀 인원 · 지금 옵션의 줄)을 와일드카드 파일로(사용자 지시 2026-10-19).
+      + `<button type="button" class="cq-sopt-btn cq-sopt-save" data-cq-wcsave="1"${locked ? ' disabled' : ''}`
+      + ` title="지금 랜덤 풀(숨긴 캐릭터 빼고)을 와일드카드 파일로 저장합니다">와일드카드로 저장</button>`
       + `</div>`;
     if (box._cqHtml !== html) { box._cqHtml = html; box.innerHTML = html; }
     // 브라우저가 먼저 바꿔 둔 체크 상태를 보이는 값에 맞춘다(같은 HTML 이면 갈아 끼우지 않으므로).
@@ -2413,6 +2466,144 @@ export function createCharacterQuickPanel({
       renderRoll();
       // 다시 읽는 사이 또 눌렀으면 이어서 보낸다.
       if (soptWanted) void flushSessionOptions();
+    }
+  }
+
+  // ── [와일드카드로 저장](사용자 지시 2026-10-19) ─────────────────────────────
+  //  지금 세션 풀에서 숨기지 않은 인원을 지금 출력 옵션의 줄 그대로 와일드카드 파일로 쓴다. 위치 = 와일드카드 관리 모듈의
+  //  Browse Files 와 같은 폴더 목록(안 고르면 최상층) · 같은 폴더에 같은 이름은 저장하지 않는다. 랜덤 슬롯은 그대로 둔다.
+  let wcSave = null;          // {back, key, folder, tree, busy}
+
+  function closeWcSave() {
+    if (!wcSave) return;
+    wcSave.back.remove();
+    document.removeEventListener('keydown', onWcSaveKey, true);
+    wcSave = null;
+  }
+
+  function onWcSaveKey(event) {
+    if (event.key !== 'Escape') return;
+    event.stopPropagation();
+    closeWcSave();
+  }
+
+  /** 그 폴더(빈 글 = 최상층)에 바로 든 파일 이름들(.txt 뺀 · 소문자) - 같은 이름 검사용. */
+  function wcSaveNames(folder) {
+    const names = new Set();
+    for (const item of (wcSave && wcSave.tree) || []) {
+      if (!folder && item.type === 'file') names.add(String(item.name || '').replace(/\.txt$/i, '').toLowerCase());
+      if (folder && item.type === 'folder' && item.name === folder) {
+        for (const file of item.files || []) {
+          const rest = String(file.path || '').slice(folder.length + 1);
+          if (rest && !rest.includes('/')) names.add(rest.replace(/\.txt$/i, '').toLowerCase());
+        }
+      }
+    }
+    return names;
+  }
+
+  function wcSaveCheck() {
+    if (!wcSave) return '';
+    const input = wcSave.back.querySelector('[data-wcs-name]');
+    const errEl = wcSave.back.querySelector('[data-wcs-err]');
+    const name = String(input?.value || '').trim().replace(/\.txt$/i, '');
+    let error = '';
+    if (!name) error = '이름을 적으세요.';
+    else if (/[\\/:*?"<>|]/.test(name) || name.startsWith('.')) error = '이름에 / \\ : * ? " < > | 는 쓸 수 없습니다.';
+    else if (wcSaveNames(wcSave.folder).has(name.toLowerCase())) error = '이 폴더에 같은 이름이 있습니다.';
+    if (errEl) { errEl.textContent = error; errEl.classList.remove('is-ok'); }
+    const ok = wcSave.back.querySelector('[data-wcs-ok]');
+    if (ok) ok.disabled = Boolean(error) || wcSave.busy;
+    return error;
+  }
+
+  function paintWcSaveTree() {
+    if (!wcSave) return;
+    const treeEl = wcSave.back.querySelector('[data-wcs-tree]');
+    const whereEl = wcSave.back.querySelector('[data-wcs-where]');
+    const folder = wcSave.folder;
+    let html = `<button type="button" class="cq-wcs-row is-root${folder ? '' : ' is-sel'}" data-wcs-folder="">(최상층)</button>`;
+    for (const item of wcSave.tree) {
+      if (item.type === 'folder') {
+        const open = item.name === folder;
+        html += `<button type="button" class="cq-wcs-row is-folder${open ? ' is-sel' : ''}" data-wcs-folder="${escHtml(item.name)}">`
+          + `${open ? '▾' : '▸'} ${escHtml(item.name)} <span class="cq-wcs-n">(${(item.files || []).length})</span></button>`;
+        if (open) {
+          html += (item.files || []).map(file => `<div class="cq-wcs-row is-file is-in">${escHtml(String(file.path || '').slice(item.name.length + 1))}</div>`).join('');
+        }
+      } else {
+        html += `<div class="cq-wcs-row is-file">${escHtml(item.name)}</div>`;
+      }
+    }
+    treeEl.innerHTML = html;
+    if (whereEl) whereEl.textContent = folder ? `${folder}/` : '(최상층)';
+    wcSaveCheck();
+  }
+
+  async function openWcSave() {
+    closeWcSave();
+    let info = null;
+    try {
+      const res = await fetch('/api/character-viewer/session-save', {cache: 'no-store'});
+      info = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(info.error || '랜덤 슬롯이 없습니다.');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+      return;
+    }
+    const back = document.createElement('div');
+    back.className = 'cq-wcs-back';
+    back.innerHTML = `<div class="cq-wcs" role="dialog" aria-label="와일드카드로 저장">`
+      + `<div class="cq-wcs-head"><b>와일드카드로 저장</b><span class="cq-wcs-dim">숨김 뺀 ${Number(info.count || 0).toLocaleString()}명</span>`
+      + `<button type="button" class="cq-wcs-x" data-wcs-close="1" aria-label="닫기">×</button></div>`
+      + `<div class="cq-wcs-tree" data-wcs-tree></div>`
+      + `<div class="cq-wcs-form">`
+      + `<div class="cq-wcs-line"><span class="cq-wcs-dim">위치</span><span data-wcs-where></span></div>`
+      + `<div class="cq-wcs-line"><span class="cq-wcs-dim">이름</span><input type="text" class="cq-wcs-name" data-wcs-name`
+      + ` spellcheck="false" autocomplete="off" placeholder="idolmaster_girls"><span class="cq-wcs-dim">.txt</span></div>`
+      + `<div class="cq-wcs-err" data-wcs-err></div></div>`
+      + `<div class="cq-wcs-foot"><button type="button" class="cq-wcs-btn" data-wcs-close="1">취소</button>`
+      + `<button type="button" class="cq-wcs-btn is-ok" data-wcs-ok="1">저장</button></div></div>`;
+    document.body.appendChild(back);
+    wcSave = {back, key: info.key, folder: '', tree: Array.isArray(info.tree) ? info.tree : [], busy: false};
+    back.addEventListener('mousedown', event => { if (event.target === back) closeWcSave(); });
+    back.addEventListener('click', event => {
+      if (event.target.closest('[data-wcs-close]')) { closeWcSave(); return; }
+      const row = event.target.closest('[data-wcs-folder]');
+      if (row && wcSave) { wcSave.folder = row.dataset.wcsFolder || ''; paintWcSaveTree(); return; }
+      if (event.target.closest('[data-wcs-ok]')) void saveWcSave();
+    });
+    back.addEventListener('input', event => { if (event.target.closest('[data-wcs-name]')) wcSaveCheck(); });
+    back.addEventListener('keydown', event => {
+      if (event.key === 'Enter' && event.target.closest('[data-wcs-name]')) { event.preventDefault(); void saveWcSave(); }
+    });
+    document.addEventListener('keydown', onWcSaveKey, true);
+    paintWcSaveTree();
+    back.querySelector('[data-wcs-name]')?.focus();
+  }
+
+  async function saveWcSave() {
+    if (!wcSave || wcSave.busy || wcSaveCheck()) return;
+    const state = wcSave;
+    const name = String(state.back.querySelector('[data-wcs-name]')?.value || '').trim();
+    state.busy = true;
+    wcSaveCheck();
+    try {
+      const res = await fetch('/api/character-viewer/session-save', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: state.key, folder: state.folder, name}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '저장하지 못했습니다.');
+      if (wcSave === state) closeWcSave();
+      showToast(`${data.wildcard} 로 저장했습니다 (${Number(data.count || 0).toLocaleString()}줄).`, 'success');
+    } catch (error) {
+      state.busy = false;
+      if (wcSave !== state) return;
+      wcSaveCheck();
+      const errEl = state.back.querySelector('[data-wcs-err]');
+      if (errEl) errEl.textContent = error.message || String(error);
     }
   }
 

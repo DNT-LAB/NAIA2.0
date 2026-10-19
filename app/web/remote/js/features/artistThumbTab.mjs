@@ -188,6 +188,38 @@ export function createArtistThumbController({
   mixBtn.setAttribute('aria-pressed', 'false');
   mixBtn.title = '믹스 모드 OFF — 아티스트 여러 명을 순서·가중치와 함께 쌓습니다.';
 
+  // ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
+  //  [생성 버튼 → 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 값은 서버(generate_options.json)에 남는다(사용자 결정).
+  //  ⚠️ 메인 Random 의 뽑기는 **서버가** 한다 - 이 창을 닫아도 돈다(사용자 결정). 여기서는 켜고 끄기 · 지금 목록 조건 ·
+  //     손잡이 값만 보낸다(`core/artist_thumbnail_service.main_random_override`).
+  //  부모 없는 노드라 믹스 띠와 같은 방식으로 리모컨 창과 함께 들고 난다.
+  const RANDOM_TOOLS = [
+    ['gen_pick', '생성 버튼 → 랜덤 아티스트', 'Generate with Random Prompt 를 누를 때마다 지금 목록(모드 · 필터 · 이름 검색)에서 한 명을 뽑아 생성합니다'],
+    ['random_weight', '랜덤 가중치', '작가를 고를 때마다 가중치를 start ~ end 에서 step 간격으로 뽑습니다'],
+    ['main_link', '메인 랜덤 버튼 연결', '메인 Random 마다 지금 목록에서 한 명을 뽑아 프리픽스 앞에 붙입니다(이 창을 닫아도 계속됩니다)'],
+  ];
+  let randomTools = {gen_pick: false, random_weight: false, main_link: false,
+    weight_start: 0.85, weight_end: 1.15, weight_step: 0.05};
+  let randomToolsLoaded = false;
+  // 사용자가 모드 · 필터 · 이름 검색을 바꿨다 - 다음 목록이 오면 그것을 메인 Random 의 목록으로 삼는다.
+  // ⚠️ 새로고침 뒤 기본 화면이 저장된 목록을 덮지 않게, 화면이 스스로 그린 목록은 따라가지 않는다(Codex 재리뷰).
+  let randomPoolFollow = false;
+  let randomToolsSaved = '';
+  let randomToolsTimer = null;
+  let pickingArtist = false;
+  const randomToolsEl = document.createElement('div');
+  randomToolsEl.className = 'rctl-tools';
+  randomToolsEl.innerHTML = RANDOM_TOOLS.map(([key, label, title]) => (
+    `<label class="rctl-tg" data-rt="${key}" title="${escHtml(title)}">`
+    + `<input type="checkbox" data-rt-k="${key}"><span>${escHtml(label)}</span></label>`)).join('');
+  // [랜덤 가중치] 켬 = 이름 줄의 슬라이더 자리에 start · end · step.
+  const weightRangeEl = document.createElement('span');
+  weightRangeEl.className = 'artist-thumb-wrange';
+  weightRangeEl.hidden = true;
+  weightRangeEl.innerHTML = ['start', 'end', 'step'].map(key => (
+    `<label><span>${key}</span><input class="artist-thumb-weight-input" type="number" min="${key === 'step' ? '0.01' : '0'}" max="5" step="0.01"`
+    + ` data-rt-w="weight_${key}" aria-label="랜덤 가중치 ${key}"></label>`)).join('');
+
   // 아티스트 매칭 검색(리모컨 전용). 판은 **믹스 큐가 비우고 나간 그 자리**에 산다
   // (사용자 지정 2026-09-19) - 그 자리는 `.rctl-side` 라 리모컨 없이는 없다.
   let searchPanel = null;
@@ -882,6 +914,16 @@ export function createArtistThumbController({
       filterEl.value = filters.some(filter => filter.key === previous) ? previous : 'all';
     }
     syncOptionsForCurrentMode();
+    // 랜덤 도구는 처음 한 번만 서버 값으로 - 그 뒤로는 이 화면이 주인이다(저장 중인 값을 옛 답이 덮지 않게).
+    if (!randomToolsLoaded && state.options && state.options.random_tools) {
+      randomToolsLoaded = true;
+      randomTools = {...randomTools, ...state.options.random_tools};
+      // 저장된 손잡이 값도 되살린다 - 안 하면 화면의 1 이 다음 저장 때 저장값을 덮는다(Codex 리뷰).
+      const savedWeight = Number(state.options.random_tools.weight);
+      if (Number.isFinite(savedWeight)) { paintWeightControls(savedWeight); syncPromptFormat(); }
+      randomToolsSaved = JSON.stringify(randomToolsPayload());
+      paintRandomTools();
+    }
     setSummary(`${Number(state.artist_count || 0).toLocaleString()} artists`);
     updateDownloadUi();
     updateArtistActionAvailability();
@@ -1074,6 +1116,10 @@ export function createArtistThumbController({
       renderGrid(data.items || []);
       updatePager();
       hasLoadedList = true;
+      if (randomPoolFollow) {
+        randomPoolFollow = false;
+        if (randomTools.main_link) { randomTools.pool = currentRandomPool(); scheduleSaveRandomTools(); }
+      }
       scrollGrid(options.anchor || 'top');
       updateListStatus();
     } catch (error) {
@@ -1231,6 +1277,8 @@ export function createArtistThumbController({
 
   function selectArtist(item, options = {}) {
     selected = item;
+    // [랜덤 가중치] - 고를 때마다 새로 뽑는다(믹스 모드는 큐가 칸마다 가중치를 쥔다).
+    if (randomWeightActive() && !mixOn) paintWeightControls(drawToolWeight());
     if (mixOn && mixQueue) {
       // 격자에서 고른 작가는 **임시 블럭** 한 자리를 차지하고 다음 선택에 갈린다.
       mixQueue.setTempArtist(item.artist, item.image_url || '');
@@ -1617,6 +1665,7 @@ export function createArtistThumbController({
 
   function setArtistWeight(value) {
     const next = paintWeightControls(value);
+    scheduleSaveRandomTools();
     // 믹스 모드에서는 슬라이더가 **마지막으로 건드린 칸**을 민다(죽은 손잡이를 남기지
     // 않는다). 예전에는 임시 칸만이라, 고정하는 순간 손잡이가 아무것도 안 밀었다.
     if (mixOn && mixQueue?.setFocusWeight(next)) return;
@@ -1927,10 +1976,23 @@ export function createArtistThumbController({
   }
 
   async function generateWithRandomPrompt() {
+    if (remoteOnboarded && randomTools.gen_pick) {
+      // 누를 때마다 지금 목록에서 한 명을 새로 뽑아 고른 뒤 생성한다(사용자 지시 2026-10-19).
+      if (pickingArtist) return;
+      pickingArtist = true;
+      try {
+        const picked = await pickRandomArtist();
+        if (!picked) return;
+        selectArtist(picked);
+      } finally {
+        pickingArtist = false;
+      }
+    }
     const item = selectedPayload();
     if (!item) return;
     if (artistGenerationActive() || artistQueueRunning) {
-      enqueueArtistGeneration(item, 'random');
+      // [랜덤 가중치] 로 뽑은 값은 지금 이름 칸에만 있다 - 예약에 그 토큰을 실어 둔다(나중 칸 값으로 바뀌지 않게 · Codex 리뷰).
+      enqueueArtistGeneration(randomWeightActive() ? {...item, artistPrompt: formatArtistPrompt(item.artist)} : item, 'random');
       return;
     }
     const artistPrompt = String(positiveEl?.value || formatArtistPrompt(item.artist) || '').trim();
@@ -1984,6 +2046,132 @@ export function createArtistThumbController({
     }
   }
 
+  // ── 랜덤 도구 ──────────────────────────────────────────────────────────
+  function randomWeightActive() {
+    return remoteOnboarded && Boolean(randomTools.random_weight);
+  }
+
+  function drawToolWeight() {
+    let start = Number(randomTools.weight_start);
+    let end = Number(randomTools.weight_end);
+    let step = Number(randomTools.weight_step);
+    if (!Number.isFinite(start)) start = 0.85;
+    if (!Number.isFinite(end)) end = 1.15;
+    if (!(step > 0)) step = 0.05;
+    if (end < start) [start, end] = [end, start];
+    const steps = Math.floor((end - start) / step + 1e-9);
+    return Math.round((start + Math.floor(Math.random() * (steps + 1)) * step) * 10000) / 10000;
+  }
+
+  /** 서버에 남길 값 - 켜고 끄기 · 범위 · 지금 손잡이 값 · 지금 목록 조건(메인 Random 이 이 목록에서 뽑는다). */
+  function randomToolsPayload() {
+    const weight = Number.parseFloat(String(weightInput?.value || weightSlider?.value || '1'));
+    return {
+      gen_pick: Boolean(randomTools.gen_pick),
+      random_weight: Boolean(randomTools.random_weight),
+      main_link: Boolean(randomTools.main_link),
+      weight_start: Number(randomTools.weight_start),
+      weight_end: Number(randomTools.weight_end),
+      weight_step: Number(randomTools.weight_step),
+      weight: Number.isFinite(weight) ? weight : 1,
+      pool: randomTools.pool || currentRandomPool(),
+    };
+  }
+
+  function currentRandomPool() {
+    return {mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim()};
+  }
+
+  function scheduleSaveRandomTools() {
+    if (!randomToolsLoaded) return;          // 서버 값을 받기 전에 기본값으로 덮지 않는다
+    if (randomToolsTimer) clearTimeout(randomToolsTimer);
+    randomToolsTimer = setTimeout(() => {
+      randomToolsTimer = null;
+      const payload = randomToolsPayload();
+      const text = JSON.stringify(payload);
+      if (text === randomToolsSaved) return;
+      randomToolsSaved = text;
+      postJson('/api/artist-thumb/options', {random_tools: payload}).catch(error => {
+        randomToolsSaved = '';
+        console.warn('Artist Thumb random tools save failed', error);
+      });
+    }, 400);
+  }
+
+  function paintRandomTools() {
+    randomToolsEl.querySelectorAll('[data-rt]').forEach(label => {
+      const on = Boolean(randomTools[label.dataset.rt]);
+      label.classList.toggle('is-on', on);
+      const box = label.querySelector('input');
+      if (box && box.checked !== on) box.checked = on;
+    });
+    weightRangeEl.querySelectorAll('[data-rt-w]').forEach(input => {
+      if (document.activeElement === input) return;
+      input.value = formatArtistWeight(Number(randomTools[input.dataset.rtW])) || '0';
+    });
+    // 슬라이더는 리모컨에서만 갈아 끼운다 - 탭(리모컨 없음)에는 이 바가 없으니 늘 슬라이더다.
+    const ranged = randomWeightActive();
+    weightRangeEl.hidden = !ranged;
+    const weight = weightSlider?.closest('.artist-thumb-weight-control');
+    if (weight) weight.hidden = ranged;
+  }
+
+  /** 지금 목록(모드 · 필터 · 이름 검색 · 제외 작가 빼고)에서 한 명. 실패하면 알리고 null. */
+  async function pickRandomArtist() {
+    try {
+      return await postJson('/api/artist-thumb/random-pick', {
+        mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim(),
+      });
+    } catch (error) {
+      showToast?.(error.message || '랜덤 작가를 뽑지 못했습니다.', 'error');
+      return null;
+    }
+  }
+
+  /** 저장값을 아직 못 받았으면(탭을 안 연 채 리모컨부터) 먼저 받는다 - 안 그러면 누른 값이 저장되지 않거나,
+   *  늦게 온 서버 값이 방금 누른 것을 덮는다. */
+  async function ensureRandomToolsLoaded() {
+    if (randomToolsLoaded) return;
+    try { await fetchState(); } catch (_) { /* 상태를 못 받아도 누른 값은 살린다 */ }
+    randomToolsLoaded = true;
+  }
+
+  function bindRandomTools() {
+    // 사람이 목록 조건을 바꿨다(프로그램이 값을 넣을 때는 이 이벤트가 안 온다).
+    const follow = () => { randomPoolFollow = true; };
+    modeEl?.addEventListener('change', follow);
+    filterEl?.addEventListener('change', follow);
+    searchEl?.addEventListener('input', follow);
+    randomToolsEl.addEventListener('change', async event => {
+      const box = event.target.closest('[data-rt-k]');
+      if (!box) return;
+      const key = box.dataset.rtK;
+      const on = box.checked;
+      await ensureRandomToolsLoaded();
+      randomTools[key] = on;
+      // 연결을 켜는 순간 = 지금 보이는 목록에서 뽑는다.
+      if (key === 'main_link' && on) randomTools.pool = currentRandomPool();
+      paintRandomTools();
+      // 켜는 순간 지금 고른 작가의 가중치도 범위에서 뽑아 이름 칸에 보인다.
+      if (key === 'random_weight' && on && selected && !mixOn) {
+        setArtistWeight(drawToolWeight());
+      }
+      scheduleSaveRandomTools();
+    });
+    weightRangeEl.addEventListener('change', async event => {
+      const input = event.target.closest('[data-rt-w]');
+      if (!input) return;
+      const value = Number.parseFloat(input.value);
+      const key = input.dataset.rtW;
+      await ensureRandomToolsLoaded();
+      if (Number.isFinite(value)) {
+        randomTools[key] = Math.max(key === 'weight_step' ? 0.01 : 0, Math.min(5, value));
+      }
+      paintRandomTools();
+      scheduleSaveRandomTools();
+    });
+  }
+
   async function buildQueuedPayload(item, requestId, mode, entry = null) {
     if (mode === 'view') {
       // 조건(글·해상도·설정·시드·캐릭터)은 서버가 보기에서 채운다. 여기서는 작가 표기만 -
@@ -2003,7 +2191,10 @@ export function createArtistThumbController({
         positive: formatArtistPrompt(item.artist),
       });
     }
-    const artistPrompt = String(formatArtistPrompt(item.artist) || '').trim();
+    // 예약할 때 정해 둔 토큰이 있으면 그것(랜덤 가중치). 없고 [랜덤 가중치] 가 켜져 있으면 예약마다 새로 뽑는다.
+    const artistPrompt = String(item.artistPrompt
+      || (randomWeightActive() ? formatArtistToken(item.artist, drawToolWeight(), {withPrefix: true}) : formatArtistPrompt(item.artist))
+      || '').trim();
     if (!artistPrompt) throw new Error(`${item.artist} Artist Prompt가 비어 있습니다.`);
     const randomPrompt = await postJson('/api/artist-thumb/random-prompt', {
       artist_prompt: artistPrompt,
@@ -2689,10 +2880,14 @@ export function createArtistThumbController({
         nodes: [
           {node: positiveEl, tag: 'name'},
           {node: weight, tag: 'weight'},
+          // 만든 노드라 `rctl-<tag>` 가 안 붙는다 - 옷은 제 클래스(`.artist-thumb-wrange`)로 입는다.
+          weightRangeEl,
         ],
       },
       {nodes: [favoriteBtn, banBtn], className: 'rctl-row-split'},
       {nodes: [randomGenerateBtn], className: 'rctl-row-split'},
+      // 하단 바 - S · 조합 창의 바닥 줄과 같은 결(사용자 지정 2026-10-19).
+      {nodes: [randomToolsEl], className: 'rctl-foot'},
     ];
   }
 
@@ -3666,6 +3861,7 @@ export function createArtistThumbController({
   }
 
   function syncRemoteButton() {
+    paintRandomTools();
     if (!remoteBtn) return;
     remoteBtn.classList.toggle('is-on', remoteOnboarded);
     remoteBtn.setAttribute('aria-pressed', remoteOnboarded ? 'true' : 'false');
@@ -3703,6 +3899,8 @@ export function createArtistThumbController({
         return;
       }
       remoteOnboarded = true;
+      // 하단 바가 저장된 토글을 보이게 - 탭을 안 거치고 리모컨부터 열어도.
+      void ensureRandomToolsLoaded().then(paintRandomTools);
       mountPeHeadButtons();
       syncRemoteSelectTitles();
       // 첫 끌기가 모듈 로딩에 먹히지 않게 미리 올린다(카드를 잡는 순간엔 이미 준비돼 있다).
@@ -3726,6 +3924,7 @@ export function createArtistThumbController({
   }
 
   bind();
+  bindRandomTools();
 
   return {
     load,

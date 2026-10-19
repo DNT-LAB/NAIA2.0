@@ -24602,6 +24602,17 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-find-fav:hover { color: rgb(250,199,117); border-color: rgba(250,199,117,0.5); }
 .cq-find-fav.is-on { color: #1a1406; background: rgb(250,199,117); border-color: rgb(250,199,117); }
 .cq-find-fav[hidden] { display: none; }
+/* 줄을 누르면 그 아래 [이 캐릭터를 Favorite로 | 이 캐릭터 숨김](사용자 지시 2026-10-19). */
+.cq-find-acts { display: flex; gap: 4px; padding: 2px 5px 6px 38px; flex: none; }
+.cq-find-act {
+  flex: 1 1 0; min-width: 0; padding: 4px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.16); background: rgba(0,0,0,0.3); color: var(--text-secondary, #cfcde0);
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.cq-find-act:hover:not(:disabled) { color: var(--text-primary); border-color: rgba(124,106,239,0.6); }
+.cq-find-act.is-on { color: rgb(250,199,117); border-color: rgba(250,199,117,0.55); }
+.cq-find-act.is-hide:hover:not(:disabled) { color: #f3b0b0; border-color: rgba(240,140,140,0.6); }
+.cq-find-act:disabled { opacity: 0.55; cursor: progress; }
 .cq-find-list { flex: 1; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 1px; }
 .cq-find-row {
   display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 5px; cursor: pointer; text-align: left;

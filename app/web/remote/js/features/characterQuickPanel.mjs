@@ -1410,6 +1410,9 @@ export function createCharacterQuickPanel({
   let findDexPage = 0;
   // [★] 즐겨찾기만(사용자 지시 2026-10-19) - 임시(기억하지 않는다) · 필터 · 이름 검색과 함께 걸린다 · 랜덤 와일드카드도 같은 결과.
   let findFavOnly = false;
+  // 줄을 누르면 그 아래 [이 캐릭터를 Favorite로 | 이 캐릭터 숨김](사용자 지시 2026-10-19) - 슬롯 추가는 [+ 슬롯] 단추만.
+  let findExpand = '';                  // 펼친 줄 = `그룹\u0000캐릭터`
+  let findActBusy = false;
   let findDexMoreLoading = false;
   let findDexError = '';
   let findPicking = '';            // 사전 상세를 받는 중인 줄(두 번 눌러 두 번 담지 않게)
@@ -1978,6 +1981,7 @@ export function createCharacterQuickPanel({
 
   async function loadFindDex() {
     const seq = ++findDexSeq;
+    findExpand = '';
     findDexLoading = true;
     findDexMoreLoading = false;
     findDexPage = 0;
@@ -2082,7 +2086,13 @@ export function createCharacterQuickPanel({
           + (row.thumbnail_url ? '' : (findGenWaiting(key)
             ? `<span class="cq-find-tag cq-find-gen is-busy" data-cqf-gen-busy="1">생성 중…</span>`
             : `<span class="cq-find-tag cq-find-gen" role="button" data-cqf-gen="1">생성</span>`))
-          + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
+          + `<span class="cq-find-tag" data-cqf-slot="1">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`
+          + (findExpand === key
+            ? `<div class="cq-find-acts" data-cqf-acts="1">`
+              + `<button type="button" class="cq-find-act${row.favorite ? ' is-on' : ''}" data-cqf-act="fav"${findActBusy ? ' disabled' : ''}>`
+              + `${row.favorite ? '★ Favorite 에서 빼기' : '★ 이 캐릭터를 Favorite로'}</button>`
+              + `<button type="button" class="cq-find-act is-hide" data-cqf-act="hide"${findActBusy ? ' disabled' : ''}>이 캐릭터 숨김</button></div>`
+            : '');
       }).join('') + (findDexMoreLoading ? empty('더 불러오는 중…') : '');
     }
     // 같은 내용이면 갈아 끼우지 않는다 - 보관함 목록은 서버 에코마다 다시 그려 보는데(빠른 길 포함), 누르는 도중에
@@ -2173,8 +2183,15 @@ export function createCharacterQuickPanel({
     if (hid) { void unhideFind(hid.dataset.cqfHidGroup || '', hid.dataset.cqfHidChar || ''); return; }
     const lib = event.target.closest('[data-cqf-lib]');
     if (lib) { pickFindLib(Number(lib.dataset.cqfLib), lib.dataset.cqfUuid || ''); return; }
+    const act = event.target.closest('[data-cqf-act]');
+    if (act) { void findRowAction(act.dataset.cqfAct); return; }
     const dex = event.target.closest('[data-cqf-char]');
-    if (dex) void pickFindDex(dex.dataset.cqfGroup || '', dex.dataset.cqfChar || '');
+    if (!dex) return;
+    // 슬롯에 다는 것은 [+ 슬롯] 단추만 - 줄을 누르면 그 아래 Favorite · 숨김 줄을 펴고 접는다(사용자 지시 2026-10-19).
+    if (event.target.closest('[data-cqf-slot]')) { void pickFindDex(dex.dataset.cqfGroup || '', dex.dataset.cqfChar || ''); return; }
+    const key = `${dex.dataset.cqfGroup || ''}\u0000${dex.dataset.cqfChar || ''}`;
+    findExpand = findExpand === key ? '' : key;
+    renderFindList();
   }
 
   // ── Find [생성](사용자 지시 2026-10-19) ─────────────────────────────────────
@@ -2260,6 +2277,45 @@ export function createCharacterQuickPanel({
     // 일반 생성 실패는 어느 요청인지 안 싣는다 - 기다리던 것을 다 풀어 [생성] 을 다시 누를 수 있게(Codex 리뷰).
     if (!requestId && findGenPending.size) {
       for (const id of [...findGenPending.keys()]) clearFindGen(id);
+      renderFindList();
+    }
+  }
+
+  /** 펼친 줄의 [Favorite] · [숨김]. 목록은 다시 받지 않고 그 줄만 고친다(이어 붙인 쪽 · 스크롤 자리 유지). */
+  async function findRowAction(kind) {
+    if (findActBusy || !findExpand) return;
+    const [group, character] = findExpand.split('\u0000');
+    const row = findDexRows.find(item => item.group === group && item.character === character);
+    if (!row) { findExpand = ''; renderFindList(); return; }
+    findActBusy = true;
+    renderFindList();
+    try {
+      const fav = kind === 'fav';
+      const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(fav ? {group, character, favorite: !row.favorite} : {group, character, hidden: true}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '처리하지 못했습니다.');
+      const dropRow = () => {
+        findDexRows = findDexRows.filter(item => item !== row);
+        if (findDexTotal != null) findDexTotal = Math.max(0, findDexTotal - 1);
+        findExpand = '';
+      };
+      if (fav) {
+        row.favorite = !!data.favorite;
+        showToast(row.favorite ? `${character} - 즐겨찾기에 넣었습니다` : `${character} - 즐겨찾기에서 뺐습니다`, 'info');
+        if (findFavOnly && !row.favorite) dropRow();       // [★] 보기에서는 빠진다
+      } else {
+        dropRow();
+        showToast(`${character} - 숨겼습니다. 검색 · 랜덤에서 빠지고 Find [제외] 에서 되돌립니다`, 'info');
+        try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (error) { /* 없으면 그만 */ }
+      }
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      findActBusy = false;
       renderFindList();
     }
   }

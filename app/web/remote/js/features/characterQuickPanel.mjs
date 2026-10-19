@@ -2297,7 +2297,7 @@ export function createCharacterQuickPanel({
             + `<button type="button" class="cq-roll-btn${item.favorite ? ' is-fav' : ''}" data-cq-roll-fav="1"${rollBusy || rollStale ? ' disabled' : ''}>`
             + `${item.favorite ? '★ favorite 됨' : '★ favorite'}</button>`
             + `<button type="button" class="cq-roll-btn${item.hidden ? ' is-hid' : ''}" data-cq-roll-hide="1"${rollBusy || rollStale ? ' disabled' : ''}>`
-            + `${item.hidden ? '숨김 됨 · 되돌리기' : '숨김'}</button>`
+            + `${item.hidden ? '숨김 취소' : '숨김'}</button>`
           : '')
         + `</div>`;
     // [자세히] 를 켜면 셋째 칸 = 태그 줄(읽기 전용 textarea - 사용자가 직접 골라 복사한다).

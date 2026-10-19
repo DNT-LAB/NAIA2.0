@@ -2678,17 +2678,12 @@ export function createCharacterQuickPanel({
     const whereEl = wcSave.back.querySelector('[data-wcs-where]');
     const folder = wcSave.folder;
     let html = `<button type="button" class="cq-wcs-row is-root${folder ? '' : ' is-sel'}" data-wcs-folder="">(최상층)</button>`;
+    // 폴더만 보인다 - 파일(.txt)은 목록에 두지 않는다(사용자 지시 2026-10-19). 같은 이름 검사는 그대로 tree 로 한다.
     for (const item of wcSave.tree) {
-      if (item.type === 'folder') {
-        const open = item.name === folder;
-        html += `<button type="button" class="cq-wcs-row is-folder${open ? ' is-sel' : ''}" data-wcs-folder="${escHtml(item.name)}">`
-          + `${open ? '▾' : '▸'} ${escHtml(item.name)} <span class="cq-wcs-n">(${(item.files || []).length})</span></button>`;
-        if (open) {
-          html += (item.files || []).map(file => `<div class="cq-wcs-row is-file is-in">${escHtml(String(file.path || '').slice(item.name.length + 1))}</div>`).join('');
-        }
-      } else {
-        html += `<div class="cq-wcs-row is-file">${escHtml(item.name)}</div>`;
-      }
+      if (item.type !== 'folder') continue;
+      const sel = item.name === folder;
+      html += `<button type="button" class="cq-wcs-row is-folder${sel ? ' is-sel' : ''}" data-wcs-folder="${escHtml(item.name)}">`
+        + `📁 ${escHtml(item.name)} <span class="cq-wcs-n">(${(item.files || []).length})</span></button>`;
     }
     treeEl.innerHTML = html;
     if (whereEl) whereEl.textContent = folder ? `${folder}/` : '(최상층)';

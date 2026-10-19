@@ -232,6 +232,9 @@ class ArtistThumbnailService:
         self._lock = threading.RLock()
         # generate_options.json 은 읽고-고치고-쓰는 파일이다 - 프리픽스 저장과 랜덤 도구 저장이 겹치면 한쪽이 사라진다.
         self._options_lock = threading.Lock()
+        # 리모컨 하단 바의 세 토글은 **실행하는 동안만** 기억한다(사용자 지시 2026-10-19 - 다시 켜면 꺼진 채로).
+        # 파일에는 늘 꺼짐으로 쓰고, 읽을 때 이 값을 덮는다(예전 판이 켜진 채 저장한 파일도 꺼짐으로 시작한다).
+        self._random_toggles = {key: False for key in self.RANDOM_TOOL_TOGGLES}
         self._download_thread: threading.Thread | None = None
         self._download_cancel = threading.Event()
         self._download_state = {
@@ -561,6 +564,7 @@ class ArtistThumbnailService:
     # ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
     #  [생성 버튼 -> 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 셋 다 다음 실행에도 남는다(사용자 결정).
     #  `pool` 은 리모컨이 보고 있던 목록 조건(모드 · 필터 · 이름 검색)이다 - 창을 닫아도 메인 Random 이 이것으로 뽑는다.
+    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
         "random_weight": False,
@@ -660,15 +664,22 @@ class ArtistThumbnailService:
     def load_options(self, mode: str = "") -> dict:
         path = self._options_path()
         if not path.exists():
-            return self._normalize_options({}, mode)
+            return self._with_runtime_toggles(self._normalize_options({}, mode))
         try:
-            return self._normalize_options(json.loads(path.read_text(encoding="utf-8")), mode)
+            return self._with_runtime_toggles(self._normalize_options(json.loads(path.read_text(encoding="utf-8")), mode))
         except Exception as exc:
             _safe_log(
                 f"🌐 Headless Artist Thumb: options load failed — {exc}",
                 f"[WARN] Headless Artist Thumb: options load failed - {exc}",
             )
-            return self._normalize_options({}, mode)
+            return self._with_runtime_toggles(self._normalize_options({}, mode))
+
+    def _with_runtime_toggles(self, options: dict) -> dict:
+        """세 토글은 파일이 아니라 이번 실행의 값으로(사용자 지시 2026-10-19)."""
+        tools = options.get("random_tools")
+        if isinstance(tools, dict):
+            tools.update(getattr(self, "_random_toggles", {}))
+        return options
 
     def save_options(self, options: dict) -> dict:
         with self._options_lock:
@@ -688,6 +699,8 @@ class ArtistThumbnailService:
             if isinstance(options.get("random_tools"), dict):
                 current["random_tools"] = self._normalize_random_tools(
                     {**current.get("random_tools", {}), **options["random_tools"]})
+                for key in self.RANDOM_TOOL_TOGGLES:
+                    self._random_toggles[key] = bool(current["random_tools"].get(key))
         selected = current["modes"].get(mode, {"prefix": "", "postfix": ""})
         current["version"] = 2
         current["mode"] = mode
@@ -695,7 +708,11 @@ class ArtistThumbnailService:
         current["postfix"] = selected.get("postfix", "")
         path = self._options_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # 파일에는 세 토글을 꺼짐으로 쓴다 - 다시 켜면 꺼진 채 시작한다(돌려주는 값은 이번 실행의 값).
+        on_disk = dict(current)
+        if isinstance(current.get("random_tools"), dict):
+            on_disk["random_tools"] = {**current["random_tools"], **{key: False for key in self.RANDOM_TOOL_TOGGLES}}
+        path.write_text(json.dumps(on_disk, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return current
 
     def _normalize_values(self, values: Any) -> list[str]:

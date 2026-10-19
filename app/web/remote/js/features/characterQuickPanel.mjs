@@ -2114,15 +2114,18 @@ export function createCharacterQuickPanel({
   let rollSlotKey = '';
   let rollImageTimer = 0;
 
+  // 꺼 둔(✗) 랜덤 슬롯은 없는 것으로 친다 - [📌 고정] 으로 꺼졌을 때도 줄을 내린다(사용자 지시 2026-10-19).
+  const liveSession = character => character && character.session_wildcard && !character.muted;
+
   function sessionSlot(state) {
     if (!state || state.virtual || !state.activated) return null;
-    return activeSlots(state).find(({character}) => character && character.session_wildcard) || null;
+    return activeSlots(state).find(({character}) => liveSession(character)) || null;
   }
 
   function sessionSlotOrdinal(state) {
     // 캐릭터 모듈이 꺼져 있으면 랜덤 슬롯도 안 굴린다 - 줄을 내리지 않는다.
     if (!state || state.virtual || !state.activated) return 0;
-    const at = activeSlots(state).findIndex(({character}) => character && character.session_wildcard);
+    const at = activeSlots(state).findIndex(({character}) => liveSession(character));
     return at + 1;
   }
 

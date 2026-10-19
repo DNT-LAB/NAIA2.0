@@ -8,12 +8,24 @@ from pathlib import Path
 _WEIGHT_PATTERN = re.compile(r'^(\d+):(?!:)(.*)')
 _DEFAULT_WEIGHT = 100
 
+# 지금 살아 있는 세션 와일드카드 키(이 프로세스). 캐릭터 설정을 읽을 때 이 밖의 세션 슬롯은 버린다 -
+# 재시작하면 비어 있으므로 파일에 남은 세션 슬롯이 저절로 사라진다(사용자 지시 2026-10-19 · Codex 리뷰).
+LIVE_SESSION_WILDCARDS = set()
+
 class WildcardManager:
     def __init__(self, wildcards_dir=None):
         self.wildcards_dir = str(self._resolve_wildcards_dir(wildcards_dir))
         self.wildcard_dict_tree = {}
         self.instant_wildcard_dict = {}  # 인스턴트 와일드카드 딕셔너리
         self.instant_wildcard_tree = {}  # 인스턴트 와일드카드 트리 구조
+        # 세션 와일드카드(사용자 지시 2026-10-19 - Find [현재 결과 -> 랜덤 와일드카드]). **파일이 없는** 와일드카드다:
+        # 디스크를 다시 읽어도(`activate_wildcards`) 그대로 남고, 그것을 쓰는 슬롯이 사라지면 함께 비운다.
+        # 뽑힌 값은 생성 기록(wildcard_history · rolls)에 남기지 않고 여기에만 둔다(다음 단계 - 나온 캐릭터 고르기).
+        self.session_wildcards = {}
+        self.session_picks = []
+        # 세션 풀의 판 - 풀을 걸거나 비우거나 옵션으로 다시 만들 때마다 오른다. 굴림이 시작할 때의 판과 저장할 때의
+        # 판이 다르면 그 굴림은 옛 풀의 것이라 스냅샷으로 저장하지 않는다(Codex 리뷰 32차).
+        self.session_generation = 0
         self.reload_callbacks = []
         self.activate_wildcards()
 
@@ -166,6 +178,21 @@ class WildcardManager:
         if callback in self.reload_callbacks:
             self.reload_callbacks.remove(callback)
             
+    def set_session_wildcard(self, key, lines):
+        """세션 와일드카드를 **하나만** 둔다(초기판 - 사용자 결정). 앞의 것은 버린다."""
+        entries = [(_DEFAULT_WEIGHT, str(line).strip()) for line in (lines or []) if str(line or '').strip()]
+        self.session_wildcards = {str(key): entries} if key and entries else {}
+        LIVE_SESSION_WILDCARDS.clear()
+        LIVE_SESSION_WILDCARDS.update(self.session_wildcards)
+        self.session_picks = []
+        self.session_generation = getattr(self, 'session_generation', 0) + 1
+
+    def clear_session_wildcard(self):
+        LIVE_SESSION_WILDCARDS.difference_update(self.session_wildcards or ())
+        self.session_wildcards = {}
+        self.session_picks = []
+        self.session_generation = getattr(self, 'session_generation', 0) + 1
+
     def get_wildcard_count(self):
         """
         현재 로드된 와일드카드 개수를 반환합니다.

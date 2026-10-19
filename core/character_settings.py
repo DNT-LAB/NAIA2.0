@@ -351,11 +351,27 @@ def _normalize_character_settings_with_migration(raw: dict | None) -> tuple[dict
                 # 원본과 같으면 소멸시키는 근거다(사용자 결정 2026-09-13: 복원 = 복사).
                 # ⚠️ 여기 안 넣으면 정규화가 조용히 떨어뜨려 사본이 그냥 히스토리가 된다.
                 "origin_uuid": str(frame.get("origin_uuid") or ""),
+                # 세션 와일드카드 슬롯(Find [현재 결과 -> 랜덤 와일드카드] · 사용자 지시 2026-10-19). 파일에 쓰지 않고
+                # (`HeadlessCharacterService.save_settings`), 활성에서 내려오면 히스토리로 가지 않고 사라진다(아래).
+                "session_wildcard": bool(frame.get("session_wildcard")),
             })
     # ⚠️ 500개 잘라내기는 **읽기·쓰기가 함께 지나는 이 자리**에서 한 번만 한다.
     #    호출부마다 걸면 하나가 빠지고, 빠진 경로로 들어온 저장본이 상한을 넘긴다.
     #    자르기는 정렬 **앞**이다 - 자르면서 없어진 프레임의 링크를 그 다음
     #    `_prune_character_links` 가 정리해야 하기 때문이다.
+    # 세션 와일드카드 슬롯은 활성일 때만 산다 - 내려오면(끄기 · 보관) 히스토리에 남기지 않고 버린다(사용자 지시 2026-10-19:
+    # 일회성 캐릭터가 사용자 히스토리에 남지 않게). 제자리 끄기(✘ · is_muted)는 활성 그대로라 남는다.
+    # 와일드카드가 이 프로세스에 없으면(재시작 · 새 세션으로 바뀜) 가리킬 것이 없다 - 파일에 남았어도 버린다(Codex 리뷰:
+    # 파일에서 빼면 생성이 파일을 읽어 세션 슬롯을 못 본다).
+    from core.wildcard_manager import LIVE_SESSION_WILDCARDS
+
+    def _session_alive(frame: dict) -> bool:
+        # 글 **안에** 살아 있는 키가 있는가 - `__키__, smile` 처럼 덧붙여도 산다(Codex 리뷰: 통째 비교면 지워졌다).
+        prompt = str(frame.get("prompt") or "")
+        return frame.get("slot_state") == "active" and any(f"__{key}__" in prompt for key in LIVE_SESSION_WILDCARDS)
+
+    normalized_frames = [frame for frame in normalized_frames
+                         if not frame.get("session_wildcard") or _session_alive(frame)]
     settings["character_frames"] = _prune_character_links(
         # ⚠️ 빈 것 걷기가 **먼저**다. 그래야 500 상한이 빈 껍데기 대신 진짜 내용을
         #    센다 - 빈 것이 자리를 차지해 쓸 만한 것이 밀려나면 안 된다.
@@ -1859,6 +1875,8 @@ def character_params_from_settings(
             return result
 
     # (4) Fresh expansion (not stored here — see docstring).
+    # 세션 풀의 판을 굴리기 **전에** 적는다 - 굴리는 사이 풀이 바뀌면 저장하지 않는다(`store_character_roll_snapshot`).
+    session_generation = getattr(getattr(app_context, "wildcard_manager", None), "session_generation", None)
     processor = _character_wildcard_processor(app_context)
     context = _get_prompt_context(app_context, reuse_current_context=reuse_current_context)
     roll_start = len(context.wildcard_rolls) if isinstance(getattr(context, "wildcard_rolls", None), list) else 0
@@ -1929,6 +1947,7 @@ def character_params_from_settings(
         # ⚠️ 마커가 없는 슬롯은 "전체 공유"라 프롬프트 전체가 담긴다(`_split_connect_region`).
         #    쓰는 쪽이 `has_connect_region()` 으로 걸러야 한다.
         "shares": {slot: pair[0] for slot, pair in expanded_by_uuid.items() if pair[0]},
+        "session_generation": session_generation,
     }
 
 
@@ -1966,13 +1985,38 @@ def _snapshot_store(app_context) -> dict | None:
     return store if isinstance(store, dict) else None
 
 
+# 세션 풀의 판(`WildcardManager.session_generation`)과 굴림 스냅샷을 함께 지키는 잠금 - '판 비교 + 저장' 과 '판 올리기 + 스냅샷
+# 버리기' 가 서로 끼어들지 않게 한다(Codex 리뷰 33차: 비교를 통과한 뒤 옵션이 바뀌고 그다음 저장이 옛 줄을 되살렸다).
+_SESSION_SNAPSHOT_LOCK = threading.RLock()
+
+
+def current_session_generation(app_context) -> int | None:
+    return getattr(getattr(app_context, "wildcard_manager", None), "session_generation", None)
+
+
+def bump_session_generation(app_context, mode: str | None = None) -> None:
+    """세션 풀이 바뀌었다(갈아 끼우기 · 옵션 · 비우기) - 판을 올리고 굴림 스냅샷을 버린다(mode=None 이면 모든 모드). 한 잠금 안에서."""
+    with _SESSION_SNAPSHOT_LOCK:
+        manager = getattr(app_context, "wildcard_manager", None)
+        if manager is not None:
+            manager.session_generation = getattr(manager, "session_generation", 0) + 1
+        clear_character_roll_snapshot(app_context, mode)
+
+
 def read_character_roll_snapshot(app_context, mode: str = "NAI") -> dict | None:
-    """Return the stored SSOT roll snapshot for ``mode`` ({"characters", "uc"}) or None."""
+    """Return the stored SSOT roll snapshot for ``mode`` ({"characters", "uc"}) or None.
+
+    ⚠️ 세션 풀의 판이 다른 스냅샷(옛 풀로 굴린 것)은 없는 것으로 친다 - Generate(재굴림 끔)도 Refresh 의 보존분도 그것을 쓰면
+       옛 줄이 나간다(Codex 리뷰 33차)."""
     store = _snapshot_store(app_context)
     if store is None:
         return None
     snapshot = store.get(_snapshot_mode_key(mode))
     if isinstance(snapshot, dict) and snapshot.get("characters"):
+        rolled_at = snapshot.get("session_generation")
+        now = current_session_generation(app_context)
+        if rolled_at is not None and now is not None and rolled_at != now:
+            return None
         return snapshot
     return None
 
@@ -2007,6 +2051,17 @@ def store_character_roll_snapshot(app_context, params: dict | None, mode: str = 
         return None
     if not (isinstance(params, dict) and params.get("characters")):
         return None
+    with _SESSION_SNAPSHOT_LOCK:
+        return _store_character_roll_snapshot_locked(app_context, params, mode)
+
+
+def _store_character_roll_snapshot_locked(app_context, params: dict, mode: str) -> dict | None:
+    # 굴리는 사이 세션 풀이 바뀌었다(옵션 · 갈아 끼우기) - 이 굴림은 옛 풀의 줄을 든다. 저장하지 않는다(Codex 리뷰 32차).
+    # 비교와 저장은 `_SESSION_SNAPSHOT_LOCK` 안에서 한 번에 - 판 올리기(`bump_session_generation`)가 그 사이에 못 낀다(33차).
+    rolled_at = params.get("session_generation")
+    now = current_session_generation(app_context)
+    if rolled_at is not None and now is not None and rolled_at != now:
+        return None
     store = _snapshot_store(app_context)
     if store is None:
         store = {}
@@ -2024,6 +2079,10 @@ def store_character_roll_snapshot(app_context, params: dict | None, mode: str = 
     shares = params.get("shares")
     if isinstance(shares, dict) and shares:
         snapshot["shares"] = {str(slot): str(text) for slot, text in shares.items() if str(text)}
+    # 이 굴림이 쓴 세션 풀의 판 - 읽을 때 판이 다르면 없는 것으로 친다(`read_character_roll_snapshot`).
+    generation = rolled_at if rolled_at is not None else now
+    if generation is not None:
+        snapshot["session_generation"] = generation
     store[_snapshot_mode_key(mode)] = snapshot
     return snapshot
 
@@ -2265,6 +2324,8 @@ def character_state_from_settings(
             #    되어 정렬이 통째로 무효가 된다 - 방금 내린 것이 맨 아래에 남았다
             #    (Codex NIT 8 · 실측).
             "used_at": _as_used_at(frame.get("used_at")),
+            # 세션 와일드카드 슬롯(Find 랜덤 와일드카드) - 화면이 랜덤 캐릭터 디버그 줄을 붙인다.
+            "session_wildcard": bool(frame.get("session_wildcard")),
         })
 
     # SSOT: the preview reads the stored roll snapshot for this mode — it NEVER

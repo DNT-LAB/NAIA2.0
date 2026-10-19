@@ -1048,7 +1048,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261017-unb
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20260903-dexfav')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261019-hid2')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -2903,7 +2903,7 @@ const automationPanelReady = import('./js/features/automationPanel.mjs?v=2026053
   .catch(error => {
     console.error('Failed to initialize automation panel module', error);
   });
-const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261015-find2')
+const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261019-sk2')
   .then(({createCharacterPanel}) => {
     characterPanel = createCharacterPanel({
       document,
@@ -2921,7 +2921,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261015-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261018-insetvc1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261019-pin2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -5936,6 +5936,8 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     if (message.debug_snapshot) {
       forwardPeDebugSnapshot(message.debug_snapshot, message.prompt_run_id || message.promptRunId || '');
     }
+    // 랜덤 캐릭터 디버그 줄 - Random 이 굴린 캐릭터(마지막으로 뽑힌 것)를 보인다(세션 와일드카드 슬롯이 있을 때만 묻는다).
+    characterQuickPanel?.noteRandom?.();
     // Show new-content dot if drawer is closed
     if (promptDrawerControl) promptDrawerControl.showNewContentDot();
   }

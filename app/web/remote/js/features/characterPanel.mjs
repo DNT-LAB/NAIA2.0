@@ -26,6 +26,7 @@
  */
 // `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 퀵 패널과 한 벌을 나눠 쓴다.
 import {commentTextIsBlank, paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
+import {SESSION_TOKEN, attachSessionKeyGuard} from './sessionKeyGuard.mjs?v=20261019-sk2';
 
 export function createCharacterPanel({
   document,
@@ -1279,7 +1280,7 @@ export function createCharacterPanel({
         <div class="cw-slot-body">
           <!-- 칸을 감싼 상자 안에, 칸 **뒤**에 주석 층을 둔다(promptCommentLayer.mjs · style.css 가 형제 선택자로 칸의 상태를 읽는다 - 템플릿 안 주석에 백틱 금지).
                칠하기는 autoGrow 와 같은 자리에서 한다. -->
-          <div class="pc-cmt-wrap"><textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="prompt"
+          <div class="pc-cmt-wrap"><textarea class="cw-input" data-cw-field="char_prompt_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="prompt"${character.session_wildcard && SESSION_TOKEN.test(character.prompt || '') ? ` data-cw-lock="${escAttr(String(character.prompt).match(SESSION_TOKEN)[0])}"` : ''}
             rows="2" placeholder="캐릭터 프롬프트">${escHtml(character.prompt || '')}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
           <div class="pc-cmt-wrap"><textarea class="cw-input is-uc" data-cw-field="char_uc_${index}" data-cw-uuid="${escAttr(character.slot_uuid || '')}" data-cw-min="uc"
             rows="1" placeholder="캐릭터 네거티브 (UC)">${escHtml(character.uc || '')}</textarea><div class="pc-cmt" aria-hidden="true"></div></div>
@@ -2020,6 +2021,16 @@ export function createCharacterPanel({
   function bindEvents() {
     const root = moduleBody.querySelector('.mod-character-shell');
     if (!root) return;
+    // 랜덤 슬롯의 `__키__` 는 못 고친다(사용자 지시 2026-10-19 · 퀵 패널과 같은 지킴이 - 한쪽만 지키면 서버가 거절한 글이
+    // 이 창에 계속 보인다, Codex 리뷰 12차). 뿌리가 렌더마다 새것이라 여기서 다시 건다.
+    const keyGuard = attachSessionKeyGuard(root, {
+      tokenOf: element => element.dataset.cwLock || '',
+      serverText: element => ((lastState && lastState.characters) || [])
+        .find(character => character && character.slot_uuid === element.dataset.cwUuid)?.prompt || '',
+      onRevert: element => setModuleParam('character', element.dataset.cwField, element.value,
+        {slotUuid: element.dataset.cwUuid || ''}),
+      toast: message => showToastSafe(message),
+    });
 
     root.addEventListener('input', event => {
       const editField = event.target.closest('[data-cw-edit-field]');
@@ -2041,6 +2052,7 @@ export function createCharacterPanel({
       }
       const field = event.target.closest('[data-cw-field]');
       if (field) {
+        if (field.dataset.cwLock && !event.isComposing && keyGuard.check(field)) return;
         autoGrow(field);
         // 그 칸을 그릴 때 적어 둔 uuid 를 함께 보낸다 - 번호가 낡았어도 서버가 그 칸을 찾아간다
         // (.claude/CHARACTER_WORKSPACE_CLAUDE.md 4절).

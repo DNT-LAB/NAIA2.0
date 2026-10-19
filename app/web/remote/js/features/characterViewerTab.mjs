@@ -1332,11 +1332,17 @@ export function createCharacterViewerController({
     resultCloseBtn?.addEventListener('click', closeResultPreview);
   }
 
+  // 캐릭터 퀵 패널에서 숨김을 바꿨다 - 들고 있는 목록은 낡았다. 다음에 열 때 다시 읽는다.
+  // ⚠️ 읽는 중에 바뀌었으면 그 읽기가 끝나도 '읽음' 으로 치지 않는다 - 숨기기 전의 줄을 들고 있다(Codex 리뷰).
+  let hiddenEpoch = 0;
+  window.addEventListener('naia:character-hidden-changed', () => { hiddenEpoch += 1; loaded = false; });
+
   async function load(options = {}) {
     if (loaded && !options.force) {
       applyResultPreviewVisibility();
       return;
     }
+    const epoch = hiddenEpoch;
     try {
       state = await getJson('/api/character-viewer/state');
       applyOptions(state.options || {});
@@ -1347,7 +1353,7 @@ export function createCharacterViewerController({
       }
       await loadGroups();
       await loadPage(currentPage, {anchor: 'top', includeAll: true, resetList: true});
-      loaded = true;
+      loaded = epoch === hiddenEpoch;
     } catch (error) {
       console.error('Character Viewer load failed', error);
       setStatus(error.message || 'Character Viewer load failed', 'error');

@@ -388,7 +388,13 @@ class HeadlessV5SceneService:
         remembered = dict(store.get(mode_key) or {})
         cast: dict[int, str] = {}
         keep: dict[str, dict[str, str]] = {}
+        # 세션 와일드카드 슬롯 - 그리고 그것을 Connect 로 물려받는 슬롯(줄줄이) - 의 뽑힘은 이월하지 않는다. 다음 컷의 일반
+        # 슬롯에 들어가 저장되면 일회성 캐릭터가 남는다(사용자 지시 2026-10-19 · Codex 리뷰). 번호(index)는 그대로 센다.
+        tainted: set[str] = set()
         for index, frame in enumerate(active_character_frames(settings), 1):
+            if frame.get("session_wildcard") or str(frame.get("connect_to") or "") in tainted:
+                tainted.add(str(_frame_uuid(frame) or ""))
+                continue
             raw = str(frame.get("prompt") or "")
             if not has_connect_region(raw):
                 continue

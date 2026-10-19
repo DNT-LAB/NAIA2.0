@@ -242,6 +242,24 @@ def _active_duplicate(frames: Any, prompt: Any, uc: Any) -> tuple[int, dict[str,
     return None
 
 
+_SESSION_TOKEN = re.compile(r"__\d{8}_\d{6}_cw__")
+
+
+def keep_session_prefix(old: str, new: str) -> str:
+    """랜덤 슬롯(세션 와일드카드)의 `__키__` 는 사용자가 못 고친다(사용자 지시 2026-10-19) - 그 밖은 자유롭게 고친다.
+
+    새 글에 키가 **그대로** 있으면 받고(앞 · 뒤에 쓰기 · Connect 로 감싸기 · 통째로 붙여 넣기 모두), 없으면(지움 · 글자 바꿈)
+    그 편집을 받지 않는다(옛 글). 키를 '고쳐 주는' 규칙들은 Connect 구간 · 글자 바꿔치기에서 번번이 엉뚱한 글을 만들었다
+    (Codex 리뷰 8 · 9차) - 고치지 않고 거절한다.
+    """
+    before = str(old or "")
+    after = str(new or "")
+    match = _SESSION_TOKEN.search(before)
+    if not match:
+        return after
+    return after if match.group(0) in after else before
+
+
 class HeadlessCharacterService:
     def __init__(self, context: Any):
         self.context = context
@@ -348,10 +366,85 @@ class HeadlessCharacterService:
             _seed_missing_positions(normalized)
         self._settle_history(mode_key, normalized, demoted)
         self.settings_by_mode()[mode_key] = normalized
+        self._sync_session_wildcard()
         # ⚠️ 파일은 **한 길로만** 쓴다 - 통째로 바꿔 끼우고, 덮기 전에 사본을 남긴다
         #    (`write_character_settings_file`). 여기서 `write_text` 로 직접 쓰면 그 방어선을 건너뛴다.
+        # 세션 와일드카드 슬롯도 그대로 쓴다 - 생성이 이 파일을 읽는다(Codex 리뷰). 재시작하면 와일드카드가 없어
+        # 읽는 순간 정규화가 버린다(`LIVE_SESSION_WILDCARDS`).
         path = self.context._save_path(f"CharacterModule_{mode_key}.json")
         write_character_settings_file(path, mode_key, normalized)
+
+    def _sync_session_wildcard(self) -> None:
+        """세션 와일드카드는 그것을 쓰는 슬롯이 있는 동안만 산다 - 어느 모드에도 세션 슬롯이 없으면 비운다."""
+        manager = getattr(self.context, "wildcard_manager", None)
+        if manager is None or not getattr(manager, "session_wildcards", None):
+            return
+        # 지금 키를 가리키는 활성 세션 슬롯이 있는가 - 다른 모드에 남은 옛 키의 슬롯은 세지 않는다(Codex 리뷰).
+        live = [f"__{key}__" for key in manager.session_wildcards]
+        alive = any(isinstance(frame, dict) and frame.get("session_wildcard")
+                    and str(frame.get("slot_state") or "") == "active"
+                    and any(token in str(frame.get("prompt") or "") for token in live)
+                    for settings in self.settings_by_mode().values() if isinstance(settings, dict)
+                    for frame in settings.get("character_frames") or [])
+        if not alive and hasattr(manager, "clear_session_wildcard"):
+            manager.clear_session_wildcard()
+
+    def set_session_wildcard_slot(self, wildcard: str, label: str, lines: list[str],
+                                  expected_mode: str | None = None) -> tuple[dict[str, Any] | None, bool]:
+        """세션 와일드카드를 걸고 그 슬롯을 (바꿔) 넣는다. (상태, 넣었나) - 활성 슬롯이 꽉 찼으면 못 넣고 와일드카드도 푼다.
+
+        ⚠️ 와일드카드 등록과 슬롯 넣기를 **한 잠금 안에서** 한다 - 사이에 다른 저장이 끼면 그 저장의 수명 확인이
+           '슬롯 없음' 으로 방금 건 와일드카드를 지웠다(Codex 리뷰).
+        """
+        from core.wildcard_runtime import ensure_wildcard_manager
+
+        from core.character_settings import clear_character_roll_snapshot
+
+        with self._commit_lock:
+            # 모드는 **한 번만** 읽는다 - 그 모드의 설정에 넣고 그 모드로 저장한다. `_set_param_locked` 는 모드와 설정을 따로
+            # 읽어, 사이에 모드를 바꾸면 다른 모드의 목록을 이 모드 파일에 쓸 수 있었다(Codex 리뷰).
+            mode = self.context.get_api_mode()
+            # 줄은 요청한 모드의 꼴로 만들어졌다(NAI `0.5::작품 ::` · SD `(작품:0.5)`) - 그사이 모드가 바뀌었으면 넣지 않는다
+            # (상태 None = 모드가 바뀜 · Codex 리뷰 29차).
+            if expected_mode is not None and str(mode) != str(expected_mode):
+                return None, False
+            settings = self.settings_for(mode)
+            frames = settings.setdefault("character_frames", [])
+            manager = ensure_wildcard_manager(self.context)
+            manager.set_session_wildcard(wildcard, lines)
+            # 세션 슬롯은 **하나만**(초기판) - 앞의 것은 히스토리로 보내지 않고 뺀다.
+            frames[:] = [frame for frame in frames
+                         if not (isinstance(frame, dict) and frame.get("session_wildcard"))]
+            if _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
+                frames.append({
+                    "prompt": f"__{wildcard}__",
+                    "uc": "",
+                    "is_enabled": True,
+                    "is_muted": False,
+                    "slot_state": "active",
+                    "custom_name": str(label or "랜덤 와일드카드"),
+                    "session_wildcard": True,
+                })
+            # 다른 슬롯 넣기와 같이, 이번 회의 조건부 캐릭터(프롬프트 맥락의 override)를 버린다 - 안 버리면 생성이 새 슬롯보다
+            # 그것을 먼저 쓴다(Codex 리뷰).
+            prompt_context = getattr(self.context, "current_prompt_context", None)
+            metadata = getattr(prompt_context, "metadata", None)
+            if isinstance(metadata, dict):
+                metadata.pop("conditional_character_overrides", None)
+                metadata.pop("_conditional_character_slots", None)
+                metadata.pop("conditional_character_skips", None)
+            self.save_settings(mode, settings)
+            # 모든 모드의 스냅샷을 버리고 판을 올린다 - 다른 모드에 남은 옛 랜덤 슬롯의 굴린 값이 그 모드의 Generate 에 실렸고
+            # (Codex 리뷰 30차), 그 전에 시작한 굴림이 저장되면 옛 풀의 줄이 되살아났다(32 · 33차).
+            from core.character_settings import bump_session_generation
+
+            bump_session_generation(self.context)
+            made = any(isinstance(frame, dict) and frame.get("session_wildcard")
+                       and str(frame.get("prompt") or "").strip() == f"__{wildcard}__"
+                       for frame in self.settings_for(mode).get("character_frames") or [])
+            if not made:
+                manager.clear_session_wildcard()
+            return self.state(), made
 
     @staticmethod
     def _connected_children(frames: list[dict[str, Any]], source: dict[str, Any]) -> list[dict[str, Any]]:
@@ -692,6 +785,67 @@ class HeadlessCharacterService:
                     return self.state()     # 그 칸이 더는 없다 - 지금 상태를 돌려줘 화면이 다시 그리게 한다
             return self._set_param_locked(key, value)
 
+    def pin_session_character(self, prompt: str, custom_name: str,
+                              expected_mode: str | None = None) -> tuple[dict[str, Any] | None, bool]:
+        """[📌 고정](사용자 결정 2026-10-19) - 그 캐릭터 줄을 켠 슬롯으로 두고 랜덤 슬롯을 끈다. (상태, 넣었나).
+
+        ⚠️ **한 잠금 · 한 모드 · 한 설정** 안에서 직접 고친다(`set_session_wildcard_slot` 과 같다). `_set_param_locked` 를 두 번
+           부르면 그 사이 모드가 바뀌어 다른 모드의 슬롯을 껐다(Codex 리뷰 24차). 넣기가 막히면 끄지 않는다(23차).
+        ⚠️ 같은 글의 슬롯이 이미 있어도 **따로 선 슬롯일 때만** 다시 쓴다 - Connect 자식이면 부모의 글이 앞에 붙고(랜덤 슬롯의
+           자식이면 함께 꺼진다 - 24 · 26차), 📌 로 얼린 슬롯이면 얼린 옛 결과가 나간다(26차). 그때는 새 슬롯을 만든다.
+        """
+        from core.character_settings import _frame_uuid, clear_character_roll_snapshot, read_frozen_character_slots
+
+        with self._commit_lock:
+            mode = self.context.get_api_mode()
+            # 줄은 풀을 만든 모드의 꼴이다 - 그사이 모드가 바뀌었으면 넣지 않는다(상태 None · Codex 리뷰 30차).
+            if expected_mode is not None and str(mode) != str(expected_mode):
+                return None, False
+            settings = self.settings_for(mode)
+            frames = settings.setdefault("character_frames", [])
+            sessions = [frame for frame in frames
+                        if isinstance(frame, dict) and frame.get("session_wildcard") and _state_of(frame) == "active"]
+            # 같은 글의 활성 슬롯 가운데 **따로 서고 얼지 않은** 첫 슬롯을 다시 쓴다 - 첫 중복만 보면 그것이 자식 · 얼린 슬롯일 때
+            # 뒤의 쓸 수 있는 슬롯을 놓쳐 누를 때마다 같은 캐릭터가 늘었다(Codex 리뷰 27차).
+            mark = _set_mark(prompt, "")
+            frozen = read_frozen_character_slots(self.context) or {}
+            reusable = next((frame for frame in frames
+                             if isinstance(frame, dict) and _state_of(frame) == "active" and mark is not None
+                             and _set_mark(frame.get("prompt"), frame.get("uc")) == mark
+                             and not str(frame.get("connect_to") or "").strip()
+                             and str(_frame_uuid(frame) or "") not in frozen), None)
+            if reusable is not None:
+                target = reusable
+            elif _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
+                target = {"prompt": str(prompt or ""), "uc": "", "is_enabled": True, "is_muted": False,
+                          "slot_state": "active", "custom_name": str(custom_name or "")}
+                frames.append(target)
+            else:
+                return self._state_with_notice(
+                    f"활성 캐릭터 슬롯이 꽉 차 고정하지 못했습니다(최대 {MAX_CHARACTER_SLOTS}개)."), False
+            target["is_muted"] = False
+            target["is_enabled"] = True
+            target["from_scene"] = False
+            for frame in sessions:
+                frame["is_muted"] = True
+                frame["is_enabled"] = False
+                # 랜덤 슬롯의 Connect 자식도 함께 끈다(화면의 ✘ 와 같다) - 고정 대상은 자식이 아니다(위).
+                for child in self._connected_children(frames, frame):
+                    if child is not target:
+                        child["is_muted"] = True
+                        child["is_enabled"] = False
+            # 슬롯 넣기와 같이 이번 회의 조건부 캐릭터(프롬프트 맥락의 override)를 버린다 - 안 버리면 생성이 고정한 캐릭터보다
+            # 옛 Random 의 조건부 결과를 먼저 쓴다(Codex 리뷰 25차 · `set_session_wildcard_slot` 과 같은 처리).
+            prompt_context = getattr(self.context, "current_prompt_context", None)
+            metadata = getattr(prompt_context, "metadata", None)
+            if isinstance(metadata, dict):
+                metadata.pop("conditional_character_overrides", None)
+                metadata.pop("_conditional_character_slots", None)
+                metadata.pop("conditional_character_skips", None)
+            self.save_settings(mode, settings)
+            clear_character_roll_snapshot(self.context, mode)
+            return self.state(), True
+
     def _state_with_notice(self, message: str) -> dict[str, Any]:
         """아무것도 고치지 않고 지금 상태를 돌려주되, **명령을 보낸 창에만** 까닭을 알린다
         (`module_commands` 가 `_headless_extra_messages` 를 떼어 그 소켓에만 보낸다 - 상태는 모두에게 간다)."""
@@ -852,7 +1006,8 @@ class HeadlessCharacterService:
             #    조건 없는 삭제(퀵 패널의 − · 히스토리의 ✕ · 옛 화면의 `true`)는 그대로다.
             if str(value or "").strip().lower() == "if_empty" and not _slot_is_untouched(_target):
                 return self.state()
-            if _target is not None and (len(frames) > 1 or _stored):
+            # 세션 와일드카드 슬롯은 마지막 하나여도 뺀다 - 이 세션에만 있는 임시 칸이다(사용자 지시 2026-10-19).
+            if _target is not None and (len(frames) > 1 or _stored or bool(_target.get("session_wildcard"))):
                 # 삭제로 활성이 0이 될 수 있다. 승격시키지 않는다 - 캐릭터 0은
                 # 유효한 상태이고(모듈을 끄거나 Cold 로 비우는 경로가 이미 그렇다)
                 # 사용자가 지우려던 것을 되살리는 쪽이 더 놀랍다.
@@ -862,7 +1017,9 @@ class HeadlessCharacterService:
             index = context._index_from_key(key, "char_prompt_")
             if index is not None:
                 frame = self.ensure_frame(frames, index)
-                frame["prompt"] = str(value or "")
+                # 랜덤 슬롯은 앞머리 `__키__` 를 지킨다 - 고치면 와일드카드가 끊겨 키 글자가 그대로 나간다(사용자 제보 2026-10-19).
+                frame["prompt"] = (keep_session_prefix(frame.get("prompt"), value) if frame.get("session_wildcard")
+                                   else str(value or ""))
                 # ⚠️ 사용자가 손댄 칸은 **더 이상 씬의 것이 아니다.** 이 표식을 안 지우면
                 #    다음 씬을 불러올 때 "이전 씬이 남긴 칸" 으로 보고 통째로 버린다 -
                 #    공들여 고친 내용이 사라진다(Codex 리뷰 CONCERN).

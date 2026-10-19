@@ -57,6 +57,10 @@ COLOR_KEYWORDS = [
 BREAST_TAGS = ("flat chest", "small breasts", "medium breasts",
                "large breasts", "huge breasts", "gigantic breasts")
 BREAST_SET = set(BREAST_TAGS)
+# 안경잡이 기준(사용자 지정 2026-10-19): `glasses` 가 이 비율 이상이면 그 캐릭터의 **기본값**이다 - 특징으로 올린다.
+# `glasses` 는 `clothes_list.txt` 에 있어 의상(key_clothes)으로 분류되고, 병합이 그 필드를 버려 프로필에서 사라졌다
+# (발생: c2-chan - glasses 94.7%).
+DEFAULT_GLASSES_PCT = 50.0
 RATINGS_SQE = {"s", "q", "e"}
 
 
@@ -311,6 +315,12 @@ def main() -> int:
         #    빼는 것은 양쪽 다 해야 한다 - 남성 그림에도 `flat chest` 가 붙는다.
         entry["characteristics"] = [e for e in entry["characteristics"]
                                     if e["tag"] not in BREAST_SET]
+        # 안경이 기본값인 캐릭터 - 의상에서 특징으로 올린다(비율 순서 유지).
+        glasses = next((e for e in entry.get("key_clothes") or [] if e["tag"] == "glasses"), None)
+        if glasses and glasses["pct"] >= DEFAULT_GLASSES_PCT \
+                and not any(e["tag"] == "glasses" for e in entry["characteristics"]):
+            entry["characteristics"] = sorted(entry["characteristics"] + [dict(glasses)],
+                                              key=lambda e: -e["pct"])
         rated = rated_rows.get(name, 0)
         if rated:
             dist = [{"tag": bt, "count": breast[name][bt],

@@ -212,6 +212,20 @@ def build_dict_text(entries: list[tuple[str, int]]) -> str | None:
     return prefix + NEWLINE + "".join(lines) + text[idx:]
 
 
+def load_only(path: Path) -> set[str]:
+    """`--only` 목록 - 이름 목록이거나 `{candidates: [{name: ...}]}`(select_candidates.py 출력)."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    items = data.get("candidates") if isinstance(data, dict) else data
+    names = set()
+    for item in items or []:
+        name = item.get("name") if isinstance(item, dict) else item
+        if str(name or "").strip():
+            names.add(str(name).strip().lower())
+    if not names:
+        raise SystemExit(f"--only 목록이 비었습니다: {path}")
+    return names
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -233,6 +247,10 @@ def main() -> int:
                     help="최신 버킷에 0행인 태그도 사전에 넣는다(옛 동작). "
                          "기본은 제외 - 개명된 옛 표기가 자동완성에 들어가면 "
                          "같은 인물이 둘로 보이고 죽은 태그로 생성하게 된다")
+    ap.add_argument("--only", type=Path, default=None,
+                    help="이 목록의 캐릭터만 다룬다(JSON - 이름 목록, 또는 `{candidates: [{name}]}`). "
+                         "광역 재조사(2026-10-19)의 후보 목록을 준다 - 빌더를 --include-known 으로 "
+                         "돌리면 이미 있는 것까지 나오므로 여기서 좁힌다")
     ap.add_argument("--min-pct-color", type=float, default=MIN_PCT_COLOR,
                     help=f"이 비율을 넘는 색이 하나도 없으면 개체가 아니라고 보아 "
                          f"analysis 에서 제외 (기본 {MIN_PCT_COLOR} - 빌더의 "
@@ -249,6 +267,14 @@ def main() -> int:
     have = flatten_names(analysis)
     profile = json.loads(Path(args.profile).read_text(encoding="utf-8"))
     rows = list(csv.DictReader(Path(args.counts).open(encoding="utf-8-sig")))
+    only: set[str] | None = None
+    if args.only is not None:
+        only = load_only(args.only)
+        before = len(rows)
+        rows = [r for r in rows if r["character"].strip().lower() in only]
+        missing = only - {r["character"].strip().lower() for r in rows}
+        print(f"--only {len(only):,}종 -> 빌드 결과에 있는 것 {len(rows):,}종 (빌드 전체 {before:,}종 · "
+              f"빌드에 없는 후보 {len(missing):,}종 = 필터 통과 행이 --min-rows 미만)")
 
     print(f"배포본 analysis {len(have):,}종 / dict {len(known_tags):,}종")
     print(f"증분 프로필 {sum(len(v) for v in profile.values()):,}종\n")
@@ -341,6 +367,10 @@ def main() -> int:
             continue
         for name, data in members.items():
             key = name.strip().lower()
+            # `--only` 면 그 목록만 - 프로필 파일 전체를 돌기 때문에 여기서도 거른다. 안 거르면 목록 밖 엔트리가
+            # (성별 게이트는 목록만 보므로) 게이트도 없이 들어간다.
+            if only is not None and key not in only:
+                continue
             if key in have:
                 # ⚠️ **이미 있는 엔트리는 손대지 않는 것이 원칙**이다(멱등·안전).
                 #    딱 한 가지 예외: 성별이 틀린 채로 배포돼 있고, 이번 실행이

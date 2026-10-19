@@ -94,6 +94,10 @@ class WildcardProcessor:
             if key.endswith('/' + name) or key.endswith('\\' + name):
                 return key
 
+        # 3. 세션 와일드카드(파일이 없는 와일드카드 - Find [현재 결과 -> 랜덤 와일드카드]). 진짜 파일이 먼저다.
+        if name in (getattr(self.wildcard_manager, 'session_wildcards', None) or {}):
+            return name
+
         return None
 
     def _record_roll(self, context, key, value) -> None:
@@ -422,6 +426,14 @@ class WildcardProcessor:
 
         # entries: [(weight, text), ...] 형식
         entries = self.wildcard_manager.wildcard_dict_tree.get(actual_wildcard_key)
+        is_session = False
+        session_picks = None
+        if not entries:
+            # 목록을 먼저 잡는다 - 그사이 슬롯이 사라져 비우거나 새 세션으로 바뀌면 떨어진 옛 목록에 적힌다(Codex 리뷰).
+            session_picks = getattr(self.wildcard_manager, 'session_picks', None)
+            session = getattr(self.wildcard_manager, 'session_wildcards', None) or {}
+            entries = session.get(actual_wildcard_key)
+            is_session = bool(entries)
         if not entries:
             print(f"경고: 와일드카드 '{actual_wildcard_key}'의 내용이 비어있습니다.")
             return None
@@ -487,6 +499,13 @@ class WildcardProcessor:
             weights = [w for w, _ in entries]
             chosen_line = random.choices([t for _, t in entries], weights=weights, k=1)[0]
 
+        if is_session:
+            # 세션 와일드카드의 뽑힘은 생성 기록(wildcard_history · rolls - 결과 · 히스토리로 간다)에 남기지 않는다
+            # (사용자 지시 2026-10-19: 일회성 캐릭터 · 휘발성 와일드카드의 기록이 남지 않게). 세션 목록에만 둔다.
+            if isinstance(session_picks, list):
+                session_picks.append(chosen_line)
+                del session_picks[:-500]
+            return chosen_line
         context.wildcard_history.setdefault(actual_wildcard_key, []).append(chosen_line)
         self._record_roll(context, actual_wildcard_key, chosen_line)
         return chosen_line

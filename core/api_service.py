@@ -1494,6 +1494,7 @@ class APIService:
                                             "uc": ucs,
                                             "character_ids": character_ids,
                                             "wildcard_rolls": char_params.get("wildcard_rolls"),
+                                            "session_generation": char_params.get("session_generation"),
                                             # ⚠️ 페이로드를 **손으로 조립**하는 자리라, 굴림에
                                             #    새 항목이 생기면 여기도 같이 늘려야 한다.
                                             #    `shares`(슬롯이 아래로 물려주는 전개값)를

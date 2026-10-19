@@ -25,7 +25,9 @@ def capture_character_state(settings: dict[str, Any]) -> dict[str, Any]:
     ⚠️ Connect 는 uuid 를 **번호**로 바꿔 담는다 - 담긴 무리 안의 1-based 자리다(0 = 연결 없음).
        uuid 는 그 설치본 안에서만 뜻이 있어, 파일을 옮기거나 슬롯을 다시 만들면 가리킬 곳이 없다.
     """
-    frames = active_character_frames(settings)
+    # 세션 와일드카드 슬롯은 담지 않는다 - 이 세션에만 있는 임시 칸이다. 담으면 씬 · 스냅샷 파일에 `__키__` 가 일반
+    # 캐릭터로 남아, 불러오면 영구 슬롯 · 히스토리가 된다(사용자 지시 2026-10-19 · Codex 리뷰).
+    frames = [frame for frame in active_character_frames(settings) if not frame.get("session_wildcard")]
     order = {str(_frame_uuid(frame) or ""): index for index, frame in enumerate(frames)}
     characters = []
     for frame in frames:

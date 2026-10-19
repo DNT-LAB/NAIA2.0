@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -23,6 +24,16 @@ class CharacterViewerService:
     )
     TAG_REPLACE = {"loli": "young female"}
     TAG_EXCLUDE = {"mature female"}
+    # 작품명 규칙(사용자 NAI 재현 실험 2026-10-19 · docs/character_pool_survey_2026_10_19/COPYRIGHT_WEIGHT_RULE.md).
+    # 게시물 수 = 엔트리의 `danbooru_posts`(tools/annotate_character_posts.py 가 적는다).
+    ORIGINAL_GROUP = "original"
+    # 이름의 `(blue archive)` 가 BA 특유 화풍을 끌어온다(팬들이 그 작화로 그린다) - 음수로 상쇄한다. BA 만.
+    NEGATIVE_COPYRIGHT = {"blue archive": -1.0}
+    # 붙이는 작품명 = 엔트리 `copyright`(그 캐릭터의 작품 - 그룹이 아니다 · tools/annotate_character_posts.py). 이름 끝 괄호가
+    # 그 작품이면(`work_in_name`) 음수로 - `roll (mega man), -0.7::mega man (series) ::`(사용자 결정 2026-10-19). BA 만 -1(위).
+    # 랜덤 슬롯에서 괄호를 걷으면 +0.5 로 바뀐다.
+    SERIES_TAIL_WEIGHT = -0.7
+    SERIES_BARE_WEIGHT = 0.5
     THUMB_MAX_SIZE = (896, 1152)
 
     def __init__(
@@ -76,6 +87,9 @@ class CharacterViewerService:
         #    것**이다. 저건 지금 쓰는 슬롯의 별표고, 이건 도감 13,497명 중 고른 것이다.
         #    같은 낱말이라 헷갈리기 쉬우니 저장소도 이름도 갈라 둔다.
         self.favorites_path = self.save_dir / "character_viewer_favorites.json"
+        # 숨김(사용자 지시 2026-10-19 - 랜덤 캐릭터 디버그 줄의 [숨김]) - 앞으로 검색(Find · 랜덤 와일드카드 · 캐릭터 탭)에
+        # 나오지 않는다. Find 의 [제외] 목록에서 되돌린다. 즐겨찾기와 같은 꼴 · 같은 자리(사용자 데이터).
+        self.hidden_path = self.save_dir / "character_viewer_hidden.json"
         self._groups: dict[str, Any] | None = None
         self._analysis: dict[str, Any] | None = None
         self._tag_index: dict[str, tuple[str, dict[str, Any]]] | None = None
@@ -86,6 +100,14 @@ class CharacterViewerService:
         self._debut: dict[str, str] | None = None
         self._recent_since: str = ""
         self._favorites: set[str] | None = None
+        self._hidden: set[str] | None = None
+        self._hidden_lock = threading.Lock()     # 겹친 저장이 같은 .tmp 를 두고 다투지 않게(Codex 리뷰)
+        # 특징 검색 색인(`feature_index`) - 낱말 -> {종류, 캐릭터 수} · 캐릭터 -> 그 캐릭터의 낱말 묶음.
+        self._feature_vocab: dict[str, dict[str, Any]] | None = None
+        self._feature_sets: dict[tuple[str, str], frozenset[str]] | None = None
+        # 작품 색인 - 캐릭터마다 든 작품(그룹 · 그 캐릭터의 `copyright` · 웃 갈래 `parent_works`)과 작품별 캐릭터 수.
+        self._work_sets: dict[tuple[str, str], frozenset[str]] | None = None
+        self._work_totals: dict[str, int] | None = None
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -277,7 +299,7 @@ class CharacterViewerService:
             "postfix": data.get("postfix", self.DEFAULT_POSTFIX),
             "cosplay_enabled": bool(data.get("cosplay_enabled", False)),
             "cosplay_name": str(data.get("cosplay_name", "")),
-            "auto_copyright": bool(data.get("auto_copyright", False)),
+            "auto_copyright": bool(data.get("auto_copyright", True)),
             "auto_characteristics": bool(data.get("auto_characteristics", True)),
             "hide_charname": bool(data.get("hide_charname", False)),
             "no_save": bool(data.get("no_save", False)),
@@ -393,6 +415,161 @@ class CharacterViewerService:
             )
         return all(term in display or term in tag_str for term in terms)
 
+    # ── 특징 검색 · 제외(사용자 지시 2026-10-19) ─────────────────────────
+    #
+    # Find 의 [특징 검색] 은 **이 데이터에 있는 낱말만** 고른다(Artist Thumbnail 검색칸과 같은 규칙 - 시스템이
+    # 아는 태그가 아주 제한적이라 먼저 그 안에서 찾게 한다). 낱말 = 캐릭터마다
+    #   · 머리 · 눈 색(`personal_color`)          -> 종류 'color'
+    #   · 특징(`characteristics` - 그 캐릭터 그림의 20% 이상)  -> 'feature'
+    #   · 가장 많은 가슴 크기 하나(`_tag_search_str` 와 같은 잣대) -> 'breast'
+    #   · 작품(그룹 키)                            -> 'work'
+    # 고른 낱말은 **정확히 같을 때만** 맞는다(부분 글자로 맞추면 '-red' 가 red eyes 까지 뺀다).
+
+    FEATURE_KIND_LABELS = {"color": "색", "feature": "특징", "breast": "가슴", "work": "작품"}
+
+    @staticmethod
+    def _norm_feature(value: Any) -> str:
+        return " ".join(str(value or "").replace("_", " ").lower().split())
+
+    def _top_breast(self, data: dict[str, Any]) -> str:
+        dist = (data.get("breast_size", {}) or {}).get("distribution", []) or []
+        if not dist:
+            return ""
+        return self._norm_feature(max(dist, key=lambda entry: entry.get("count", 0)).get("tag"))
+
+    def feature_index(self) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str], frozenset[str]]]:
+        """(낱말 -> {kind, count}, (작품, 이름) -> 낱말 묶음). 한 번 만들어 쥔다(13,497명 · 수십 ms)."""
+        if self._feature_vocab is None or self._feature_sets is None:
+            vocab: dict[str, dict[str, Any]] = {}
+            sets: dict[tuple[str, str], frozenset[str]] = {}
+            for group_key, name, data in self._iter_all_chars():
+                own: set[str] = set()
+                for kind, entries in (("color", data.get("personal_color")), ("feature", data.get("characteristics"))):
+                    for entry in entries or []:
+                        tag = self._norm_feature(entry.get("tag") if isinstance(entry, dict) else "")
+                        if tag:
+                            own.add(tag)
+                            vocab.setdefault(tag, {"kind": kind, "count": 0})
+                breast = self._top_breast(data)
+                if breast:
+                    own.add(breast)
+                    vocab.setdefault(breast, {"kind": "breast", "count": 0})
+                for tag in own:
+                    vocab[tag]["count"] += 1
+                sets[(group_key, name)] = frozenset(own)
+            self._feature_vocab, self._feature_sets = vocab, sets
+        return self._feature_vocab, self._feature_sets
+
+    def _work_index(self) -> tuple[dict[tuple[str, str], frozenset[str]], dict[str, int]]:
+        """(캐릭터 -> 든 작품들, 작품 -> 캐릭터 수). 작품 = 그룹 + 그 캐릭터의 작품(`copyright`) + 웃 갈래(`parent_works` -
+        `virtual youtuber` 처럼 하위 작품들을 묶는 것 · 사용자 지시 2026-10-19). original 은 그룹일 때만."""
+        if self._work_sets is None or self._work_totals is None:
+            sets: dict[tuple[str, str], frozenset[str]] = {}
+            totals: dict[str, int] = {}
+            for group_key, name, data in self._iter_all_chars():
+                works = {self._norm_feature(group_key)}
+                copyright_tag = str(data.get("copyright") or "").strip()
+                if copyright_tag and copyright_tag != self.ORIGINAL_GROUP:
+                    works.add(self._norm_feature(copyright_tag))
+                for parent in data.get("parent_works") or []:
+                    works.add(self._norm_feature(parent))
+                works.discard("")
+                sets[(group_key, name)] = frozenset(works)
+                for work in works:
+                    totals[work] = totals.get(work, 0) + 1
+            self._work_sets, self._work_totals = sets, totals
+        return self._work_sets, self._work_totals
+
+    def _work_counts(self) -> dict[str, int]:
+        return self._work_index()[1]
+
+    def feature_suggest(self, query: str, ordered_tags: list[str] | None = None, limit: int = 20) -> dict[str, Any]:
+        """검색칸 자동완성 - 이 데이터에 있는 낱말(색 · 특징 · 가슴 · 작품)만 낸다.
+
+        ``ordered_tags`` 가 있으면(한글로 친 것을 태그 사전이 바꿔 준 차례) 그 차례대로 이 데이터에 있는 것만 고른다.
+        없으면 친 글자로 찾는다 - 앞이 맞는 것 먼저, 그다음 중간이 맞는 것, 각각 캐릭터 수 많은 순.
+        """
+        vocab, _sets = self.feature_index()
+        works = self._work_counts()
+
+        def row(tag: str) -> dict[str, Any] | None:
+            if tag in vocab:
+                kind, count = vocab[tag]["kind"], vocab[tag]["count"]
+            elif tag in works:
+                kind, count = "work", works[tag]
+            else:
+                return None
+            return {"tag": tag, "kind": kind, "label": self.FEATURE_KIND_LABELS[kind], "count": count}
+
+        limit = max(1, min(50, int(limit or 20)))
+        rows: list[dict[str, Any]] = []
+        if ordered_tags is not None:
+            seen: set[str] = set()
+            for raw in ordered_tags:
+                tag = self._norm_feature(raw)
+                if tag in seen:
+                    continue
+                seen.add(tag)
+                item = row(tag)
+                if item:
+                    rows.append(item)
+                if len(rows) >= limit:
+                    break
+            return {"rows": rows}
+        q = self._norm_feature(query)
+        if not q:
+            return {"rows": []}
+        names = list(vocab) + [key for key in works if key not in vocab]
+        # 낱말 하나가 친 글자로 시작하면 앞줄(`ear` -> animal ears 1,689 가 ear piercing 28 보다 위), 중간이 맞으면 뒷줄.
+        head = [tag for tag in names if any(word.startswith(q) for word in tag.split()) or tag.startswith(q)]
+        head_set = set(head)
+        middle = [tag for tag in names if q in tag and tag not in head_set]
+        for bucket in (head, middle):
+            items = [item for item in (row(tag) for tag in bucket) if item]
+            items.sort(key=lambda item: (-item["count"], item["tag"]))
+            rows.extend(items)
+        return {"rows": rows[:limit]}
+
+    def _feature_filter(self, include: list[str] | None, exclude: list[str] | None):
+        """고른 낱말로 거르는 함수. 낱말이 없으면 None. ``work:`` 로 시작하면 작품이다.
+
+        검색 줄: 특징은 **전부** 가져야 하고(AND), 작품은 그중 **하나**에 속하면 된다(한 캐릭터는 작품 하나).
+        제외 줄: 특징 하나라도 가지면 빼고, 그 작품이면 뺀다.
+        """
+        def split(values: list[str] | None) -> tuple[set[str], set[str]]:
+            tags, works = set(), set()
+            for raw in values or []:
+                text = str(raw or "").strip()
+                if text.lower().startswith("work:"):
+                    work = self._norm_feature(text[5:])
+                    if work:
+                        works.add(work)
+                else:
+                    tag = self._norm_feature(text)
+                    if tag:
+                        tags.add(tag)
+            return tags, works
+
+        inc_tags, inc_works = split(include)
+        exc_tags, exc_works = split(exclude)
+        if not (inc_tags or inc_works or exc_tags or exc_works):
+            return None
+        _vocab, sets = self.feature_index()
+
+        work_sets, _totals = self._work_index()
+
+        def keep(group_key: str, name: str) -> bool:
+            own = sets.get((group_key, name), frozenset())
+            # 한 캐릭터가 여러 작품에 든다(그룹 · 그 캐릭터의 작품 · 웃 갈래) - 그중 하나라도 맞으면 그 작품이다.
+            works = work_sets.get((group_key, name)) or frozenset({self._norm_feature(group_key)})
+            if inc_works and not (works & inc_works):
+                return False
+            if works & exc_works:
+                return False
+            return inc_tags <= own and not (exc_tags & own)
+
+        return keep
+
     # ── 도감 즐겨찾기 ────────────────────────────────────────────────────
     #
     # 키는 썸네일·번들 폴백과 **같은 모양**(`group::name`)이다 - 한 캐릭터를 가리키는
@@ -445,6 +622,56 @@ class CharacterViewerService:
             "favorite": bool(on),
             "favorite_count": len(favorites),
         }
+
+    # ── 숨김 ─────────────────────────────────────────────────────────────
+    # 키 = 즐겨찾기와 같은 `group::name`. 깨진 파일에 죽지 않고 원자적으로 쓰는 것도 즐겨찾기와 같다.
+
+    def hidden(self) -> set[str]:
+        if self._hidden is None:
+            try:
+                raw = self._load_json(self.hidden_path, {})
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+                print(f"[warn] character hidden list unreadable, starting empty: {exc}", flush=True)
+                raw = {}
+            items = raw.get("hidden") if isinstance(raw, dict) else raw
+            self._hidden = ({str(x) for x in items if isinstance(x, str) and x}
+                            if isinstance(items, list) else set())
+        return self._hidden
+
+    def is_hidden(self, group_key: str, name: str) -> bool:
+        return f"{group_key}::{name}" in self.hidden()
+
+    def set_hidden(self, group_key: str, name: str, on: bool) -> dict[str, Any]:
+        """숨김을 켜고 끈다. 없는 캐릭터는 거절한다(즐겨찾기와 같은 까닭)."""
+        self._get_character(group_key, name)          # 없으면 KeyError
+        key = f"{group_key}::{name}"
+        with self._hidden_lock:
+            hidden = set(self.hidden())
+            if on:
+                hidden.add(key)
+            else:
+                hidden.discard(key)
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+            tmp_path = self.hidden_path.with_name(self.hidden_path.name + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as handle:
+                json.dump({"hidden": sorted(hidden)}, handle, ensure_ascii=False, indent=1)
+            tmp_path.replace(self.hidden_path)
+            # 파일이 써진 뒤에야 메모리를 바꾼다 - 쓰다 실패하면 숨김도 없던 일이다.
+            self._hidden = hidden
+        return {"group": group_key, "character": name, "hidden": bool(on), "hidden_count": len(hidden)}
+
+    def hidden_items(self) -> list[dict[str, Any]]:
+        """[제외] 목록 - 사전에서 사라진 키는 건너뛴다(파일에는 남긴다 - 사전이 돌아오면 다시 숨는다)."""
+        items: list[dict[str, Any]] = []
+        for key in sorted(self.hidden()):
+            group_key, _, name = key.partition("::")
+            data = (self.analysis().get(group_key) or {}).get(name)
+            if not isinstance(data, dict):
+                continue
+            items.append({"group": group_key, "character": name,
+                          "danbooru_posts": data.get("danbooru_posts"),
+                          "thumbnail_url": self._thumb_url(group_key, name, size="grid")})
+        return items
 
     def _thumb_key(self, group_key: str, name: str, variant_label: str = "") -> str:
         key = f"{group_key}::{name}"
@@ -552,6 +779,9 @@ class CharacterViewerService:
         include_all: bool = False,
         recent_only: bool = False,
         favorites_only: bool = False,
+        include: list[str] | None = None,
+        exclude: list[str] | None = None,
+        include_hidden: bool = False,
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
@@ -562,6 +792,13 @@ class CharacterViewerService:
                 if isinstance(data, dict)
             ]
         chars = [item for item in chars if self._matches_query(item[1], item[2], query)]
+        # 숨긴 캐릭터는 검색에 나오지 않는다(사용자 지시 2026-10-19) - 되돌리는 곳은 Find 의 [제외] 목록이다.
+        hidden = set() if include_hidden else self.hidden()
+        if hidden:
+            chars = [item for item in chars if f"{item[0]}::{item[1]}" not in hidden]
+        feature_keep = self._feature_filter(include, exclude)
+        if feature_keep is not None:
+            chars = [item for item in chars if feature_keep(item[0], item[1])]
         if recent_only:
             chars = [item for item in chars if self.is_recent(item[1])]
         if favorites_only:
@@ -700,6 +937,7 @@ class CharacterViewerService:
             "group": group_key,
             "character": name,
             "count": int(data.get("total_rows", 0) or 0),
+            "danbooru_posts": data.get("danbooru_posts"),
             "gender": data.get("gender", ""),
             "aliases": data.get("aliases", []) or [],
             "variant": variant_label,
@@ -723,6 +961,50 @@ class CharacterViewerService:
     @staticmethod
     def _escape_sd_tag(tag: str) -> str:
         return str(tag or "").replace("(", r"\(").replace(")", r"\)")
+
+    @classmethod
+    def copyright_weight(cls, posts: int | None) -> float:
+        """게시물 수 -> 작품명 가중치. 1.0 = 그대로. 스냅숏에 없으면(개명 · 4월 이후) 0.5."""
+        if posts is None:
+            return 0.5
+        if posts < 80:          # 40 미만도 그대로(사전에서 빼지는 않는다)
+            return 1.0
+        if posts < 100:
+            return 0.7
+        if posts < 150:
+            return 0.6
+        return 0.5
+
+    def copyright_part(self, group_key: str, name: str, data: dict[str, Any], is_nai: bool = True) -> str:
+        """이름 뒤에 붙일 작품명 조각. 빈 문자열 = 붙이지 않는다.
+
+        · 붙이는 작품명 = 엔트리 `copyright`(없으면 그룹). `original` 은 작품명이 아니다 - 붙이지 않는다(작가는
+          `display_name` 이 이름에 붙인다).
+        · 이름 끝 괄호가 그 작품(`work_in_name`)이면 음수로 - `-0.7::mega man (series) ::` · BA 는 `-1::blue archive ::`.
+        · 그 밖에는(의상 · 작가 괄호만 있는 이름 포함 - `gawr gura (2nd costume)`) 게시물 수 구간의 가중치(`copyright_weight`).
+        """
+        group = str(group_key or "").strip()
+        work = str(data.get("copyright") or group).strip()
+        if not group or group == self.ORIGINAL_GROUP or not work or work == self.ORIGINAL_GROUP:
+            return ""
+        if data.get("work_in_name"):
+            weight = self.NEGATIVE_COPYRIGHT.get(work.lower(), self.SERIES_TAIL_WEIGHT)
+            # 음수 가중치는 NAI 구문에서만 뜻이 있다.
+            return f"{weight:g}::{work} ::" if is_nai else ""
+        posts = data.get("danbooru_posts")
+        weight = self.copyright_weight(int(posts) if isinstance(posts, (int, float)) else None)
+        if weight == 1.0:
+            return work if is_nai else self._escape_sd_tag(work)
+        if is_nai:
+            return f"{weight:g}::{work} ::"
+        return f"({self._escape_sd_tag(work)}:{weight:g})"
+
+    def display_name(self, group_key: str, name: str, data: dict[str, Any]) -> str:
+        """original 캐릭터는 `이름 (작가)` 로 불러야 나온다(usami taiga -> usami taiga (fu-ta))."""
+        artist = str(data.get("artist") or "").strip()
+        if group_key == self.ORIGINAL_GROUP and artist and "(" not in name:
+            return f"{name} ({artist})"
+        return name
 
     def build_prompt(
         self,
@@ -749,7 +1031,7 @@ class CharacterViewerService:
         elif cosplay_mode and cosplay_char:
             char_name = cosplay_char if is_nai else self._escape_sd_tag(cosplay_char)
         else:
-            char_name = name
+            char_name = self.display_name(group_key, name, data) if current.get("auto_copyright") else name
             if variant_label:
                 char_name = f"{char_name} ({variant_label.replace('_', ' ')})"
             if not is_nai:
@@ -802,8 +1084,12 @@ class CharacterViewerService:
             if is_nai:
                 prefix_parts.append("girl")
             prefix_parts.append(char_name)
-            if current.get("auto_copyright") and group_key:
-                prefix_parts.append(group_key if is_nai else self._escape_sd_tag(group_key))
+            # 이름 숨김 · 코스프레에는 붙이지 않는다(이름 자리가 그 캐릭터가 아니다).
+            if (current.get("auto_copyright") and group_key and not current.get("hide_charname")
+                    and not (cosplay_mode and cosplay_char)):
+                part = self.copyright_part(group_key, name, data, is_nai)
+                if part:
+                    prefix_parts.append(part)
         character_prompt = (", ".join(prefix_parts) + ", " if prefix_parts else "") + ", ".join(tags)
         return {
             "character_prompt": character_prompt.strip().strip(","),

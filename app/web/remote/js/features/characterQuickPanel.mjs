@@ -38,6 +38,7 @@ function isNarrowViewport() {
 }
 
 // `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 워크스페이스와 한 벌을 나눠 쓴다.
+import {SESSION_TOKEN, attachSessionKeyGuard} from './sessionKeyGuard.mjs?v=20261019-sk2';
 import {paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
 
 export function createCharacterQuickPanel({
@@ -72,6 +73,7 @@ export function createCharacterQuickPanel({
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
 }) {
   let mount = null;
+  let keyGuard = null;               // 랜덤 슬롯 키 지킴이(`sessionKeyGuard.mjs`)
   let open = false;
   const openSlots = new Set();       // 동시에 여러 개 펼칠 수 있다 - Set 이다
   let pendingAddOpen = null;         // + Add 직전의 활성 슬롯 수(에코를 기다린다)
@@ -533,6 +535,14 @@ export function createCharacterQuickPanel({
       if (!event.target.closest('textarea, select')) event.preventDefault();
     });
     mount.addEventListener('click', onClick);
+    // 랜덤 슬롯 칸의 `__키__` 를 지킨다(공용 - Manage 창도 같은 것을 쓴다). 되돌리면 서버에도 되돌린 글을 보낸다.
+    keyGuard = attachSessionKeyGuard(mount, {
+      tokenOf: element => element.dataset.cqLock || '',
+      serverText: element => ((lastState && lastState.characters) || [])
+        .find(character => character && character.slot_uuid === element.dataset.cqUuid)?.prompt || '',
+      onRevert: element => onModTextEdit('character', element.dataset.cqField, element.value, element.dataset.cqUuid || ''),
+      toast: message => showToast(message, 'info'),
+    });
     mount.addEventListener('input', onInput);
     // POS 버튼 hover 엿보기(사용자 지정). ⚠️ `mouseover`/`mouseout` 을 쓴다 -
     // `mouseenter` 는 버블링이 없어 위임이 안 되는데, 이 버튼은 다시 그릴 때마다 새
@@ -904,12 +914,17 @@ export function createCharacterQuickPanel({
       `<div class="cq-input-wrap">`
       + `<div class="cq-hl" aria-hidden="true"></div>`
       + `<textarea class="cq-input${cls}" data-cq-field="char_${kind}_${index}" data-cq-uuid="${escAttr(character.slot_uuid || '')}" data-cq-min="${kind === 'prompt' ? 'prompt' : 'uc'}"`
+      // 랜덤 슬롯의 앞머리 `__키__` 는 못 고친다(사용자 지시 2026-10-19) - 서버 `keep_session_prefix` 와 같은 규칙으로 바로 되돌린다.
+      + (kind === 'prompt' && character.session_wildcard && SESSION_TOKEN.test(character.prompt || '')
+        ? ` data-cq-lock="${escAttr(String(character.prompt).match(SESSION_TOKEN)[0])}"` : '')
       + ` rows="${MIN_ROWS[kind === 'prompt' ? 'prompt' : 'uc']}" placeholder="${ph}"></textarea>`
       // `#주석` 층은 칸 **뒤**의 형제다 - style.css 가 칸의 상태(`.is-neg` · 초점)를 `~` 로 읽어 색을 고른다.
       + `<div class="pc-cmt" aria-hidden="true"></div></div>`;
     const body = isOpen
       ? field('prompt', '', linked ? '추가할 캐릭터 프롬프트' : '캐릭터 프롬프트')
         + field('uc', ' is-neg', linked ? '추가할 캐릭터 네거티브' : '캐릭터 네거티브')
+        // 랜덤 슬롯 출력 옵션 2줄(사용자 지시 2026-10-19) - 내용은 `paintSessionOptions` 가 채운다.
+        + (character.session_wildcard ? '<div class="cq-sopt" data-cq-sopt="1"></div>' : '')
       : '';
     // ⚠️ title 을 두지 않는다. 앱이 그걸 걷어 자체 툴팁으로 바꾸는데, 이 상자는
     //    좁아서 툴팁이 라벨을 그대로 덮는다(사용자 지적). 화살표가 이미 접힘/펼침을
@@ -1135,7 +1150,10 @@ export function createCharacterQuickPanel({
     const anchor = document.querySelector(BOTTOM_ANCHOR);
     const limit = anchor ? anchor.getBoundingClientRect().top : window.innerHeight;
     const top = grid.getBoundingClientRect().top;
-    grid.style.maxHeight = Math.max(120, Math.round(limit - top - BOTTOM_GAP)) + 'px';
+    // 아래에 랜덤 캐릭터 줄이 붙어 있으면 그만큼 덜 자란다.
+    const roll = mount.querySelector('.cq-roll');
+    const below = roll ? roll.offsetHeight + 6 : 0;
+    grid.style.maxHeight = Math.max(120, Math.round(limit - top - BOTTOM_GAP - below)) + 'px';
   }
 
   /** 최소 줄수는 지키되, 넘치면 한 줄씩 늘어난다(사용자 지정). */
@@ -1163,6 +1181,7 @@ export function createCharacterQuickPanel({
     }
     const element = event.target.closest('[data-cq-field]');
     if (!element) return;
+    if (element.dataset.cqLock && !event.isComposing && keyGuard && keyGuard.check(element)) return;
     autoGrow(element);
     // 강조는 **글자를 칠 때마다** 다시 칠한다. 서명 기반 재렌더는 입력 내용을 일부러
     // 무시하므로(캐럿 튐) 여기서 하지 않으면 구간이 옛 모양에 굳는다.
@@ -1175,6 +1194,20 @@ export function createCharacterQuickPanel({
   function onClick(event) {
     // 활성화 토글은 label/input 이라 클릭이 여기로도 올라온다 - 바깥 토글보다 먼저 본다.
     if (event.target.closest('[data-cq-enable]') || event.target.closest('.cq-enable')) return;
+    if (event.target.closest('[data-cq-roll-fold]')) {
+      rollFold = !rollFold;
+      try { localStorage.setItem(ROLL_FOLD_KEY, rollFold ? '1' : '0'); } catch (error) { /* 기억 못 해도 지금은 접힌다 */ }
+      renderRoll();
+      fitGridHeight();
+      return;
+    }
+    if (event.target.closest('[data-cq-roll-pin]')) { void pinRoll(); return; }
+    const soptKey = event.target.closest('[data-cq-sopt-k]');
+    if (soptKey) { void setSessionOptions(soptKey.dataset.cqSoptK); return; }
+    if (event.target.closest('[data-cq-sopt-paren]')) { void setSessionOptions('paren'); return; }
+    if (event.target.closest('.cq-sopt-chk')) return;          // label 클릭은 input 으로 한 번 더 온다 - input 것만
+    if (event.target.closest('[data-cq-roll-fav]')) { void rollToggle('fav'); return; }
+    if (event.target.closest('[data-cq-roll-hide]')) { void rollToggle('hide'); return; }
     // '생성 때 갱신' - label 을 누르면 click 이 label 과 input 에 두 번 온다. input 것만 본다.
     if (event.target.closest('.cq-reroll')) {
       const box = event.target.closest('[data-cq-reroll]');
@@ -1264,6 +1297,7 @@ export function createCharacterQuickPanel({
     //    이유까지 말해 준다. 여기서 조용히 삼키면 아무 일도 안 일어나 보인다.
     if (event.target.closest('[data-cq-manage]')) { closeFind(); openCharacterModule(); return; }
     if (event.target.closest('[data-cq-find]')) { if (findEl) closeFind(); else openFind(); return; }
+    if (event.target.closest('[data-cq-feat]')) { toggleFeat(); return; }
     if (event.target.closest('[data-cq-add]')) {
       // 지금 활성 슬롯 수를 적어 둔다 - 에코가 이보다 늘면 그게 새 슬롯이다.
       pendingAddOpen = activeSlots(lastState).length;
@@ -1340,6 +1374,8 @@ export function createCharacterQuickPanel({
     const {index} = pendingRefresh;
     pendingRefresh = null;
     requestAnimationFrame(() => showRefreshTip(index, entry));
+    // [Refresh] 도 굴림이다 - 랜덤 슬롯이면 디버그 줄을 마지막으로 뽑힌 캐릭터로(A).
+    if (state && (state.characters || [])[index]?.session_wildcard) noteRandom();
   }
 
   // ── Find(패널 바깥의 빠른 불러오기) ───────────────────────────────────────
@@ -1353,9 +1389,16 @@ export function createCharacterQuickPanel({
   // ⚠️ 목록만 갈아 끼운다. 창 전체를 다시 그리면 검색칸이 새로 생겨 한 글자마다 캐럿을 잃는다.
   const FIND_PER_PAGE = 30;
   let findEl = null;
+  // [특징] 검색 · 제외 판(사용자 지시 2026-10-19) - Find 단추 위에 따로 뜬다. 낱말은 **캐릭터 데이터에 있는 것만**
+  // 고른다(`/api/character-viewer/feature-suggest` - Artist Thumbnail 검색칸과 같은 규칙). 고른 낱말은 판을 닫아도
+  // 남아 [캐릭터 · 작품] 목록에 걸린다(단추에 수가 붙는다). 검색 줄 = 전부(AND · 작품은 그중 하나), 제외 줄 = 하나라도.
+  let featEl = null;
+  const featTerms = {inc: [], exc: []};          // [{tag, kind, label}]
+  const featSugg = {inc: null, exc: null};       // {rows, active, seq, timer}
+  let findDexTotal = null;
   // 처음 여는 갈래 = 히스토리 · 즐겨찾기(사용자 지시 2026-10-17). 탭 차례(사전이 앞)는 그대로 - 기본값만 바꿨다.
   let findTab = 'lib';
-  const findQuery = {dex: '', lib: ''};
+  const findQuery = {dex: '', lib: '', hid: ''};
   let findDexRows = [];
   let findDexSeq = 0;
   let findDexTimer = 0;
@@ -1368,6 +1411,9 @@ export function createCharacterQuickPanel({
   let findHeld = false;
   let findHeldRender = false;
   let findHeldTimer = 0;
+  let hidRows = null;              // Find [제외] - 숨긴 캐릭터(null = 아직 안 읽음)
+  let hidSeq = 0;
+  let hidLoading = false;
 
   function settleFindHeld() {
     clearTimeout(findHeldTimer);
@@ -1380,6 +1426,22 @@ export function createCharacterQuickPanel({
   /** 뗐다 - click 이 먼저 지나가게 0ms 뒤에 푼다. 창 밖에서 뗀 경우(mouseup 이 안 오는 경우)는 1초 뒤에 푼다. */
   function onFindPointerUp() {
     if (findHeld) setTimeout(settleFindHeld, 0);
+  }
+
+  /** [Find] [필터] 줄은 패널 머리줄 옆(위)이 기본이다(사용자 지시 2026-10-19). 좁은 창에서는 Result 오른쪽 위의 알약(Usage 등 -
+   *  같은 층에서 패널보다 위)이 그 자리를 덮는다 - 덮였으면 예전 자리(패널 오른쪽 아래)로 내린다. 패널 층을 올리면 Result 의 다른
+   *  덮개(대기열 · 디버그 오버레이 등)까지 덮게 되어 층은 건드리지 않는다. */
+  function placeFindBar() {
+    const bar = mount?.querySelector('.cq-find-bar');
+    if (!bar) return;
+    bar.classList.remove('is-low');
+    const rect = bar.getBoundingClientRect();
+    if (!rect.width) return;
+    const covered = [rect.left + 4, rect.left + rect.width / 2, rect.right - 4].some(x => {
+      const hit = document.elementFromPoint(x, rect.top + rect.height / 2);
+      return hit && !bar.contains(hit) && !findEl?.contains(hit) && !featEl?.contains(hit);
+    });
+    if (covered) bar.classList.add('is-low');
   }
 
   /** 서버 `_set_mark` 와 같은 잣대 - 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시. 둘 다 비면 ''. */
@@ -1407,7 +1469,267 @@ export function createCharacterQuickPanel({
     return !!(visible && open && !posEditing && state && !state.virtual && !isNarrowViewport());
   }
 
+  function featCount() {
+    return featTerms.inc.length + featTerms.exc.length;
+  }
+
+  /** 서버에 보낼 꼴 - 작품은 `work:<이름>`. */
+  function featParams() {
+    const enc = term => encodeURIComponent(term.kind === 'work' ? `work:${term.tag}` : term.tag);
+    return [...featTerms.inc.map(term => `inc=${enc(term)}`), ...featTerms.exc.map(term => `exc=${enc(term)}`)];
+  }
+
+  function toggleFeat() {
+    if (featEl) { closeFeat(); return; }
+    // 결과는 Find 의 [캐릭터 · 작품] 목록이 보여 준다 - 판과 함께 연다.
+    if (!findEl) openFind();
+    if (findTab !== 'dex') setFindTab('dex');
+    openFeat();
+  }
+
+  function closeFeat() {
+    for (const line of ['inc', 'exc']) clearTimeout(featSugg[line]?.timer);
+    featSugg.inc = featSugg.exc = null;
+    featEl?.remove();
+    featEl = null;
+    mount?.querySelector('[data-cq-feat]')?.classList.remove('is-on');
+    positionFind();
+  }
+
+  function openFeat() {
+    featEl?.remove();
+    featEl = document.createElement('div');
+    featEl.className = 'cq-feat-pop';
+    featEl.setAttribute('role', 'dialog');
+    featEl.setAttribute('aria-label', '필터 - 검색 · 제외');
+    // 후보 목록은 칸 **아래에 떠서** 밑의 줄 · Find 창을 덮는다 - 판 안의 줄로 두면 판이 길어져 창을 끌어내린다
+    // (사용자 제보 2026-10-19). `.cq-feat-field` 가 기준 상자다.
+    const line = (key, label, hint) =>
+      `<div class="cq-feat-field"><div class="cq-feat-line"><span class="cq-feat-lab">${label}</span>`
+      + `<div class="cq-feat-box" data-cqx-box="${key}"><span class="cq-feat-chips" data-cqx-chips="${key}"></span>`
+      + `<input type="text" autocomplete="off" spellcheck="false" data-cqx-in="${key}" placeholder="${hint}"></div></div>`
+      + `<div class="cq-feat-sugg" data-cqx-sugg="${key}" hidden></div></div>`;
+    featEl.innerHTML = line('inc', '검색', '색 · 특징 · 가슴 · 작품')
+      + line('exc', '제외', '뺄 것')
+      + `<div class="cq-feat-foot"><span data-cqx-count></span>`
+      + `<button type="button" data-cqx-clear>비우기</button></div>`;
+    document.body.appendChild(featEl);
+    featEl.addEventListener('input', onFeatInput);
+    featEl.addEventListener('keydown', onFeatKey);
+    featEl.addEventListener('click', onFeatClick);
+    // 후보 줄을 누르는 동안 칸이 초점을 잃어 목록이 닫히지 않게 - 누르기는 click 에서 처리한다.
+    featEl.addEventListener('mousedown', event => { if (event.target.closest('[data-cqx-pick]')) event.preventDefault(); });
+    mount?.querySelector('[data-cq-feat]')?.classList.add('is-on');
+    renderFeat();
+    featEl.querySelector('[data-cqx-in="inc"]')?.focus();
+  }
+
+  function renderFeat() {
+    if (!featEl) return;
+    for (const key of ['inc', 'exc']) {
+      const chips = featEl.querySelector(`[data-cqx-chips="${key}"]`);
+      if (chips) {
+        chips.innerHTML = featTerms[key].map((term, i) =>
+          `<button type="button" class="cq-feat-chip is-${key}" data-cqx-del="${key}:${i}"`
+          + ` aria-label="${escAttr(`${term.tag} 빼기`)}">${term.kind === 'work' ? '<em>작품</em>' : ''}`
+          + `${escHtml(term.tag)}<i aria-hidden="true">×</i></button>`).join('');
+      }
+      paintFeatSugg(key);
+    }
+    const count = featEl.querySelector('[data-cqx-count]');
+    if (count) {
+      count.textContent = !featCount() ? '고른 낱말이 없습니다'
+        : findDexLoading ? '찾는 중…'
+          : findDexTotal === null ? '' : `${Number(findDexTotal).toLocaleString()}명`;
+    }
+    syncFeatButton();
+    positionFeat();
+    positionFind();
+  }
+
+  /** 단추의 수 · 켜짐만 고친다(패널 전체를 다시 그리지 않는다). */
+  function syncFeatButton() {
+    const button = mount?.querySelector('[data-cq-feat]');
+    if (!button) return;
+    const n = featCount();
+    button.classList.toggle('has-terms', !!n);
+    button.classList.toggle('is-on', !!featEl);
+    const label = n ? `필터 · ${n}` : '필터';
+    const text = [...button.childNodes].find(node => node.nodeType === 3);
+    if (text && text.textContent !== label) text.textContent = label;
+  }
+
+  function onFeatInput(event) {
+    const input = event.target.closest('[data-cqx-in]');
+    if (!input) return;
+    scheduleFeatSuggest(input.dataset.cqxIn, input.value);
+  }
+
+  function scheduleFeatSuggest(key, value) {
+    const state = featSugg[key] || (featSugg[key] = {rows: [], active: -1, seq: 0, timer: 0});
+    clearTimeout(state.timer);
+    // 차례는 **칠 때** 올린다(Codex 리뷰) - 타이머가 돌 때 올리면 칸을 비우거나 바꾼 뒤 날아오던 앞 응답이 채택됐다.
+    const mine = ++state.seq;
+    const text = String(value || '').trim();
+    // 한글은 한 글자로도 뜻이 있다(귀 · 뿔) - 영문은 두 글자부터(Artist Thumbnail 과 같다).
+    const hangul = /[가-힣ㄱ-ㅎㅏ-ㅣ]/.test(text);
+    if (!text || (!hangul && text.length < 2)) {
+      state.rows = []; state.active = -1; state.pending = false; state.stale = false; paintFeatSugg(key); return;
+    }
+    // 보이던 후보는 앞 글자의 것이다 - 새 답이 올 때까지 흐리게 두고 고르지 못하게 한다(Codex 리뷰: pink 후보가 뜬 채
+    // blue 로 바꾸고 Enter 를 치면 pink hair 가 들어갔다). 지우면 매 글자마다 목록이 깜박인다.
+    if (state.rows.length && !state.stale) { state.stale = true; paintFeatSugg(key); }
+    state.timer = setTimeout(async () => {
+      state.timer = 0;
+      let rows = [];
+      let pending = false;
+      try {
+        const res = await fetch(`/api/character-viewer/feature-suggest?q=${encodeURIComponent(text)}`);
+        const data = await res.json().catch(() => ({}));
+        rows = Array.isArray(data.rows) ? data.rows : [];
+        pending = !!data.pending;
+      } catch (_) { return; }
+      if (mine !== state.seq || featSugg[key] !== state || !featEl) return;
+      if (pending) {
+        // 태그 사전을 만드는 중(한글) - 알리고 잠시 뒤 같은 글자로 다시 묻는다(그사이 치면 차례가 바뀌어 멈춘다).
+        state.rows = [];
+        state.pending = true;
+        paintFeatSugg(key);
+        state.timer = setTimeout(() => {
+          if (mine === state.seq && featSugg[key] === state && featEl) scheduleFeatSuggest(key, value);
+        }, 1500);
+        return;
+      }
+      state.pending = false;
+      state.stale = false;
+      const chosen = new Set([...featTerms.inc, ...featTerms.exc].map(term => `${term.kind}\u0000${term.tag}`));
+      state.rows = rows.filter(row => !chosen.has(`${row.kind}\u0000${row.tag}`));
+      // 정확히 친 것이 있으면 그것만 미리 고른다(Artist Thumbnail 과 같은 규칙).
+      const typed = text.toLowerCase();
+      state.active = state.rows.findIndex(row => String(row.tag).toLowerCase() === typed);
+      paintFeatSugg(key);
+    }, 160);
+  }
+
+  function paintFeatSugg(key) {
+    const box = featEl?.querySelector(`[data-cqx-sugg="${key}"]`);
+    if (!box) return;
+    const state = featSugg[key];
+    if (state?.pending && !state.rows.length) {
+      box.innerHTML = '<div class="cq-feat-wait">태그 사전 준비 중…</div>';
+      box.hidden = false;
+      positionFind();
+      return;
+    }
+    // 판의 높이가 바뀐다 - Find 창도 다시 앉힌다(positionFind 가 판을 먼저 앉힌다 · Codex 리뷰).
+    if (!state || !state.rows.length) { box.hidden = true; box.innerHTML = ''; positionFind(); return; }
+    box.classList.toggle('is-stale', !!state.stale);
+    box.innerHTML = state.rows.map((row, i) =>
+      `<button type="button" class="cq-feat-row${i === state.active ? ' is-on' : ''}" data-cqx-pick="${key}:${i}">`
+      + `<span>${escHtml(row.tag)}</span><em>${escHtml(row.label || '')}</em>`
+      + `<b>${Number(row.count || 0).toLocaleString()}</b></button>`).join('');
+    box.hidden = false;
+    positionFind();
+    if (state.active >= 0) box.querySelectorAll('[data-cqx-pick]')[state.active]?.scrollIntoView({block: 'nearest'});
+  }
+
+  function pickFeat(key, row) {
+    if (!row || featSugg[key]?.stale) return;          // 낡은 후보는 고르지 않는다
+    const same = term => term.kind === row.kind && term.tag === row.tag;
+    // 다른 줄에 있으면 옮긴다(같은 낱말을 찾으면서 빼는 일은 없다).
+    featTerms.inc = featTerms.inc.filter(term => !same(term));
+    featTerms.exc = featTerms.exc.filter(term => !same(term));
+    featTerms[key].push({tag: row.tag, kind: row.kind, label: row.label});
+    const input = featEl?.querySelector(`[data-cqx-in="${key}"]`);
+    if (input) input.value = '';
+    featSugg[key] = null;
+    applyFeat();
+    input?.focus();
+  }
+
+  /** 낱말이 바뀌었다 - 목록을 다시 받는다(사전 탭으로). */
+  function applyFeat() {
+    findDexTotal = null;
+    if (findEl && findTab !== 'dex') setFindTab('dex');
+    else if (findEl) void loadFindDex();
+    renderFeat();
+  }
+
+  function onFeatKey(event) {
+    const input = event.target.closest('[data-cqx-in]');
+    // 한글 조합을 확정하는 Enter 는 isComposing 이 이미 false 일 수 있다 - keyCode 229 도 IME 의 것이다(Codex 리뷰).
+    if (!input || event.isComposing || event.keyCode === 229) return;
+    const key = input.dataset.cqxIn;
+    const state = featSugg[key];
+    const n = state ? state.rows.length : 0;
+    if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && n) {
+      event.preventDefault();
+      // 끝에서 한 번 더 누르면 '아무것도 안 고름' 을 거친다(Artist Thumbnail 과 같다).
+      const next = state.active + (event.key === 'ArrowDown' ? 1 : -1);
+      state.active = next < -1 ? n - 1 : next >= n ? -1 : next;
+      paintFeatSugg(key);
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      // 고른 줄(없으면 맨 위) - 이 데이터에 없는 낱말은 넣지 않는다.
+      if (n) pickFeat(key, state.rows[state.active >= 0 ? state.active : 0]);
+      return;
+    }
+    if (event.key === 'Backspace' && !input.value && featTerms[key].length) {
+      featTerms[key].pop();
+      applyFeat();
+    }
+  }
+
+  function onFeatClick(event) {
+    const pick = event.target.closest('[data-cqx-pick]');
+    if (pick) {
+      const [key, index] = pick.dataset.cqxPick.split(':');
+      pickFeat(key, featSugg[key]?.rows[Number(index)]);
+      return;
+    }
+    const del = event.target.closest('[data-cqx-del]');
+    if (del) {
+      const [key, index] = del.dataset.cqxDel.split(':');
+      featTerms[key].splice(Number(index), 1);
+      applyFeat();
+      return;
+    }
+    if (event.target.closest('[data-cqx-clear]')) {
+      if (!featCount()) return;
+      featTerms.inc = [];
+      featTerms.exc = [];
+      applyFeat();
+      return;
+    }
+    // 빈 곳을 누르면 그 줄의 칸에 초점.
+    const box = event.target.closest('[data-cqx-box]');
+    if (box) box.querySelector('[data-cqx-in]')?.focus();
+  }
+
+  /** [필터] 판은 단추 줄 **바로 아래**에 뜬다 - 단추 줄이 패널 머리줄 옆(위)으로 올라갔다(사용자 지시 2026-10-19).
+   *  아래에 자리가 없으면 위로. */
+  function positionFeat() {
+    const bar = mount?.querySelector('.cq-find-bar');
+    if (!featEl || !bar) return;
+    const rect = bar.getBoundingClientRect();
+    const margin = 8;
+    const width = featEl.offsetWidth, height = featEl.offsetHeight;
+    const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
+    const below = rect.bottom + 6;
+    const above = rect.top - height - 6;
+    // 줄이 예전 자리(아래 · `is-low`)로 내려가 있으면 예전처럼 위를 먼저 본다.
+    const preferAbove = bar.classList.contains('is-low') && above >= margin;
+    const top = !preferAbove && (below + height <= window.innerHeight - margin || above < margin)
+      ? Math.max(margin, Math.min(below, window.innerHeight - height - margin))
+      : above;
+    featEl.style.left = `${Math.round(left)}px`;
+    featEl.style.top = `${Math.round(top)}px`;
+  }
+
   function closeFind() {
+    closeFeat();
     if (findDismiss) {
       document.removeEventListener('mousedown', findDismiss, true);
       document.removeEventListener('keydown', findDismiss, true);
@@ -1434,9 +1756,13 @@ export function createCharacterQuickPanel({
     findEl.innerHTML =
       `<div class="cq-find-seg">`
       + `<button type="button" data-cqf-tab="dex">캐릭터 · 작품</button>`
-      + `<button type="button" data-cqf-tab="lib">히스토리 · 즐겨찾기</button></div>`
+      + `<button type="button" data-cqf-tab="lib">히스토리 · 즐겨찾기</button>`
+      // [제외] - 숨긴 캐릭터(랜덤 디버그 줄의 [숨김] · 사용자 지시 2026-10-19). 누르면 숨김을 푼다.
+      + `<button type="button" data-cqf-tab="hid">제외</button></div>`
       + `<input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
-      + `<div class="cq-find-list" data-cqf-list="1"></div>`;
+      + `<div class="cq-find-list" data-cqf-list="1"></div>`
+      // [현재 결과 -> 랜덤 와일드카드](사용자 지시 2026-10-19) - [캐릭터 · 작품] 에서만 보인다.
+      + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button>`;
     document.body.appendChild(findEl);
     findEl.addEventListener('click', onFindClick);
     findEl.addEventListener('mousedown', () => {
@@ -1455,7 +1781,26 @@ export function createCharacterQuickPanel({
     positionFind();
     findEl.querySelector('[data-cqf-q]')?.focus();
     findDismiss = event => {
-      if (event.type === 'keydown') { if (event.key === 'Escape') closeFind(); return; }
+      if (event.type === 'keydown') {
+        if (event.key !== 'Escape') return;
+        // 한글 조합을 취소하는 Escape 는 IME 의 것이다 - Find 를 닫지 않는다(Codex 리뷰).
+        if (event.isComposing || event.keyCode === 229) return;
+        // 지금 칸의 후보 목록이 열려 있으면 그것만 닫는다(다른 줄 것을 먼저 닫지 않는다).
+        const line = featEl?.contains(event.target) ? event.target.closest?.('[data-cqx-in]')?.dataset.cqxIn : '';
+        const sugg = line ? featSugg[line] : null;
+        if (sugg && (sugg.rows.length || sugg.pending)) {
+          event.stopPropagation();
+          clearTimeout(sugg.timer);
+          sugg.seq += 1;
+          sugg.rows = [];
+          sugg.pending = false;
+          paintFeatSugg(line);
+          return;
+        }
+        closeFind();
+        return;
+      }
+      if (featEl?.contains(event.target)) return;
       // 창 안 · 패널(Find 단추 포함 - 단추는 스스로 열고 닫는다)은 바깥이 아니다. 패널의 ✔ 를 누르며 여러 명을
       // 담는 동안 창이 닫히면 매번 다시 열어야 한다.
       if (findEl?.contains(event.target) || mount?.contains(event.target)) return;
@@ -1469,33 +1814,46 @@ export function createCharacterQuickPanel({
 
   /** Find 단추 바로 위로 띄운다(단추는 패널 오른쪽 아래 바깥) - 위에 자리가 없으면 화면 안으로 당긴다. */
   function positionFind() {
+    positionFeat();          // 패널이 다시 그려지면 단추 줄이 움직인다 - 판도 따라간다(Find 창 자리는 판을 본다)
     const button = mount?.querySelector('[data-cq-find]');
     if (!findEl || !button) return;
     const rect = button.getBoundingClientRect();
     const margin = 8;
     const width = findEl.offsetWidth, height = findEl.offsetHeight;
     const left = Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin));
-    // 위에 자리가 모자라면 단추 **아래**로 연다 - 위로 당겨 붙이면 창이 Find 단추를 덮어 닫을 길이 가려진다(실측:
-    // 슬롯이 적어 패널이 짧을 때).
+    // 단추 줄이 위(머리줄 옆)에 있다 - **아래로** 연다(사용자 지시 2026-10-19). 아래에 자리가 없을 때만 위로.
     const above = rect.top - height - 6;
-    const top = above >= margin
-      ? above
-      : Math.max(margin, Math.min(rect.bottom + 6, window.innerHeight - height - margin));
+    const low = !!mount?.querySelector('.cq-find-bar.is-low');
+    let top = !(low && above >= margin) && (rect.bottom + 6 + height <= window.innerHeight - margin || above < margin)
+      ? Math.max(margin, Math.min(rect.bottom + 6, window.innerHeight - height - margin))
+      : above;
+    if (featEl) {
+      // [특징] 판이 단추 위(또는 아래)를 쓴다 - Find 창은 판과 단추를 피해 아래로, 자리가 없으면 위로 쌓는다.
+      const feat = featEl.getBoundingClientRect();
+      const featBelow = feat.top >= rect.bottom;
+      const below = (featBelow ? feat.bottom : rect.bottom) + 6;
+      const aboveAll = Math.min(feat.top, rect.top) - height - 6;
+      if (below + height <= window.innerHeight - margin) top = below;
+      else if (aboveAll >= margin) top = aboveAll;
+      else top = Math.max(margin, window.innerHeight - height - margin);
+    }
     findEl.style.left = `${Math.round(left)}px`;
     findEl.style.top = `${Math.round(top)}px`;
   }
 
   function setFindTab(tab) {
-    findTab = tab === 'lib' ? 'lib' : 'dex';
+    findTab = tab === 'lib' ? 'lib' : tab === 'hid' ? 'hid' : 'dex';
+    if (findTab !== 'dex' && featEl) closeFeat();      // 낱말은 [캐릭터 · 작품] 에만 걸린다
     if (!findEl) return;
     findEl.querySelectorAll('[data-cqf-tab]').forEach(el =>
       el.classList.toggle('is-on', el.dataset.cqfTab === findTab));
     const input = findEl.querySelector('[data-cqf-q]');
     if (input) {
       input.value = findQuery[findTab];
-      input.placeholder = findTab === 'dex' ? '캐릭터 · 작품 이름' : '이름 · 프롬프트 · 그룹';
+      input.placeholder = findTab === 'dex' ? '캐릭터 · 작품 이름' : findTab === 'hid' ? '숨긴 캐릭터 · 작품' : '이름 · 프롬프트 · 그룹';
     }
     if (findTab === 'dex' && !findDexRows.length && !findDexLoading) void loadFindDex();
+    if (findTab === 'hid') void loadHidden();          // 열 때마다 새로 - 다른 창이 숨겼을 수 있다
     renderFindList();
   }
 
@@ -1514,6 +1872,7 @@ export function createCharacterQuickPanel({
         'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
         'page=0', `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
         'recent_only=false', 'favorites_only=false',
+        ...featParams(),
       ];
       const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
       const data = await res.json().catch(() => ({}));
@@ -1521,6 +1880,7 @@ export function createCharacterQuickPanel({
       if (seq !== findDexSeq) return;
       if (!res.ok) throw new Error(data.error || '캐릭터를 불러오지 못했습니다.');
       findDexRows = Array.isArray(data.items) ? data.items : [];
+      findDexTotal = Number.isFinite(Number(data.total)) ? Number(data.total) : null;
       findDexError = '';
     } catch (error) {
       if (seq !== findDexSeq) return;
@@ -1529,6 +1889,7 @@ export function createCharacterQuickPanel({
     }
     findDexLoading = false;
     renderFindList();
+    renderFeat();
   }
 
   /** 보관함(활성이 아닌 것) - ★ 먼저, 그다음 그룹, 그다음 히스토리(최근 순). 검색은 이름 · 프롬프트 · 그룹. */
@@ -1560,7 +1921,21 @@ export function createCharacterQuickPanel({
     const keepScroll = list.scrollTop;
     let html = '';
     const empty = text => `<div class="cq-find-empty">${escHtml(text)}</div>`;
-    if (findTab === 'lib') {
+    if (findTab === 'hid') {
+      const query = findQuery.hid.trim().toLowerCase();
+      const rows = (hidRows || []).filter(row => !query
+        || `${row.character} ${row.group}`.toLowerCase().includes(query));
+      html = rows.length ? rows.map(row => `<button type="button" class="cq-find-row"`
+          + ` data-cqf-hid-group="${escAttr(row.group)}" data-cqf-hid-char="${escAttr(row.character)}">`
+          + (row.thumbnail_url
+            ? `<img class="cq-find-img" loading="lazy" decoding="async" alt="" src="${escAttr(row.thumbnail_url)}">`
+            : `<span class="cq-find-img is-initial">${escHtml(String(row.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
+          + `<span class="cq-find-text"><b>${escHtml(row.character)}</b>`
+          + `<span>${escHtml(row.group)}${row.danbooru_posts != null ? ` · ${Number(row.danbooru_posts).toLocaleString()}` : ''}</span></span>`
+          + `<span class="cq-find-tag">되돌리기</span></button>`).join('')
+        : empty(hidLoading || hidRows === null ? '불러오는 중…'
+          : query ? '맞는 캐릭터가 없습니다.' : '숨긴 캐릭터가 없습니다. 랜덤 캐릭터 줄의 [숨김] 으로 넣습니다.');
+    } else if (findTab === 'lib') {
       const rows = findLibRows();
       html = rows.length ? rows.map(({character, index}) => {
         const name = String(character.custom_name || '').trim();
@@ -1603,12 +1978,56 @@ export function createCharacterQuickPanel({
       list.innerHTML = html;
       list.scrollTop = keepScroll;
     }
+    renderFindFoot();
     positionFind();
   }
 
+  /** 지금 [캐릭터 · 작품] 결과 전부를 세션 와일드카드 슬롯으로(사용자 지시 2026-10-19). 서버가 같은 조건으로 다시 센다. */
+  let findRwBusy = false;
+  async function makeRandomWildcard() {
+    if (findRwBusy || !findDexTotal) return;
+    findRwBusy = true;
+    renderFindFoot();
+    try {
+      const res = await fetch('/api/character-viewer/session-wildcard', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          query: findQuery.dex.trim(),
+          inc: featTerms.inc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
+          exc: featTerms.exc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '랜덤 와일드카드를 만들지 못했습니다.');
+      showToast(`랜덤 와일드카드 슬롯 · ${Number(data.count).toLocaleString()}명 - 이 세션에만 있고 기록에 남지 않습니다`
+        + (data.reroll_on_generate ? '' : ' (생성 때 재굴림이 꺼져 있으면 Random 마다 바뀝니다)'), 'success');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      findRwBusy = false;
+      renderFindFoot();
+    }
+  }
+
+  function renderFindFoot() {
+    const button = findEl?.querySelector('[data-cqf-rw]');
+    if (!button) return;
+    const show = findTab === 'dex' && !!findDexTotal;
+    button.hidden = !show;
+    if (!show) return;
+    const label = findRwBusy ? '만드는 중…'
+      : `현재 결과 → 랜덤 와일드카드 (${Number(findDexTotal).toLocaleString()}명)`;
+    if (button.textContent !== label) button.textContent = label;
+    button.disabled = findRwBusy;
+  }
+
   function onFindClick(event) {
+    if (event.target.closest('[data-cqf-rw]')) { void makeRandomWildcard(); return; }
     const tab = event.target.closest('[data-cqf-tab]');
     if (tab) { setFindTab(tab.dataset.cqfTab); findEl?.querySelector('[data-cqf-q]')?.focus(); return; }
+    const hid = event.target.closest('[data-cqf-hid-char]');
+    if (hid) { void unhideFind(hid.dataset.cqfHidGroup || '', hid.dataset.cqfHidChar || ''); return; }
     const lib = event.target.closest('[data-cqf-lib]');
     if (lib) { pickFindLib(Number(lib.dataset.cqfLib), lib.dataset.cqfUuid || ''); return; }
     const dex = event.target.closest('[data-cqf-char]');
@@ -1647,7 +2066,7 @@ export function createCharacterQuickPanel({
         headers: {'Content-Type': 'application/json'},
         // 옵션을 못 박는다 - 안 넘기면 Characters 탭에 저장된 값(이름 숨김 등)을 읽는다(Manage 와 같은 까닭).
         body: JSON.stringify({group, character, variant: '',
-                              options: {hide_charname: false, cosplay_enabled: false}}),
+                              options: {hide_charname: false, cosplay_enabled: false, auto_copyright: true}}),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || '상세를 불러오지 못했습니다.');
@@ -1666,6 +2085,417 @@ export function createCharacterQuickPanel({
     }
   }
 
+  // ── 랜덤 캐릭터 디버그 줄(사용자 지시 2026-10-19) ─────────────────────────────────────
+  // 세션 와일드카드 슬롯(Find [현재 결과 -> 랜덤 와일드카드])이 켜져 있는 동안 패널 아래에 붙는다. PE 디버그와 같은 꼴 · 2줄.
+  //   보이는 캐릭터 - Random · 생성이 굴리면 **마지막으로 뽑힌 것**(A), 히스토리 등으로 그림이 바뀌면 **그 그림의 것**(C).
+  //   [★ favorite] = 캐릭터 탭과 같은 도감 즐겨찾기 · [숨김] = 앞으로 검색에 안 나온다(Find [제외] 에서 되돌린다).
+  //   접으면 이름만(접힘은 이 브라우저에 기억한다).
+  const ROLL_FOLD_KEY = 'naia.cq.rollFold';
+  let rollFold = false;
+  try { rollFold = localStorage.getItem(ROLL_FOLD_KEY) === '1'; } catch (error) { /* 못 읽으면 펼친 채로 */ }
+  // 서버가 마지막으로 확인해 준 옵션 {key, options} - 다음 조작의 바탕. 재조회 답이 늦거나 실패해도 옛 옵션으로 덮지 않는다(Codex 리뷰 21차).
+  let soptLast = null;
+  let rollInfo = null;           // 서버 답 {active, count, source, item}
+  let rollSeq = 0;
+  let rollBusy = false;
+  // 그림이 바뀌었거나 Random 이 굴렸는데 아직 답이 없다 - 지금 보이는 캐릭터는 옛 것이라 [★] [숨김] 을 막는다(Codex 리뷰).
+  let rollStale = false;
+  let rollLastAsk = 'last';      // 마지막으로 무엇을 물었나 - 옵션 바꾸는 사이 버린 답을 다시 물을 때 쓴다('last' | 'image')
+  // 지금 줄이 보는 랜덤 슬롯(uuid + `__키__`) - 풀을 새로 만들면 바뀐다. 바뀌면 옛 캐릭터 · 수를 버리고 다시 묻는다(Codex 리뷰).
+  let rollSlotKey = '';
+  let rollImageTimer = 0;
+
+  function sessionSlot(state) {
+    if (!state || state.virtual || !state.activated) return null;
+    return activeSlots(state).find(({character}) => character && character.session_wildcard) || null;
+  }
+
+  function sessionSlotOrdinal(state) {
+    // 캐릭터 모듈이 꺼져 있으면 랜덤 슬롯도 안 굴린다 - 줄을 내리지 않는다.
+    if (!state || state.virtual || !state.activated) return 0;
+    const at = activeSlots(state).findIndex(({character}) => character && character.session_wildcard);
+    return at + 1;
+  }
+
+  /** 서버에 묻는다 - prompts 를 주면 그 그림의 캐릭터에서(C), 안 주면 마지막으로 뽑힌 것(A). ids = 그 그림의 슬롯 id. */
+  async function fetchRoll(prompts, ids = null) {
+    if (!sessionSlotOrdinal(lastState)) { rollInfo = null; renderRoll(); return; }
+    const seq = ++rollSeq;
+    try {
+      const res = await fetch('/api/character-viewer/session-roll', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(Array.isArray(prompts) ? {prompts, ids: Array.isArray(ids) ? ids : []} : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (seq !== rollSeq || !res.ok) return;          // 낡은 답은 버린다
+      rollInfo = data && data.active ? data : null;
+      rollStale = false;
+      // 서버가 지금 말해 준 옵션이 가장 새것이다 - 다른 창에서 바꿨어도 이것을 다음 조작의 바탕으로(Codex 리뷰 22차).
+      if (rollInfo) soptLast = {key: rollInfo.key, options: rollInfo.options || {}};
+    } catch (error) {
+      return;
+    }
+    renderRoll();
+    fitGridHeight();
+  }
+
+  /** 지금 보이는 그림의 메타 주소(PE 디버그와 같은 규칙). 생성 중 중간 그림 · 빈 화면은 null. */
+  function previewMetaUrl() {
+    const preview = document.getElementById('preview');
+    if (!preview || !preview.classList.contains('show') || !preview.getAttribute('src')) return '';
+    const source = preview.dataset.source || '';
+    if (source === 'preview') return '';
+    let path = source === 'saved' ? String(preview.dataset.path || '') : '';
+    if (!path) {
+      try {
+        const url = new URL(preview.getAttribute('src'), location.href);
+        const prefix = '/api/viewer/image/';
+        if (url.pathname.startsWith(prefix)) path = decodeURIComponent(url.pathname.slice(prefix.length));
+      } catch (error) { /* 주소가 아니면 아래로 */ }
+    }
+    if (path) return `/api/viewer/meta?${new URLSearchParams({path, full: '1'}).toString()}`;
+    return source === 'current' ? '/api/result/metadata' : '';
+  }
+
+  /** 그림이 바뀌었다(히스토리를 눌렀거나 결과가 왔다) - 그 그림의 캐릭터 프롬프트로 묻는다. */
+  async function rollFromImage() {
+    rollImageTimer = 0;
+    if (!sessionSlotOrdinal(lastState)) return;
+    const url = previewMetaUrl();
+    if (!url) return;
+    const seq = ++rollSeq;
+    let data = null;
+    try {
+      const res = await fetch(url, {cache: 'no-store'});
+      data = res.ok ? await res.json() : null;
+    } catch (error) {
+      data = null;
+    }
+    if (seq !== rollSeq || !data) return;
+    // 랜덤 슬롯이 그 그림의 몇 번째 캐릭터인가는 **서버가** 가린다 - 그림이 든 슬롯 id 로(없으면 생성과 같은 잣대로 센다).
+    await fetchRoll(characterPromptsOf(data), characterIdsOf(data));
+  }
+
+  /** 메타에서 그 그림의 캐릭터 슬롯 id(`_executed_character_ids` - 슬롯 uuid). 없으면(디스크 PNG) null. */
+  function characterIdsOf(data) {
+    let found = null;
+    const walk = (node, depth) => {
+      if (found || depth > 6 || !node || typeof node !== 'object') return;
+      if (Array.isArray(node._executed_character_ids)) { found = node._executed_character_ids.map(String); return; }
+      for (const value of Object.values(node)) walk(value, depth + 1);
+    };
+    walk(data, 0);
+    return found;
+  }
+
+  /** 메타에서 캐릭터 프롬프트들 - 앱 결과 · 히스토리(`_executed_characters`)와 디스크 PNG(NAI 의 `char_captions`)를 다 본다. */
+  function characterPromptsOf(data) {
+    const found = [];
+    const walk = (node, depth) => {
+      if (found.length || depth > 6 || !node) return;
+      if (typeof node === 'string') {
+        if (node.includes('char_captions') && node.trim().startsWith('{')) {
+          try { walk(JSON.parse(node), depth + 1); } catch (error) { /* JSON 이 아니다 */ }
+        }
+        return;
+      }
+      if (typeof node !== 'object') return;
+      for (const key of ['_executed_characters', 'characters']) {
+        if (Array.isArray(node[key]) && node[key].some(item => typeof item === 'string')) {
+          found.push(...node[key].filter(item => typeof item === 'string'));
+          return;
+        }
+      }
+      if (Array.isArray(node.char_captions)) {
+        found.push(...node.char_captions.map(item => (typeof item === 'string' ? item : item?.char_caption || '')));
+        return;
+      }
+      for (const value of Object.values(node)) walk(value, depth + 1);
+    };
+    walk(data, 0);
+    return found.map(text => String(text || '')).filter(Boolean);
+  }
+
+  function watchPreviewForRoll() {
+    const preview = document.getElementById('preview');
+    if (!preview || preview._cqRollWatch || typeof MutationObserver === 'undefined') return;
+    preview._cqRollWatch = new MutationObserver(records => {
+      if (!records.some(record => record.attributeName === 'src' || record.attributeName === 'data-source')) return;
+      if (preview.dataset.source === 'preview' || !sessionSlotOrdinal(lastState)) return;
+      rollSeq += 1;          // 그림이 바뀌었다 - 지금 날아오는 답(옛 그림 · 옛 Random)은 버린다(Codex 리뷰)
+      rollStale = true;
+      rollLastAsk = 'image';
+      renderRoll();
+      clearTimeout(rollImageTimer);
+      rollImageTimer = setTimeout(() => { void rollFromImage(); }, 150);
+    });
+    preview._cqRollWatch.observe(preview, {attributes: true, attributeFilter: ['src', 'data-source']});
+  }
+
+  function renderRoll() {
+    if (!mount) return;
+    let el = mount.querySelector('.cq-roll');
+    const slot = sessionSlot(lastState);
+    if (!slot) {
+      // 랜덤 슬롯이 정말 없어졌다(지움 · 모듈 끔 · 가상) - 줄도 기억도 버린다.
+      el?.remove();
+      if (rollSlotKey) { rollSlotKey = ''; rollInfo = null; }
+      return;
+    }
+    const ordinal = sessionSlotOrdinal(lastState);
+    if (!visible || posEditing) {
+      // 다른 탭 · POS 편집 동안은 줄만 내린다 - 돌아왔을 때 보던 그림의 캐릭터를 마지막 Random 으로 덮지 않는다(Codex 리뷰).
+      el?.remove();
+      return;
+    }
+    // 풀 = 슬롯 uuid + `__키__`. 글 전체로 보면 뒤에 `, smile` 만 덧붙여도 새 풀로 여겨 보던 그림의 캐릭터를 덮었다(Codex 리뷰).
+    const slotKey = `${slot?.character?.slot_uuid || ''}\u0000${(String(slot?.character?.prompt || '').match(SESSION_TOKEN) || [''])[0]}`;
+    if (slotKey !== rollSlotKey) {
+      // 세션 슬롯이 막 생겼거나(패널이 다시 보이거나) **새 풀로 바뀌었다** - 옛 줄을 버리고 마지막으로 뽑힌 것을 묻는다.
+      rollSlotKey = slotKey;
+      rollInfo = null;
+      watchPreviewForRoll();
+      void fetchRoll(null);
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'cq-roll';
+      const box = mount.querySelector('.cq-box');
+      if (box) box.after(el); else mount.appendChild(el);
+    }
+    const item = rollInfo && rollInfo.item;
+    const posts = item && Number.isFinite(Number(item.danbooru_posts)) && item.danbooru_posts !== null
+      ? `<span class="cq-roll-n">${Number(item.danbooru_posts).toLocaleString()}</span>` : '';
+    const empty = !rollInfo ? '…'
+      : rollInfo.source === 'image' ? '이 그림에는 랜덤 캐릭터가 없습니다'
+        : rollInfo.unresolved ? '어느 캐릭터인지 알 수 없습니다(출력 옵션)' : '아직 뽑히지 않았습니다';
+    const line1 = `<div class="cq-roll-l"><span class="cq-roll-k">C${ordinal}</span>`
+      + (item ? `<b class="cq-roll-name">${escHtml(item.character)}</b>${rollFold ? '' : posts}`
+        + (rollFold ? '' : `<span class="cq-roll-g">${escHtml(item.group)}</span>`)
+        : `<span class="cq-roll-dim">${escHtml(empty)}</span>`)
+      + `<button type="button" class="cq-roll-fold" data-cq-roll-fold="1" aria-label="${rollFold ? '펼치기' : '접기'}">`
+      + `${rollFold ? '▸' : '▾'}</button></div>`;
+    const line2 = rollFold ? ''
+      : `<div class="cq-roll-l"><span class="cq-roll-k">랜덤</span>`
+        + `<span class="cq-roll-dim">${Number(rollInfo && rollInfo.count || 0).toLocaleString()}명</span>`
+        + (item
+          ? `<button type="button" class="cq-roll-btn" data-cq-roll-pin="1"${rollBusy || rollStale || soptBusy || !item.line ? ' disabled' : ''}`
+            + ` title="랜덤 슬롯을 끄고 이 캐릭터를 맨 아래 슬롯에 켭니다">📌 고정</button>`
+            + `<button type="button" class="cq-roll-btn${item.favorite ? ' is-fav' : ''}" data-cq-roll-fav="1"${rollBusy || rollStale ? ' disabled' : ''}>`
+            + `${item.favorite ? '★ favorite 됨' : '★ favorite'}</button>`
+            + `<button type="button" class="cq-roll-btn${item.hidden ? ' is-hid' : ''}" data-cq-roll-hide="1"${rollBusy || rollStale ? ' disabled' : ''}>`
+            + `${item.hidden ? '숨김 됨 · 되돌리기' : '숨김'}</button>`
+          : '')
+        + `</div>`;
+    const html = line1 + line2;
+    if (el._cqHtml !== html) { el._cqHtml = html; el.innerHTML = html; }
+    paintSessionOptions();
+  }
+
+  // ── 랜덤 슬롯 출력 옵션(사용자 지시 2026-10-19 · 결정 = 목업 기본안) ──
+  //   [괄호 제거] 체크 · [작품명 제거] [캐릭터명 제거] 는 함께 켤 수 있다 · [이름+작품만] [이름만] 은 묶음(누르면 나머지를 끈다).
+  //   수명 = 그 슬롯(풀). 서버가 풀을 원래 줄에서 다시 만든다(`/api/character-viewer/session-options`).
+  let soptBusy = false;
+  function paintSessionOptions() {
+    const box = mount && mount.querySelector('[data-cq-sopt]');
+    if (!box) return;
+    const o = (soptLast && rollInfo && soptLast.key === rollInfo.key ? soptLast.options : null)
+      || (rollInfo && rollInfo.options) || {};
+    const preset = o.drop_features ? (o.drop_copyright ? 'no' : 'nc') : '';
+    const locked = soptBusy || !rollInfo || !rollInfo.key;
+    const btn = (key, label, on) => `<button type="button" class="cq-sopt-btn${on ? ' is-on' : ''}" data-cq-sopt-k="${key}"`
+      + `${locked ? ' disabled' : ''}>${label}</button>`;
+    const item = rollInfo && rollInfo.item;
+    const preview = item && item.line ? `예: ${item.line}` : '아직 뽑힌 캐릭터가 없습니다';
+    const html = `<div class="cq-sopt-row">`
+      + `<label class="cq-sopt-chk"><input type="checkbox" data-cq-sopt-paren="1"${o.parens ? ' checked' : ''}`
+      + `${locked ? ' disabled' : ''}><span>괄호 제거</span></label>`
+      + btn('cp', '작품명 제거', !!o.drop_copyright && !o.drop_features)
+      + btn('nm', '캐릭터명 제거', !!o.drop_name)
+      // 둘째 줄 = 묶음 둘 + 지금 나갈 줄 미리보기(남는 자리 · 넘치면 … - 전체는 툴팁). 두 줄에 끝낸다(사용자 지시).
+      + `</div><div class="cq-sopt-row">`
+      + btn('nc', '이름+작품만', preset === 'nc')
+      + btn('no', '이름만', preset === 'no')
+      + `<span class="cq-sopt-pv" title="${escAttr(preview)}">${escHtml(preview)}</span></div>`;
+    if (box._cqHtml !== html) { box._cqHtml = html; box.innerHTML = html; }
+  }
+
+  async function setSessionOptions(key) {
+    // 첫 조회가 오기 전(풀 키를 모른다)에는 못 바꾼다 - 빈 옵션 · 빈 키로 서버 설정을 덮었다(Codex 리뷰 23차).
+    if (soptBusy || !rollInfo || !rollInfo.key) return;
+    const confirmed = soptLast && rollInfo && soptLast.key === rollInfo.key ? soptLast.options : null;
+    const o = {...(confirmed || (rollInfo && rollInfo.options) || {})};
+    if (key === 'paren') o.parens = !o.parens;
+    if (key === 'cp') { o.drop_copyright = !(o.drop_copyright && !o.drop_features); o.drop_features = false; }
+    if (key === 'nm') { o.drop_name = !o.drop_name; o.drop_features = false; }
+    if (key === 'nc') { const on = !(o.drop_features && !o.drop_copyright); o.drop_features = on; o.drop_copyright = false; o.drop_name = false; }
+    if (key === 'no') { const on = !(o.drop_features && o.drop_copyright); o.drop_features = on; o.drop_copyright = on; o.drop_name = false; }
+    const sentInfo = rollInfo;
+    const item = rollInfo && rollInfo.item;
+    soptBusy = true;
+    // 지금 날아오는 조회 답은 옛 옵션의 줄을 든다 - 버린다. 끝날 때까지 [📌 고정] 도 막는다(Codex 리뷰 15차).
+    rollSeq += 1;
+    paintSessionOptions();
+    renderRoll();
+    try {
+      const res = await fetch('/api/character-viewer/session-options', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...o, key: sentInfo?.key || '', group: item?.group || '', character: item?.character || ''}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '옵션을 바꾸지 못했습니다.');
+      soptLast = {key: data.key, options: data.options || o};
+      // 응답이 왔을 때 줄이 다른 풀을 보고 있으면 덮지 않는다(옛 풀 2명이 새 풀 20명을 덮었다 - Codex 리뷰 15차).
+      if (rollInfo && rollInfo === sentInfo && rollInfo.key === data.key) {
+        rollInfo.options = data.options || o;
+        if (Number.isFinite(Number(data.count))) rollInfo.count = Number(data.count);
+        if (rollInfo.item && rollInfo.item === item && data.line) rollInfo.item.line = data.line;
+      }
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      // 옵션이 바뀌면 줄 · 옵션 · 수를 **서버에서 다시 읽는다**(서버가 진실 - 그사이 시작한 조회가 옛 옵션을 들고 와도 덮인다,
+      // Codex 리뷰 16차). 다 읽을 때까지 옵션 단추 · [📌 고정] 은 잠근다(읽기 전 또 누르면 옛 옵션 위에 얹혔다 - 21차).
+      rollStale = true;
+      renderRoll();
+      try {
+        await (rollLastAsk === 'image' && previewMetaUrl() ? rollFromImage() : fetchRoll(null));
+      } finally {
+        soptBusy = false;
+        renderRoll();
+      }
+    }
+  }
+
+  /** [📌 고정](사용자 결정 2026-10-19) - 랜덤 슬롯을 끄고, 보이는 캐릭터를 지금 옵션의 줄로 맨 아래 슬롯에 켠다. 기존 길만 쓴다
+   *  (add_character - 같은 글이 이미 있으면 서버가 그 슬롯을 켠다 · char_muted). */
+  async function pinRoll() {
+    const item = rollInfo && rollInfo.item;
+    if (!item || !item.line || rollBusy || rollStale || soptBusy) return;
+    const dup = duplicateOrdinal(item.line, '');
+    if (!dup && slotsAreFull()) { showToast(`활성 캐릭터 슬롯은 최대 ${lastState.max_slots}개입니다.`, 'info'); return; }
+    // 넣기와 끄기는 서버가 한 잠금 안에서 한다 - 넣기가 막히면 끄지 않는다(Codex 리뷰 23차).
+    rollBusy = true;
+    renderRoll();
+    try {
+      const res = await fetch('/api/character-viewer/session-pin', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({key: rollInfo.key, group: item.group, character: item.character}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '고정하지 못했습니다.');
+      const slot = sessionSlot(lastState);
+      if (slot) openSlots.delete(slot.index);
+      showToast(`${item.character} 을(를) 맨 아래 슬롯에 켜고 랜덤 슬롯을 껐습니다.`, 'info');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      rollBusy = false;
+      renderRoll();
+    }
+  }
+
+  async function rollToggle(kind) {
+    const item = rollInfo && rollInfo.item;
+    if (!item || rollBusy || rollStale) return;
+    const sentInfo = rollInfo;            // 응답이 올 때 줄이 다른 풀 · 다른 캐릭터면 수를 덮지 않는다(Codex 리뷰)
+    rollBusy = true;
+    renderRoll();
+    try {
+      const fav = kind === 'fav';
+      const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(fav
+          ? {group: item.group, character: item.character, favorite: !item.favorite}
+          : {group: item.group, character: item.character, hidden: !item.hidden}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '바꾸지 못했습니다.');
+      if (fav) {
+        item.favorite = !!data.favorite;
+        // 캐릭터 탭이 들고 있는 목록(즐겨찾기 보기 포함)도 낡았다 - 다음에 열 때 다시 읽게 한다(Codex 리뷰).
+        try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (error) { /* 없으면 그만 */ }
+        showToast(item.favorite ? `${item.character} - 즐겨찾기에 넣었습니다` : `${item.character} - 즐겨찾기에서 뺐습니다`, 'info');
+      } else {
+        afterHiddenChanged();
+        item.hidden = !!data.hidden;
+        if (rollInfo === sentInfo && Number.isFinite(Number(data.session_count))) rollInfo.count = Number(data.session_count);
+        showToast(item.hidden ? `${item.character} - 숨겼습니다. 검색 · 랜덤에서 빠지고 Find [제외] 에서 되돌립니다`
+          : `${item.character} - 숨김을 풀었습니다`, 'info');
+        hidRows = null;
+        if (findEl && findTab === 'hid') void loadHidden();
+      }
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      rollBusy = false;
+      renderRoll();
+    }
+  }
+
+  /** 숨김이 바뀌었다 - 들고 있던 검색 목록은 낡았다. Find 사전 목록은 비워(지금 보고 있으면 다시 읽고), 캐릭터 탭에는
+   *  다음에 열 때 다시 읽으라고 알린다(Codex 리뷰). */
+  function afterHiddenChanged() {
+    findDexSeq += 1;
+    findDexLoading = false;
+    findDexRows = [];
+    if (findEl && findTab === 'dex') void loadFindDex();
+    try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (error) { /* 없으면 그만 */ }
+  }
+
+  /** Random 이 굴렸다 - 기다리던 그림 읽기는 접고(그보다 Random 이 나중이다) 마지막으로 뽑힌 것을 보인다(A). */
+  function noteRandom() {
+    clearTimeout(rollImageTimer);
+    rollImageTimer = 0;
+    rollStale = true;
+    rollLastAsk = 'last';
+    renderRoll();
+    void fetchRoll(null);
+  }
+
+  // ── Find [제외] - 숨긴 캐릭터 목록. 줄을 누르면 숨김을 푼다. ──
+  async function loadHidden() {
+    const seq = ++hidSeq;
+    hidLoading = true;
+    renderFindList();
+    try {
+      const res = await fetch('/api/character-viewer/hidden', {cache: 'no-store'});
+      const data = await res.json().catch(() => ({}));
+      if (seq !== hidSeq) return;
+      if (!res.ok) throw new Error(data.error || '제외 목록을 불러오지 못했습니다.');
+      hidRows = Array.isArray(data.items) ? data.items : [];
+    } catch (error) {
+      if (seq !== hidSeq) return;
+      hidRows = [];
+      showToast(error.message || String(error), 'error');
+    }
+    hidLoading = false;
+    renderFindList();
+  }
+
+  async function unhideFind(group, character) {
+    try {
+      const res = await fetch('/api/character-viewer/hidden', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group, character, hidden: false}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '되돌리지 못했습니다.');
+      showToast(`${character} - 다시 검색에 나옵니다`, 'info');
+      afterHiddenChanged();
+      const item = rollInfo && rollInfo.item;
+      if (item && item.group === group && item.character === character) { item.hidden = false; renderRoll(); }
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    }
+    void loadHidden();
+  }
+
   function setVisible(next) {
     visible = !!next;
     // 보이기로 했으면 **다시 그린다.**
@@ -1681,6 +2511,7 @@ export function createCharacterQuickPanel({
     // 패널이 사라지면 편집도 끝난다 - 무대만 남으면 나갈 문이 없다.
     if (!visible && posEditing) setPosEditing(false);
     if (!visible) closeFind();
+    renderRoll();
     syncViewerShift();
   }
 
@@ -1707,7 +2538,7 @@ export function createCharacterQuickPanel({
     ensureMount();
     const nextSignature = signature(current);
     if (!force && nextSignature === lastSignature) {
-      syncValues(current); bindAssist(); fitGridHeight();
+      syncValues(current); bindAssist(); renderRoll(); fitGridHeight();
       // 보관함은 서명에 없다(활성 슬롯 구조만 본다) - 다른 창이 보관함을 고친 상태도 이 길로 온다. Find 의 보관함
       // 목록은 여기서도 고친다(Codex 리뷰 2026-10-15). 내용이 같으면 `renderFindList` 가 갈아 끼우지 않는다.
       if (findEl && findTab === 'lib') renderFindList();
@@ -1810,10 +2641,16 @@ export function createCharacterQuickPanel({
       // [Find] - 패널 **바깥**, Manage 옆(오른쪽 아래 모서리)에 뜬다(사용자 지정 2026-10-15). 상자는 overflow 로
       // 자르므로 상자의 형제로 둔다. 가상(인페인트 세션) · 좁은 화면 · 접힘에는 내지 않는다.
       + (findAvailable(current)
-          ? `<button type="button" class="cq-find${findEl ? ' is-on' : ''}" data-cq-find="1"`
+          ? `<div class="cq-find-bar">`
+            + `<button type="button" class="cq-find${findEl ? ' is-on' : ''}" data-cq-find="1"`
             + ` aria-label="캐릭터 찾기 - 캐릭터 · 작품 · 히스토리 · 즐겨찾기">`
             + `<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.6"/><path d="M10.5 10.5 14 14"/></svg>`
             + `Find</button>`
+            // [필터] - 검색 · 제외 판을 연다(사용자 지시 2026-10-19 · 이름 = 필터). 고른 낱말이 있으면 수를 단다.
+            + `<button type="button" class="cq-find cq-feat-btn${featEl ? ' is-on' : ''}${featCount() ? ' has-terms' : ''}"`
+            + ` data-cq-feat="1" aria-label="필터 - 색 · 특징 · 가슴 · 작품으로 찾고 뺍니다">`
+            + `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11l-4.2 5v4l-2.6 1.2V8.5z"/></svg>`
+            + `필터${featCount() ? ` · ${featCount()}` : ''}</button></div>`
           : '');
     lastSignature = nextSignature;
     // Find 창은 body 에 떠 있다 - 단추가 사라졌으면 닫고, 남았으면 새 상태로 목록(중복 표)을 고치고 다시 붙인다.
@@ -1822,7 +2659,9 @@ export function createCharacterQuickPanel({
     }
     syncValues(current);
     bindAssist();          // 렌더가 칸을 새로 만들었다 - 반드시 다시 건다
+    renderRoll();          // 패널을 통째로 갈아 끼웠다 - 디버그 줄을 다시 붙인다(높이 재기 전에)
     fitGridHeight();
+    placeFindBar();
     // 쥐고 있던 스크롤을 되돌린다. **`syncValues`(칸 높이) 와 `fitGridHeight`(높이 상한)
     // 뒤라야 한다** - 그 둘이 scrollHeight 와 clientHeight 를 정하므로, 먼저 넣으면
     // 브라우저가 아직 짧은 내용에 맞춰 다시 잘라낸다.
@@ -1838,7 +2677,7 @@ export function createCharacterQuickPanel({
   // ⚠️ 무대도 함께 다시 그린다. 띠의 폭은 px 로 넣으므로 창이 좁아져도 스스로
   //    줄지 않는다 - 다시 그려야 칩이 접히고 그만큼 무대가 내려간다(실측).
   // 미는 양은 뷰어 상자에서 나온다 - 창이 바뀌면 그것도 같이 다시 재야 한다.
-  window.addEventListener('resize', () => { fitGridHeight(); syncViewerShift(); renderStage(); positionFind(); });
+  window.addEventListener('resize', () => { fitGridHeight(); syncViewerShift(); renderStage(); placeFindBar(); positionFind(); });
   // ⚠️ resize 만으로는 모자란다. GENERATION INFO 패널은 **창과 무관하게** 높이가
   //    변한다(히스토리 항목을 고르면 내용이 늘어난다) - 그때 경계가 올라오는데
   //    창은 그대로라 resize 가 오지 않는다. 그 요소를 직접 지켜본다.
@@ -1893,5 +2732,6 @@ export function createCharacterQuickPanel({
       .addEventListener?.('change', () => render(null, true));
   }
 
-  return {render, setVisible, isOpen: () => open};
+  // noteRandom - Random 이 굴렸다(그림이 없어도) - 마지막으로 뽑힌 캐릭터를 보인다(A).
+  return {render, setVisible, isOpen: () => open, noteRandom};
 }

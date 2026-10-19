@@ -2306,18 +2306,16 @@ export function createCharacterQuickPanel({
     const locked = soptBusy || !rollInfo || !rollInfo.key;
     const btn = (key, label, on) => `<button type="button" class="cq-sopt-btn${on ? ' is-on' : ''}" data-cq-sopt-k="${key}"`
       + `${locked ? ' disabled' : ''}>${label}</button>`;
-    const item = rollInfo && rollInfo.item;
-    const preview = item && item.line ? `예: ${item.line}` : '아직 뽑힌 캐릭터가 없습니다';
     const html = `<div class="cq-sopt-row">`
       + `<label class="cq-sopt-chk"><input type="checkbox" data-cq-sopt-paren="1"${o.parens ? ' checked' : ''}`
       + `${locked ? ' disabled' : ''}><span>괄호 제거</span></label>`
       + btn('cp', '작품명 제거', !!o.drop_copyright && !o.drop_features)
       + btn('nm', '캐릭터명 제거', !!o.drop_name)
-      // 둘째 줄 = 묶음 둘 + 지금 나갈 줄 미리보기(남는 자리 · 넘치면 … - 전체는 툴팁). 두 줄에 끝낸다(사용자 지시).
+      // 둘째 줄 = 묶음 둘. 나갈 줄 미리보기는 두지 않는다 - 디버그 줄이 결과를 보인다(사용자 지시 2026-10-19).
       + `</div><div class="cq-sopt-row">`
       + btn('nc', '이름+작품만', preset === 'nc')
       + btn('no', '이름만', preset === 'no')
-      + `<span class="cq-sopt-pv" title="${escAttr(preview)}">${escHtml(preview)}</span></div>`;
+      + `</div>`;
     if (box._cqHtml !== html) { box._cqHtml = html; box.innerHTML = html; }
   }
 

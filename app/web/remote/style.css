@@ -24641,7 +24641,6 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-sopt-btn:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.6); }
 .cq-sopt-btn.is-on { color: var(--text-primary); background: rgba(124,106,239,0.28); border-color: rgba(124,106,239,0.7); }
 .cq-sopt-btn:disabled { opacity: 0.5; cursor: default; }
-.cq-sopt-pv { flex: 1; min-width: 0; margin-left: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-dim, #9aa0b2); }
 .cq-find-empty { padding: 10px 6px; font-size: 10.5px; color: var(--text-dim); }
 /* [현재 결과 -> 랜덤 와일드카드] - Find 목록 아래(사용자 지시 2026-10-19). */
 .cq-find-rw {

@@ -1437,9 +1437,15 @@ export function createCharacterQuickPanel({
     bar.classList.remove('is-low');
     const rect = bar.getBoundingClientRect();
     if (!rect.width) return;
-    const covered = [rect.left + 4, rect.left + rect.width / 2, rect.right - 4].some(x => {
-      const hit = document.elementFromPoint(x, rect.top + rect.height / 2);
-      return hit && !bar.contains(hit) && !findEl?.contains(hit) && !featEl?.contains(hit);
+    // 덮는 것은 Result 오른쪽 위의 알약들뿐이다(사용량 · 모바일 통계 - 같은 층에서 패널보다 위). 그 상자와 겹치는지만 본다.
+    // ⚠️ 예전엔 그 자리의 맨 위 요소를 집었다(`elementFromPoint`) - 그리는 순간 잠깐 떠 있던 토스트 · 창이 집히면 단추 줄이
+    //    아래로 내려간 채 다음 렌더까지 남았다(사용자 제보 2026-10-19: Find · 필터가 다시 아래로).
+    const covered = ['naiUsagePill', 'statsIsland'].some(id => {
+      const el = document.getElementById(id);
+      if (!el || el.classList.contains('hidden') || !el.getClientRects().length) return false;
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && box.left < rect.right && box.right > rect.left
+        && box.top < rect.bottom && box.bottom > rect.top;
     });
     if (covered) bar.classList.add('is-low');
   }

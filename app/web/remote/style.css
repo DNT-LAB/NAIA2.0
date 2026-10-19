@@ -24741,6 +24741,8 @@ button.cq-wcs-row:hover { background: rgba(255,255,255,0.05); }
 .cq-find-rw:hover:not(:disabled) { background: rgba(124,106,239,0.32); }
 .cq-find-rw:disabled { opacity: 0.6; cursor: progress; }
 .cq-find-rw[hidden] { display: none; }
+/* (N명) 은 통째로 아랫줄(사용자 지시 2026-10-19). */
+.cq-find-rw-n { display: block; }
 /* Find 바닥 줄 = [생성 설정] + [현재 결과 → 랜덤 와일드카드] (사용자 지시 2026-10-19). */
 .cq-find-foot { display: flex; gap: 5px; flex: none; }
 .cq-find-foot[hidden] { display: none; }

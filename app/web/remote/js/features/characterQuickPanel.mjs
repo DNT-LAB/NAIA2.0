@@ -1406,6 +1406,9 @@ export function createCharacterQuickPanel({
   let findDexSeq = 0;
   let findDexTimer = 0;
   let findDexLoading = false;
+  // 끝까지 굴리면 다음 쪽을 이어 붙인다(사용자 지시 2026-10-19) - 마지막으로 받은 쪽 · 이어 받는 중인가.
+  let findDexPage = 0;
+  let findDexMoreLoading = false;
   let findDexError = '';
   let findPicking = '';            // 사전 상세를 받는 중인 줄(두 번 눌러 두 번 담지 않게)
   let findDismiss = null;
@@ -1828,6 +1831,8 @@ export function createCharacterQuickPanel({
     findEl.addEventListener('mouseleave', hideFindZoom);
     // 목록을 굴리면 줄이 마우스 밑에서 바뀐다 - 미리보기는 다음 mouseover 가 다시 띄운다.
     findEl.addEventListener('wheel', hideFindZoom, {passive: true});
+    // 목록 끝에 닿으면 다음 쪽(scroll 은 버블링이 안 된다 - 캡처로 받는다).
+    findEl.addEventListener('scroll', onFindListScroll, true);
     findEl.addEventListener('mousedown', () => {
       findHeld = true;
       clearTimeout(findHeldTimer);
@@ -1926,18 +1931,54 @@ export function createCharacterQuickPanel({
     findDexTimer = setTimeout(() => { findDexTimer = 0; void loadFindDex(); }, 180);
   }
 
+  function findDexUrl(page) {
+    const parts = [
+      'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
+      `page=${page}`, `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
+      'recent_only=false', 'favorites_only=false',
+      ...featParams(),
+    ];
+    return `/api/character-viewer/list?${parts.join('&')}`;
+  }
+
+  /** 목록 끝에 닿았다 - 같은 조건의 다음 쪽을 이어 붙인다. 조건이 바뀌면(새 검색) 늦게 온 답은 버린다. */
+  async function loadMoreFindDex() {
+    if (findTab !== 'dex' || findDexLoading || findDexMoreLoading) return;
+    if (findDexTotal == null || findDexRows.length >= findDexTotal) return;
+    const seq = findDexSeq;
+    findDexMoreLoading = true;
+    renderFindList();
+    try {
+      const res = await fetch(findDexUrl(findDexPage + 1));
+      const data = await res.json().catch(() => ({}));
+      if (seq !== findDexSeq || !res.ok) return;
+      const seen = new Set(findDexRows.map(row => `${row.group}\u0000${row.character}`));
+      const more = (Array.isArray(data.items) ? data.items : [])
+        .filter(row => !seen.has(`${row.group}\u0000${row.character}`));
+      findDexPage += 1;
+      if (more.length) findDexRows = findDexRows.concat(more);
+      else findDexTotal = findDexRows.length;      // 더 없다 - 다시 묻지 않는다
+    } catch (error) {
+      /* 다음에 다시 굴리면 또 묻는다 */
+    } finally {
+      if (seq === findDexSeq) { findDexMoreLoading = false; renderFindList(); }
+    }
+  }
+
+  function onFindListScroll(event) {
+    const list = event.target;
+    if (!list || !list.matches?.('[data-cqf-list]')) return;
+    if (list.scrollTop + list.clientHeight >= list.scrollHeight - 48) void loadMoreFindDex();
+  }
+
   async function loadFindDex() {
     const seq = ++findDexSeq;
     findDexLoading = true;
+    findDexMoreLoading = false;
+    findDexPage = 0;
     renderFindList();
     try {
-      const parts = [
-        'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
-        'page=0', `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
-        'recent_only=false', 'favorites_only=false',
-        ...featParams(),
-      ];
-      const res = await fetch(`/api/character-viewer/list?${parts.join('&')}`);
+      const res = await fetch(findDexUrl(0));
       const data = await res.json().catch(() => ({}));
       // 낡은 응답은 버린다 - 한 글자마다 요청이 나가면 순서가 뒤집힌다.
       if (seq !== findDexSeq) return;
@@ -2037,7 +2078,7 @@ export function createCharacterQuickPanel({
             ? `<span class="cq-find-tag cq-find-gen is-busy">생성 중…</span>`
             : `<span class="cq-find-tag cq-find-gen" role="button" data-cqf-gen="1">생성</span>`))
           + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
-      }).join('');
+      }).join('') + (findDexMoreLoading ? empty('더 불러오는 중…') : '');
     }
     // 같은 내용이면 갈아 끼우지 않는다 - 보관함 목록은 서버 에코마다 다시 그려 보는데(빠른 길 포함), 누르는 도중에
     // 줄이 새 요소로 바뀌면 크롬은 click 을 보내지 않는다(CHARACTER_WORKSPACE_CLAUDE.md 법 0).
@@ -2086,9 +2127,10 @@ export function createCharacterQuickPanel({
     const show = findTab === 'dex' && !!findDexTotal;
     button.hidden = !show;
     if (!show) return;
-    const label = findRwBusy ? '만드는 중…'
-      : `현재 결과 → 랜덤 와일드카드 (${Number(findDexTotal).toLocaleString()}명)`;
-    if (button.textContent !== label) button.textContent = label;
+    // (N명) 은 통째로 아랫줄 - 좁으면 '1,312' 와 '명' 이 갈라져 줄바꿈됐다(사용자 지시 2026-10-19).
+    const html = findRwBusy ? '만드는 중…'
+      : `현재 결과 → 랜덤 와일드카드<span class="cq-find-rw-n">(${Number(findDexTotal).toLocaleString()}명)</span>`;
+    if (button._cqHtml !== html) { button._cqHtml = html; button.innerHTML = html; }
     button.disabled = findRwBusy;
   }
 
@@ -2168,8 +2210,16 @@ export function createCharacterQuickPanel({
     if (!meta || !meta.character_viewer_request) return;
     const entry = clearFindGen(String(meta.character_viewer_request_id || ''));
     if (!entry) return;
-    if (meta.character_viewer_thumbnail_saved && findEl && findTab === 'dex') scheduleFindDex();
-    else renderFindList();
+    if (meta.character_viewer_thumbnail_saved) {
+      // 그 줄만 썸네일 주소를 단다 - 목록을 처음부터 다시 받으면 이어 붙인 쪽 · 스크롤 자리를 잃는다.
+      const [group, character] = entry.key.split('\u0000');
+      const row = findDexRows.find(item => item.group === group && item.character === character);
+      if (row) {
+        row.thumbnail_url = `/api/character-viewer/thumbnail?${new URLSearchParams({group, character, size: 'grid', v: String(Date.now())})}`;
+        row.has_thumbnail = true;
+      }
+    }
+    renderFindList();
   }
 
   function noteCharacterError(meta) {

@@ -2075,7 +2075,7 @@ export function createCharacterQuickPanel({
           // 썸네일이 없으면 [생성](사용자 지시 2026-10-19) - Characters 탭 Generate 와 같은 사양으로 한 장, 썸네일로 저장.
           // 줄이 <button> 이라 안에 단추를 못 둔다 - span + role. 누르면 줄의 [+ 슬롯] 으로 번지지 않는다(onFindClick).
           + (row.thumbnail_url ? '' : (findGenWaiting(key)
-            ? `<span class="cq-find-tag cq-find-gen is-busy">생성 중…</span>`
+            ? `<span class="cq-find-tag cq-find-gen is-busy" data-cqf-gen-busy="1">생성 중…</span>`
             : `<span class="cq-find-tag cq-find-gen" role="button" data-cqf-gen="1">생성</span>`))
           + `<span class="cq-find-tag">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`;
       }).join('') + (findDexMoreLoading ? empty('더 불러오는 중…') : '');
@@ -2142,6 +2142,7 @@ export function createCharacterQuickPanel({
       openCharacterPage('vocaloid', 'hatsune miku');
       return;
     }
+    if (event.target.closest('[data-cqf-gen-busy]')) return;     // 생성 중 - 줄의 [+ 슬롯] 으로 넘기지 않는다
     const gen = event.target.closest('[data-cqf-gen]');
     if (gen) {
       const row = gen.closest('[data-cqf-char]');
@@ -2162,6 +2163,8 @@ export function createCharacterQuickPanel({
   //  썸네일이 없는 캐릭터를 Characters 탭 Generate 와 같은 사양으로 한 장 - 누른 만큼 생성 큐에 순서대로 쌓인다(사용자 결정).
   //  결과가 오면(app.js updateMeta -> noteCharacterResult) 기다림을 풀고, 썸네일이 저장됐으면 목록을 새로 받는다.
   const findGenPending = new Map();     // request_id -> {key, timer}
+  // 응답보다 먼저 온 결과(서버가 응답 전에 큐를 돌린다) - 응답이 오면 바로 맞춰 본다(Codex 리뷰).
+  const findGenEarly = new Map();       // request_id -> meta
 
   function findGenWaiting(key) {
     for (const entry of findGenPending.values()) if (entry.key === key) return true;
@@ -2180,7 +2183,8 @@ export function createCharacterQuickPanel({
     const key = `${group}\u0000${character}`;
     if (!group || !character || findGenWaiting(key)) return;
     const placeholder = `pending-${Date.now()}`;
-    findGenPending.set(placeholder, {key, timer: 0});
+    // 응답이 끝내 안 와도 '생성 중' 에 갇히지 않게.
+    findGenPending.set(placeholder, {key, timer: setTimeout(() => { clearFindGen(placeholder); renderFindList(); }, 60000)});
     renderFindList();
     try {
       const res = await fetch('/api/character-viewer/quick-generate', {
@@ -2194,6 +2198,8 @@ export function createCharacterQuickPanel({
       // 결과 소식을 놓쳐도(창을 닫았다 열었다) 단추가 영영 '생성 중' 으로 남지 않게 - 5분 뒤 풀고 목록을 새로 받는다.
       const timer = setTimeout(() => { clearFindGen(data.request_id); if (findEl && findTab === 'dex') scheduleFindDex(); }, 300000);
       findGenPending.set(data.request_id, {key, timer});
+      const early = findGenEarly.get(data.request_id);
+      if (early) { findGenEarly.delete(data.request_id); noteCharacterResult(early); }
       // 기본안(사용자 결정 2026-10-19): Characters 탭 옵션이 썸네일 저장을 막고 있으면 알리고 생성은 한다.
       if (data.save_blocked) {
         showToast('Characters 탭에서 저장 안 함 · 캐릭터명 숨김 · 코스프레 중 하나가 켜져 있어 썸네일로 저장되지 않습니다.', 'info');
@@ -2208,8 +2214,16 @@ export function createCharacterQuickPanel({
   /** app.js 가 결과 메타마다 부른다. Find [생성] 이 기다리던 것이면 풀고, 썸네일이 저장됐으면 목록을 새로 받는다. */
   function noteCharacterResult(meta) {
     if (!meta || !meta.character_viewer_request) return;
-    const entry = clearFindGen(String(meta.character_viewer_request_id || ''));
-    if (!entry) return;
+    const requestId = String(meta.character_viewer_request_id || '');
+    const entry = clearFindGen(requestId);
+    if (!entry) {
+      // 내 [생성] 인데 응답이 아직이면 잠깐 기억해 둔다(최근 몇 개만).
+      if (requestId.startsWith('character-quick-')) {
+        findGenEarly.set(requestId, meta);
+        while (findGenEarly.size > 8) findGenEarly.delete(findGenEarly.keys().next().value);
+      }
+      return;
+    }
     if (meta.character_viewer_thumbnail_saved) {
       // 그 줄만 썸네일 주소를 단다 - 목록을 처음부터 다시 받으면 이어 붙인 쪽 · 스크롤 자리를 잃는다.
       const [group, character] = entry.key.split('\u0000');
@@ -2223,8 +2237,13 @@ export function createCharacterQuickPanel({
   }
 
   function noteCharacterError(meta) {
-    const entry = clearFindGen(String((meta && (meta.character_viewer_request_id || meta.request_id)) || ''));
-    if (entry) renderFindList();
+    const requestId = String((meta && (meta.character_viewer_request_id || meta.request_id)) || '');
+    if (requestId && findGenPending.has(requestId)) { clearFindGen(requestId); renderFindList(); return; }
+    // 일반 생성 실패는 어느 요청인지 안 싣는다 - 기다리던 것을 다 풀어 [생성] 을 다시 누를 수 있게(Codex 리뷰).
+    if (!requestId && findGenPending.size) {
+      for (const id of [...findGenPending.keys()]) clearFindGen(id);
+      renderFindList();
+    }
   }
 
   /** 보관함 -> 슬롯. Manage 의 ↩ 와 같은 명령이다(★ · 그룹은 사본, 히스토리는 옮김 - 서버 규칙). */

@@ -1091,6 +1091,8 @@ export function createCharacterViewerController({
   function handleResultMeta(meta) {
     if (!meta || !meta.character_viewer_request) return false;
     const requestId = String(meta.character_viewer_request_id || '');
+    // 캐릭터 퀵 패널 Find [생성] 의 결과는 이 탭 것이 아니다 - 미리보기 · 연속 생성 예약을 가로채지 않는다(Codex 리뷰).
+    if (requestId.startsWith('character-quick-') && requestId !== pendingResultRequestId) return false;
     if (pendingResultRequestId && requestId && requestId !== pendingResultRequestId) return false;
     if (!pendingResultRequestId && requestId) pendingResultRequestId = requestId;
     pendingResultMeta = meta;

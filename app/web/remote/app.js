@@ -983,7 +983,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-pill3')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-rv5')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -1048,7 +1048,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-pil
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261019-open1')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261019-rv5')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -2921,7 +2921,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261019-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261019-more1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261019-rv5')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -5128,6 +5128,8 @@ const wsMessageHandlers = {
   },
   generation_error: m => {
     lastGenerationOk = false;
+    // Find [생성] 이 기다리던 것이 실패했을 수 있다 - 일반 실패는 요청 id 를 안 싣는다(퀵 패널이 다 푼다).
+    characterQuickPanel?.noteCharacterError?.({});
     cancelInteractiveAutoGen();
     // 연속 생성도 여기서 끊는다 - 실패를 딜레이마다 다시 보내면 크레딧이 탄다.
     // ⚠️ **내 런일 때만** 끊는다. 이 알림도 모든 탭에 가므로 표를 안 보면 남의

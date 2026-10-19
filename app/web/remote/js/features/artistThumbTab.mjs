@@ -211,6 +211,8 @@ export function createArtistThumbController({
   let linkHint = false;
   // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
   let keepWeightOnce = false;
+  // 메인 Random 이 보낸 뽑기의 차례 - 늦게 끝난 옛 것이 새 것을 덮지 않게.
+  let randomFocusSeq = 0;
   let randomToolsSaved = '';
   let randomToolsTimer = null;
   let pickingArtist = false;
@@ -1284,7 +1286,7 @@ export function createArtistThumbController({
 
   function selectArtist(item, options = {}) {
     selected = item;
-    scheduleSaveRandomTools();                 // [메인 랜덤 버튼 연결] 이 붙일 작가(`focus`)
+    scheduleSaveRandomTools({now: true});      // [메인 랜덤 버튼 연결] 이 붙일 작가(`focus`) - 바로
     // [랜덤 가중치] - 고를 때마다 새로 뽑는다(믹스 모드는 큐가 칸마다 가중치를 쥔다).
     // 메인 Random 이 뽑아 프롬프트에 이미 쓴 가중치를 보일 때는 새로 뽑지 않는다(keepWeight).
     const keepWeight = Boolean(options.keepWeight) || keepWeightOnce;
@@ -2099,20 +2101,28 @@ export function createArtistThumbController({
     return {mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim()};
   }
 
-  function scheduleSaveRandomTools() {
+  /** 바뀐 칸만 보낸다 - 통째로 보내면 다른 탭이 끈 연결을 이 탭의 낡은 값이 다시 켰다(Codex 리뷰).
+   *  `now` = 기다리지 않고 바로(고른 작가 - 0.4초 사이 메인 Random 이 옛 작가를 붙였다 · Codex 리뷰). */
+  function scheduleSaveRandomTools(options = {}) {
     if (!randomToolsLoaded) return;          // 서버 값을 받기 전에 기본값으로 덮지 않는다
     if (randomToolsTimer) clearTimeout(randomToolsTimer);
-    randomToolsTimer = setTimeout(() => {
+    const flush = () => {
       randomToolsTimer = null;
       const payload = randomToolsPayload();
-      const text = JSON.stringify(payload);
-      if (text === randomToolsSaved) return;
-      randomToolsSaved = text;
-      postJson('/api/artist-thumb/options', {random_tools: payload}).catch(error => {
-        randomToolsSaved = '';
+      let saved = {};
+      try { saved = JSON.parse(randomToolsSaved || '{}'); } catch (_) { saved = {}; }
+      const changed = {};
+      for (const [key, value] of Object.entries(payload)) {
+        if (JSON.stringify(value) !== JSON.stringify(saved[key])) changed[key] = value;
+      }
+      if (!Object.keys(changed).length) return;
+      randomToolsSaved = JSON.stringify(payload);
+      postJson('/api/artist-thumb/options', {random_tools: changed}).catch(error => {
+        randomToolsSaved = JSON.stringify(saved);
         console.warn('Artist Thumb random tools save failed', error);
       });
-    }, 400);
+    };
+    if (options.now) flush(); else randomToolsTimer = setTimeout(flush, 400);
   }
 
   /** [아티스트 탭 연동됨] - 연결이 켜져 있고 리모컨 창이 안 보이면(닫힘 · 리모컨 내림) 시드 고정 알약 옆에 띄운다. */
@@ -2121,7 +2131,9 @@ export function createArtistThumbController({
     const linked = randomToolsLoaded ? Boolean(randomTools.main_link) : linkHint;
     const remote = getRemoteController?.();
     const windowShown = remoteOnboarded && remote?.isOpen?.() !== false;
-    const show = linked && !windowShown;
+    // 시드 알약이 숨는 화면(Interactive Assets 등)에서는 같이 숨긴다 - 붙을 자리가 없다(Codex 리뷰).
+    const seedShown = Boolean(seedPillEl && seedPillEl.offsetParent !== null && seedPillEl.offsetWidth > 0);
+    const show = linked && !windowShown && seedShown;
     linkPillEl.hidden = !show;
     if (!show || !seedPillEl) return;
     // 시드 알약은 켜면 시드 번호만큼 길어진다 - 그 오른쪽 끝에 붙인다.
@@ -2171,9 +2183,11 @@ export function createArtistThumbController({
    *  ⚠️ 매칭 검색 판이 격자를 쥐고 있으면 쪽 번호가 다르다 - 그때는 있으면 누르고, 없으면 고르기만 한다. */
   async function focusPickedArtist(picked, options = {}) {
     const findCard = () => gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(picked.artist)}"]`) || null;
+    const stale = typeof options.stale === 'function' ? options.stale : () => false;
     let card = findCard();
     if (!card && !searchQuery && Number.isInteger(picked.page)) {
       await loadPage(picked.page, {anchor: 'top'});
+      if (stale()) return;                       // 그사이 더 새 뽑기가 왔다 - 옛 것으로 덮지 않는다(Codex 리뷰)
       card = findCard();
     }
     if (card && !selectionMode) {
@@ -2191,14 +2205,19 @@ export function createArtistThumbController({
   async function focusRandomArtist(info) {
     const artist = String(info?.artist || '').trim();
     if (!artist) return;
+    const seq = ++randomFocusSeq;
+    const stale = () => seq !== randomFocusSeq;
+    // 쪽 번호는 서버가 **저장된 목록**에서 센 것이다 - 지금 화면 목록이 다르면 쪽을 넘기지 않는다(Codex 리뷰).
+    const samePool = JSON.stringify(currentRandomPool()) === JSON.stringify(randomTools.pool || {});
     const picked = {artist, image_url: info.image_url || '', weight: '', favorite: false, banned: false,
-      page: Number.isInteger(info.page) ? info.page : null};
+      page: samePool && Number.isInteger(info.page) ? info.page : null};
     const weight = Number(info.weight);
     if (gridVisible()) {
-      await focusPickedArtist(picked, {keepWeight: true});
+      await focusPickedArtist(picked, {keepWeight: true, stale});
     } else {
       selectArtist(picked, {keepWeight: true});
     }
+    if (stale()) return;
     if (Number.isFinite(weight) && !mixOn) setArtistWeight(weight);
   }
 

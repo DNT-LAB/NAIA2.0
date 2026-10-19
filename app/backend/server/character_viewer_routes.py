@@ -450,6 +450,8 @@ def register_character_viewer_routes(
         query = str(payload.get("query") or "")
         inc = [str(item) for item in payload.get("inc") or [] if str(item or "").strip()]
         exc = [str(item) for item in payload.get("exc") or [] if str(item or "").strip()]
+        # Find 의 [★] (즐겨찾기만 · 임시) 이 켜져 있으면 그 결과만(사용자 지시 2026-10-19 - 목록과 같은 조건).
+        favorites_only = bool(payload.get("favorites_only"))
         service = character_viewer_service(session_context)
         mode = session_context.get_api_mode()
 
@@ -460,7 +462,7 @@ def register_character_viewer_routes(
         entries: list[tuple[str, tuple[str, str]]] = []
 
         def build() -> list[str]:
-            listed = service.build_list(CharacterViewerService.GROUP_ALL, query, 0, 9, True, True, False, False,
+            listed = service.build_list(CharacterViewerService.GROUP_ALL, query, 0, 9, True, True, False, favorites_only,
                                         inc, exc)
             lines: list[str] = []
             for item in listed.get("all_items") or []:

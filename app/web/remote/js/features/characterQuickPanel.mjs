@@ -1408,6 +1408,8 @@ export function createCharacterQuickPanel({
   let findDexLoading = false;
   // 끝까지 굴리면 다음 쪽을 이어 붙인다(사용자 지시 2026-10-19) - 마지막으로 받은 쪽 · 이어 받는 중인가.
   let findDexPage = 0;
+  // [★] 즐겨찾기만(사용자 지시 2026-10-19) - 임시(기억하지 않는다) · 필터 · 이름 검색과 함께 걸린다 · 랜덤 와일드카드도 같은 결과.
+  let findFavOnly = false;
   let findDexMoreLoading = false;
   let findDexError = '';
   let findPicking = '';            // 사전 상세를 받는 중인 줄(두 번 눌러 두 번 담지 않게)
@@ -1755,6 +1757,7 @@ export function createCharacterQuickPanel({
     findHeldRender = false;
     findEl?.remove();
     findEl = null;
+    findFavOnly = false;            // [★] 은 임시 - 닫으면 풀린다
     hideFindZoom();
     mount?.querySelector('[data-cq-find]')?.classList.remove('is-on');
   }
@@ -1816,7 +1819,9 @@ export function createCharacterQuickPanel({
       + `<button type="button" data-cqf-tab="lib">히스토리 · 즐겨찾기</button>`
       // [제외] - 숨긴 캐릭터(랜덤 디버그 줄의 [숨김] · 사용자 지시 2026-10-19). 누르면 숨김을 푼다.
       + `<button type="button" data-cqf-tab="hid">제외</button></div>`
-      + `<input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
+      + `<div class="cq-find-qrow"><input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
+      + `<button type="button" class="cq-find-fav" data-cqf-fav="1" aria-pressed="false" hidden`
+      + ` title="즐겨찾기만 보기(필터 · 이름 검색과 함께 걸립니다 · 닫으면 풀립니다)">★</button></div>`
       + `<div class="cq-find-list" data-cqf-list="1"></div>`
       // [현재 결과 -> 랜덤 와일드카드](사용자 지시 2026-10-19) - [캐릭터 · 작품] 에서만 보인다.
       // [생성 설정](사용자 지시 2026-10-19) - [생성] 이 쓰는 Prefix · Postfix 를 Characters 탭 상세에서 고친다.
@@ -1935,7 +1940,7 @@ export function createCharacterQuickPanel({
     const parts = [
       'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
       `page=${page}`, `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
-      'recent_only=false', 'favorites_only=false',
+      'recent_only=false', `favorites_only=${findFavOnly ? 'true' : 'false'}`,
       ...featParams(),
     ];
     return `/api/character-viewer/list?${parts.join('&')}`;
@@ -2103,6 +2108,7 @@ export function createCharacterQuickPanel({
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           query: findQuery.dex.trim(),
+          favorites_only: findFavOnly,
           inc: featTerms.inc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
           exc: featTerms.exc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
         }),
@@ -2122,6 +2128,12 @@ export function createCharacterQuickPanel({
   function renderFindFoot() {
     const foot = findEl?.querySelector('[data-cqf-foot]');
     if (foot) foot.hidden = findTab !== 'dex';
+    const fav = findEl?.querySelector('[data-cqf-fav]');
+    if (fav) {
+      fav.hidden = findTab !== 'dex';
+      fav.classList.toggle('is-on', findFavOnly);
+      fav.setAttribute('aria-pressed', findFavOnly ? 'true' : 'false');
+    }
     const button = findEl?.querySelector('[data-cqf-rw]');
     if (!button) return;
     const show = findTab === 'dex' && !!findDexTotal;
@@ -2136,6 +2148,12 @@ export function createCharacterQuickPanel({
 
   function onFindClick(event) {
     if (event.target.closest('[data-cqf-rw]')) { void makeRandomWildcard(); return; }
+    if (event.target.closest('[data-cqf-fav]')) {
+      findFavOnly = !findFavOnly;
+      renderFindFoot();
+      void loadFindDex();
+      return;
+    }
     if (event.target.closest('[data-cqf-gset]')) {
       // 예시 캐릭터의 상세를 연다 - Prefix · Postfix 는 모든 캐릭터에 같이 쓰인다(사용자 지정: hatsune miku).
       closeFind();

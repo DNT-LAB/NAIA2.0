@@ -24592,6 +24592,16 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
 }
 .cq-find-q:focus { outline: none; border-color: rgba(124,106,239,0.55); }
+/* 이름 칸 + [★] 즐겨찾기만(사용자 지시 2026-10-19). */
+.cq-find-qrow { display: flex; gap: 4px; align-items: center; flex: none; }
+.cq-find-qrow .cq-find-q { flex: 1 1 auto; min-width: 0; }
+.cq-find-fav {
+  flex: none; width: 30px; height: 26px; border-radius: 5px; cursor: pointer; font-size: 13px; line-height: 1;
+  border: 1px solid var(--border-dim); background: rgba(0,0,0,0.34); color: var(--text-dim);
+}
+.cq-find-fav:hover { color: rgb(250,199,117); border-color: rgba(250,199,117,0.5); }
+.cq-find-fav.is-on { color: #1a1406; background: rgb(250,199,117); border-color: rgb(250,199,117); }
+.cq-find-fav[hidden] { display: none; }
 .cq-find-list { flex: 1; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 1px; }
 .cq-find-row {
   display: flex; align-items: center; gap: 7px; width: 100%; padding: 4px 5px; cursor: pointer; text-align: left;

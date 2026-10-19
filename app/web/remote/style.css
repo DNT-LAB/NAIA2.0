@@ -24703,8 +24703,9 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   margin: 8px 12px; padding: 4px; border: 1px solid var(--border-dim); border-radius: 6px; background: rgba(0,0,0,0.22);
   max-height: 240px; overflow: auto; display: flex; flex-direction: column; gap: 1px;
 }
+/* flex: none - 줄이 많으면 높이가 정해진 목록 안에서 납작하게 줄어 글자가 겹쳤다(사용자 제보 2026-10-19). */
 .cq-wcs-row {
-  display: block; width: 100%; text-align: left; padding: 4px 8px; border: 0; border-radius: 4px; background: none;
+  flex: none; display: block; width: 100%; text-align: left; padding: 4px 8px; border: 0; border-radius: 4px; background: none;
   font: inherit; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 button.cq-wcs-row { cursor: pointer; }

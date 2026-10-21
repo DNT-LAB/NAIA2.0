@@ -1892,10 +1892,7 @@ async def _broadcast_generation_error(
 
     model_unknown = isinstance(error, UnknownNaiModelError)
     if model_unknown:
-        stale = getattr(error, "model_key", "")
-        message = "모델을 다시 골라 주세요 - 저장된 모델을 알 수 없습니다"
-        if stale:
-            message = f"{message} ({stale})"
+        message = error.reselect_message
     params = getattr(request, "params", {}) or {}
     img2img_service = _img2img_lifecycle_service(context)
     img2img_failed = bool(

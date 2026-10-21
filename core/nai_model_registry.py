@@ -16,6 +16,7 @@ from typing import Any
 from core.nai_model_contract import (
     BUILTIN_NAI_MODEL_SPECS,
     DEFAULT_NAI_MODEL_KEY,
+    NAI_LEGACY_KEY_ALIASES,
     NAI_PAYLOAD_PROFILES,
     NAI_REMOTE_MODEL_KEYS,
     NaiModelSpec,
@@ -61,6 +62,16 @@ class UnknownNaiModelError(NaiModelValidationError):
     def __init__(self, key: str):
         self.model_key = str(key or "")
         super().__init__(f"등록되지 않은 NAI 모델 키입니다: {self.model_key}")
+
+    @property
+    def reselect_message(self) -> str:
+        """화면에 보일 문장. 원문은 계정 등록 문제처럼 읽혀서, 무엇을 해야 하는지 말해 준다.
+
+        ⚠️ 이 실패가 화면에 닿는 길이 **둘**이다 - 요청을 만들 때(디스패치)와 보낼 때(러너).
+           문장을 한 곳에 두지 않으면 한쪽만 고쳐진다(실제로 디스패치 쪽은 원문이 떴다).
+        """
+        message = "모델을 다시 골라 주세요 - 저장된 모델을 알 수 없습니다"
+        return f"{message} ({self.model_key})" if self.model_key else message
 
 
 class NaiModelRegistry:
@@ -177,6 +188,13 @@ class NaiModelRegistry:
         if _collides_with_builtin_wire(key):
             raise NaiModelValidationError(
                 f"기본 모델의 API 이름과 같은 키는 쓸 수 없습니다: {key}"
+            )
+        # 옛 계보 키(`NAID5.0F`)도 같은 이유로 막는다 - 화면 · 메타데이터 번역이 그 글자를
+        # 빌트인 키로 읽는다(`NAI_LEGACY_KEY_ALIASES`).
+        if key in NAI_LEGACY_KEY_ALIASES:
+            raise NaiModelValidationError(
+                f"옛 모델 키와 같은 키는 쓸 수 없습니다: {key} "
+                f"({NAI_LEGACY_KEY_ALIASES[key]} 로 읽힙니다)"
             )
         api_model = cls._clean_api_model(raw.get("api_model"), field="api_model", required=True)
         profile = str(raw.get("payload_profile") or "passthrough").strip().lower()

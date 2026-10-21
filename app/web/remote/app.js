@@ -4944,6 +4944,9 @@ function applyDispatchedResolutionDisplay(m) {
 }
 
 function onGenerationDispatched(m) {
+  // 고른 모델을 서버가 몰라 요청을 못 만들었다 - 생성 버튼은 러너까지 안 가고 **여기서** 막힌다.
+  // 문장은 바로 뒤 `toast` 가 알리니, 여기서는 고칠 자리로 데려가는 일만 한다(`generation_error` 와 같은 일).
+  if (m && m.ok === false && m.model_unknown) { guideModelReselect(); return; }
   // 실제 디스패치된 시드를 Params 패널 시드 박스에 반영한다 — Seed Fix OFF면 서버가
   // 요청마다 시드를 재추첨하므로(534fa55) 박스의 직전 값과 어긋난다. 구체 시드(>=0)일
   // 때만 갱신한다(WEBUI/COMFYUI의 -1은 백엔드 랜덤 위임이라 실행 시드를 아직 모름 -
@@ -8412,6 +8415,17 @@ function applyMetadataParamValue(key, value) {
   return true;
 }
 
+// 내장 모델 키 전부(고르는 칸에 안 보이는 F/C 포함) · 옛 계보 키 -> 지금 키.
+// 백엔드 `core/nai_model_contract.py` 의 `BUILTIN_NAI_MODEL_SPECS` · `NAI_LEGACY_KEY_ALIASES` 사본이다
+// - 어긋나면 `tests/test_nai_legacy_model_keys.py` 가 잡는다.
+const NAI_BUILTIN_MODEL_KEYS = [
+  'NAID5F', 'NAID5FM', 'NAID5C', 'NAID4.5F', 'NAID4.5C', 'NAID4.5',
+  'NAID4.0F', 'NAID4.0C', 'NAID4', 'NAID3',
+];
+const NAI_LEGACY_MODEL_KEY_ALIASES = new Map([
+  ['NAID5.0F', 'NAID5F'], ['NAID5.0C', 'NAID5C'],
+]);
+
 // NAI 생성물 메타데이터의 모델 표기를 **모델 키**로 되돌린다. 못 알아보면 ''.
 //
 // NAI 가 PNG 에 남기는 것(실측 2026-08-22, V5 생성물):
@@ -8423,10 +8437,25 @@ function applyMetadataParamValue(key, value) {
 // 백엔드 SSOT 는 `core/nai_model_contract.py::nai_key_from_metadata` 이고,
 // 여기는 그 규칙의 프런트 사본이다 - 새 모델을 추가하면 **양쪽을 같이** 고쳐야 한다
 // (테스트 `test_nai_model_from_metadata.py` 가 계약 쪽을 지킨다).
+//
+// ⚠️ **키처럼 생겼다고 통과시키지 않는다.** 예전에는 `NAID` 로 시작하면 무엇이든 그대로
+// 돌려줬는데, 옛 계보(Dev0714)의 V5 키 `NAID5.0F` 가 그 길로 들어와 드롭다운에 박히고
+// 생성이 `등록되지 않은 NAI 모델 키입니다: NAID5.0F` 로 막혔다(사용자 제보 2026-10-21).
+// 아는 키(내장 · 옛 계보 별칭 · 레지스트리가 보내 준 사용자 모델)만 받는다.
 function naiModelKeyFromMetadataText(raw) {
   const text = String(raw || '').trim();
   if (!text) return '';
-  if (/^NAID/i.test(text)) return text;
+  const upper = text.toUpperCase();
+  if (NAI_BUILTIN_MODEL_KEYS.includes(upper)) return upper;
+  if (NAI_LEGACY_MODEL_KEY_ALIASES.has(upper)) return NAI_LEGACY_MODEL_KEY_ALIASES.get(upper);
+  // 사용자 등록 모델은 **글자 그대로** 있을 때만. 대소문자를 풀면 wire 이름
+  // (`nai-diffusion-5-full`)이 같은 글자의 커스텀 키로 둔갑한다(백엔드와 같은 함정).
+  if (naiModelMetaByKey.has(text)) return text;
+  // ⚠️ **키 모양인데 모르는 것은 아래 부분 문자열 추론으로 넘기지 않는다.** NAI 가 PNG 에 남기는 것은
+  // 라벨(공백 있음) · wire 이름(소문자)이고, 공백 없는 대문자 · `NAID…` 는 키다. 넘기면 지운 커스텀 모델
+  // `NAID-NAI-DIFFUSION-5-FULL` 이 `nai-diffusion-5-full` 을 품었다고 V5 Full 로 둔갑해 다른 모델로 돈이
+  // 나간다(Codex 리뷰). 모르면 '' - 지금 고른 모델을 둔다.
+  if (!/\s/.test(text) && (text === upper || /^NAID/i.test(text))) return '';
   const lowered = text.toLowerCase();
   // 해시가 가장 정확하다 - V4 는 Full/Curated 의 라벨이 같아 해시로만 갈린다.
   const hashes = [

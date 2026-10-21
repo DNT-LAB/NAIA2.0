@@ -29,7 +29,13 @@ from core.generation_request import (
     NAIVibeTransferData,
 )
 from core.headless_result_service import HeadlessStoredResult
-from core.nai_model_contract import apply_nai_fixed_params, resolve_nai_model_for_context
+from core.nai_model_contract import (
+    NAI_LEGACY_KEY_ALIASES,
+    apply_nai_fixed_params,
+    normalize_nai_model_key,
+    resolve_nai_model_for_context,
+)
+from core.nai_model_registry import UnknownNaiModelError
 from core.resolution_utils import snap_resolution_to_multiple
 from core.web_session_context import WebSessionContext
 
@@ -127,6 +133,8 @@ class HeadlessGenerationDispatch:
     blocked_reason: str = ""
     # 시퀀스 구문(:begin/:seq/:end)이면 큐에 들어간 컷 수. `request` 는 첫 컷이다.
     sequence_count: int = 1
+    # 고른 모델을 레지스트리가 몰라서 막혔다 - 화면이 PARAMS 를 열어 다시 고르게 안내한다.
+    model_unknown: bool = False
 
     @property
     def request_id(self) -> str:
@@ -143,6 +151,8 @@ class HeadlessGenerationDispatch:
                 "ok": False,
                 "api_mode": self.api_mode,
                 "message": self.blocked_reason,
+                # ⚠️ 새 메시지 타입을 만들지 않고 필드만 더한다 - 웹 스모크 계약이 타입을 순서대로 센다.
+                "model_unknown": self.model_unknown,
             }
 
         params = self.request.params
@@ -253,10 +263,25 @@ class HeadlessGenerationService:
         params.pop("_source_name", None)
         nai_model_spec = None
         if api_mode == "NAI":
+            # 요청이 실어 온 옛 계보 키(`NAID5.0F`)는 여기서 지금 키로 - 파라미터 목(`set_param`)을 안 거치고
+            # `overrides` 로 바로 오는 길이 있다(Enhance 는 원본 생성 파라미터를 통째로 싣는다 · Codex 리뷰).
+            # ⚠️ 옛 계보 키만이다. 모르는 키를 다른 모델로 바꾸는 판단은 하지 않는다(아래 엄격한 판정).
+            legacy_key = NAI_LEGACY_KEY_ALIASES.get(normalize_nai_model_key(params.get("model")))
+            if legacy_key:
+                params["model"] = legacy_key
             try:
                 nai_model_spec = resolve_nai_model_for_context(
                     self.context,
                     params.get("model") or "NAID4.5F",
+                )
+            except UnknownNaiModelError as exc:
+                # 생성 버튼은 **여기서** 막힌다(러너까지 안 간다). 원문을 그대로 보내면
+                # "등록되지 않은 NAI 모델 키입니다" 만 뜨고 PARAMS 안내도 없었다(사용자 제보 2026-10-21).
+                return HeadlessGenerationDispatch(
+                    request=None,
+                    api_mode=api_mode,
+                    blocked_reason=exc.reselect_message,
+                    model_unknown=True,
                 )
             except (KeyError, RuntimeError, ValueError) as exc:
                 return HeadlessGenerationDispatch(
@@ -464,7 +489,8 @@ class HeadlessGenerationService:
                 reason = dispatch.blocked_reason or "요청을 만들지 못했습니다."
                 if queued:
                     reason = f"시퀀스 {index}/{total}번째 컷에서 막혔습니다({queued}컷은 큐에 있음): {reason}"
-                return HeadlessGenerationDispatch(request=None, api_mode=api_mode, blocked_reason=reason)
+                return HeadlessGenerationDispatch(request=None, api_mode=api_mode, blocked_reason=reason,
+                                                  model_unknown=dispatch.model_unknown)
             if shared_nai is None:
                 request = dispatch.request
                 shared_nai = (request.nai_characters, request.nai_vibe_transfer, request.nai_character_reference)

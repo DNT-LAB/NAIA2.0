@@ -291,6 +291,23 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
     ),
 }
 
+# 옛 계보가 쓰던 키 -> 지금 키. **글자가 정확히 같을 때만** 번역한다.
+#
+# Dev0714(데스크톱 계보)는 V5 를 `NAID5.0F` / `NAID5.0C` 로 붙였다(`de2de4f7` - 이 계보는
+# 점 없는 `NAID5F` / `NAID5C`). 그 계보의 프리셋 · 설정 · 메타데이터가 넘어오면 그 글자가
+# 키 자리에 그대로 앉아 `등록되지 않은 NAI 모델 키입니다: NAID5.0F` 로 생성이 막혔다
+# (사용자 제보 2026-10-21 - 커뮤니티 질문글). 라벨 · wire 이름만 되돌리던 번역이 못 잡았다.
+#
+# ⚠️ 이 이름들은 공백이 없어 **커스텀 키 문법에 맞는다.** 그래서 레지스트리가 새 커스텀
+#    모델이 이 이름을 못 쓰게 막는다 - 안 막으면 지운 커스텀 모델이 이 번역을 타고 V5 로
+#    둔갑해 다른 모델로 돈이 나간다(wire 이름 충돌과 같은 이유).
+# ⚠️ 프런트에 사본이 있다(`app.js` 의 `NAI_LEGACY_MODEL_KEY_ALIASES`) - 같이 고칠 것.
+#    `tests/test_nai_legacy_model_keys.py` 가 둘이 어긋나면 잡는다.
+NAI_LEGACY_KEY_ALIASES: dict[str, str] = {
+    "NAID5.0F": "NAID5F",
+    "NAID5.0C": "NAID5C",
+}
+
 DEFAULT_NAI_MODEL_SPEC = BUILTIN_NAI_MODEL_SPECS[DEFAULT_NAI_MODEL_KEY]
 NAI_REMOTE_MODEL_KEYS = tuple(
     spec.key for spec in BUILTIN_NAI_MODEL_SPECS.values() if spec.selectable
@@ -454,6 +471,8 @@ def resolve_nai_model_spec(
         custom = custom_models.get(normalized)
         if isinstance(custom, NaiModelSpec):
             return custom
+    # 옛 계보 키(`NAID5.0F`)는 '모르는 키' 가 아니다 - 기본값(4.5)이 아니라 그 모델로 간다.
+    normalized = NAI_LEGACY_KEY_ALIASES.get(normalized, normalized)
     return BUILTIN_NAI_MODEL_SPECS.get(normalized, DEFAULT_NAI_MODEL_SPEC)
 
 
@@ -546,6 +565,9 @@ def nai_key_from_display_name(value: Any) -> str:
 
     그래서 사용자 **선택**을 다루는 자리(파라미터 목·시작 시 치유)는 이 함수를 쓰고,
     메타데이터에서 온 값을 다루는 자리만 `nai_key_from_exact_name` 을 쓴다.
+
+    옛 계보 키(`NAID5.0F`)도 되돌린다. 이건 공백이 없지만 레지스트리가 그 이름의 커스텀
+    키를 받지 않으므로(`NAI_LEGACY_KEY_ALIASES` 주석) 남의 키를 삼키지 않는다.
     """
     text = str(value or "").strip()
     if not text:
@@ -553,6 +575,8 @@ def nai_key_from_display_name(value: Any) -> str:
     upper = text.upper()
     if upper in BUILTIN_NAI_MODEL_SPECS:
         return upper
+    if upper in NAI_LEGACY_KEY_ALIASES:
+        return NAI_LEGACY_KEY_ALIASES[upper]
     lowered = text.lower()
     for spec in BUILTIN_NAI_MODEL_SPECS.values():
         if spec.label and spec.label.lower() == lowered:
@@ -570,8 +594,8 @@ def nai_key_from_exact_name(value: Any) -> str:
        (Codex 리뷰 BLOCK, 재현됨). 사용자가 고른 모델을 바꾸는 판단은 **정확히 아는
        이름일 때만** 해야 한다.
 
-    맞춰 보는 것: canonical 키 · wire 이름(제 인페인팅 이름 포함) · 표시 라벨 ·
-    계열 이름(`NovelAI Diffusion V5` - NAI 가 PNG 에 실제로 쓰는 형태다).
+    맞춰 보는 것: canonical 키 · 옛 계보 키(`NAID5.0F`) · wire 이름(제 인페인팅 이름
+    포함) · 표시 라벨 · 계열 이름(`NovelAI Diffusion V5` - NAI 가 PNG 에 실제로 쓰는 형태다).
     """
     text = str(value or "").strip()
     if not text:
@@ -579,6 +603,8 @@ def nai_key_from_exact_name(value: Any) -> str:
     upper = text.upper()
     if upper in BUILTIN_NAI_MODEL_SPECS:
         return upper
+    if upper in NAI_LEGACY_KEY_ALIASES:
+        return NAI_LEGACY_KEY_ALIASES[upper]
     lowered = text.lower()
     for spec in BUILTIN_NAI_MODEL_SPECS.values():
         names = [spec.api_model, spec.label]
@@ -622,6 +648,8 @@ def nai_key_from_metadata(model_value: Any = "", source_value: Any = "") -> str:
     raw = str(model_value or "").strip()
     if raw.upper() in BUILTIN_NAI_MODEL_SPECS:
         return raw.upper()
+    if raw.upper() in NAI_LEGACY_KEY_ALIASES:
+        return NAI_LEGACY_KEY_ALIASES[raw.upper()]
 
     lowered = haystack.lower()
 

@@ -368,6 +368,7 @@ def register_character_viewer_routes(
         favorites_only: bool = False,
         inc: list[str] = Query(default=[]),
         exc: list[str] = Query(default=[]),
+        gender: list[str] = Query(default=[]),
     ):
         try:
             group_key = str(group or CharacterViewerService.GROUP_ALL)
@@ -384,6 +385,9 @@ def register_character_viewer_routes(
                 # Find [특징 검색] - 검색(inc) · 제외(exc) 낱말. 작품은 `work:<이름>`(사용자 지시 2026-10-19).
                 inc,
                 exc,
+                False,
+                # 성별 girl / boy / other(여러 번 줄 수 있다 · 없으면 전체 - 사용자 지시 2026-10-21).
+                gender,
             )
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer list failed: {exc}"}, status_code=500)
@@ -452,6 +456,8 @@ def register_character_viewer_routes(
         exc = [str(item) for item in payload.get("exc") or [] if str(item or "").strip()]
         # Find 의 [★] (즐겨찾기만 · 임시) 이 켜져 있으면 그 결과만(사용자 지시 2026-10-19 - 목록과 같은 조건).
         favorites_only = bool(payload.get("favorites_only"))
+        # 성별(목록과 같은 조건 · 없으면 전체 - 사용자 지시 2026-10-21).
+        genders = [str(item) for item in payload.get("genders") or [] if str(item or "").strip()]
         service = character_viewer_service(session_context)
         mode = session_context.get_api_mode()
 
@@ -463,7 +469,7 @@ def register_character_viewer_routes(
 
         def build() -> list[str]:
             listed = service.build_list(CharacterViewerService.GROUP_ALL, query, 0, 9, True, True, False, favorites_only,
-                                        inc, exc)
+                                        inc, exc, genders=genders)
             lines: list[str] = []
             for item in listed.get("all_items") or []:
                 built = service.build_prompt(item["group"], item["character"], "",

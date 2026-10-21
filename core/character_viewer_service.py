@@ -771,6 +771,8 @@ class CharacterViewerService:
         item["debut"] = self.debut_index().get(name, "")
         # 별 상태. 카드마다 따로 물으면 13,497번을 묻게 된다 - 목록에 실어 보낸다.
         item["favorite"] = f"{group_key}::{name}" in self.favorites()
+        # 성별 girl / boy / other(머리말과 같은 잣대 - 화면이 줄마다 표시할 수 있게 · 2026-10-21).
+        item["gender"] = self.prompt_head(data)
         if include_tags:
             item["tags"] = self._tag_search_str(data)
         if include_thumbnail_url:
@@ -790,6 +792,7 @@ class CharacterViewerService:
         include: list[str] | None = None,
         exclude: list[str] | None = None,
         include_hidden: bool = False,
+        genders: list[str] | None = None,
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
@@ -814,6 +817,14 @@ class CharacterViewerService:
             #    보는 중에는 즐겨찾기 안의 작품만 칩으로 떠야 한다.
             favorites = self.favorites()
             chars = [item for item in chars if f"{item[0]}::{item[1]}" in favorites]
+        # 성별(사용자 지시 2026-10-21 · 화면은 나중 - 지금은 백엔드만). 값 = girl / boy / other(머리말과 같은 잣대
+        # `prompt_head`). 수는 **성별로 거르기 전**에 센다 - 화면이 토글마다 '그걸 켜면 몇 명' 을 보여 줄 수 있게.
+        gender_counts = {"girl": 0, "boy": 0, "other": 0}
+        for _gk, _name, data in chars:
+            gender_counts[self.prompt_head(data)] += 1
+        wanted = {str(g or "").strip().lower() for g in (genders or [])} & set(gender_counts)
+        if wanted:
+            chars = [item for item in chars if self.prompt_head(item[2]) in wanted]
         # 작품 칩은 **지금 걸린 것들**에서 뽑는다. 예전에는 검색어를 작품 **이름**에
         # 맞춰 보는 딴 길(`build_groups`)로 뽑아서, 캐릭터 이름을 치면 칩이 거의
         # 안 떴다(실측: `elysia` -> 0개). 작품을 이미 골랐으면 셀 것이 하나뿐이라
@@ -866,6 +877,8 @@ class CharacterViewerService:
             "recent_since": self.recent_since(),
             "favorites_only": bool(favorites_only),
             "favorite_count": len(self.favorites()),
+            "genders": sorted(wanted),
+            "gender_counts": gender_counts,
             "scope": scope,
             "items": [
                 self._serialize_list_item(

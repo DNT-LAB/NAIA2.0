@@ -389,7 +389,9 @@ class HeadlessGenerationService:
     # Dev0714 규칙(future01 `_handle_sequence_generation`, 옮길 때 지킨 것):
     #   1. 공통 구간(prefix · begin · end)의 와일드카드는 **한 번만** 전개해 전 컷이 같은 값.
     #      `:seq` 안의 와일드카드는 컷마다 새로(실행 시점 `_expand_input_wildcards`가 한다).
-    #   2. 해상도는 첫 세트 기준 고정 - `resolution:WxH` 가 있으면 그 값, 없으면 지금 설정.
+    #   2. 해상도는 첫 세트 기준 - `resolution:WxH` 가 있으면 그 값, 없으면 지금 설정.
+    #      ⚠️ 2026-10-21 부터 Dev0714 와 다르다(사용자 제보 · 지시): 컷에 제 `resolution:WxH` 가 있으면
+    #      그 컷은 그 값을 쓴다(`seed:N` 과 같은 방식). 없는 컷만 첫 세트 기준을 따른다.
     #   3. 컷별 `seed:N` 을 읽고 프롬프트에서 지운다. 없으면 NAI 는 시드 미고정일 때 컷마다
     #      새 시드, WEBUI/ComfyUI 는 기본 시드 유지.
     #   4. 네거티브(공통 구간에서 `-태그` 로 옮겨진 것 포함)는 전 컷 공유.
@@ -428,6 +430,10 @@ class HeadlessGenerationService:
                                               blocked_reason="시퀀스에 컷이 없습니다.")
 
         width, height = self._sequence_resolution(prompt_sets[0], params)
+        sizes: list[str] = []
+        # 컷 자신의 해상도는 **그 `:seq` 원문**에서 찾는다 - 합친 세트에서 찾으면 prefix · begin 의 값이
+        # 먼저 잡히고, 값 없는 컷이 end 의 값을 집는다(Codex 리뷰). prompt_sets 와 1:1 이다.
+        cut_sources = list(parsed.get("sequences") or [])
         seed_fixed = self._to_bool(params.get("seed_fixed"))
         shared_nai: tuple | None = None
         first: HeadlessGenerationDispatch | None = None
@@ -442,12 +448,15 @@ class HeadlessGenerationService:
                 # `_normalize_numbers` 가 이미 시드 하나를 뽑아 params 에 박았다 - 그대로
                 # 복사하면 전 컷이 **같은 시드**가 된다. Dev0714 처럼 컷마다 새로 뽑는다.
                 cut["seed"] = random.randint(0, 9_999_999_999)
+            own = str(cut_sources[index - 1]) if index - 1 < len(cut_sources) else ""
+            cut_width, cut_height = self._sequence_resolution(own, params, fallback=(width, height))
             text = self._SEQ_RESOLUTION_RE.sub("", text).strip().strip(",").strip()
             cut["input"] = text
             cut["_raw_input"] = text
-            cut["width"] = width
-            cut["height"] = height
-            cut["resolution"] = f"{width} x {height}"
+            cut["width"] = cut_width
+            cut["height"] = cut_height
+            cut["resolution"] = f"{cut_width} x {cut_height}"
+            sizes.append(f"{cut_width}x{cut_height}")
             cut["_sequence_cut"] = {"index": index, "total": total}
             dispatch = self._dispatch_params(command, cut, api_mode, enqueue=True, shared_nai=shared_nai)
             if not dispatch.ok or dispatch.request is None:
@@ -463,7 +472,7 @@ class HeadlessGenerationService:
                 first = dispatch
         assert first is not None
         first.sequence_count = total
-        print(f"Headless Remote: sequence prompt queued cuts={total} size={width}x{height}", flush=True)
+        print(f"Headless Remote: sequence prompt queued cuts={total} sizes={','.join(sizes)}", flush=True)
         return first
 
     def _expand_sequence_static_sections(self, parsed: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
@@ -483,12 +492,16 @@ class HeadlessGenerationService:
         params["negative_prompt"] = negative
         return expanded
 
-    def _sequence_resolution(self, first_prompt: str, params: dict[str, Any]) -> tuple[int, int]:
-        """첫 세트 기준 고정(Dev0714 규칙 2). `resolution:WxH` 우선, 없으면 지금 설정.
+    def _sequence_resolution(
+        self, prompt: str, params: dict[str, Any], fallback: tuple[int, int] | None = None,
+    ) -> tuple[int, int]:
+        """`prompt` 의 `resolution:WxH` 우선, 없으면 `fallback`(컷이면 첫 세트 기준), 그것도 없으면 지금 설정.
         NAI 는 64 배수로 맞춘다 - `_normalize_resolution` 과 같은 잣대."""
-        match = self._SEQ_RESOLUTION_RE.search(first_prompt)
+        match = self._SEQ_RESOLUTION_RE.search(prompt)
         if match:
             width, height = int(match.group(1)), int(match.group(2))
+        elif fallback is not None:
+            return fallback
         else:
             width = self._to_int(params.get("width"), 832) or 832
             height = self._to_int(params.get("height"), 1216) or 1216

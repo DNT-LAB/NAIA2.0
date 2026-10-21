@@ -2012,7 +2012,7 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261
   .catch(error => {
     console.error('Failed to initialize result image input module', error);
   });
-const queuePanelReady = import('./js/features/queuePanel.mjs?v=20260520-random-latency1')
+const queuePanelReady = import('./js/features/queuePanel.mjs?v=20261021-qstart2')
   .then(({createQueuePanelController}) => {
     queuePanel = createQueuePanelController({
       document,

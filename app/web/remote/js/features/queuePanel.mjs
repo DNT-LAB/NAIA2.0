@@ -20,15 +20,26 @@ export function createQueuePanelController({
   const pauseBtn = root.querySelector('[data-queue-action="pause"]');
   const clearBtn = root.querySelector('[data-queue-action="clear"]');
   const collapseBtn = root.querySelector('[data-queue-collapse]');
-  const STORAGE_KEY = 'naia_queue_panel_collapsed';
+  const header = root.querySelector('.queue-panel-header');
+  const countEl = root.querySelector('[data-queue-count]');
+  // 쉬고 있을 때 Generate 한 번은 큐에 들어갔다가 러너가 곧바로 꺼낸다 - 서버는 그 사이 '대기 1' 을
+  // 먼저 보낸다(generation_commands: queue_state 다음에 러너 시작). 그 한 프레임에 패널이 번쩍였다
+  // (사용자 제보 2026-10-21). 생성 중이 아닐 때 들어온 대기는 이만큼 남아 있을 때만 보인다.
+  const IDLE_QUEUE_GRACE_MS = 700;
   let state = {active: null, items: [], paused: false, total: 0, is_generating: false};
-  let collapsed = localStorage.getItem(STORAGE_KEY) === '1';
+  // 실행하면 늘 접힌 채로 시작한다(사용자 지시 2026-10-21) - 펼친 것은 이번 실행 동안만.
+  let collapsed = true;
   let holdVisibleUntil = 0;
+  let pulseTimer = 0;
+  let idleQueuedSince = 0;
+  let graceTimer = 0;
 
   function visibleState(nextState) {
+    const waiting = Array.isArray(nextState?.items) && nextState.items.length > 0;
     return Boolean(
       nextState?.active
-      || (Array.isArray(nextState?.items) && nextState.items.length)
+      || (waiting && (nextState?.is_generating
+        || (idleQueuedSince && Date.now() - idleQueuedSince >= IDLE_QUEUE_GRACE_MS)))
       || nextState?.paused
       || Date.now() < holdVisibleUntil
     );
@@ -98,7 +109,8 @@ export function createQueuePanelController({
     root.hidden = !visibleState(state);
     root.classList.toggle('collapsed', collapsed);
     root.classList.toggle('paused', Boolean(state.paused));
-    if (title) title.textContent = collapsed ? `Queue ${displayCount}` : 'Queue';
+    if (title) title.textContent = 'Queue';
+    if (countEl) countEl.textContent = String(displayCount);
     if (meta) {
       meta.textContent = state.paused
         ? `${pendingCount} paused`
@@ -112,7 +124,11 @@ export function createQueuePanelController({
       pauseBtn.disabled = !hasActive && !pendingCount && !state.paused;
     }
     if (clearBtn) clearBtn.disabled = pendingCount < 1;
-    if (collapseBtn) collapseBtn.textContent = collapsed ? '▴' : '▾';
+    if (collapseBtn) {
+      collapseBtn.textContent = collapsed ? '▴' : '▾';
+      collapseBtn.setAttribute('aria-label', collapsed ? 'Expand queue' : 'Collapse queue');
+      collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    }
     if (!body) return;
     if (collapsed) {
       body.innerHTML = '';
@@ -155,29 +171,48 @@ export function createQueuePanelController({
     }
   }
 
+  // 접힘은 사용자가 [▾] · 접힌 띠로만 바꾼다(사용자 지시 2026-10-21). 예전에는 패널이 숨었다가
+  // 다시 나타날 때마다 펼쳤는데, 자동 생성은 한 장마다 큐가 1 -> 0 으로 비므로 매 장 펼쳐져
+  // 결과 화면을 가렸다.
   function handleState(nextState = {}) {
-    const wasHidden = root.hidden;
-    const nextVisible = visibleState(nextState);
-    if (wasHidden && nextVisible) {
-      collapsed = false;
-      localStorage.setItem(STORAGE_KEY, '0');
-    }
     state = {
       ...state,
       ...nextState,
       items: Array.isArray(nextState.items) ? nextState.items : [],
     };
+    const idleWaiting = state.items.length > 0 && !state.is_generating;
+    if (!idleWaiting) {
+      idleQueuedSince = 0;
+      clearTimeout(graceTimer);
+    } else if (!idleQueuedSince) {
+      clearTimeout(graceTimer);
+      if (!root.hidden) {
+        // 이미 보이던 대기(생성 중에 쌓인 것)는 장과 장 사이 is_generating false 에서 숨기지 않는다(Codex 리뷰).
+        idleQueuedSince = Date.now() - IDLE_QUEUE_GRACE_MS;
+      } else {
+        idleQueuedSince = Date.now();
+        // 러너가 못 꺼내 가고 남아 있으면(막힘 · 대기) 그때는 보여 준다.
+        graceTimer = setTimeout(render, IDLE_QUEUE_GRACE_MS + 20);
+      }
+    }
     render();
   }
 
   function wake() {
     holdVisibleUntil = Date.now() + 2500;
-    collapsed = false;
-    localStorage.setItem(STORAGE_KEY, '0');
+    // 접혀 있으면 펴지 않고 띠만 잠깐 또렷하게 - 큐에 들어갔다는 표시.
+    root.classList.add('pulse');
+    clearTimeout(pulseTimer);
+    pulseTimer = setTimeout(() => root.classList.remove('pulse'), 2500);
     render();
     setTimeout(() => {
       if (Date.now() >= holdVisibleUntil) render();
     }, 2600);
+  }
+
+  function setCollapsed(next) {
+    collapsed = next;
+    render();
   }
 
   function init() {
@@ -191,11 +226,15 @@ export function createQueuePanelController({
     if (collapseBtn) {
       collapseBtn.addEventListener('click', event => {
         event.preventDefault();
-        collapsed = !collapsed;
-        localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0');
-        render();
+        event.stopPropagation();
+        setCollapsed(!collapsed);
       });
     }
+    // 접힌 띠는 어디를 눌러도 편다(캐릭터 퀵 패널 CHARACTER 머리와 같다).
+    header?.addEventListener('click', event => {
+      if (!collapsed || event.target.closest('button')) return;
+      setCollapsed(false);
+    });
     render();
   }
 

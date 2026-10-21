@@ -5738,13 +5738,16 @@ body:not(.desktop-shell) .viewer-keys-row[data-shell-only] { display: none; }
   }
 }
 
+/* 시드 고정 알약(.seedlock-pill · 26px · bottom 10px)의 **한 줄 위**에 둔다(사용자 지적 2026-10-21).
+   전에는 left 16 / bottom 18 이라 그 알약을 위층(z 12)에서 덮었다. 왼쪽 끝 · 도크 비켜서기는 알약과 같은 변수. */
 .queue-panel {
   position: absolute;
-  left: 16px;
-  bottom: 18px;
+  left: calc(10px + var(--ia-shift, 0px));
+  bottom: calc(10px + 26px + 6px + var(--inpaint-dock-lift, 0px));
   z-index: 12;
-  width: min(360px, calc(100% - 32px));
-  max-height: min(420px, calc(100% - 36px));
+  /* 도구 팝업만큼 비켜선(--ia-shift) 만큼 폭에서도 뺀다 - 안 빼면 오른쪽(Clear · 접기)이 뷰어 밖으로 잘린다(Codex 리뷰). */
+  width: min(360px, calc(100% - 20px - var(--ia-shift, 0px)));
+  max-height: min(420px, calc(100% - 60px - var(--inpaint-dock-lift, 0px)));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5756,10 +5759,48 @@ body:not(.desktop-shell) .viewer-keys-row[data-shell-only] { display: none; }
   -webkit-backdrop-filter: blur(14px);
 }
 .queue-panel[hidden] { display: none; }
+/* 접힘 = 캐릭터 퀵 패널(.cq-box)처럼 좁고 반투명한 띠 · 호버 = 또렷(사용자 지시 2026-10-21).
+   Pause · Clear 와 대기 문구는 숨기고 `▸ QUEUE n` + [▴] 만 남긴다 - 띠를 누르면 편다.
+   [▴] 는 남긴다: 키보드로 펼 길이 그것뿐이다(Codex 리뷰). 일시정지면 'paused' 글을 남긴다(색만으로는 놓친다). */
 .queue-panel.collapsed {
   width: auto;
-  min-width: 170px;
+  min-width: 0;
+  opacity: 0.5;
+  border-color: rgba(255,255,255,0.10);
+  background: rgba(20,20,28,0.5);
+  box-shadow: none;
+  transition: opacity 0.16s ease;
 }
+.queue-panel.collapsed:hover,
+.queue-panel.collapsed.pulse { opacity: 0.9; }
+.queue-panel.collapsed { border-radius: 6px; }
+/* 높이 = 시드 고정 알약과 같은 26px(테두리 포함). */
+.queue-panel.collapsed .queue-panel-header {
+  min-height: 0;
+  height: 24px;
+  padding: 0 5px 0 7px;
+  gap: 6px;
+  cursor: pointer;
+}
+.queue-panel.collapsed .queue-panel-title { gap: 6px; align-items: center; font-size: 10.5px; font-weight: 600; }
+.queue-panel.collapsed:not(.paused) .queue-panel-meta,
+.queue-panel.collapsed .queue-panel-btn,
+.queue-panel.collapsed .queue-panel-body { display: none; }
+.queue-panel.collapsed.paused .queue-panel-meta { color: rgb(250,199,117); }
+.queue-panel.collapsed .queue-panel-collapse { width: 16px; height: 16px; font-size: 8px; border-radius: 4px; }
+.queue-panel-caret,
+.queue-panel-count { display: none; }
+.queue-panel.collapsed .queue-panel-caret {
+  display: inline-flex; align-items: center; justify-content: center; flex: none;
+  width: 14px; height: 14px; border-radius: 4px;
+  background: rgba(255,255,255,0.08); font-size: 8px; line-height: 1;
+}
+.queue-panel.collapsed .queue-panel-count {
+  display: inline-block; flex: none; padding: 0 5px; border-radius: 999px;
+  background: rgba(124,106,239,0.22); color: var(--text-secondary);
+  font-size: 9px; font-weight: 700; line-height: 15px;
+}
+.queue-panel.collapsed.paused .queue-panel-count { background: rgba(250,199,117,0.25); color: rgb(250,199,117); }
 .queue-panel-header {
   display: flex;
   align-items: center;

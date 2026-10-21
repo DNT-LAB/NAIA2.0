@@ -736,7 +736,7 @@ def assemble(*, people: list[str], characters: list[ComposeCharacter], relation:
             (main if where == 0 or where not in per else per[where]).append(tag)
     heads: dict[int, list[str]] = {}
     for k, ch in enumerate(characters, 1):
-        parts = [p for p in ([ch.gender] if ch.gender in ("girl", "boy") else []) + [ch.tag] if p]
+        parts = [p for p in ([ch.gender] if ch.gender in ("girl", "boy", "other") else []) + [ch.tag] if p]
         if ch.work:
             parts.append(ch.work)
         parts += ch.appearance

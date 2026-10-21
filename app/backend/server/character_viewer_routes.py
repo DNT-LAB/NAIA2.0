@@ -36,9 +36,9 @@ def character_viewer_service(context: WebSessionContext) -> CharacterViewerServi
 
 
 def roll_name_token(prompt: str) -> str:
-    """캐릭터 프롬프트의 이름 자리(맨 앞 `girl` 다음 낱말) - 소문자 · SD 이스케이프(`\\(`) 를 걷는다."""
+    """캐릭터 프롬프트의 이름 자리(맨 앞 머리말 girl / boy / other 다음 낱말) - 소문자 · SD 이스케이프(`\\(`) 를 걷는다."""
     tokens = [part.strip() for part in str(prompt or "").split(",") if part.strip()]
-    if tokens and tokens[0].lower() in ("girl", "boy"):
+    if tokens and tokens[0].lower() in ("girl", "boy", "other"):
         tokens = tokens[1:]
     return tokens[0].replace("\\", "").lower() if tokens else ""
 
@@ -119,7 +119,7 @@ def transform_session_line(line: str, owner: tuple[str, str] | None, options: di
     if not options or not any(options.get(key) for key in SESSION_OPTION_KEYS):
         return line
     pieces = [piece.strip() for piece in str(line or "").split(",") if piece.strip()]
-    lead = [pieces.pop(0)] if pieces and pieces[0].lower() in ("girl", "boy") else []
+    lead = [pieces.pop(0)] if pieces and pieces[0].lower() in ("girl", "boy", "other") else []
     if not pieces:
         return line
     name = pieces.pop(0)

@@ -220,8 +220,24 @@ def _set_mark(prompt: Any, uc: Any) -> tuple[str, str] | None:
     def norm(text: Any) -> str:
         return ", ".join(part.strip() for part in str(text or "").split(",") if part.strip())
 
-    mark = (norm(prompt), norm(uc))
+    def norm_prompt(text: Any) -> str:
+        # 머리말(girl / boy / other)은 잣대에서 뺀다 - 사전 성별 머리말(2026-10-21) 전에 넣은 `girl, link, ...` 슬롯과
+        # 새 `boy, link, ...` 가 같은 캐릭터다(Codex 리뷰). 화면 `characterPanel.hasActiveDuplicate` 와 같은 잣대.
+        parts = [part.strip() for part in str(text or "").split(",") if part.strip()]
+        if parts and parts[0].lower() in ("girl", "boy", "other"):
+            parts = parts[1:]
+        return ", ".join(parts)
+
+    mark = (norm_prompt(prompt), norm(uc))
     return mark if any(mark) else None
+
+
+def _adopt_new_head(frame: dict[str, Any], prompt: Any) -> None:
+    """새 줄(`boy, link, ...`)로 머리말만 다른 예전 슬롯(`girl, link, ...`)을 다시 켤 때 그 슬롯 글을 새 줄로 바꾼다
+    (2026-10-21 사전 성별 머리말 · Codex 재리뷰). `_set_mark` 가 같을 때만 부른다 - 머리말 밖은 같으니 사용자 편집을 잃지 않는다."""
+    new = str(prompt or "")
+    if new and str(frame.get("prompt") or "") != new and _set_mark(frame.get("prompt"), "") == _set_mark(new, ""):
+        frame["prompt"] = new
 
 
 def _active_duplicate(frames: Any, prompt: Any, uc: Any) -> tuple[int, dict[str, Any]] | None:
@@ -695,6 +711,7 @@ class HeadlessCharacterService:
         duplicate = _active_duplicate(frames, prompt, uc)
         dedupe_notice = ""
         if duplicate is not None:
+            _adopt_new_head(duplicate[1], prompt)
             dedupe_notice, _changed = self._wake_duplicate(frames, duplicate, solo=apply_mode == "c1")
         elif apply_mode == "add_slot":
             # ⚠️ **여기도 상한을 본다**(Codex BLOCK 1). `add_character` 만 막고 있어서
@@ -816,6 +833,7 @@ class HeadlessCharacterService:
                              and str(_frame_uuid(frame) or "") not in frozen), None)
             if reusable is not None:
                 target = reusable
+                _adopt_new_head(target, prompt)
             elif _active_slot_count(frames) < MAX_CHARACTER_SLOTS:
                 target = {"prompt": str(prompt or ""), "uc": "", "is_enabled": True, "is_muted": False,
                           "slot_state": "active", "custom_name": str(custom_name or "")}

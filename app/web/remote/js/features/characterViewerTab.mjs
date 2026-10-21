@@ -145,11 +145,13 @@ export function createCharacterViewerController({
     const raw = String(value || '').trim();
     if (!raw) return '';
     const parts = raw.split(',').map(part => part.trim()).filter(Boolean);
+    // 머리말은 서버가 사전 성별로 고른다(girl / boy / other - 2026-10-21). 이미 있으면 그대로 둔다.
+    const HEADS = ['girl', '1girl', 'boy', '1boy', 'other', '1other'];
     if (currentGenerationMode() === 'NAI') {
       const head = String(parts[0] || '').toLowerCase();
-      return (head === 'girl' || head === '1girl') ? parts.join(', ') : `girl, ${parts.join(', ')}`;
+      return HEADS.includes(head) ? parts.join(', ') : `girl, ${parts.join(', ')}`;
     }
-    while (parts.length && ['girl', '1girl'].includes(String(parts[0]).toLowerCase())) {
+    while (parts.length && HEADS.includes(String(parts[0]).toLowerCase())) {
       parts.shift();
     }
     return parts.join(', ');

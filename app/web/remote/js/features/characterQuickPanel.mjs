@@ -1461,10 +1461,16 @@ export function createCharacterQuickPanel({
     if (covered) bar.classList.add('is-low');
   }
 
-  /** 서버 `_set_mark` 와 같은 잣대 - 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시. 둘 다 비면 ''. */
+  /** 서버 `_set_mark` 와 같은 잣대 - 프롬프트 + 네거티브, 쉼표 앞뒤 공백 무시 · 프롬프트 맨 앞 머리말(girl / boy /
+   *  other)은 안 본다(2026-10-21 사전 성별 머리말 - 예전 `girl, link` 슬롯 = 새 `boy, link`). 둘 다 비면 ''. */
   function setMark(prompt, uc) {
     const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
-    const p = norm(prompt), u = norm(uc);
+    const normPrompt = text => {
+      const parts = String(text || '').split(',').map(part => part.trim()).filter(Boolean);
+      if (parts.length && ['girl', 'boy', 'other'].includes(parts[0].toLowerCase())) parts.shift();
+      return parts.join(', ');
+    };
+    const p = normPrompt(prompt), u = norm(uc);
     return (p || u) ? `${p}\u0000${u}` : '';
   }
 

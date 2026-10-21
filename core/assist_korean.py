@@ -369,6 +369,7 @@ class PersonCount:
     girls: int = 0
     boys: int = 0
     unknown: int = 0
+    others: int = 0                 # 사전 성별 other(비인간 · 2026-10-21) - 미상이 아니라 확인을 묻지 않는다
     solo: bool = False
     partition: str = "unknown"      # 이벤트 맵 인원 구획 이름 | 'unknown'
     confirm: bool = False           # 성별 모르는 사람이 섞였거나 사람이 없다 — 사용자 확인
@@ -1129,6 +1130,8 @@ class KoreanLayer:
                 pc.girls += 1
             elif gender == "boy":
                 pc.boys += 1
+            elif gender == "other":
+                pc.others += 1
             else:
                 pc.unknown += 1
             pc.notes.append(f"{form}x1:{gender or 'unknown'}")
@@ -1265,7 +1268,8 @@ class KoreanLayer:
         # 한 사람이라고 solo 가 아니다 — '혼자' · '홀로' 를 적었을 때만(사용자 지정 09-28: 다른 남녀를 엿듣는 여성이
         # 1girl, solo, hetero, sex 가 됐다). 이벤트 맵 풀은 그대로 둘 다 본다(persons_param)
         pc.partition = partition_of(pc.girls, pc.boys, pc.solo)
-        pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
+        # 사람이 없고 비인간만 있는 장면(피카츄 혼자)은 '못 셌다' 가 아니다.
+        pc.confirm = bool(pc.unknown) or (pc.partition == "unknown" and not pc.others)
         return pc
 
     @staticmethod

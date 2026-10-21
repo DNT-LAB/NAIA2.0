@@ -393,10 +393,16 @@ export function createCharacterPanel({
    *  쉼표 앞뒤 공백 무시 · 둘 다 비면 중복 아님). 내용으로 정하는 일이라 가장 새 상태를 본다(법 0). */
   function hasActiveDuplicate(prompt, uc) {
     const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
-    const p = norm(prompt), u = norm(uc);
+    // 머리말(girl / boy / other)은 잣대에서 뺀다 - 서버 `_set_mark` 와 같다(2026-10-21 사전 성별 머리말).
+    const normPrompt = text => {
+      const parts = String(text || '').split(',').map(part => part.trim()).filter(Boolean);
+      if (parts.length && ['girl', 'boy', 'other'].includes(parts[0].toLowerCase())) parts.shift();
+      return parts.join(', ');
+    };
+    const p = normPrompt(prompt), u = norm(uc);
     if (!p && !u) return false;
     return (newestState()?.characters || [])
-      .some(c => slotState(c) === 'active' && norm(c.prompt) === p && norm(c.uc) === u);
+      .some(c => slotState(c) === 'active' && normPrompt(c.prompt) === p && norm(c.uc) === u);
   }
 
   function slotState(character) {

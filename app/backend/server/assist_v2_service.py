@@ -75,7 +75,7 @@ def _load_character_analysis(context: Any) -> None:
             for name, info in (chars or {}).items():
                 if not isinstance(info, dict):
                     continue
-                if info.get("gender") in ("girl", "boy"):
+                if info.get("gender") in ("girl", "boy", "other"):
                     genders[str(name)] = info["gender"]
                 profiles[str(name)] = (str(work), {k: info.get(k) for k in ("personal_color", "characteristics",
                                                                           "breast_size", "gender")})
@@ -1677,7 +1677,8 @@ def _english_people(pc: Any, people: list[str]) -> None:
     g, b, solo = people_count(people)
     pc.girls, pc.boys, pc.solo = max(pc.girls, g), max(pc.boys, b), pc.solo or solo
     pc.partition = partition_of(pc.girls, pc.boys, pc.solo)           # solo 는 적었을 때만(says_solo · 영문 solo)
-    pc.confirm = bool(pc.unknown) or pc.partition == "unknown"
+    # 비인간만 있는 장면은 '못 셌다' 가 아니다(사전 gender other · 2026-10-21).
+    pc.confirm = bool(pc.unknown) or (pc.partition == "unknown" and not getattr(pc, "others", 0))
     pc.notes.append("영문:" + ",".join(people))
 
 
@@ -1950,12 +1951,14 @@ def _compose_persons(req: dict[str, Any], chars: list[Any], people: list[str] = 
                 "confirm": False, "notes": [], "param": pc.persons_param()}
     girls = sum(1 for c in chars if c.gender == "girl")
     boys = sum(1 for c in chars if c.gender == "boy")
-    unknown = len(chars) - girls - boys
-    pc = PersonCount(girls=girls, boys=boys, unknown=unknown, partition=partition_of(girls, boys, solo),
-                     solo=solo)
+    others = sum(1 for c in chars if c.gender == "other")      # 비인간(2026-10-21) - 미상이 아니다
+    unknown = len(chars) - girls - boys - others
+    pc = PersonCount(girls=girls, boys=boys, unknown=unknown, others=others,
+                     partition=partition_of(girls, boys, solo), solo=solo)
     _english_people(pc, list(people))
     return {"mode": "auto", "partition": pc.partition, "girls": pc.girls, "boys": pc.boys, "unknown": unknown,
-            "confirm": bool(unknown) or pc.partition == "unknown", "notes": pc.notes, "param": pc.persons_param()}
+            "confirm": bool(unknown) or (pc.partition == "unknown" and not others), "notes": pc.notes,
+            "param": pc.persons_param()}
 
 
 def _compose_evidence(context: Any, relation: Any, details: list[Any], req: dict[str, Any],

@@ -24,6 +24,14 @@ class CharacterViewerService:
     )
     TAG_REPLACE = {"loli": "young female"}
     TAG_EXCLUDE = {"mature female"}
+    # 여성 기준 태그 - 머리말이 girl 이 아니면(boy · other) 싣지 않는다. 명시 집합이다: `chest` 로 끝나는 것을 다
+    # 지우면 `scar on chest` 같은 특징까지 사라진다(Codex 리뷰 2026-10-21).
+    FEMALE_ONLY_TAGS = frozenset({"flat chest", "small breasts", "medium breasts", "large breasts", "huge breasts",
+                                  "gigantic breasts", "young female"})
+    # 메인 프롬프트(Prefix)의 인원 태그 - 캐릭터 머리말과 맞춘다(girl -> 1girl · boy -> 1boy · other -> 1other).
+    HEAD_COUNT_TAGS = {"girl": "1girl", "boy": "1boy", "other": "1other"}
+    # Danbooru 인원 태그 전부(1girl · 2boys · 6+others · multiple girls ...) - Prefix 의 구성을 셀 때 쓴다.
+    _PERSON_COUNT = re.compile(r"^(?:\d\+?(?:girls?|boys?|others?)|multiple (?:girls|boys|others))$")
     # 작품명 규칙(사용자 NAI 재현 실험 2026-10-19 · docs/character_pool_survey_2026_10_19/COPYRIGHT_WEIGHT_RULE.md).
     # 게시물 수 = 엔트리의 `danbooru_posts`(tools/annotate_character_posts.py 가 적는다).
     ORIGINAL_GROUP = "original"
@@ -1079,10 +1087,18 @@ class CharacterViewerService:
                 if tag not in self.TAG_EXCLUDE:
                     tags.append(self.TAG_REPLACE.get(tag, tag))
 
+        # 머리말 = 사전의 성별(사용자 지시 2026-10-21 - 남성에게도 girl 이 붙었다). 비인간은 other
+        # (`tools/mark_nonhuman_characters.py` · 코퍼스 no humans 비율 >= 0.3). 가슴 크기 · loli 치환은 여성 기준이라
+        # 남성 · 비인간에는 싣지 않는다(pikachu -> large breasts).
+        # 코스프레는 예전대로(girl · 태그 그대로) - 착용자 · 의상 캐릭터가 갈리고 사용자가 적은 태그가 섞인다(Codex 3차).
+        head = "girl" if cosplay_mode else self.prompt_head(data)
+        if head != "girl":
+            tags = [tag for tag in tags if tag not in self.FEMALE_ONLY_TAGS]
+
         prefix_parts: list[str] = []
         if char_name:
             if is_nai:
-                prefix_parts.append("girl")
+                prefix_parts.append(head)
             prefix_parts.append(char_name)
             # 이름 숨김 · 코스프레에는 붙이지 않는다(이름 자리가 그 캐릭터가 아니다).
             if (current.get("auto_copyright") and group_key and not current.get("hide_charname")
@@ -1098,6 +1114,12 @@ class CharacterViewerService:
             "cosplay_excluded_pc": cosplay_excluded_pc,
             "options": current,
         }
+
+    @staticmethod
+    def prompt_head(data: dict[str, Any] | None) -> str:
+        """캐릭터 프롬프트 머리말 - girl / boy / other(사전 `gender`). 모르면 girl(옛 동작)."""
+        gender = str((data or {}).get("gender") or "").strip().lower()
+        return gender if gender in ("boy", "other") else "girl"
 
     def build_generation_overrides(self, payload: dict[str, Any], api_mode: str = "NAI") -> dict[str, Any]:
         group_key = str(payload.get("group") or "")
@@ -1117,6 +1139,18 @@ class CharacterViewerService:
         if not request_id:
             raise ValueError("request_id is required")
         is_nai = str(api_mode or "NAI").upper() == "NAI"
+        # Prefix 의 인원 태그를 캐릭터 머리말에 맞춘다 - 기본 Prefix 가 `1girl, ...` 라 남성 · 비인간이
+        # 메인 `1girl` + 캐릭터 `boy, link` 로 부딪쳤다(Codex 리뷰 2026-10-21). 다른 인원 태그는 그대로 둔다.
+        # 인원 태그가 **하나**일 때만 바꾼다 - 사용자가 `1girl, 1boy` 처럼 여럿을 적었으면 그 구성을 지킨다(Codex 재리뷰).
+        # `2boys` · `multiple girls` 같은 인원 태그가 하나라도 더 있으면 여럿 구성이다 - 그대로 둔다(Codex 3차).
+        # 코스프레도 그대로(머리말이 예전대로 girl 이다).
+        count_tag = self.HEAD_COUNT_TAGS[self.prompt_head(data)]
+        prefix_parts = self._split_tags(prefix_text)
+        count_slots = [i for i, tag in enumerate(prefix_parts) if self._PERSON_COUNT.match(tag.strip().lower())]
+        if (len(count_slots) == 1 and prefix_parts[count_slots[0]].lower() in self.HEAD_COUNT_TAGS.values()
+                and not payload.get("cosplay_enabled")):
+            prefix_parts[count_slots[0]] = count_tag
+            prefix_text = ", ".join(prefix_parts)
         width, height = 896, 1152
         snapshot = {
             "group_key": group_key,
@@ -1149,14 +1183,14 @@ class CharacterViewerService:
                 overrides["uc"] = [str(payload.get("character_uc") or "")]
             return overrides
 
-        char_tags = [tag for tag in self._split_tags(char_prompt) if tag.lower() != "girl"]
+        char_tags = [tag for tag in self._split_tags(char_prompt) if tag.lower() not in ("girl", "boy", "other")]
         char_name_tags = char_tags[:1]
         char_trait_tags = char_tags[1:]
         prefix_tags = self._split_tags(prefix_text)
         postfix_tags = self._split_tags(postfix_text)
         insert_idx = 0
         for index, tag in enumerate(prefix_tags):
-            if "girl" in tag.lower():
+            if tag.lower() in self.HEAD_COUNT_TAGS.values() or "girl" in tag.lower():
                 insert_idx = index + 1
                 break
         merged = prefix_tags[:insert_idx] + char_name_tags + prefix_tags[insert_idx:] + char_trait_tags + postfix_tags

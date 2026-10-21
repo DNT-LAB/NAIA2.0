@@ -1410,6 +1410,16 @@ export function createCharacterQuickPanel({
   let findDexPage = 0;
   // [★] 즐겨찾기만(사용자 지시 2026-10-19) - 임시(기억하지 않는다) · 필터 · 이름 검색과 함께 걸린다 · 랜덤 와일드카드도 같은 결과.
   let findFavOnly = false;
+  // 성별 [ALL | 여 | 남 | 외](사용자 결정 2026-10-21) - 기본 여 · 이 브라우저에 기억한다 · 목록 · 랜덤 와일드카드에 함께 걸린다.
+  // 값 = 서버 `gender` (girl / boy / other · 캐릭터 머리말과 같은 잣대). 칸 툴팁 = 서버 `gender_counts`(성별로 거르기 전 수).
+  const FIND_GENDER_KEY = 'naia_cq_find_gender';
+  const FIND_GENDERS = [['all', 'ALL', '전체'], ['girl', '여', '여성'], ['boy', '남', '남성'], ['other', '외', '비인간']];
+  let findGender = 'girl';
+  try {
+    const saved = localStorage.getItem(FIND_GENDER_KEY);
+    if (FIND_GENDERS.some(([key]) => key === saved)) findGender = saved;
+  } catch (_) { /* 못 읽으면 기본 여 */ }
+  let findGenderCounts = null;
   // 줄을 누르면 그 아래 [이 캐릭터를 Favorite로 | 이 캐릭터 숨김](사용자 지시 2026-10-19) - 슬롯 추가는 [+ 슬롯] 단추만.
   let findExpand = '';                  // 펼친 줄 = `그룹\u0000캐릭터`
   let findActBusy = false;
@@ -1823,12 +1833,17 @@ export function createCharacterQuickPanel({
     findEl.setAttribute('role', 'dialog');
     findEl.setAttribute('aria-label', '캐릭터 찾기');
     findEl.innerHTML =
+      // 탭 이름은 짧게 - 기본 창(1280)에서 Find 가 쓸 수 있는 폭이 306px 이라 세 탭이 모두 두 줄로 꺾였다
+      // (실측 · 사용자 결정 2026-10-21: [히스토리] 하나로 - 안에는 히스토리 · 즐겨찾기 · 그룹이 그대로 있다).
       `<div class="cq-find-seg">`
-      + `<button type="button" data-cqf-tab="dex">캐릭터 · 작품</button>`
-      + `<button type="button" data-cqf-tab="lib">히스토리 · 즐겨찾기</button>`
+      + `<button type="button" data-cqf-tab="dex" title="캐릭터 · 작품 사전">캐릭터</button>`
+      + `<button type="button" data-cqf-tab="lib" title="히스토리 · 즐겨찾기 · 그룹(보관함)">히스토리</button>`
       // [제외] - 숨긴 캐릭터(랜덤 디버그 줄의 [숨김] · 사용자 지시 2026-10-19). 누르면 숨김을 푼다.
       + `<button type="button" data-cqf-tab="hid">제외</button></div>`
       + `<div class="cq-find-qrow"><input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
+      + `<div class="cq-find-gender" data-cqf-genders="1" role="group" aria-label="성별" hidden>`
+      + FIND_GENDERS.map(([key, label]) => `<button type="button" data-cqf-gender="${key}">${label}</button>`).join('')
+      + `</div>`
       + `<button type="button" class="cq-find-fav" data-cqf-fav="1" aria-pressed="false" hidden`
       + ` title="즐겨찾기만 보기(필터 · 이름 검색과 함께 걸립니다 · 닫으면 풀립니다)">★</button></div>`
       + `<div class="cq-find-list" data-cqf-list="1"></div>`
@@ -1950,6 +1965,7 @@ export function createCharacterQuickPanel({
       'group=__ALL__', `query=${encodeURIComponent(findQuery.dex.trim())}`,
       `page=${page}`, `per_page=${FIND_PER_PAGE}`, 'thumb_first=true',
       'recent_only=false', `favorites_only=${findFavOnly ? 'true' : 'false'}`,
+      ...(findGender === 'all' ? [] : [`gender=${encodeURIComponent(findGender)}`]),
       ...featParams(),
     ];
     return `/api/character-viewer/list?${parts.join('&')}`;
@@ -2000,6 +2016,7 @@ export function createCharacterQuickPanel({
       if (!res.ok) throw new Error(data.error || '캐릭터를 불러오지 못했습니다.');
       findDexRows = Array.isArray(data.items) ? data.items : [];
       findDexTotal = Number.isFinite(Number(data.total)) ? Number(data.total) : null;
+      findGenderCounts = data.gender_counts && typeof data.gender_counts === 'object' ? data.gender_counts : null;
       findDexError = '';
     } catch (error) {
       if (seq !== findDexSeq) return;
@@ -2086,7 +2103,7 @@ export function createCharacterQuickPanel({
             ? `<img class="cq-find-img" loading="lazy" decoding="async" alt="" src="${escAttr(row.thumbnail_url)}">`
             : `<span class="cq-find-img is-initial">${escHtml(String(row.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
           + `<span class="cq-find-text"><b>${escHtml(row.character)}</b>`
-          + `<span>${escHtml(row.group)} · ${Number(row.count) || 0}</span></span>`
+          + `<span>${escHtml(row.group)} · ${(Number(row.count) || 0).toLocaleString()}</span></span>`
           // 썸네일이 없으면 [생성](사용자 지시 2026-10-19) - Characters 탭 Generate 와 같은 사양으로 한 장, 썸네일로 저장.
           // 줄이 <button> 이라 안에 단추를 못 둔다 - span + role. 누르면 줄의 [+ 슬롯] 으로 번지지 않는다(onFindClick).
           + (row.thumbnail_url ? '' : (findGenWaiting(key)
@@ -2125,6 +2142,7 @@ export function createCharacterQuickPanel({
         body: JSON.stringify({
           query: findQuery.dex.trim(),
           favorites_only: findFavOnly,
+          genders: findGender === 'all' ? [] : [findGender],
           inc: featTerms.inc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
           exc: featTerms.exc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
         }),
@@ -2144,6 +2162,21 @@ export function createCharacterQuickPanel({
   function renderFindFoot() {
     const foot = findEl?.querySelector('[data-cqf-foot]');
     if (foot) foot.hidden = findTab !== 'dex';
+    const genders = findEl?.querySelector('[data-cqf-genders]');
+    if (genders) {
+      genders.hidden = findTab !== 'dex';
+      const counts = findGenderCounts || {};
+      const all = ['girl', 'boy', 'other'].reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
+      genders.querySelectorAll('[data-cqf-gender]').forEach(button => {
+        const key = button.dataset.cqfGender;
+        const on = key === findGender;
+        button.classList.toggle('is-on', on);
+        button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const name = (FIND_GENDERS.find(([k]) => k === key) || [])[2] || key;
+        const count = findGenderCounts ? (key === 'all' ? all : Number(counts[key]) || 0) : null;
+        button.title = count == null ? name : `${name} ${count.toLocaleString()}명`;
+      });
+    }
     const fav = findEl?.querySelector('[data-cqf-fav]');
     if (fav) {
       fav.hidden = findTab !== 'dex';
@@ -2155,15 +2188,26 @@ export function createCharacterQuickPanel({
     const show = findTab === 'dex' && !!findDexTotal;
     button.hidden = !show;
     if (!show) return;
-    // (N명) 은 통째로 아랫줄 - 좁으면 '1,312' 와 '명' 이 갈라져 줄바꿈됐다(사용자 지시 2026-10-19).
+    // 한 줄(사용자 결정 2026-10-21 A안) - 수는 통째로 붙인다(nowrap): 좁을 때 '1,312' 와 '명' 이 갈라지던 것(10-19)을 막는다.
     const html = findRwBusy ? '만드는 중…'
-      : `현재 결과 → 랜덤 와일드카드<span class="cq-find-rw-n">(${Number(findDexTotal).toLocaleString()}명)</span>`;
+      : `결과 → 랜덤 와일드카드<span class="cq-find-rw-n"> · ${Number(findDexTotal).toLocaleString()}명</span>`;
     if (button._cqHtml !== html) { button._cqHtml = html; button.innerHTML = html; }
     button.disabled = findRwBusy;
   }
 
   function onFindClick(event) {
     if (event.target.closest('[data-cqf-rw]')) { void makeRandomWildcard(); return; }
+    const genderButton = event.target.closest('[data-cqf-gender]');
+    if (genderButton) {
+      const next = genderButton.dataset.cqfGender;
+      if (next && next !== findGender) {
+        findGender = next;
+        try { localStorage.setItem(FIND_GENDER_KEY, findGender); } catch (_) { /* 기억 못 해도 지금은 바뀐다 */ }
+        renderFindFoot();
+        void loadFindDex();
+      }
+      return;
+    }
     if (event.target.closest('[data-cqf-fav]')) {
       findFavOnly = !findFavOnly;
       renderFindFoot();

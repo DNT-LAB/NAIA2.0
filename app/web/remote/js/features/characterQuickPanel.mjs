@@ -73,6 +73,8 @@ export function createCharacterQuickPanel({
   bindTagAssist = () => {},        // 태그 자동완성. 모듈 팝업의 캐릭터 칸과 같은 사양
   showToast = () => {},            // 잠긴 조작을 눌렀을 때 이유를 말한다
   openCharacterPage = () => {},    // Find [생성 설정] - Characters 탭의 그 캐릭터 상세를 연다(app.js)
+  // Find ⚙ = Character 생성 설정 창(Prefix · Postfix · 사용자 지시 2026-10-21). 없으면 옛 길(Characters 탭).
+  openGenSettings = null,
 }) {
   let mount = null;
   let keyGuard = null;               // 랜덤 슬롯 키 지킴이(`sessionKeyGuard.mjs`)
@@ -1877,7 +1879,7 @@ export function createCharacterQuickPanel({
       // [현재 결과 -> 랜덤 와일드카드](사용자 지시 2026-10-19) - [캐릭터 · 작품] 에서만 보인다.
       // [생성 설정](사용자 지시 2026-10-19) - [생성] 이 쓰는 Prefix · Postfix 를 Characters 탭 상세에서 고친다.
       + `<div class="cq-find-foot" data-cqf-foot="1" hidden>`
-      + `<button type="button" class="cq-find-gset" data-cqf-gset="1" title="생성 설정 - Characters 탭에서 Prefix · Postfix 를 고칩니다"`
+      + `<button type="button" class="cq-find-gset" data-cqf-gset="1" title="생성 설정 - [생성] 이 붙이는 Prefix · Postfix 를 떠 있는 창에서 고칩니다"`
       + ` aria-label="생성 설정"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/>`
       + `<path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>`
       + `<button type="button" class="cq-find-rw cq-find-merge" data-cqf-merge="1" hidden`
@@ -2439,6 +2441,8 @@ export function createCharacterQuickPanel({
       return;
     }
     if (event.target.closest('[data-cqf-gset]')) {
+      // 떠 있는 생성 설정 창(사용자 지시 2026-10-21) - Find 는 그대로 둔다(고치면서 [생성] 을 누른다).
+      if (typeof openGenSettings === 'function') { void openGenSettings(); return; }
       // 예시 캐릭터의 상세를 연다 - Prefix · Postfix 는 모든 캐릭터에 같이 쓰인다(사용자 지정: hatsune miku).
       closeFind();
       openCharacterPage('vocaloid', 'hatsune miku');

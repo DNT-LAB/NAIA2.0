@@ -30684,6 +30684,17 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   flex: 1 1 auto; min-height: 0; display: flex;
 }
 .dragpanel.pewin .peq-text { flex: 1 1 auto; min-height: 54px; resize: none; }
+/* Character 생성 설정 창(Find ⚙ · 2026-10-21) - PE 창 옷 그대로 + 머리줄 [↗] · 썸네일로 안 남는 경고 한 줄. */
+.dragpanel.cqgen .cqgen-more {
+  height: 20px; min-width: 22px; padding: 0 5px; border-radius: 5px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 11px;
+}
+.dragpanel.cqgen .cqgen-more:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.7); }
+.dragpanel.cqgen .cqgen-warn {
+  flex: none; margin: 4px 8px 6px; padding: 4px 7px; border-radius: 4px;
+  background: rgba(250,199,117,0.12); color: rgb(242,201,126); font-size: 11px; line-height: 1.4;
+}
+.dragpanel.cqgen .cqgen-warn[hidden] { display: none; }
 
 /* ══ PE 빠른 수정 (js/features/peQuickEdit.mjs) ═══════════════════════════
    믹스 판 아래에 붙는 접이식 칸 둘. Prompt Engineering 의 prefix·postfix 를

@@ -1048,7 +1048,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-pic
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261021-head1')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261021-gset1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -1060,6 +1060,8 @@ const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=2026
       onPromptEdit,
       setPromptFields: applyPromptFields,
       getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+      // 탭에서 저장한 Prefix · Postfix 를 떠 있는 생성 설정 창에도 맞춘다(사용자 지시 2026-10-21).
+      onOptionsSaved: options => characterGenSettings?.sync(options),
     });
   })
   .catch(error => {
@@ -2921,7 +2923,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261021-spw5')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261021-gset1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2946,6 +2948,8 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
         switchRightTab('characters');
         void characterViewerReady.then(() => characterViewerControl?.openCharacter?.(group, character));
       },
+      // Find ⚙ = 떠 있는 Character 생성 설정 창(사용자 지시 2026-10-21 · PE 창처럼 따로 뺀다).
+      openGenSettings: () => openCharacterGenSettings(),
     });
     syncCharacterQuickPanelVisibility();
     // ⚠️ 여기서 메인 캐시를 바로 그리면 안 된다 - 이 import 는 늦게 끝나서, 이미 열려
@@ -2955,6 +2959,39 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
+// Character 생성 설정 창 - Find ⚙ 가 연다. 값은 Characters 탭의 Prefix · Postfix 와 같다(서로 맞춘다).
+let characterGenSettings = null;
+let characterGenSettingsReady = null;
+function openCharacterGenSettings() {
+  if (!characterGenSettingsReady) {
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261021-gset1')
+      .then(({createCharacterGenSettingsWindow}) => {
+        characterGenSettings = createCharacterGenSettingsWindow({
+          document, window, escHtml, showToast,
+          loadPeQuickEdit: () => import('./js/features/peQuickEdit.mjs?v=20261010-escsave')
+            .then(module => module.createPeQuickEdit),
+          loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
+            .then(module => module.createDraggablePanel),
+          // PE 창과 같은 색 규칙 · 같은 자동완성.
+          attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
+          bindAssist: (textarea, options) => bindTagAssist(textarea, options),
+          onSaved: options => characterViewerControl?.syncOptions?.(options),
+          openCharacterPage: () => {
+            switchRightTab('characters');
+            void characterViewerReady.then(() => characterViewerControl?.openCharacter?.('vocaloid', 'hatsune miku'));
+          },
+        });
+        return characterGenSettings;
+      })
+      .catch(error => {
+        characterGenSettingsReady = null;
+        console.error('Failed to initialize character generation settings window', error);
+        showToast('생성 설정 창을 열지 못했습니다.', 'error');
+        return null;
+      });
+  }
+  return characterGenSettingsReady.then(control => control?.toggle());
+}
 // 조건부 프롬프트 창(사용자 지정 2026-09-26: 새 플로팅 스타일 + 컴팩트). Search 창과 같은 방식으로
 // 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
 const conditionalHost = document.createElement('div');

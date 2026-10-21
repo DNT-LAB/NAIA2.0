@@ -5,6 +5,7 @@ export function createCharacterViewerController({
   showToast,
   negEdit,
   getGenerationMode = () => 'NAI',
+  onOptionsSaved = () => {},       // (options) => void   Character 생성 설정 창을 맞춘다(app.js)
 }) {
   const groupSearchEl = document.getElementById('characterViewerGroupSearch');
   const groupListEl = document.getElementById('characterViewerGroupList');
@@ -665,6 +666,7 @@ export function createCharacterViewerController({
     try {
       const saved = await postJson('/api/character-viewer/options', currentOptions());
       state = {...(state || {}), options: saved};
+      try { onOptionsSaved(saved); } catch (_) {}
       return saved;
     } catch (error) {
       console.error('Character options save failed', error);
@@ -1380,6 +1382,14 @@ export function createCharacterViewerController({
     setActive,
     /** 밖(캐릭터 퀵 패널 Find 의 생성 설정)에서 그 캐릭터의 상세(Prefix · Postfix 편집)를 연다. */
     openCharacter: (group, character) => selectCharacter(group, character, '', {openDetail: true}),
+    /** Character 생성 설정 창에서 저장됐다 - 이 탭의 Prefix · Postfix 칸을 맞춘다(치는 중인 칸은 그대로).
+     *  안 맞추면 이 칸에 남은 옛 글이 다음 옵션 저장(체크 하나만 바꿔도 칸 전체를 보낸다) 때 새 글을 덮는다. */
+    syncOptions(options = {}) {
+      if (!options || typeof options !== 'object') return;
+      state = {...(state || {}), options: {...((state && state.options) || {}), ...options}};
+      if (prefixEl && 'prefix' in options && document.activeElement !== prefixEl) prefixEl.value = String(options.prefix || '');
+      if (postfixEl && 'postfix' in options && document.activeElement !== postfixEl) postfixEl.value = String(options.postfix || '');
+    },
     handleResultMeta,
     handleResultBlob,
     handleGenerationError,

@@ -24,6 +24,7 @@ from core.event_stream_vibe import (
 from core.extension_runtime import ext_lineage_fields
 from core.generation_request import (
     GenerationRequest,
+    strip_session_pool_controls,
     NAICharacterData,
     NAICharacterReferenceData,
     NAIVibeTransferData,
@@ -237,7 +238,7 @@ class HeadlessGenerationService:
 
         params = self._normalized_params(command, api_mode, credential)
         if self.is_sequence_command_text(params.get("_raw_input")):
-            if not enqueue:
+            if not enqueue or params.get("_session_pool_character"):
                 # Enhance 같은 비-큐 경로는 요청 하나만 돌려줄 수 있다 - N 컷을 놓을 자리가 없다.
                 return HeadlessGenerationDispatch(
                     request=None, api_mode=api_mode,
@@ -289,6 +290,8 @@ class HeadlessGenerationService:
                     api_mode=api_mode,
                     blocked_reason=str(exc),
                 )
+        if params.get("_session_pool_character") and nai_model_spec is not None and not nai_model_spec.uses_v4_payload:
+            return HeadlessGenerationDispatch(None, api_mode, "캐릭터 슬롯을 지원하는 NAI 모델을 선택해 주세요.")
         base_negative = str(params.get("negative_prompt") or "")
         prompt_run_id = self._prompt_run_id_for_command(command, params)
         if not prompt_run_id:
@@ -608,6 +611,24 @@ class HeadlessGenerationService:
             params["input"] = clean_prompt(params.get("input", ""))
         with pipeline_swap_lock(self.context):
             self._expand_input_wildcards(params)
+        selected = params.get("_session_pool_character")
+        if isinstance(selected, dict):
+            from core.character_settings import session_pool_request_characters, record_session_pool_request_pick
+
+            with pipeline_swap_lock(self.context):
+                characters = session_pool_request_characters(self.context, selected)
+            params["_session_pool_characters"] = characters
+            # 결과에 남는 출처 표시 - 파생 요청은 이 그림만 실행된 캐릭터로 묶는다(일반 결과는 late binding 그대로).
+            params["_session_pool_executed"] = True
+            # Native character captions exist only in NAI. SD providers use the same
+            # captured slot order as literal prompt/UC additions for this one request.
+            if params.get("api_mode") != "NAI":
+                params["input"] = ", ".join(filter(None, [str(params.get("input") or ""), *characters["characters"]]))
+                params["negative_prompt"] = ", ".join(filter(None, [str(params.get("negative_prompt") or ""), *characters["uc"]]))
+                params["_executed_characters"] = list(characters["characters"])
+                params["_executed_character_ids"] = list(characters["character_ids"])
+                params["_executed_characters_uc"] = list(characters["uc"])
+            record_session_pool_request_pick(self.context, selected)
         request.mark_processing()
         api_service = self._api_service()
         api_result = api_service.call_generation_api(
@@ -625,6 +646,7 @@ class HeadlessGenerationService:
         # 안 자르면 2컷부터 [직전 절반 | 새 절반] 이 함께 남아 같은 인물이 두 번 쌓인
         # 그림이 된다(2026-08-28 라이브 실행에서 확인). 원본도 결과를 잘라 저장한다.
         _isq_crop_result(api_result, params)
+        strip_session_pool_controls(params)
         api_result["generation_params"] = params
         api_result["source_row"] = request.source_row
         # 읽기 전용 생성 추적(파이프라인 단계 델타 + 적용된 와일드카드)을 이 이미지에 붙인다.

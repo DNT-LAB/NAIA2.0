@@ -294,6 +294,8 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
+    if params.get("_session_pool_character"):
+        return False
     if str(params.get("event_stream_run_id") or ""):
         return False  # Story
     if is_special_request(params, context._coerce_bool):
@@ -581,6 +583,14 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 except Exception:
                     pass
                 continue
+            finally:
+                if request_params.get("_session_pool_character"):
+                    # Draw accounting happens inside execute_request, even if the
+                    # provider subsequently fails. Refresh the pool's pick counts.
+                    try:
+                        await broadcast_json(clients, context.module_state_payload("character"))
+                    except Exception as exc:
+                        print(f"[CharacterViewer] session pool broadcast failed: {ascii(str(exc))}")
 
             img2img_completed = bool(
                 img2img_service
@@ -1223,6 +1233,8 @@ async def _maybe_continue_auto_generation(
     if search_transition_pending(context):
         return False
     params = getattr(request, "params", {}) or {}
+    if params.get("_session_pool_character"):
+        return False  # This manual selection is exactly one image.
 
     # Sequence 연속 생성(Auto Gen): 시퀀스 프레임이면 _advance_sequence_run 이 라운드 카운트를
     # 진전시키고(완료 시 다음 랜덤 그룹 연속 또는 종료) True 를 돌려준다. 시퀀스는 '그룹 전체'를
@@ -1614,6 +1626,8 @@ def _automation_should_bind(context: WebSessionContext, request) -> bool:
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
+    if params.get("_session_pool_character"):
+        return False  # This manual selection is exactly one image.
     if any(
         context._coerce_bool(params.get(key, False))
         for key in AUTO_GENERATE_SUPPRESSED_FLAGS
@@ -1636,6 +1650,8 @@ def _should_continue_auto_generation(context: WebSessionContext, request) -> boo
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
+    if params.get("_session_pool_character"):
+        return False  # This manual selection is exactly one image.
     automation_run_id = str(params.get("automation_run_id") or "")
     if automation_run_id:
         if not context._automation_service().is_running(automation_run_id):

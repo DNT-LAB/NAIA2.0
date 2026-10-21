@@ -40,6 +40,7 @@ function isNarrowViewport() {
 // `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 워크스페이스와 한 벌을 나눠 쓴다.
 import {SESSION_TOKEN, attachSessionKeyGuard} from './sessionKeyGuard.mjs?v=20261019-sk2';
 import {paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
+import {createSessionPoolWindow} from './sessionPoolWindow.mjs?v=20261021-spw5';
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,
@@ -1205,6 +1206,7 @@ export function createCharacterQuickPanel({
     if (event.target.closest('[data-cq-roll-detail]')) { rollDetail = !rollDetail; renderRoll(); fitGridHeight(); return; }
     if (event.target.closest('[data-cq-roll-pin]')) { void pinRoll(); return; }
     if (event.target.closest('[data-cq-wcsave]')) { void openWcSave(); return; }
+    if (event.target.closest('[data-cq-swopen]')) { openPoolWindow(); return; }
     const soptKey = event.target.closest('[data-cq-sopt-k]');
     if (soptKey) { void setSessionOptions(soptKey.dataset.cqSoptK); return; }
     if (event.target.closest('[data-cq-sopt-paren]')) { void setSessionOptions('paren'); return; }
@@ -1428,6 +1430,18 @@ export function createCharacterQuickPanel({
   let poolClearArmed = 0;       // [풀 비우기] 는 두 번 누른다 - 첫 번째가 이 타이머를 건다
   let poolClearKey = '';        // 첫 번째를 누른 풀 - 그사이 풀이 바뀌면 확인을 푼다(새 풀을 지우지 않게 · Codex 리뷰)
   let poolRefreshTimer = 0;
+  // 세션 와일드카드 창(사용자 결정 2026-10-21) - 랜덤 슬롯의 [세션 와일드카드 펼치기 ↗]. 처음 누를 때 만든다.
+  let poolWin = null;
+  function openPoolWindow() {
+    if (!poolWin) {
+      poolWin = createSessionPoolWindow({
+        document, escHtml, showToast,
+        openWcSave: () => openWcSave(),
+        onPoolChanged: () => { if (findEl) void loadPool(); },
+      });
+    }
+    poolWin.open();
+  }
   const poolActive = () => !!(poolInfo && poolInfo.active);
   const poolMemberKeys = () => new Set((poolActive() ? poolInfo.members || [] : [])
     .map(member => `${member.group}\u0000${member.character}`));
@@ -1995,9 +2009,14 @@ export function createCharacterQuickPanel({
 
   /** 서버 상태가 바뀌면(슬롯 · 풀) Find 가 열려 있을 때만 풀을 다시 받는다 - 에코가 몰려 오므로 묶는다. */
   function schedulePoolRefresh() {
-    if (!findEl) return;
+    const winOpen = !!(poolWin && poolWin.isOpen());
+    if (!findEl && !winOpen) return;
     clearTimeout(poolRefreshTimer);
-    poolRefreshTimer = setTimeout(() => { poolRefreshTimer = 0; if (findEl) void loadPool(); }, 400);
+    poolRefreshTimer = setTimeout(() => {
+      poolRefreshTimer = 0;
+      if (findEl) void loadPool();
+      if (poolWin && poolWin.isOpen()) void poolWin.refresh();
+    }, 400);
   }
 
   function disarmPoolClear() {
@@ -2894,7 +2913,10 @@ export function createCharacterQuickPanel({
       // 지금 풀(숨김 뺀 인원 · 지금 옵션의 줄)을 와일드카드 파일로(사용자 지시 2026-10-19).
       + `<button type="button" class="cq-sopt-btn cq-sopt-save" data-cq-wcsave="1"${locked ? ' disabled' : ''}`
       + ` title="지금 랜덤 풀(숨긴 캐릭터 빼고)을 와일드카드 파일로 저장합니다">와일드카드로 저장</button>`
-      + `</div>`;
+      + `</div>`
+      // 셋째 줄 - 세션 와일드카드 창(사용자 결정 2026-10-21): 풀에 실제로 든 줄을 떠 있는 창으로 본다.
+      + `<button type="button" class="cq-sopt-open" data-cq-swopen="1"`
+      + ` title="지금 랜덤 풀(세션 와일드카드)에 든 줄을 떠 있는 창으로 봅니다">세션 와일드카드 펼치기 ↗</button>`;
     if (box._cqHtml !== html) { box._cqHtml = html; box.innerHTML = html; }
     // 브라우저가 먼저 바꿔 둔 체크 상태를 보이는 값에 맞춘다(같은 HTML 이면 갈아 끼우지 않으므로).
     const check = box.querySelector('[data-cq-sopt-paren]');

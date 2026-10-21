@@ -23,6 +23,33 @@ from core.nai_model_contract import NaiModelSpec
 from core.nai_vibe_limits import MAX_NAI_VIBE_REFERENCES
 
 
+def strip_session_pool_controls(params: dict) -> None:
+    """One-shot selection instructions must never survive into result/replay params."""
+    params.pop("_session_pool_character", None)
+    params.pop("_session_pool_characters", None)
+
+
+def restore_executed_character_params(params: dict) -> None:
+    """Bind a result's literal NAI characters without replaying its selection command.
+
+    Only for images made by a session-pool row action (`_session_pool_executed`). Ordinary
+    results keep late binding - their derived requests follow the current slots as before.
+    """
+    strip_session_pool_controls(params)
+    if not params.get("_session_pool_executed"):
+        return
+    if str(params.get("api_mode") or "").upper() != "NAI":
+        return
+    for source, target in (
+        ("_executed_characters", "characters"),
+        ("_executed_characters_uc", "uc"),
+        ("_executed_character_ids", "character_ids"),
+        ("_executed_character_positions", "character_positions"),
+    ):
+        if isinstance(params.get(source), list):
+            params[target] = list(params[source])
+
+
 # ============ NAI 데이터 클래스 ============
 
 @dataclass(frozen=True)

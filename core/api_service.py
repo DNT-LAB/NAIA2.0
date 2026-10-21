@@ -1302,7 +1302,16 @@ class APIService:
                 char_source = None
                 characters, ucs, character_positions, character_ids = [], [], [], []
 
-                if params.get('sketchbook_character_prompts'):
+                if isinstance(params.get("_session_pool_characters"), dict):
+                    # Request-local pool selection outranks the live roll/freeze, but
+                    # never becomes either. Preserve UUIDs for session-roll/images.
+                    char_source = "SessionPoolRequest"
+                    selected = params["_session_pool_characters"]
+                    characters = list(selected["characters"])
+                    ucs = list(selected["uc"])
+                    character_ids = list(selected["character_ids"])
+                    character_positions = list(selected["character_positions"])
+                elif params.get('sketchbook_character_prompts'):
                     # 1) Sketchbook / Img2ImgWindow 오버라이드
                     #
                     # ⚠️ **좌표를 함께 읽는다.** 예전엔 여기서 위치를 통째로 버려
@@ -1333,7 +1342,7 @@ class APIService:
                         nai_char_data = generation_request.nai_characters
                         characters = list(nai_char_data.characters)
                         ucs = list(nai_char_data.uc)
-                        character_ids = [str(index + 1) for index in range(len(characters))]
+                        character_ids = list(params.get("character_ids") or [str(index + 1) for index in range(len(characters))])
                         character_positions = [pos.to_dict() for pos in nai_char_data.character_positions]
 
                     elif params.get('character_asset_request') and params.get('characters'):
@@ -1479,8 +1488,9 @@ class APIService:
                                 #    이 꺼져 배치가 통째로 조용히 사라진다.
                                 from core.character_settings import character_positions_for_mode
 
-                                character_positions = character_positions_for_mode(
-                                    self.app_context, _char_mode, count=len(characters)
+                                character_positions = (
+                                    char_params["character_positions"] if "character_positions" in char_params
+                                    else character_positions_for_mode(self.app_context, _char_mode, count=len(characters))
                                 )
                                 character_ids = list(char_params.get("character_ids") or [])
                                 # Persist a genuine fresh roll (reroll ON, or snapshot was

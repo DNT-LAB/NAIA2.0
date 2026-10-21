@@ -13,7 +13,7 @@ from app.backend.server.result_display_routes import (
     resolve_result_image_action_source,
 )
 from app.backend.server.websocket_broadcast import broadcast_image, broadcast_json
-from core.generation_request import GenerationRequest
+from core.generation_request import GenerationRequest, restore_executed_character_params
 from core.web_session_context import WebSessionContext
 
 
@@ -247,6 +247,7 @@ def prepare_result_enhance_command(
     with Image.open(io.BytesIO(image_bytes)) as image:
         orig_w, orig_h = image.size
     params = copy.deepcopy(generation_params)
+    restore_executed_character_params(params)
     _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
@@ -402,6 +403,7 @@ def perform_nai_result_upscale(context: WebSessionContext, payload: dict[str, An
         raise RuntimeError(str((result or {}).get("message") or "NAI upscale failed"))
 
     params = copy.deepcopy(generation_params)
+    restore_executed_character_params(params)
     _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):
@@ -439,6 +441,7 @@ def perform_nai_result_outpaint(context: WebSessionContext, payload: dict[str, A
         context.api_service = service
 
     params = copy.deepcopy(generation_params)
+    restore_executed_character_params(params)
     _drop_reference_inset_flags(params)
     _prompt_from_result_context(context, params, prompt_context)
     for key in ("credential", "schema_only", "options_model", "options_sampler", "options_scheduler", "options_resolution"):

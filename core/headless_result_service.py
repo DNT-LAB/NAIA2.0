@@ -17,6 +17,7 @@ from PIL import Image
 
 from core import result_image_payload_service as result_images
 from core.event_stream_vibe import strip_event_stream_vibe_params
+from core.generation_request import strip_session_pool_controls
 
 
 HISTORY_ITEM_PREFIX = "__history_item__/"
@@ -176,6 +177,7 @@ class HeadlessResultStore:
         self._attach_interactive_snapshot_thumb(request, raw_bytes or webp_bytes)
         params = dict(getattr(request, "params", {}) or {})
         params.pop("credential", None)
+        strip_session_pool_controls(params)
         executed_seed = self._resolve_executed_seed(api_result, params)
         # Storyteller Use Vibe: 스트림 발급 vibe는 휘발성 — 히스토리 메타/리플레이에
         # 남기지 않는다(마커로 그 1장만 정밀 제거, 일반 vibe refs는 리플레이 의미 보존).
@@ -208,6 +210,11 @@ class HeadlessResultStore:
                 value = executed.get(key)
                 if isinstance(value, list) and value:
                     params[key] = list(value)
+            # 세션 풀 줄 동작으로 만든 그림인지 - 이 그림의 파생 요청만 실행본 캐릭터로 묶는다
+            # (restore_executed_character_params). 리플레이 원본에 남은 값은 실행본 기준으로 재설정.
+            params.pop("_session_pool_executed", None)
+            if executed.get("_session_pool_executed"):
+                params["_session_pool_executed"] = True
         # WEBUI custom payload is a LIVE editor/session setting (remote_params), not a per-image
         # baked param. Never persist it into a stored result, so EVERY replay path (Result Enhance,
         # history replay/reopen, queue 'original', and any future one) injects the user's CURRENT

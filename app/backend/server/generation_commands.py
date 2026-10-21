@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from app.backend.server.anlas_poller import broadcast_anlas_if_vibe_encoded
 from app.backend.server.websocket_broadcast import broadcast_json as _broadcast_json
 from core.headless_generation_service import HeadlessGenerationService
-from core.headless_random_prompt_service import HeadlessRandomPromptService
+from core.headless_random_prompt_service import HeadlessRandomPromptResult, HeadlessRandomPromptService
 from core.resolution_utils import (
     anima_resolution_preset_candidates,
     nearest_anima_preset_resolution,
@@ -357,33 +357,35 @@ async def recover_exhausted_random_pool(
     )
 
 async def handle_random_command(
-    ws: WebSocket,
+    ws: WebSocket | None,
     context: WebSessionContext,
     clients: set[WebSocket],
     command: dict[str, Any] | None = None,
     *,
     start_generation_runner: GenerationRunnerStarter,
-) -> None:
+    enqueue: bool = True,
+) -> HeadlessRandomPromptResult:
     # 수동 Random 이 도는 동안 Auto Gen continuation 은 새로 뽑지 않고 양보한다(generation_runner) —
     # 둘이 같은 풀·같은 llama 슬롯을 두고 겹치면 "화면은 B, 생성은 A" 같은 꼬임이 난다.
     command = command if isinstance(command, dict) else {}
     context.manual_random_inflight = str(command.get("random_request_id") or command.get("requestId") or "manual")
     try:
-        await _handle_random_command(
-            ws, context, clients, command, start_generation_runner=start_generation_runner,
+        return await _handle_random_command(
+            ws, context, clients, command, start_generation_runner=start_generation_runner, enqueue=enqueue,
         )
     finally:
         context.manual_random_inflight = ""
 
 
 async def _handle_random_command(
-    ws: WebSocket,
+    ws: WebSocket | None,
     context: WebSessionContext,
     clients: set[WebSocket],
     command: dict[str, Any],
     *,
     start_generation_runner: GenerationRunnerStarter,
-) -> None:
+    enqueue: bool = True,
+) -> HeadlessRandomPromptResult:
     overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else None
     request_id = str(command.get("random_request_id") or command.get("requestId") or "")
     active_ratings = _active_ratings_from_command(command) or context.get_active_ratings()
@@ -446,16 +448,17 @@ async def _handle_random_command(
         request_id=request_id,
         queue_source="Random",
         allow_once=True,
-    )
+    ) if enqueue else None
     # 이 Random 이 끝날 때 Auto Gen 이 꺼져 있어 큐에 안 넣었으면 기억해 둔다 — Boost 를 기다리는 동안
     # 사용자가 켠 Auto Gen 은 WS 가 이 명령 뒤에야 읽으므로, 그 set_option 이 이 결과로 첫 장을 낸다.
-    context._last_random_dispatch = {
-        "request_id": request_id,
-        "result": result,
-        "command": command,
-        "overrides": overrides,
-        "enqueued": dispatch is not None,
-    }
+    if enqueue:
+        context._last_random_dispatch = {
+            "request_id": request_id,
+            "result": result,
+            "command": command,
+            "overrides": overrides,
+            "enqueued": dispatch is not None,
+        }
     if dispatch is not None:
         await _send_json(ws, dispatch.websocket_payload())
         if not dispatch.ok:
@@ -488,6 +491,7 @@ async def _handle_random_command(
     # Use Vibe 인코딩(2 Anlas)이 이 랜덤(스텝 전진)에서 일어났다면 잔액 차감을 pill에
     # 즉시 반영한다(generate 실패여도 인코딩은 일어났을 수 있어 무조건 검사 — no-op 안전).
     await broadcast_anlas_if_vibe_encoded(context, clients)
+    return result
 
 
 async def handle_bootstrap_random_command(

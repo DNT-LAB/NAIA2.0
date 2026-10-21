@@ -16,6 +16,9 @@ import pandas as pd
 from core.prompt_context import PromptContext
 from core.wildcard_processor import WildcardProcessor, split_tags_smart
 
+# Pool routes and request pick accounting share HIDE -> commit -> snapshot order.
+SESSION_POOL_LOCK = threading.Lock()
+
 
 def _default_save_root() -> Path:
     user_data_dir = os.environ.get("NAIA_USER_DATA_DIR")
@@ -1804,6 +1807,54 @@ def _expand_character_text(
     return strip_comment_tags(expanded)
 
 
+def _session_pool_pinned_frames(app_context, settings: dict, mode: str) -> list[dict]:
+    roster = getattr(app_context, "character_session_roster", None)
+    if not isinstance(roster, dict) or roster.get("mode") != mode:
+        return []
+    pin = tuple(roster.get("pin") or ())
+    if not pin or pin not in (roster.get("present") or set()):
+        return []
+    token = f'__{roster["key"]}__'
+    return [frame for frame in active_character_frames(settings)
+            if frame.get("session_wildcard") and token in str(frame.get("prompt") or "")]
+
+
+def _overlay_session_pool_pin(app_context, settings, result, pinned_frames, *, reuse_current_context, conditional=False):
+    """Replace only the pool slot; keep unrelated conditional/frozen results intact."""
+    if not pinned_frames:
+        return result
+    all_frames = settings.get("character_frames") or []
+    active_ids = _active_frame_slot_ids(active_character_frames(settings))
+    mask = _conditional_slot_mask(app_context) if conditional else None
+    base_ids = ([_frame_uuid(frame) for frame, keep in zip(all_frames, mask) if keep]
+                if mask is not None and len(mask) == len(all_frames) else active_ids)
+    ids = list(result.get("character_ids") or base_ids)
+    chars, ucs = result.get("characters") or [], result.get("uc") or []
+    values = {sid: (prompt, ucs[index] if index < len(ucs) else "")
+              for index, (sid, prompt) in enumerate(zip(ids, chars))}
+    processor = _character_wildcard_processor(app_context)
+    context = _get_prompt_context(app_context, reuse_current_context=reuse_current_context)
+    shares = dict(result.get("shares") or {})
+    for frame in pinned_frames:
+        sid = _frame_uuid(frame)
+        index = active_ids.index(sid) + 1
+        prompt, share = _expand_connect_field(frame.get("prompt", ""), "", processor, context, sid, index)
+        uc, _ = _expand_connect_field(frame.get("uc", ""), "", processor, context, sid, index)
+        values[sid] = (prompt, uc)
+        shares[sid] = share
+    ordered = [_frame_uuid(frame) for frame in all_frames if _frame_uuid(frame) in values]
+    ordered.extend(sid for sid in values if sid not in ordered)
+    updated = dict(result, characters=[values[sid][0] for sid in ordered],
+                   uc=[values[sid][1] for sid in ordered], character_ids=ordered)
+    pool_ids = {_frame_uuid(frame) for frame in pinned_frames}
+    updated["shares"] = shares
+    updated["wildcard_rolls"] = [roll for roll in result.get("wildcard_rolls") or []
+                                 if str(roll.get("slot") or "") not in pool_ids]
+    updated["character_positions"] = resolved_character_positions(
+        settings, count=len(ordered), slot_mask=[_frame_uuid(frame) in values for frame in all_frames])
+    return updated
+
+
 def character_params_from_settings(
     app_context,
     mode: str = "NAI",
@@ -1813,29 +1864,33 @@ def character_params_from_settings(
     save_root: Path | str | None = None,
     prefer_snapshot: bool = False,
     pinned: dict[str, dict[str, str]] | None = None,
+    frozen_override: dict[str, dict[str, str]] | None = None,
 ) -> dict:
     """Resolve the character params for this call, with the SSOT precedence:
 
       1. An active conditional character override (per-run, e.g. ``char:1+=__wc__``)
-         ALWAYS wins — return it. The snapshot must never bypass it.
+         wins except for the actively pinned session-pool slot. The snapshot
+         must never bypass unrelated conditional results.
       2. No active frames (module disabled / all slots inactive/empty) → no
          characters. A stale snapshot is NOT consumed while inactive (it may still
          persist so re-enabling restores the roll).
       3. ``prefer_snapshot`` and a stored (mode-keyed) snapshot exists → reuse it
-         verbatim (NO re-roll). This is how Generate (reroll OFF) and the
+         without re-rolling unrelated slots (the pool pin still wins). This is how Generate (reroll OFF) and the
          random prompt grounding stay identical to what was rolled.
       4. Otherwise perform ONE fresh wildcard expansion and return it.
 
     ``pinned`` = {slot uuid: {"prompt", "uc", "share"}}: step 4 does NOT re-expand these
     slots - it reuses the given result (and hands ``share`` down to Connect children).
     Used by ``roll_character_slot`` so one slot's [Refresh] leaves the others alone.
+    ``frozen_override`` supplies a private freeze snapshot for a queued one-shot
+    request. It also suppresses pruning of the shared freeze store.
 
     This function does NOT persist the snapshot — storage is explicit at the
     authoritative roll sites (Random / Generate / Refresh) via
     ``store_character_roll_snapshot``, so one-off callers (Seed Fan-out,
     event-stream freeze) can expand without clobbering the session snapshot.
-    Steps 1 and 2 are pure reads and run for ALL callers, so a disabled module
-    or an active conditional override is honored everywhere.
+    The pool pin replaces only its active session slot; other conditional and
+    frozen results retain their precedence and their stored values.
     """
     if save_root is None:
         save_root = _save_root_from_context(app_context)
@@ -1849,14 +1904,18 @@ def character_params_from_settings(
     #   S3 슬롯 베이스(캐릭터 칸 직접 입력) 97572409.
     # override에는 raw 토큰을 절대 넣지 말 것. (로컬 상세: CONDITIONAL_CHAR_WILDCARD_TRAP.md)
     override = _conditional_character_override(app_context, reuse_current_context=reuse_current_context)
-    if override is not None:
-        return override
     normalized = (
         normalize_character_settings(settings)
         if settings is not None
         else load_character_settings(mode, save_root=save_root)
     )
-    _prune_frozen_character_slots(app_context, normalized)
+    pool_frames = _session_pool_pinned_frames(app_context, normalized, mode)
+    pool_ids = {_frame_uuid(frame) for frame in pool_frames}
+    if override is not None:
+        return _overlay_session_pool_pin(app_context, normalized, override, pool_frames,
+                                         reuse_current_context=reuse_current_context, conditional=True)
+    if frozen_override is None:
+        _prune_frozen_character_slots(app_context, normalized)
     # (2) Inactive / no active frames → never consume a stale snapshot.
     frames = active_character_frames(normalized)
     if not frames:
@@ -1871,6 +1930,8 @@ def character_params_from_settings(
         if snapshot is not None:
             result = _snapshot_result(snapshot, frame_slot_ids)
             result = _overlay_frozen_character_slots(app_context, result, frame_slot_ids)
+            result = _overlay_session_pool_pin(app_context, normalized, result, pool_frames,
+                                               reuse_current_context=reuse_current_context)
             _replay_character_snapshot_rolls(app_context, result, reuse_current_context=reuse_current_context)
             return result
 
@@ -1880,7 +1941,7 @@ def character_params_from_settings(
     processor = _character_wildcard_processor(app_context)
     context = _get_prompt_context(app_context, reuse_current_context=reuse_current_context)
     roll_start = len(context.wildcard_rolls) if isinstance(getattr(context, "wildcard_rolls", None), list) else 0
-    frozen = read_frozen_character_slots(app_context)
+    frozen = (read_frozen_character_slots(app_context) if frozen_override is None else frozen_override)
 
     characters = []
     ucs = []
@@ -1891,14 +1952,14 @@ def character_params_from_settings(
     expanded_by_uuid: dict[str, tuple[str, str]] = {}
     for slot_index, frame in enumerate(frames, 1):
         slot = frame_slot_ids[slot_index - 1] if slot_index - 1 < len(frame_slot_ids) else str(slot_index)
-        frozen_payload = frozen.get(slot)
+        frozen_payload = frozen.get(slot) if slot not in pool_ids else None
         if frozen_payload:
             prompt = frozen_payload["prompt"]
             uc = frozen_payload.get("uc", "")
             rolls = getattr(context, "wildcard_rolls", None)
             if isinstance(rolls, list):
                 _append_frozen_character_roll(rolls, slot, prompt, slot_index)
-        elif pinned and slot in pinned:
+        elif pinned and slot in pinned and slot not in pool_ids:
             # [Refresh] 가 건드리지 않는 슬롯 - 지난 결과를 그대로 쓴다. 아래로 물려줄 몫도
             # 지난 것이다(Connect 자식이 이 슬롯의 **같은** 값을 이어받게).
             pin = pinned[slot]
@@ -2136,6 +2197,76 @@ def roll_character_params(
     if not override_active:
         store_character_roll_snapshot(app_context, params, mode)
     return params
+
+
+def session_pool_request_characters(app_context, request: dict) -> dict:
+    """Resolve a single request from its captured settings; never store its forced roll.
+
+    The selected wildcard is replaced only in this private settings copy. Other
+    slots reuse the captured roll when reroll-on-generate was off; Connect children
+    are expanded again so they inherit the selected character. No app-wide override,
+    freeze, or roll snapshot is written, including on exceptions and API retries.
+    """
+    from copy import deepcopy
+
+    mode = str(request["mode"])
+    settings = deepcopy(request["settings"])
+    slot = str(request["slot"])
+    token = f'__{request["wildcard"]}__'
+    target = next((frame for frame in settings["character_frames"] if _frame_uuid(frame) == slot), None)
+    if target is None or token not in str(target.get("prompt") or ""):
+        raise ValueError("생성 요청의 랜덤 슬롯을 찾을 수 없습니다.")
+    target["prompt"] = target["prompt"].replace(token, str(request["line"]))
+    # This literal copy must survive normalization even if the live pool was cleared.
+    target["session_wildcard"] = False
+    frames = active_character_frames(settings)
+    ids = _active_frame_slot_ids(frames)
+    targets = {slot}
+    for frame, sid in zip(frames, ids):
+        if str(frame.get("connect_to") or "") in targets:
+            targets.add(sid)
+    conditional = request.get("conditional") or {}
+    # Preserve the current run's changes to unrelated slots. The selected slot and
+    # its Connect children intentionally resolve from their captured templates.
+    for frame in settings["character_frames"]:
+        sid = _frame_uuid(frame)
+        value = conditional.get(sid)
+        if sid not in targets and isinstance(value, dict) and (not value.get("active") or character_text_is_blank(value.get("prompt"))):
+            frame["is_muted"] = True
+    frames = active_character_frames(settings)
+    ids = _active_frame_slot_ids(frames)
+    snapshot = request.get("snapshot") or {}
+    prior = _snapshot_result(snapshot, ids)
+    shares = prior.get("shares") or {}
+    pinned = {sid: {"prompt": prompt, "uc": uc, "share": shares.get(sid, prompt)}
+              for sid, prompt, uc in zip(prior["character_ids"], prior["characters"], prior["uc"])
+              if sid not in targets}
+    frozen = deepcopy(request.get("frozen") or {})
+    frozen.pop(slot, None)
+    for sid, value in conditional.items():
+        if sid in ids and sid not in targets:
+            pinned[sid] = {"prompt": str(value.get("prompt") or ""), "uc": str(value.get("uc") or "")}
+            frozen.pop(sid, None)  # Conditional results outrank ordinary slot freeze.
+    result = character_params_from_settings(
+        app_context, mode=mode, settings=settings, reuse_current_context=False,
+        pinned=pinned, frozen_override=frozen,
+    )
+    if slot not in (result.get("character_ids") or []):
+        raise ValueError("선택한 캐릭터의 출력 줄이 비어 있습니다.")
+    result["character_positions"] = resolved_character_positions(settings, count=len(result["characters"]))
+    return result
+
+
+def record_session_pool_request_pick(app_context, request: dict) -> None:
+    """Count the draw only in its original live pool, under the routes' HIDE lock."""
+    with SESSION_POOL_LOCK:
+        roster = getattr(app_context, "character_session_roster", None)
+        manager = getattr(app_context, "wildcard_manager", None)
+        if (not isinstance(roster, dict) or roster.get("pool_id") != request.get("pool_id")
+                or request.get("wildcard") not in (getattr(manager, "session_wildcards", None) or {})):
+            return
+        manager.session_picks.append(str(request["line"]))
+        del manager.session_picks[:-500]
 
 
 def roll_character_slot(

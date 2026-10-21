@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import re
-import threading
+from copy import deepcopy
 import uuid as _uuid
 from typing import Any, Awaitable, Callable
 
@@ -54,7 +54,7 @@ def _session_roster(context: WebSessionContext) -> tuple[dict[str, Any] | None, 
 
 
 # 숨김(파일 쓰기 + 지금 풀에서 빼기)은 한 번에 하나씩 - 동시에 둘이 같은 풀을 베껴 갈아 끼우면 서로 뺀 것을 되살린다(Codex 리뷰).
-_HIDE_LOCK = threading.Lock()
+from core.character_settings import SESSION_POOL_LOCK as _HIDE_LOCK
 
 
 def _roll_identity(roster: dict[str, Any], prompt: str) -> tuple[str, str] | None:
@@ -180,6 +180,10 @@ def _rebuild_session_pool(roster: dict[str, Any], manager: Any) -> int:
     (같은 줄이 둘 이상의 캐릭터에서 나오면 그 줄은 None = 모른다). 돌려주는 값 = 풀의 수."""
     options = roster.get("options") or {}
     present = roster.get("present") or set()
+    pin = tuple(roster.get("pin") or ())
+    if pin and pin not in present:
+        roster.pop("pin", None)
+        pin = ()
     # ⚠️ 새 사전에 쓰고 마지막에 갈아 끼운다 - 조회(`_roll_identity`)가 잠금 없이 같은 사전을 돌고 있을 수 있다
     #    ('dictionary changed size during iteration' · Codex 리뷰 20차).
     lines = dict(roster.get("lines") or {})
@@ -194,11 +198,12 @@ def _rebuild_session_pool(roster: dict[str, Any], manager: Any) -> int:
             lines[text] = None
         else:
             lines.setdefault(text, identity)
-        pool.append((100, text))
+        if not pin or identity == pin:
+            pool.append((100, text))
     roster["lines"] = lines
     if pool:
         manager.session_wildcards[roster["key"]] = pool
-    return len(pool)
+    return len(present)
 
 
 def _session_line_for(roster: dict[str, Any], identity: tuple[str, str]) -> str:
@@ -635,8 +640,14 @@ def register_character_viewer_routes(
                 frames = slots.settings_for(roster["mode"]).get("character_frames") or []
                 label = next((frame.get("custom_name", "") for frame in frames
                               if frame.get("session_wildcard") and f'__{roster["key"]}__' in str(frame.get("prompt") or "")), "")
+                # 세션 와일드카드 창(2026-10-21): 와일드카드 이름 · 지금 출력 옵션 · 마지막으로 뽑힌 캐릭터(초록 표시).
+                last = _roll_identity(roster, picks[-1]) if picks else None
                 return {"active": True, "key": roster["pool_id"], "label": label, "count": len(members),
-                        "total_picks": len(picks), "members": members}
+                        "total_picks": len(picks), "members": members,
+                        "pin": ({"group": roster["pin"][0], "character": roster["pin"][1]}
+                                if roster.get("pin") else None),
+                        "wildcard": f'__{roster["key"]}__', "options": dict(roster.get("options") or {}),
+                        "last_pick": {"group": last[0], "character": last[1]} if last else None}
 
         return await run_in_thread(read)
 
@@ -737,6 +748,195 @@ def register_character_viewer_routes(
     @app.post("/api/character-viewer/session-pool/clear")
     async def api_character_viewer_session_pool_clear(req: Request):
         return await mutate_session_pool(req, "clear")
+
+    def require_session_pool(key: str):
+        roster, manager = _session_roster(session_context)
+        if roster is None or key != roster["pool_id"]:
+            raise _SessionPoolError(409, "랜덤 슬롯이 새로 바뀌었습니다. 다시 눌러 주세요.")
+        return roster, manager
+
+    @app.post("/api/character-viewer/session-pool/pin")
+    async def api_character_viewer_session_pool_pin(req: Request):
+        payload = await session_pool_payload(req)
+
+        def apply():
+            from core.character_settings import _SESSION_SNAPSHOT_LOCK, bump_session_generation
+
+            slots = session_context._character_service()
+            with _HIDE_LOCK, slots._commit_lock:
+                roster, manager = require_session_pool(str(payload.get("key") or ""))
+                if not isinstance(payload.get("pin"), bool):
+                    raise _SessionPoolError(400, "pin must be a boolean")
+                identity = (str(payload.get("group") or "").strip(),
+                            str(payload.get("character") or "").strip())
+                if payload["pin"] and identity not in roster["present"]:
+                    raise _SessionPoolError(400, "이 캐릭터는 지금 랜덤 풀에 없습니다.")
+                with _SESSION_SNAPSHOT_LOCK:
+                    if payload["pin"]:
+                        roster["pin"] = identity
+                    else:
+                        roster.pop("pin", None)
+                    count = _rebuild_session_pool(roster, manager)
+                    bump_session_generation(session_context, roster["mode"])
+                return {"ok": True, "key": roster["pool_id"], "count": count,
+                        "pin": ({"group": identity[0], "character": identity[1]} if payload["pin"] else None)}
+
+        try:
+            result = await run_in_thread(apply)
+        except _SessionPoolError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        await broadcast_session_pool()
+        return result
+
+    @app.post("/api/character-viewer/session-pool/generate")
+    async def api_character_viewer_session_pool_generate(req: Request):
+        payload = await session_pool_payload(req)
+        key = str(payload.get("key") or "")
+        identity = (str(payload.get("group") or "").strip(), str(payload.get("character") or "").strip())
+
+        def capture():
+            from core.character_settings import (
+                _SESSION_SNAPSHOT_LOCK, _frame_uuid, active_character_frames,
+                read_character_roll_snapshot, read_frozen_character_slots, read_reroll_on_generate,
+            )
+
+            slots = session_context._character_service()
+            with _HIDE_LOCK, slots._commit_lock, _SESSION_SNAPSHOT_LOCK:
+                roster, _manager = require_session_pool(key)
+                if not isinstance(payload.get("random"), bool):
+                    raise _SessionPoolError(400, "random must be a boolean")
+                if identity not in roster["present"]:
+                    raise _SessionPoolError(400, "이 캐릭터는 지금 랜덤 풀에 없습니다.")
+                mode = str(roster["mode"])
+                if mode != str(session_context.get_api_mode()):
+                    raise _SessionPoolError(409, "랜덤 슬롯을 만든 API 모드에서 생성해 주세요.")
+                settings = deepcopy(slots.settings_for(mode))
+                frames = active_character_frames(settings)
+                target = next((frame for frame in frames if frame.get("session_wildcard")
+                               and f'__{roster["key"]}__' in str(frame.get("prompt") or "")), None)
+                if target is None:
+                    raise _SessionPoolError(409, "캐릭터 모듈과 랜덤 슬롯을 켠 뒤 생성해 주세요.")
+                line = _session_line_for(roster, identity)
+                if not line.strip():
+                    raise _SessionPoolError(400, "선택한 캐릭터의 출력 줄이 비어 있습니다.")
+                metadata = getattr(getattr(session_context, "current_prompt_context", None), "metadata", None) or {}
+                conditional_slots = metadata.get("_conditional_character_slots")
+                original_frames = settings.get("character_frames") or []
+                conditional = {}
+                if (metadata.get("conditional_character_overrides") is not None
+                        and isinstance(conditional_slots, list) and len(conditional_slots) == len(original_frames)):
+                    conditional = {_frame_uuid(frame): deepcopy(value)
+                                   for frame, value in zip(original_frames, conditional_slots) if isinstance(value, dict)}
+                settings["character_frames"] = deepcopy(frames)
+                return {"pool_id": key, "wildcard": roster["key"], "slot": _frame_uuid(target),
+                        "line": line, "mode": mode, "settings": settings,
+                        "snapshot": (None if read_reroll_on_generate(session_context, mode) else
+                                     deepcopy(read_character_roll_snapshot(session_context, mode))),
+                        "frozen": deepcopy(read_frozen_character_slots(session_context)), "conditional": conditional}
+
+        try:
+            selected = await run_in_thread(capture)
+            service = _generation_service(session_context)
+            # Use the normal dispatch error shape before advancing Random when no API is available.
+            from core.generation_access_policy import access_policy
+            from core.headless_generation_service import HeadlessGenerationDispatch
+
+            policy = access_policy(session_context)
+            if policy.blocked or not service._credential_for_mode(selected["mode"]):
+                reason = policy.reason() if policy.blocked else f'{selected["mode"]} credential is not configured.'
+                return JSONResponse(HeadlessGenerationDispatch(None, selected["mode"], reason).websocket_payload(),
+                                    status_code=409)
+            random_result = None
+            if payload["random"]:
+                from app.backend.server.generation_commands import handle_random_command
+
+                # [랜덤+생성] 의 Random 은 **프롬프트만** 새로 뽑는다 - 그사이 랜덤 슬롯이 굴린 한 줄은 이 그림에 안 쓰인다
+                # (이 요청은 고른 캐릭터로 나간다). 이 호출이 만드는 픽만 기록하지 않는다. 다른 동시 요청의 기록은 그대로 둔다.
+                from core.wildcard_processor import suppress_session_pick_recording
+
+                with suppress_session_pick_recording(session_context.wildcard_manager):
+                    random_result = await handle_random_command(
+                        None, session_context, clients,
+                        {"type": "random", "random_request_id": f"session-pool-{_uuid.uuid4().hex}",
+                         "force_naia_skip_generate": True},
+                        start_generation_runner=start_generation_runner, enqueue=False,
+                    )
+                if not random_result.success:
+                    return JSONResponse(random_result.websocket_payload(), status_code=409)
+
+            def enqueue():
+                # Random can await: revalidate pool/membership/mode before snapshotting and dispatch.
+                selected_now = capture()
+                with _HIDE_LOCK, session_context._character_service()._commit_lock:
+                    roster, _manager = require_session_pool(key)
+                    if identity not in roster["present"] or roster["mode"] != session_context.get_api_mode():
+                        raise _SessionPoolError(409, "랜덤 슬롯이 새로 바뀌었습니다. 다시 눌러 주세요.")
+                    overrides = {"_session_pool_character": selected_now, "auto_generate": False,
+                                 "_remote_queue_source": "SessionPool", "_remote_queue_label": identity[1]}
+                    if random_result is not None:
+                        from app.backend.server.generation_runner import _reroll_random_resolution
+
+                        _reroll_random_resolution(session_context, overrides)
+                        if random_result.detected_resolution:
+                            width, height = random_result.detected_resolution
+                            overrides.update(width=width, height=height, resolution=f"{width} x {height}")
+                    command = {"type": "generate", "api_mode": selected_now["mode"],
+                               "prompt": random_result.prompt if random_result is not None else session_context.prompt_text,
+                               "negative_prompt": session_context.negative_prompt_text, "overrides": overrides}
+                    if random_result is not None and random_result.prompt_run_id:
+                        command["prompt_run_id"] = random_result.prompt_run_id
+                    return service.enqueue_remote_request(command)
+
+            dispatch = await run_in_thread(enqueue)
+        except _SessionPoolError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except Exception as exc:
+            return JSONResponse({"error": f"Session pool generate failed: {exc}"}, status_code=500)
+        if not dispatch.ok:
+            return JSONResponse(dispatch.websocket_payload(), status_code=409)
+        await broadcast_session_pool()
+        if session_context.headless_generation_execute_enabled:
+            start_generation_runner(session_context, clients)
+        return dispatch.websocket_payload()
+
+    @app.get("/api/character-viewer/session-pool/images")
+    async def api_character_viewer_session_pool_images(key: str = "", group: str = "", character: str = ""):
+        def read():
+            from core.character_settings import _frame_uuid
+
+            slots = session_context._character_service()
+            with _HIDE_LOCK, slots._commit_lock:
+                roster, _manager = require_session_pool(key)
+                identity = (group.strip(), character.strip())
+                if not all(identity):
+                    raise _SessionPoolError(400, "group and character are required")
+                frames = slots.settings_for(roster["mode"]).get("character_frames") or []
+                owns = {str(_frame_uuid(frame) or "") for frame in frames
+                        if frame.get("session_wildcard")
+                        and f'__{roster["key"]}__' in str(frame.get("prompt") or "")}
+                owns.discard("")
+                store = session_context.result_store
+                with store._mutation_lock:
+                    history = list(store._items)
+                items = []
+                for item in history:
+                    params = item.generation_params or {}
+                    ids = params.get("_executed_character_ids") or []
+                    prompts = params.get("_executed_characters") or []
+                    if not isinstance(ids, list) or not isinstance(prompts, list):
+                        continue
+                    if not any(str(slot) in owns and _roll_identity(roster, str(prompt)) == identity
+                               for slot, prompt in zip(ids, prompts)):
+                        continue
+                    items.append({"id": item.history_id, "path": item.rel_path,
+                                  "thumbnail_url": f"/api/history/thumb/{item.history_id}",
+                                  "created": item.created_at.isoformat()})
+                return {"items": items, "count": len(items)}
+
+        try:
+            return await run_in_thread(read)
+        except _SessionPoolError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
 
     @app.post("/api/character-viewer/session-roll")
     async def api_character_viewer_session_roll(req: Request):

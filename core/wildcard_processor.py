@@ -1,8 +1,27 @@
 import random
+from contextlib import contextmanager
+from contextvars import ContextVar
 import re
 from typing import List
 from .prompt_context import PromptContext
 from .wildcard_manager import WildcardManager
+
+
+_SUPPRESSED_SESSION_PICKS = ContextVar("suppressed_session_picks", default=())
+
+
+@contextmanager
+def suppress_session_pick_recording(manager):
+    """Suppress only this call tree's draws; asyncio.to_thread copies this context.
+
+    Other tasks/threads keep their own context. Reset even on cancellation/failure;
+    never trim the shared capped log to undo draws after the fact.
+    """
+    token = _SUPPRESSED_SESSION_PICKS.set((*_SUPPRESSED_SESSION_PICKS.get(), manager))
+    try:
+        yield
+    finally:
+        _SUPPRESSED_SESSION_PICKS.reset(token)
 
 
 def _angle_ends_tag(text: str, index: int) -> bool:
@@ -502,7 +521,8 @@ class WildcardProcessor:
         if is_session:
             # 세션 와일드카드의 뽑힘은 생성 기록(wildcard_history · rolls - 결과 · 히스토리로 간다)에 남기지 않는다
             # (사용자 지시 2026-10-19: 일회성 캐릭터 · 휘발성 와일드카드의 기록이 남지 않게). 세션 목록에만 둔다.
-            if isinstance(session_picks, list):
+            if (isinstance(session_picks, list)
+                    and not any(manager is self.wildcard_manager for manager in _SUPPRESSED_SESSION_PICKS.get())):
                 session_picks.append(chosen_line)
                 del session_picks[:-500]
             return chosen_line

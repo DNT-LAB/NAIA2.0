@@ -323,7 +323,10 @@ def _source_row_json_safe(source_row: Any) -> dict[str, Any]:
 
 
 def _history_item_replay_params(item: Any) -> dict[str, Any]:
+    from core.generation_request import restore_executed_character_params
+
     params = dict(getattr(item, "generation_params", {}) or {})
+    restore_executed_character_params(params)
     for key in (
         "credential",
         "_generation_request",
@@ -553,6 +556,8 @@ def resolve_result_image_action_source(
     if item is not None:
         png_bytes, _ = result_images.history_item_png_payload(item, label=getattr(item, "filename", "") or label)
         generation_params = dict(getattr(item, "generation_params", {}) or {})
+        from core.generation_request import strip_session_pool_controls
+        strip_session_pool_controls(generation_params)
         prompt_context = dict(getattr(item, "prompt_context", {}) or {})
         return png_bytes, label or getattr(item, "filename", "") or "Result Image", generation_params, prompt_context
 
@@ -1595,7 +1600,7 @@ def register_result_display_routes(
             overrides["_raw_input"] = prompt
             overrides["_remote_queue_source"] = "Result Reopen"
         elif queue_mode == "current_character":
-            for key in ("characters", "uc", "character_positions"):
+            for key in ("characters", "uc", "character_positions", "character_ids"):
                 overrides.pop(key, None)
             overrides["_remote_queue_source"] = "Result Current Character"
         else:

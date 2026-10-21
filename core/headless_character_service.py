@@ -405,6 +405,22 @@ class HeadlessCharacterService:
         if not alive and hasattr(manager, "clear_session_wildcard"):
             manager.clear_session_wildcard()
 
+    def update_session_pool_slot(self, wildcard: str, mode: str, *, label: str = "", remove: bool = False) -> None:
+        """풀의 라벨/삭제도 정규화와 기존 삭제 경로를 통한다. 호출자는 HIDE -> commit -> snapshot 순서를 지킨다."""
+        with self._commit_lock:
+            settings = self.settings_for(mode)
+            frames = settings.get("character_frames") or []
+            index = next((i for i, frame in enumerate(frames)
+                          if isinstance(frame, dict) and frame.get("session_wildcard")
+                          and f"__{wildcard}__" in str(frame.get("prompt") or "")), None)
+            if index is None:
+                return
+            if remove:
+                self._set_param_locked(f"remove_character_{index}", True, mode=mode)
+            else:
+                frames[index]["custom_name"] = label
+                self.save_settings(mode, settings)
+
     def set_session_wildcard_slot(self, wildcard: str, label: str, lines: list[str],
                                   expected_mode: str | None = None) -> tuple[dict[str, Any] | None, bool]:
         """세션 와일드카드를 걸고 그 슬롯을 (바꿔) 넣는다. (상태, 넣었나) - 활성 슬롯이 꽉 찼으면 못 넣고 와일드카드도 푼다.
@@ -886,10 +902,12 @@ class HeadlessCharacterService:
                 return f"{match.group('head')}{index}"
         return None
 
-    def _set_param_locked(self, key: str, value: Any) -> dict[str, Any] | None:
+    def _set_param_locked(self, key: str, value: Any, *, mode: str | None = None) -> dict[str, Any] | None:
         context = self.context
-        mode = context.get_api_mode()
-        settings = self.settings_cache()
+        # 모드를 주면 그 모드의 설정(세션 풀 슬롯 삭제 - 풀을 만든 모드), 아니면 예전대로 지금 모드(`settings_cache`).
+        explicit = mode is not None
+        mode = mode if explicit else context.get_api_mode()
+        settings = self.settings_for(mode) if explicit else self.settings_cache()
         frames = settings.setdefault("character_frames", [])
         # SSOT snapshot bookkeeping:
         #   - content edits invalidate the snapshot (next authoritative roll reflects

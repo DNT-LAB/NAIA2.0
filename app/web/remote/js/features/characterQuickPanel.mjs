@@ -1401,7 +1401,7 @@ export function createCharacterQuickPanel({
   let findDexTotal = null;
   // 처음 여는 갈래 = 히스토리 · 즐겨찾기(사용자 지시 2026-10-17). 탭 차례(사전이 앞)는 그대로 - 기본값만 바꿨다.
   let findTab = 'lib';
-  const findQuery = {dex: '', lib: '', hid: ''};
+  const findQuery = {dex: '', lib: '', pool: '', hid: ''};
   let findDexRows = [];
   let findDexSeq = 0;
   let findDexTimer = 0;
@@ -1420,6 +1420,17 @@ export function createCharacterQuickPanel({
     if (FIND_GENDERS.some(([key]) => key === saved)) findGender = saved;
   } catch (_) { /* 못 읽으면 기본 여 */ }
   let findGenderCounts = null;
+  // [풀] 탭 = 스테이징(사용자 결정 2026-10-21): 지금 랜덤 풀(세션 와일드카드)을 **바로** 고친다 · ✕ = 이 풀에서만(숨김과 별개) ·
+  // [풀 비우기] = 슬롯까지 지운다 · 재시작하면 사라진다(지금과 같다). 서버 = GET/POST /api/character-viewer/session-pool*.
+  let poolInfo = null;          // GET session-pool 응답 {active, key, label, count, total_picks, members}
+  let poolSeq = 0;
+  let poolBusy = '';            // 진행 중인 일(캐릭터 키 · 'merge' · 'clear')
+  let poolClearArmed = 0;       // [풀 비우기] 는 두 번 누른다 - 첫 번째가 이 타이머를 건다
+  let poolClearKey = '';        // 첫 번째를 누른 풀 - 그사이 풀이 바뀌면 확인을 푼다(새 풀을 지우지 않게 · Codex 리뷰)
+  let poolRefreshTimer = 0;
+  const poolActive = () => !!(poolInfo && poolInfo.active);
+  const poolMemberKeys = () => new Set((poolActive() ? poolInfo.members || [] : [])
+    .map(member => `${member.group}\u0000${member.character}`));
   // 줄을 누르면 그 아래 [이 캐릭터를 Favorite로 | 이 캐릭터 숨김](사용자 지시 2026-10-19) - 슬롯 추가는 [+ 슬롯] 단추만.
   let findExpand = '';                  // 펼친 줄 = `그룹\u0000캐릭터`
   let findActBusy = false;
@@ -1777,6 +1788,7 @@ export function createCharacterQuickPanel({
     findEl?.remove();
     findEl = null;
     findFavOnly = false;            // [★] 은 임시 - 닫으면 풀린다
+    disarmPoolClear();              // [풀 비우기] 확인은 이 창에서만
     hideFindZoom();
     mount?.querySelector('[data-cq-find]')?.classList.remove('is-on');
   }
@@ -1821,7 +1833,7 @@ export function createCharacterQuickPanel({
   }
 
   function onFindHover(event) {
-    const row = event.target.closest('[data-cqf-char], [data-cqf-hid-char]');
+    const row = event.target.closest('[data-cqf-char], [data-cqf-hid-char], [data-cqf-pool-char]');
     if (row && findEl && findEl.contains(row)) showFindZoom(row); else hideFindZoom();
   }
 
@@ -1838,6 +1850,7 @@ export function createCharacterQuickPanel({
       `<div class="cq-find-seg">`
       + `<button type="button" data-cqf-tab="dex" title="캐릭터 · 작품 사전">캐릭터</button>`
       + `<button type="button" data-cqf-tab="lib" title="히스토리 · 즐겨찾기 · 그룹(보관함)">히스토리</button>`
+      + `<button type="button" data-cqf-tab="pool" title="지금 랜덤 풀(세션 와일드카드)">풀</button>`
       // [제외] - 숨긴 캐릭터(랜덤 디버그 줄의 [숨김] · 사용자 지시 2026-10-19). 누르면 숨김을 푼다.
       + `<button type="button" data-cqf-tab="hid">제외</button></div>`
       + `<div class="cq-find-qrow"><input class="cq-find-q" type="search" autocomplete="off" spellcheck="false" data-cqf-q="1">`
@@ -1853,7 +1866,13 @@ export function createCharacterQuickPanel({
       + `<button type="button" class="cq-find-gset" data-cqf-gset="1" title="생성 설정 - Characters 탭에서 Prefix · Postfix 를 고칩니다"`
       + ` aria-label="생성 설정"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/>`
       + `<path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>`
-      + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button></div>`;
+      + `<button type="button" class="cq-find-rw cq-find-merge" data-cqf-merge="1" hidden`
+      + ` title="지금 결과에서 풀에 없는 캐릭터만 더합니다(숨긴 캐릭터 제외)">풀에 합치기</button>`
+      + `<button type="button" class="cq-find-rw" data-cqf-rw="1" hidden></button></div>`
+      // [풀] 탭 바닥(사용자 결정 2026-10-21) - [와일드카드로 저장] 은 랜덤 디버그 줄과 두 곳 모두.
+      + `<div class="cq-find-pfoot" data-cqf-pfoot="1" hidden>`
+      + `<button type="button" class="cq-find-rw" data-cqf-psave="1">와일드카드로 저장</button>`
+      + `<button type="button" class="cq-find-rw is-danger" data-cqf-pclear="1"></button></div>`;
     document.body.appendChild(findEl);
     findEl.addEventListener('click', onFindClick);
     findEl.addEventListener('mouseover', onFindHover);
@@ -1875,6 +1894,7 @@ export function createCharacterQuickPanel({
     });
     mount?.querySelector('[data-cq-find]')?.classList.add('is-on');
     setFindTab(findTab);
+    if (findTab !== 'pool') void loadPool();       // 캐릭터 탭의 '풀에 있음' 점 · 탭의 수
     positionFind();
     findEl.querySelector('[data-cqf-q]')?.focus();
     findDismiss = event => {
@@ -1939,7 +1959,7 @@ export function createCharacterQuickPanel({
   }
 
   function setFindTab(tab) {
-    findTab = tab === 'lib' ? 'lib' : tab === 'hid' ? 'hid' : 'dex';
+    findTab = tab === 'lib' ? 'lib' : tab === 'hid' ? 'hid' : tab === 'pool' ? 'pool' : 'dex';
     if (findTab !== 'dex' && featEl) closeFeat();      // 낱말은 [캐릭터 · 작품] 에만 걸린다
     if (!findEl) return;
     findEl.querySelectorAll('[data-cqf-tab]').forEach(el =>
@@ -1947,11 +1967,155 @@ export function createCharacterQuickPanel({
     const input = findEl.querySelector('[data-cqf-q]');
     if (input) {
       input.value = findQuery[findTab];
-      input.placeholder = findTab === 'dex' ? '캐릭터 · 작품 이름' : findTab === 'hid' ? '숨긴 캐릭터 · 작품' : '이름 · 프롬프트 · 그룹';
+      input.placeholder = findTab === 'dex' ? '캐릭터 · 작품 이름' : findTab === 'hid' ? '숨긴 캐릭터 · 작품'
+        : findTab === 'pool' ? '풀 안의 캐릭터 · 작품' : '이름 · 프롬프트 · 그룹';
     }
     if (findTab === 'dex' && !findDexRows.length && !findDexLoading) void loadFindDex();
     if (findTab === 'hid') void loadHidden();          // 열 때마다 새로 - 다른 창이 숨겼을 수 있다
+    if (findTab === 'pool') void loadPool();
     renderFindList();
+  }
+
+  // ── [풀] 탭(스테이징 · 사용자 결정 2026-10-21) ─────────────────────────────────
+  async function loadPool() {
+    const seq = ++poolSeq;
+    let next = null;
+    try {
+      const res = await fetch('/api/character-viewer/session-pool', {cache: 'no-store'});
+      const data = await res.json().catch(() => ({}));
+      next = res.ok ? data : {active: false};
+    } catch (_) {
+      next = {active: false};
+    }
+    if (seq !== poolSeq) return;          // 늦게 온 옛 답은 버린다
+    poolInfo = next;
+    if (poolClearArmed && (!poolActive() || poolInfo.key !== poolClearKey)) disarmPoolClear();
+    renderFindList();
+  }
+
+  /** 서버 상태가 바뀌면(슬롯 · 풀) Find 가 열려 있을 때만 풀을 다시 받는다 - 에코가 몰려 오므로 묶는다. */
+  function schedulePoolRefresh() {
+    if (!findEl) return;
+    clearTimeout(poolRefreshTimer);
+    poolRefreshTimer = setTimeout(() => { poolRefreshTimer = 0; if (findEl) void loadPool(); }, 400);
+  }
+
+  function disarmPoolClear() {
+    clearTimeout(poolClearArmed);
+    poolClearArmed = 0;
+    poolClearKey = '';
+  }
+
+  async function poolRequest(path, body) {
+    const res = await fetch(`/api/character-viewer/session-pool/${path}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '처리하지 못했습니다.');
+    return data;
+  }
+
+  /** [+ 풀] / [✓ 풀] / 풀 탭 ✕. 할 일(add · remove)과 풀 키는 **그 줄을 그릴 때의 것**을 받는다 - 누르는 사이 풀이 바뀌어도
+   *  옛 화면의 ✕ 가 새 풀에 '넣기' 로 뒤집히거나 새 풀에서 빼지 않는다(서버가 키가 다르면 409 · Codex 리뷰). */
+  async function togglePool(group, character, op, pool) {
+    if (poolBusy || !group || !character || (op !== 'add' && op !== 'remove')) return;
+    const key = `${group}\u0000${character}`;
+    poolBusy = key;
+    renderFindList();
+    try {
+      if (op === 'remove') {
+        await poolRequest('remove', {key: pool, group, character});
+        showToast(`${character} - 이 풀에서 뺐습니다`, 'info');
+      } else {
+        const data = await poolRequest('add', {key: pool, group, character});
+        showToast(data.created ? `${character} - 새 랜덤 풀(1명)을 만들었습니다`
+          : data.already ? `${character} - 이미 풀에 있습니다`
+            : `${character} - 풀에 넣었습니다(${Number(data.count || 0).toLocaleString()}명)`, 'info');
+      }
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      poolBusy = '';
+      await loadPool();
+    }
+  }
+
+  /** 지금 [캐릭터] 탭의 조건 - 랜덤 와일드카드 · 풀에 합치기가 같은 결과를 쓴다. */
+  function findListBody() {
+    return {
+      query: findQuery.dex.trim(),
+      favorites_only: findFavOnly,
+      genders: findGender === 'all' ? [] : [findGender],
+      inc: featTerms.inc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
+      exc: featTerms.exc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
+    };
+  }
+
+  async function mergeIntoPool() {
+    if (poolBusy || !poolActive() || !findDexTotal) return;
+    poolBusy = 'merge';
+    renderFindFoot();
+    try {
+      const data = await poolRequest('merge', {key: poolInfo.key, ...findListBody()});
+      showToast(data.added
+        ? `풀에 ${Number(data.added).toLocaleString()}명을 더했습니다(${Number(data.count || 0).toLocaleString()}명)`
+        : '더할 캐릭터가 없습니다 - 지금 결과가 이미 풀에 있습니다', 'info');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      poolBusy = '';
+      await loadPool();
+    }
+  }
+
+  async function clearPool() {
+    if (poolBusy || !poolActive()) return;
+    if (!poolClearArmed || poolClearKey !== poolInfo.key) {
+      disarmPoolClear();
+      poolClearKey = poolInfo.key;
+      poolClearArmed = setTimeout(() => { disarmPoolClear(); renderFindFoot(); }, 3000);
+      renderFindFoot();
+      return;
+    }
+    const target = poolClearKey;              // 첫 클릭의 풀 - 서버가 키가 다르면 409
+    disarmPoolClear();
+    poolBusy = 'clear';
+    renderFindFoot();
+    try {
+      await poolRequest('clear', {key: target});
+      showToast('풀과 랜덤 슬롯을 지웠습니다', 'info');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      poolBusy = '';
+      await loadPool();
+    }
+  }
+
+  function poolListHtml(empty) {
+    if (!poolInfo) return empty('불러오는 중…');
+    if (!poolActive()) return empty('지금 풀이 없습니다. [캐릭터] 탭에서 줄을 눌러 [+ 풀], 또는 [결과 → 랜덤 와일드카드] 로 만듭니다.');
+    const query = findQuery.pool.trim().toLowerCase();
+    const members = (poolInfo.members || []).filter(member => !query
+      || `${member.character} ${member.group}`.toLowerCase().includes(query));
+    const head = `<div class="cq-pool-head"><span>${escHtml(poolInfo.label || `랜덤 · ${Number(poolInfo.count || 0).toLocaleString()}명`)}</span>`
+      + `<span>뽑힌 ${Number(poolInfo.total_picks || 0).toLocaleString()}번</span></div>`;
+    if (!members.length) return head + empty('맞는 캐릭터가 없습니다.');
+    return head + members.map(member => {
+      const key = `${member.group}\u0000${member.character}`;
+      const busy = poolBusy === key;
+      return `<div class="cq-find-row cq-pool-row" data-cqf-pool-group="${escAttr(member.group)}" data-cqf-pool-char="${escAttr(member.character)}"`
+        + ` data-cqf-pool-key="${escAttr(poolInfo.key || '')}">`
+        + (member.thumbnail_url
+          ? `<img class="cq-find-img" loading="lazy" decoding="async" alt="" src="${escAttr(member.thumbnail_url)}">`
+          : `<span class="cq-find-img is-initial">${escHtml(String(member.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
+        + `<span class="cq-find-text"><b>${escHtml(member.character)}</b>`
+        + `<span>${escHtml(member.group)} · 뽑힘 ${Number(member.picks || 0).toLocaleString()}${member.hidden ? ' · 숨김' : ''}</span></span>`
+        + `<button type="button" class="cq-pool-rm" data-cqf-pool-rm="1" title="이 풀에서만 빼기(숨김 아님)"${poolBusy ? ' disabled' : ''}>`
+        + `${busy ? '…' : '✕'}</button></div>`;
+    }).join('');
   }
 
   function scheduleFindDex() {
@@ -2057,7 +2221,14 @@ export function createCharacterQuickPanel({
     const keepScroll = list.scrollTop;
     let html = '';
     const empty = text => `<div class="cq-find-empty">${escHtml(text)}</div>`;
-    if (findTab === 'hid') {
+    const poolTab = findEl.querySelector('[data-cqf-tab="pool"]');
+    if (poolTab) {
+      const label = poolActive() ? `풀 ${Number(poolInfo.count || 0).toLocaleString()}` : '풀';
+      if (poolTab.textContent !== label) poolTab.textContent = label;
+    }
+    if (findTab === 'pool') {
+      html = poolListHtml(empty);
+    } else if (findTab === 'hid') {
       const query = findQuery.hid.trim().toLowerCase();
       const rows = (hidRows || []).filter(row => !query
         || `${row.character} ${row.group}`.toLowerCase().includes(query));
@@ -2092,13 +2263,18 @@ export function createCharacterQuickPanel({
       html = empty(findDexLoading ? '찾는 중…' : '맞는 캐릭터가 없습니다.');
     } else {
       // 사전의 줄은 아직 프롬프트를 모른다(상세를 받아야 안다) - 중복 표는 이름으로 짐작하지 않는다. 서버가 판단한다.
+      const inPool = poolMemberKeys();
       html = findDexRows.map(row => {
         const key = `${row.group}\u0000${row.character}`;
         const busy = findPicking === key;
+        const pooled = inPool.has(key);
+        const actOff = findActBusy || poolBusy ? ' disabled' : '';
         return `<button type="button" class="cq-find-row${busy ? ' is-busy' : ''}"`
           // title 을 두지 않는다 - 앱이 자체 툴팁으로 바꿔 띄우는데, 줄에 이미 보이는 이름 · 작품을 그대로 되풀이하며
           // 아래 줄을 덮는다(실측).
           + ` data-cqf-group="${escAttr(row.group)}" data-cqf-char="${escAttr(row.character)}">`
+          // 지금 랜덤 풀에 있는 캐릭터 - 썸네일 모서리에 초록 점(사용자 결정 2026-10-21).
+          + (pooled ? '<span class="cq-find-pooldot" title="지금 풀에 있습니다"></span>' : '')
           + (row.thumbnail_url
             ? `<img class="cq-find-img" loading="lazy" decoding="async" alt="" src="${escAttr(row.thumbnail_url)}">`
             : `<span class="cq-find-img is-initial">${escHtml(String(row.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
@@ -2112,9 +2288,14 @@ export function createCharacterQuickPanel({
           + `<span class="cq-find-tag" data-cqf-slot="1">${busy ? '담는 중…' : '+ 슬롯'}</span></button>`
           + (findExpand === key
             ? `<div class="cq-find-acts" data-cqf-acts="1">`
-              + `<button type="button" class="cq-find-act${row.favorite ? ' is-on' : ''}" data-cqf-act="fav"${findActBusy ? ' disabled' : ''}>`
-              + `${row.favorite ? '★ Favorite 해제' : '★ Favorite에 추가'}</button>`
-              + `<button type="button" class="cq-find-act is-hide" data-cqf-act="hide"${findActBusy ? ' disabled' : ''}>이 캐릭터 숨김</button></div>`
+              // 셋 - ★ Favorite | + 풀 | 숨김(사용자 결정 2026-10-21 · 300px 창이라 글자를 줄였다).
+              + `<button type="button" class="cq-find-act${row.favorite ? ' is-on' : ''}" data-cqf-act="fav"${actOff}`
+              + ` title="${row.favorite ? '즐겨찾기에서 빼기' : '즐겨찾기에 추가'}">${row.favorite ? '★ 해제' : '★ Favorite'}</button>`
+              + `<button type="button" class="cq-find-act is-pool${pooled ? ' is-on' : ''}" data-cqf-act="pool"${actOff}`
+              + ` data-cqf-pool-op="${pooled ? 'remove' : 'add'}" data-cqf-pool-key="${escAttr(poolActive() ? poolInfo.key || '' : '')}"`
+              + ` title="${pooled ? '이 풀에서 빼기(숨김 아님)' : poolActive() ? '지금 랜덤 풀에 넣기' : '이 캐릭터로 새 랜덤 풀(1명) 만들기'}">`
+              + `${poolBusy === key ? '…' : pooled ? '✓ 풀' : '+ 풀'}</button>`
+              + `<button type="button" class="cq-find-act is-hide" data-cqf-act="hide"${actOff} title="이 캐릭터 숨김(검색 · 랜덤에서 빠집니다)">숨김</button></div>`
             : '');
       }).join('') + (findDexMoreLoading ? empty('더 불러오는 중…') : '');
     }
@@ -2140,11 +2321,7 @@ export function createCharacterQuickPanel({
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
-          query: findQuery.dex.trim(),
-          favorites_only: findFavOnly,
-          genders: findGender === 'all' ? [] : [findGender],
-          inc: featTerms.inc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
-          exc: featTerms.exc.map(term => (term.kind === 'work' ? `work:${term.tag}` : term.tag)),
+          ...findListBody(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -2156,6 +2333,7 @@ export function createCharacterQuickPanel({
     } finally {
       findRwBusy = false;
       renderFindFoot();
+      void loadPool();
     }
   }
 
@@ -2183,20 +2361,47 @@ export function createCharacterQuickPanel({
       fav.classList.toggle('is-on', findFavOnly);
       fav.setAttribute('aria-pressed', findFavOnly ? 'true' : 'false');
     }
+    const pfoot = findEl?.querySelector('[data-cqf-pfoot]');
+    if (pfoot) {
+      pfoot.hidden = !(findTab === 'pool' && poolActive());
+      const clear = pfoot.querySelector('[data-cqf-pclear]');
+      const clearLabel = poolBusy === 'clear' ? '지우는 중…' : poolClearArmed ? '한 번 더 누르면 지웁니다' : '풀 비우기';
+      if (clear && clear.textContent !== clearLabel) clear.textContent = clearLabel;
+      if (clear) clear.classList.toggle('is-armed', !!poolClearArmed);
+    }
     const button = findEl?.querySelector('[data-cqf-rw]');
     if (!button) return;
     const show = findTab === 'dex' && !!findDexTotal;
     button.hidden = !show;
+    const merge = findEl?.querySelector('[data-cqf-merge]');
+    if (merge) {
+      merge.hidden = !(show && poolActive());
+      merge.disabled = !!poolBusy;
+      const mergeLabel = poolBusy === 'merge' ? '합치는 중…' : '풀에 합치기';
+      if (merge.textContent !== mergeLabel) merge.textContent = mergeLabel;
+    }
     if (!show) return;
     // 한 줄(사용자 결정 2026-10-21 A안) - 수는 통째로 붙인다(nowrap): 좁을 때 '1,312' 와 '명' 이 갈라지던 것(10-19)을 막는다.
+    // 풀이 있으면 이 단추는 [새 풀](바꿔 끼우기) - 옆의 [풀에 합치기] 와 짝(사용자 결정 2026-10-21).
     const html = findRwBusy ? '만드는 중…'
-      : `결과 → 랜덤 와일드카드<span class="cq-find-rw-n"> · ${Number(findDexTotal).toLocaleString()}명</span>`;
+      : poolActive() ? `새 풀<span class="cq-find-rw-n"> · ${Number(findDexTotal).toLocaleString()}명</span>`
+        : `결과 → 랜덤 와일드카드<span class="cq-find-rw-n"> · ${Number(findDexTotal).toLocaleString()}명</span>`;
     if (button._cqHtml !== html) { button._cqHtml = html; button.innerHTML = html; }
     button.disabled = findRwBusy;
   }
 
   function onFindClick(event) {
     if (event.target.closest('[data-cqf-rw]')) { void makeRandomWildcard(); return; }
+    if (event.target.closest('[data-cqf-merge]')) { void mergeIntoPool(); return; }
+    if (event.target.closest('[data-cqf-psave]')) { void openWcSave(); return; }
+    if (event.target.closest('[data-cqf-pclear]')) { void clearPool(); return; }
+    const poolRm = event.target.closest('[data-cqf-pool-rm]');
+    if (poolRm) {
+      const row = poolRm.closest('[data-cqf-pool-char]');
+      // 풀 탭 ✕ 는 언제나 빼기 - 그 줄을 그린 풀에서.
+      if (row) void togglePool(row.dataset.cqfPoolGroup || '', row.dataset.cqfPoolChar || '', 'remove', row.dataset.cqfPoolKey || '');
+      return;
+    }
     const genderButton = event.target.closest('[data-cqf-gender]');
     if (genderButton) {
       const next = genderButton.dataset.cqfGender;
@@ -2234,6 +2439,14 @@ export function createCharacterQuickPanel({
     const lib = event.target.closest('[data-cqf-lib]');
     if (lib) { pickFindLib(Number(lib.dataset.cqfLib), lib.dataset.cqfUuid || ''); return; }
     const act = event.target.closest('[data-cqf-act]');
+    if (act && act.dataset.cqfAct === 'pool') {
+      // 이름은 펼친 줄(그 동작 줄이 달린 줄)의 것 - findExpand 는 그 줄을 그릴 때와 같다(펼침이 바뀌면 동작 줄이 다시 그려진다).
+      const owner = act.closest('[data-cqf-acts]')?.previousElementSibling;
+      const group = owner?.dataset.cqfGroup || '';
+      const character = owner?.dataset.cqfChar || '';
+      void togglePool(group, character, act.dataset.cqfPoolOp || '', act.dataset.cqfPoolKey || '');
+      return;
+    }
     if (act) { void findRowAction(act.dataset.cqfAct); return; }
     const dex = event.target.closest('[data-cqf-char]');
     if (!dex) return;
@@ -3029,6 +3242,7 @@ export function createCharacterQuickPanel({
 
   function render(state, force) {
     if (state) lastState = state;
+    if (state) schedulePoolRefresh();          // 슬롯 · 풀이 다른 길(숨김 · 고정 · 랜덤 슬롯 끄기)로도 바뀐다
     if (state) settleRefresh(state);
     if (!visible) return;
     const current = lastState;

@@ -24657,6 +24657,36 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .cq-find-gender button:first-child { width: 28px; border-left: 0; }
 .cq-find-gender button:hover { color: var(--text-primary); }
 .cq-find-gender button.is-on { background: rgba(124,106,239,0.35); color: var(--text-primary); }
+/* [풀] 탭 = 스테이징(사용자 결정 2026-10-21). */
+.cq-find-row { position: relative; }
+.cq-find-pooldot {
+  position: absolute; left: 28px; top: 2px; width: 8px; height: 8px; border-radius: 50%;
+  background: rgb(106,191,123); border: 2px solid var(--bg-surface); pointer-events: none;
+}
+/* 셋(★ · 풀 · 숨김) 중 긴 글자 하나에 폭을 더 - 같은 폭이면 '★ Favorite' 가 1px 모자라 잘렸다(실측 2026-10-21). */
+.cq-find-act[data-cqf-act="fav"] { flex-grow: 1.5; }
+.cq-find-act.is-pool { color: rgb(150,220,160); border-color: rgba(106,191,123,0.5); }
+.cq-find-act.is-pool.is-on { background: rgba(106,191,123,0.16); }
+.cq-pool-head {
+  display: flex; justify-content: space-between; gap: 8px; padding: 2px 5px 4px;
+  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); flex: none;
+}
+.cq-pool-head span:first-child { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cq-pool-row { cursor: default; }
+.cq-pool-rm {
+  flex: none; width: 24px; height: 22px; padding: 0; border-radius: 4px; cursor: pointer;
+  border: 1px solid transparent; background: transparent; color: rgb(224,138,138); font-size: 12px;
+}
+.cq-pool-rm:hover:not(:disabled) { border-color: rgba(224,138,138,0.55); background: rgba(224,138,138,0.1); }
+.cq-pool-rm:disabled { opacity: 0.5; cursor: progress; }
+.cq-find-foot .cq-find-merge { flex: 0 0 auto; }
+.cq-find-merge[hidden] { display: none; }
+.cq-find-pfoot { display: flex; gap: 5px; flex: none; }
+.cq-find-pfoot[hidden] { display: none; }
+.cq-find-pfoot .cq-find-rw { flex: 1 1 0; width: auto; min-width: 0; }
+.cq-find-rw.is-danger { border-color: rgba(224,138,138,0.55); background: rgba(224,138,138,0.08); color: rgb(240,176,176); }
+.cq-find-rw.is-danger:hover:not(:disabled) { background: rgba(224,138,138,0.2); }
+.cq-find-rw.is-danger.is-armed { background: rgba(224,138,138,0.32); color: var(--text-primary); }
 /* 줄을 누르면 그 아래 [이 캐릭터를 Favorite로 | 이 캐릭터 숨김](사용자 지시 2026-10-19). */
 /* 앞 여백 없이 판 폭을 다 쓰고, 문구는 버튼 안에서 줄바꿈한다 - 한 줄 고정 + 38px 여백이면 좁은 Find 창에서 글자가 넘쳐 겹쳤다(사용자 제보). */
 /* 왼쪽 들여쓰기 = 줄 여백 5 + 썸네일 28 + 사이 7 - 글자 칸 시작선에 맞춘다(2026-10-21). */

@@ -38,7 +38,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
-from core.named_entity_groups import is_generic_char_attribute
+from core.named_entity_groups import is_denylisted_franchise_tag, is_generic_char_attribute
 
 __all__ = ["LLMSearchIndex", "normalize_query", "stem_token", "query_stems"]
 
@@ -184,6 +184,10 @@ def _rec_count(info: Mapping[str, Any]) -> int:
 
 
 def _excluded(norm: str, info: Mapping[str, Any]) -> bool:
+    # Structural groups can come from interactive data rather than KR categories.
+    # The explicit franchise denylist must apply regardless of that provenance.
+    if is_denylisted_franchise_tag(norm):
+        return True
     if str(info.get("_cat") or "").strip().lower() in _PROPER_CATS:
         return True
     group = str(info.get("group") or "").strip().lower()

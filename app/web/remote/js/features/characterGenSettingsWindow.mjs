@@ -63,7 +63,7 @@ export function createCharacterGenSettingsWindow({
   // 메인 캐릭터 슬롯과 따로 논다. 캐릭터 프롬프트 = 고를 때마다 그 캐릭터의 줄로 바뀐다(고칠 수 있지만 다음 고름에 버린다).
   // 추가 프롬프트 = 직접 적는 칸 · 캐릭터를 바꿔도 남는다(서버 옵션 `character_extra`) · 캐릭터 줄 뒤에 붙는다(Find [생성] 도).
   // 위치(POS) 없음. [생성] = prefix + (캐릭터 + 추가) + postfix 한 장 - 그 캐릭터의 썸네일로 저장(막는 옵션이 꺼져 있으면).
-  const slot = {group: '', character: '', prompt: '', uc: '', seq: 0, busy: false, loading: null};
+  const slot = {group: '', character: '', variant: '', prompt: '', uc: '', seq: 0, busy: false, loading: null};
   let slotEl = null;
   // 줄을 바꾸는 옵션 - 바뀌면 슬롯 줄을 그 옵션으로 다시 만든다. 안 그러면 코스프레로 만든 B 의 줄이 코스프레를 끈 뒤
   // A 의 썸네일로 저장된다(Codex 리뷰 P1).
@@ -73,7 +73,9 @@ export function createCharacterGenSettingsWindow({
     if (!slotEl) return;
     const has = !!slot.character;
     slotEl.querySelector('[data-cqgen-slotname]').innerHTML = has
-      ? `<b>${escHtml(slot.character)}</b><span>${escHtml(slot.group)}</span>`
+      ? `<b>${escHtml(slot.character)}</b>`
+        + (slot.variant ? `<em>${escHtml(slot.variant.replace(/_/g, ' '))}</em>` : '')
+        + `<span>${escHtml(slot.group)}</span>`
       : '<span class="cqgen-hint">Characters 창이나 Find 에서 캐릭터를 고르면 여기 담깁니다</span>';
     slotEl.querySelector('[data-cqgen-clear]').hidden = !has;
     const prompt = slotEl.querySelector('[data-cqgen-prompt]');
@@ -87,22 +89,23 @@ export function createCharacterGenSettingsWindow({
   }
 
   /** 고른 캐릭터를 담는다 - 줄은 저장된 옵션(작품명 · 특징 · 코스프레 …)으로 서버가 만든다. */
-  function setCharacter(group, character) {
+  function setCharacter(group, character, variant = '') {
     if (!group || !character) return Promise.resolve(false);
     const mine = ++slot.seq;
-    Object.assign(slot, {group, character, prompt: '', uc: ''});
-    slot.loading = fillSlot(group, character, mine);
+    variant = String(variant || '');
+    Object.assign(slot, {group, character, variant, prompt: '', uc: ''});
+    slot.loading = fillSlot(group, character, variant, mine);
     paintSlot();
     return slot.loading;
   }
 
   /** 줄 · 네거티브를 받아 채운다. 그사이 다른 캐릭터를 골랐으면 버린다. 성공하면 true. */
-  async function fillSlot(group, character, mine) {
+  async function fillSlot(group, character, variant, mine) {
     let ok = false;
     try {
       const res = await fetch('/api/character-viewer/detail', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({group, character, variant: ''}),
+        body: JSON.stringify({group, character, variant}),
       });
       const data = await res.json().catch(() => ({}));
       if (mine !== slot.seq) return;                // 그사이 다른 캐릭터를 골랐다
@@ -123,7 +126,8 @@ export function createCharacterGenSettingsWindow({
     if (!slot.character || slot.busy || slot.loading) return;
     if (!slot.prompt.trim()) { showToast('캐릭터 줄이 비어 있습니다 - 캐릭터를 다시 고르세요.', 'info'); return; }
     // 이 순간의 슬롯을 잡아 둔다 - 저장을 기다리는 사이 다른 캐릭터를 골라도 잡은 캐릭터 · 줄로 나간다.
-    const target = {group: slot.group, character: slot.character, prompt: slot.prompt, uc: slot.uc, seq: slot.seq};
+    const target = {group: slot.group, character: slot.character, variant: slot.variant, prompt: slot.prompt, uc: slot.uc,
+      seq: slot.seq};
     slot.busy = true;
     paintSlot();
     try {
@@ -134,7 +138,8 @@ export function createCharacterGenSettingsWindow({
       await saveChain.catch(() => {});
       const fn = (getActions() || {}).generateThumb;
       if (typeof fn !== 'function') throw new Error('캐릭터 패널을 아직 불러오지 못했습니다.');
-      await fn(target.group, target.character, {character_prompt: target.prompt, character_uc: target.uc});
+      await fn(target.group, target.character,
+        {character_prompt: target.prompt, character_uc: target.uc, variant: target.variant});
     } catch (error) {
       showToast(error.message || String(error), 'error');
     } finally {
@@ -167,7 +172,7 @@ export function createCharacterGenSettingsWindow({
     });
     slotEl.addEventListener('click', event => {
       if (event.target.closest('[data-cqgen-clear]')) {
-        Object.assign(slot, {group: '', character: '', prompt: '', uc: '', loading: null});
+        Object.assign(slot, {group: '', character: '', variant: '', prompt: '', uc: '', loading: null});
         slot.seq += 1;
         paintSlot();
       }
@@ -256,7 +261,7 @@ export function createCharacterGenSettingsWindow({
         paintWarn();
         paintOptions();
         // 줄을 바꾸는 옵션이 바뀌었으면 슬롯 줄을 다시 만든다(고친 글은 버린다 - 옵션이 우선).
-        if (LINE_OPTIONS.has(name) && slot.character) void setCharacter(slot.group, slot.character);
+        if (LINE_OPTIONS.has(name) && slot.character) void setCharacter(slot.group, slot.character, slot.variant);
         else paintSlot();
         try { onSaved(data); } catch (_) {}
       })
@@ -381,14 +386,15 @@ export function createCharacterGenSettingsWindow({
     cancelMount() { mountSeq++; },              // 서랍 열기만 무른다 - 진행 중인 떠 있는 창 열기는 그대로(Codex 재리뷰)
     isOpen: () => !!(panel && panel.isOpen()),
     /** 캐릭터를 골랐다(Characters 창 · Find [생성]) - 창이 닫혀 있어도 담아 둔다. */
-    setCharacter: (group, character) => setCharacter(group, character),
-    /** Characters 창 [생성] - 그 캐릭터가 아직 안 담겼으면 담고(줄을 기다린다) 가상 슬롯으로 한 장. */
-    async generateFor(group, character) {
-      const ready = (slot.group !== group || slot.character !== character) ? setCharacter(group, character)
-        : (slot.loading || Promise.resolve(true));
+    setCharacter: (group, character, variant = '') => setCharacter(group, character, variant),
+    /** Characters 창 [생성] - 그 캐릭터(변형)가 아직 안 담겼으면 담고(줄을 기다린다) 가상 슬롯으로 한 장. */
+    async generateFor(group, character, variant = '') {
+      variant = String(variant || '');
+      const same = () => slot.group === group && slot.character === character && slot.variant === variant;
+      const ready = same() ? (slot.loading || Promise.resolve(true)) : setCharacter(group, character, variant);
       const ok = await ready;
       // 기다리는 사이 다른 캐릭터를 골랐으면 그 캐릭터로 나가지 않는다(Codex 리뷰).
-      if (!ok || slot.group !== group || slot.character !== character) return;
+      if (!ok || !same()) return;
       await generate();
     },
     /** Characters 탭에서 저장됐다 - 치는 중인 칸은 그대로 두고(판의 `sync` 규칙) 나머지를 맞춘다. */
@@ -400,7 +406,7 @@ export function createCharacterGenSettingsWindow({
       paintOptions();
       // Characters 탭에서 줄을 바꾸는 옵션(코스프레 등)을 바꿨으면 슬롯 줄도 다시(창에서 바꾼 때와 같은 규칙).
       const lineChanged = [...LINE_OPTIONS].some(key => next && key in next && next[key] !== before[key]);
-      if (lineChanged && slot.character) void setCharacter(slot.group, slot.character);
+      if (lineChanged && slot.character) void setCharacter(slot.group, slot.character, slot.variant);
       else paintSlot();
     },
   };

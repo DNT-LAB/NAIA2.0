@@ -2634,8 +2634,9 @@ export function createCharacterQuickPanel({
     if (!dup) showToast('슬롯 맨 아래에 담았습니다.', 'info');
   }
 
-  /** 사전 -> 슬롯. Manage 검색 탭의 [+ 슬롯] 과 같다(기본 변형 · 이름 = 캐릭터 이름). */
-  async function pickFindDex(group, character) {
+  /** 사전 -> 슬롯. Manage 검색 탭의 [+ 슬롯] 과 같다(이름 = 캐릭터 이름). 변형은 Characters 창 상세보기에서 고른 것(10-22). */
+  async function pickFindDex(group, character, variant = '') {
+    variant = String(variant || '');
     const key = `${group}\u0000${character}`;
     if (!character || findPicking) return;
     findPicking = key;
@@ -2645,7 +2646,7 @@ export function createCharacterQuickPanel({
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         // 옵션을 못 박는다 - 안 넘기면 Characters 탭에 저장된 값(이름 숨김 등)을 읽는다(Manage 와 같은 까닭).
-        body: JSON.stringify({group, character, variant: '',
+        body: JSON.stringify({group, character, variant,
                               options: {hide_charname: false, cosplay_enabled: false, auto_copyright: true}}),
       });
       const data = await res.json().catch(() => ({}));
@@ -3497,7 +3498,7 @@ export function createCharacterQuickPanel({
    *  슬롯 담기 = pickFindDex(중복이면 그 슬롯을 켠다 · 슬롯 한도) · 풀 = togglePool(지금 풀 키 · 없으면 1명 풀을 만든다) ·
    *  생성 = generateFindThumb(Find [생성] 과 같은 quick-generate · 결과 소식도 같은 자리에서 받는다). */
   const characterActions = {
-    addToSlot: (group, character) => pickFindDex(group, character),
+    addToSlot: (group, character, variant = '') => pickFindDex(group, character, variant),
     poolAdd: async (group, character) => {
       await loadPool();                                          // 지금 풀 키(그사이 바뀌었을 수 있다)
       await togglePool(group, character, 'add', poolActive() ? poolInfo.key : '');

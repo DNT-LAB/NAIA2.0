@@ -30900,6 +30900,7 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 .cqgen-content .cqgen-slotname { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; }
 .cqgen-content .cqgen-slotname b { color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
 .cqgen-content .cqgen-slotname span { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.cqgen-content .cqgen-slotname em { flex: none; font-style: normal; font-size: 10px; padding: 0 5px; border-radius: 4px; background: rgba(217,130,59,0.25); color: #f3b27a; }
 .cqgen-content .cqgen-hint { color: var(--text-dim); font-size: 10.5px; white-space: normal; }
 .cqgen-content .cqgen-clear { flex: none; padding: 0 6px; height: 18px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 10px; }
 .cqgen-content .cqgen-clear[hidden] { display: none; }
@@ -30955,6 +30956,44 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   border: 1px solid #d9823b; background: rgba(217,130,59,0.12); color: #f3b27a;
 }
 .chw-gopt.is-on { background: #d9823b; color: #1b1206; }
+/* 캐릭터 상세보기(사용자 지시 2026-10-22) - 생성 옵션과 같은 서랍 · 하나만. 맨 아래 = 그 캐릭터 줄(예전엔 아래 줄에 숨어 있었다). */
+.chw-drawer-body[hidden], .chw-drawer-detail[hidden] { display: none; }
+.chw-drawer-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.chw-dt-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding: 0 10px 8px; }
+.chw-dt-head { display: flex; gap: 10px; min-width: 0; }
+.chw-dt-img { flex: none; width: 112px; height: 112px; border-radius: 8px; object-fit: cover; background: rgba(0,0,0,0.3); }
+.chw-dt-img.is-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; }
+.chw-dt-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: var(--text-secondary); line-height: 1.5; }
+.chw-dt-info b { font-size: 13px; font-weight: 600; color: var(--text-primary); overflow-wrap: anywhere; }
+.chw-dt-alias { color: var(--text-dim); overflow-wrap: anywhere; }
+.chw-dt-del {
+  align-self: flex-start; margin-top: 4px; height: 20px; padding: 0 8px; border-radius: 5px; cursor: pointer; font-size: 10px;
+  border: 1px solid rgba(240,120,120,0.55); background: rgba(240,120,120,0.08); color: #f3a0a0;
+}
+.chw-dt-del:hover { background: rgba(240,120,120,0.2); }
+.chw-dt-sec { display: flex; flex-direction: column; gap: 2px; }
+.chw-dt-lab { font-size: 10px; color: var(--text-dim); margin-bottom: 2px; }
+/* 변형 칩은 낮게 - 아래 섹션 자리를 남긴다(사용자 지시). */
+.chw-vchips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chw-vchip {
+  height: 18px; padding: 0 7px; border-radius: 9px; cursor: pointer; font-size: 10px; line-height: 16px; white-space: nowrap;
+  border: 1px solid rgba(255,255,255,0.18); background: transparent; color: var(--text-primary);
+}
+.chw-vchip b { font-weight: 400; color: var(--text-dim); margin-left: 4px; }
+.chw-vchip.is-on { border-color: #d9823b; background: #d9823b; color: #1b1206; }
+.chw-vchip.is-on b { color: #4a2a0c; }
+.chw-dt-tag { display: grid; grid-template-columns: minmax(0, 1fr) 90px 42px; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-primary); line-height: 17px; }
+.chw-dt-tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chw-dt-tag i { display: block; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); }
+.chw-dt-tag i b { display: block; height: 100%; border-radius: 3px; background: #7c6aef; }
+.chw-dt-tag.is-pc i b { background: #1d9e75; }
+.chw-dt-tag.is-at i b { background: #d9823b; }
+.chw-dt-tag em { font-style: normal; color: var(--text-dim); text-align: right; font-variant-numeric: tabular-nums; }
+.chw-dt-prompt {
+  flex: none; max-height: 30%; overflow-y: auto; padding: 6px 10px 8px; border-top: 1px solid rgba(255,255,255,0.08);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45; color: #b9b2ff; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+}
+.chw-drawer-detail .chw-empty { padding: 12px; }
 /* 생성 설정 창의 옵션 체크(Characters 탭 Detail 에서 옮김 · 2026-10-22). */
 .cqgen-content .cqgen-opts { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px 4px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: var(--text-secondary); }
 .cqgen-content .cqgen-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

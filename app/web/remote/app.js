@@ -2934,7 +2934,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-vslot1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-dtl3')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2978,12 +2978,12 @@ function openCharacterGenSettings() {
 }
 // 고른 캐릭터 = 생성 설정 창의 가상 슬롯(사용자 결정 2026-10-22). 창이 닫혀 있어도 담아 둔다 - 열면 보인다.
 window.addEventListener('naia:character-picked', event => {
-  const {group, character} = event.detail || {};
-  if (group && character) void ensureCharacterGenSettings().then(control => control?.setCharacter(group, character));
+  const {group, character, variant = ''} = event.detail || {};
+  if (group && character) void ensureCharacterGenSettings().then(control => control?.setCharacter(group, character, variant));
 });
 function ensureCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-lchk1')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-dtl1')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,
@@ -7689,7 +7689,7 @@ const characterActionsWhenReady = new Proxy({}, {
 const characterWindowActions = new Proxy({}, {
   get: (_target, name) => {
     if (name === 'generateVirtual') {
-      return async (group, character) => (await ensureCharacterGenSettings())?.generateFor(group, character);
+      return async (group, character, variant = '') => (await ensureCharacterGenSettings())?.generateFor(group, character, variant);
     }
     if (name === 'mountGenOptions') {
       return async container => (await ensureCharacterGenSettings())?.mountInto(container);
@@ -7700,7 +7700,7 @@ const characterWindowActions = new Proxy({}, {
 });
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-grip1')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-dtl3')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,

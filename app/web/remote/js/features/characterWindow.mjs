@@ -49,6 +49,7 @@ export function createCharacterWindow({
   let queryTimer = 0;
   let selected = null;                  // {group, character, count, favorite}
   let selectedLine = '';
+  let selVariant = '';                  // 상세보기에서 고른 변형('' = Default) - 슬롯 · [생성] 이 그 변형으로 간다
   let busy = '';
   let groups = [];                      // [{key, name, count}]
   let groupQuery = '';
@@ -85,7 +86,8 @@ export function createCharacterWindow({
       // 생성 옵션 서랍 - 창 안의 떠 있는 카드(아래에서 위로 · 좌우로 늘리지 않는다). 내용은 생성 설정 조각을 옮겨 붙인다.
       + `<div class="chw-drawer" data-chw-drawer hidden>`
       + `<div class="chw-drawer-grip" data-chw-grip data-naia-title="위아래로 끌어 높이를 바꿉니다"></div>`
-      + `<div class="chw-drawer-body" data-chw-drawer-body></div></div></div>`
+      + `<div class="chw-drawer-body" data-chw-drawer-body hidden></div>`
+      + `<div class="chw-drawer-detail" data-chw-detail hidden></div></div></div>`
       + `<div class="chw-sel" data-chw-sel></div></div>`;
     const body = panel.body;
     body.addEventListener('click', onClick);
@@ -334,13 +336,17 @@ export function createCharacterWindow({
   function paintSel() {
     const box = el('[data-chw-sel]');
     if (!box) return;
-    const gopt = `<button type="button" class="chw-gopt${drawerOpen ? ' is-on' : ''}" data-chw-gopt aria-expanded="${drawerOpen}"`
-      + ` title="Prefix · 캐릭터 슬롯 · Postfix · 옵션">생성 옵션 ${drawerOpen ? '▾' : '▴'}</button>`;
+    const tog = (mode, label, title) => `<button type="button" class="chw-gopt${drawerMode === mode ? ' is-on' : ''}"`
+      + ` data-chw-drawer-mode="${mode}" aria-expanded="${drawerMode === mode}" title="${title}">`
+      + `${label} ${drawerMode === mode ? '▾' : '▴'}</button>`;
+    const gopt = tog('gen', '생성 옵션', 'Prefix · 캐릭터 슬롯 · Postfix · 옵션')
+      + tog('detail', '캐릭터 상세보기', '썸네일 · Variations · 색 · 특징 · 의상 · 프롬프트');
     if (!selected) { box.innerHTML = `${gopt}<div class="chw-empty">캐릭터를 누르면 여기서 슬롯 · 풀 · 생성을 합니다.</div>`; return; }
     const s = selected;
     const off = busy ? ' disabled' : '';
     box.innerHTML = `${gopt}<div class="chw-st"><b>${escHtml(s.character)}</b>`
-      + `<span>${escHtml(s.group)} · ${Number(s.count || 0).toLocaleString()}${selectedLine ? ` · ${escHtml(selectedLine)}` : ''}</span></div>`
+      + `<span>${escHtml(s.group)} · ${Number(s.count || 0).toLocaleString()}`
+      + `${selVariant ? ` · ${escHtml(selVariant.replace(/_/g, ' '))}` : ''}</span></div>`
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
       + `<button type="button" class="chw-act is-pool" data-chw-act="pool"${off}>+ 풀</button>`
@@ -356,24 +362,32 @@ export function createCharacterWindow({
 
   async function select(item) {
     selected = {group: item.group, character: item.character, count: item.count, favorite: !!item.favorite};
+    selVariant = '';
     // 고르기만 해도 생성 설정 창의 가상 슬롯에 담긴다(사용자 결정 2026-10-22).
     try { win.dispatchEvent(new CustomEvent('naia:character-picked', {detail: {group: item.group, character: item.character}})); } catch (_) {}
     selectedLine = '';
     paintSel();
     paintGrid();
+    if (drawerMode === 'detail') void loadDetail();
+    await loadLine();
+  }
+
+  /** [복사] 할 줄 - 고른 캐릭터 · 변형의 줄(Find [+ 슬롯] 과 같은 옵션). 그사이 바뀌었으면 버린다. */
+  async function loadLine() {
     const mine = selected;
+    const variant = selVariant;
+    selectedLine = '';                   // 못 받으면 옛 줄(다른 변형)이 아니라 이름을 복사한다(Codex 재리뷰)
+    if (!mine) return;
     try {
-      // Find [+ 슬롯] 과 같은 옵션으로 - 슬롯에 담길 줄 그대로 보인다.
       const res = await fetch('/api/character-viewer/detail', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({group: item.group, character: item.character, variant: '',
+        body: JSON.stringify({group: mine.group, character: mine.character, variant,
                               options: {hide_charname: false, cosplay_enabled: false, auto_copyright: true}}),
       });
       const data = await res.json().catch(() => ({}));
-      if (mine !== selected) return;
+      if (mine !== selected || variant !== selVariant) return;
       selectedLine = String(data.prompt?.character_prompt || '').trim();
-      paintSel();
-    } catch (_) { /* 줄만 못 보인다 */ }
+    } catch (_) { /* 줄만 못 받는다 - 복사는 이름으로 */ }
   }
 
   async function act(kind) {
@@ -390,11 +404,11 @@ export function createCharacterWindow({
     busy = kind;
     paintSel();
     try {
-      if (kind === 'slot') await actions.addToSlot?.(s.group, s.character);
+      if (kind === 'slot') await actions.addToSlot?.(s.group, s.character, selVariant);
       else if (kind === 'pool') await actions.poolAdd?.(s.group, s.character);
       // [생성] = 가상 슬롯으로(그 슬롯에서 고친 줄 · 추가 프롬프트 · 네거티브가 함께 나간다).
-      else if (kind === 'gen') await (actions.generateVirtual ? actions.generateVirtual(s.group, s.character)
-        : actions.generateThumb?.(s.group, s.character));
+      else if (kind === 'gen') await (actions.generateVirtual ? actions.generateVirtual(s.group, s.character, selVariant)
+        : actions.generateThumb?.(s.group, s.character, {variant: selVariant}));
       else if (kind === 'fav' || kind === 'hide') {
         const fav = kind === 'fav';
         const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {
@@ -409,19 +423,24 @@ export function createCharacterWindow({
           showToast(s.favorite ? `${s.character} - 즐겨찾기에 넣었습니다` : `${s.character} - 즐겨찾기에서 뺐습니다`, 'info');
         } else {
           showToast(`${s.character} - 숨겼습니다. Find [제외] 에서 되돌립니다`, 'info');
-          try { win.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (_) {}
           selected = null;
+          selVariant = '';
+          selectedLine = '';
+          if (drawerMode === 'detail') void loadDetail();    // 선택이 없다 - 빈 상세(앞선 요청은 번호로 무른다)
+          try { win.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (_) {}
         }
         resetResults();
       } else if (kind === 'delthumb') {
         const res = await fetch('/api/character-viewer/thumbnail/delete', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({group: s.group, character: s.character, variant: ''}),
+          body: JSON.stringify({group: s.group, character: s.character, variant: selVariant}),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '지우지 못했습니다.');
-        showToast(`${s.character} - 내 썸네일을 지웠습니다(기본 팩 그림이 있으면 그것이 보입니다)`, 'info');
+        showToast(data.removed ? `${s.character} - 생성된 썸네일을 지웠습니다(기본 썸네일로 돌아갑니다)`
+          : `${s.character} - 지울 생성 썸네일이 없습니다`, 'info');
         resetResults();
+        if (drawerMode === 'detail') void loadDetail();
       }
     } catch (error) {
       showToast(error.message || String(error), 'error');
@@ -440,6 +459,7 @@ export function createCharacterWindow({
     blocks.forEach((value, key) => { if (Array.isArray(value)) stale.set(key, value); });
     blocks = new Map();
     paintGrid();
+    if (drawerMode === 'detail') scheduleDetail();      // 생성이 끝나 썸네일이 바뀌었을 수 있다 - 몰려도 한 번
   }
   for (const name of ['naia:character-thumb-changed', 'naia:character-hidden-changed', 'naia:character-favorite-changed']) {
     try { win.addEventListener(name, softRefresh); } catch (_) { /* 이벤트가 없으면 다시 열 때 받는다 */ }
@@ -452,7 +472,7 @@ export function createCharacterWindow({
   }
 
   // ── 생성 옵션 서랍 ───────────────────────────────────────────────────────────
-  let drawerOpen = false;
+  let drawerMode = null;                // null | 'gen' | 'detail' - 한 번에 하나만(사용자 지시 2026-10-22)
   let drawerH = (() => {
     try { return Number(storage?.getItem(DRAWER_H_KEY)) || DRAWER_H_DEFAULT; } catch (_) { return DRAWER_H_DEFAULT; }
   })();
@@ -486,17 +506,101 @@ export function createCharacterWindow({
     grip.addEventListener('pointerup', up);
     grip.addEventListener('pointercancel', up);
   }
-  async function setDrawer(open) {
+  async function setDrawer(mode) {
     const box = el('[data-chw-drawer]');
     if (!box) return;
-    drawerOpen = !!open;
-    box.hidden = !drawerOpen;
-    if (drawerOpen) applyDrawerH(drawerH);
+    drawerMode = mode === 'gen' || mode === 'detail' ? mode : null;
+    box.hidden = !drawerMode;
+    el('[data-chw-drawer-body]').hidden = drawerMode !== 'gen';
+    el('[data-chw-detail]').hidden = drawerMode !== 'detail';
+    if (drawerMode) applyDrawerH(drawerH);
     paintSel();
     const actions = getActions() || {};
-    if (!drawerOpen) { actions.cancelGenOptions?.(); return; }
+    if (drawerMode !== 'gen') actions.cancelGenOptions?.();
+    if (drawerMode === 'detail') { void loadDetail(); return; }
+    if (drawerMode !== 'gen') return;
     try { await actions.mountGenOptions?.(el('[data-chw-drawer-body]')); }
     catch (error) { showToast(error.message || String(error), 'error'); }
+  }
+
+  // ── 캐릭터 상세보기 ─────────────────────────────────────────────────────────
+  // 썸네일 · 이름 · 작품 · 데이터 수 · Variations(칩) · 색 · 특징 · 의상 · 맨 아래 프롬프트 줄(그 슬롯에 담길 줄).
+  let detailSeq = 0;
+  let detailTimer = 0;
+  function scheduleDetail() {
+    clearTimeout(detailTimer);
+    detailTimer = setTimeout(() => { void loadDetail(); }, 200);
+  }
+  const GENDER_LABEL = {girl: '여성', boy: '남성', other: '비인간'};
+  async function loadDetail() {
+    const host = el('[data-chw-detail]');
+    if (!host) return;
+    const mine = ++detailSeq;
+    if (!selected) { host.innerHTML = '<div class="chw-empty">캐릭터를 고르면 여기에 상세가 보입니다.</div>'; return; }
+    const s = selected;
+    const variant = selVariant;
+    host.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    try {
+      const res = await fetch('/api/character-viewer/detail', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({group: s.group, character: s.character, variant}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (mine !== detailSeq || s !== selected || variant !== selVariant || drawerMode !== 'detail') return;
+      if (!res.ok) throw new Error(data.error || '상세를 받지 못했습니다.');
+      paintDetail(host, data);
+    } catch (error) {
+      if (mine === detailSeq) host.innerHTML = `<div class="chw-empty">${escHtml(error.message || String(error))}</div>`;
+    }
+  }
+  function paintDetail(host, d) {
+    const n = v => Number(v || 0).toLocaleString();
+    const variants = Array.isArray(d.variants) ? d.variants : [];
+    const name = d.variant ? `${d.character} (${String(d.variant).replace(/_/g, ' ')})` : d.character;
+    const aliases = (d.aliases || []).filter(a => a && a !== d.character);
+    // 생성(사용자) 썸네일만 지운다 - URL 의 v= 가 u 로 시작하면 사용자 것(서비스 thumbnail_source 의 접두사).
+    const userThumb = /[?&]v=u/.test(String(d.thumbnail_url || ''));
+    const thumb = d.thumbnail_url
+      ? `<img class="chw-dt-img" src="${escHtml(d.thumbnail_url)}" alt="" draggable="false">`
+      : '<div class="chw-dt-img is-empty">썸네일 없음</div>';
+    const sec = (title, items, tone) => (items && items.length
+      ? `<div class="chw-dt-sec"><div class="chw-dt-lab">${title}</div>`
+        + items.map(it => `<div class="chw-dt-tag${tone}"><span>${escHtml(it.tag)}</span>`
+          + `<i><b style="width:${Math.max(0, Math.min(100, Number(it.pct || 0)))}%"></b></i>`
+          + `<em>${Number(it.pct || 0).toFixed(1)}%</em></div>`).join('') + '</div>'
+      : '');
+    const sections = d.sections || {};
+    host.innerHTML = `<div class="chw-dt-scroll">`
+      + `<div class="chw-dt-head">${thumb}<div class="chw-dt-info"><b>${escHtml(name)}</b>`
+      + `<span>${escHtml(d.group || '')}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}</span>`
+      + `<span>데이터 ${n(d.count)}장${d.danbooru_posts ? ` · Danbooru ${n(d.danbooru_posts)}` : ''}</span>`
+      + (aliases.length ? `<span class="chw-dt-alias">별칭: ${escHtml(aliases.join(', '))}</span>` : '')
+      + (userThumb ? `<button type="button" class="chw-dt-del" data-chw-act="delthumb"`
+        + ` data-chw-dt-g="${escHtml(d.group || '')}" data-chw-dt-c="${escHtml(d.character || '')}" data-chw-dt-v="${escHtml(d.variant || '')}" title="생성된 썸네일을 지우고 기본 썸네일로 돌아갑니다">생성된 썸네일 삭제</button>` : '')
+      + `</div></div>`
+      + (variants.length > 1
+        ? `<div class="chw-dt-sec"><div class="chw-dt-lab">Variations · ${variants.length}</div><div class="chw-vchips">`
+          + variants.map(v => `<button type="button" class="chw-vchip${String(v.label || '') === String(d.variant || '') ? ' is-on' : ''}"`
+            + ` data-chw-var="${escHtml(v.label || '')}">${escHtml(v.name || 'Default')}<b>${n(v.rows)}</b></button>`).join('')
+          + `</div></div>`
+        : '')
+      + sec('Personal Color', sections.personal_color, ' is-pc')
+      + sec('Characteristics', sections.characteristics, '')
+      + sec('Attire', sections.attire, ' is-at')
+      + `</div>`
+      + `<div class="chw-dt-prompt" title="생성 옵션의 저장값으로 만든 캐릭터 줄">${escHtml(String(d.prompt?.character_prompt || ''))}</div>`;
+  }
+  function pickVariant(label) {
+    if (!selected) return;
+    selVariant = String(label || '');
+    // 슬롯도 그 변형으로(고르기만 해도 담기 - 같은 규칙).
+    try {
+      win.dispatchEvent(new CustomEvent('naia:character-picked',
+        {detail: {group: selected.group, character: selected.character, variant: selVariant}}));
+    } catch (_) {}
+    paintSel();
+    void loadDetail();
+    void loadLine();
   }
 
   function onClick(event) {
@@ -523,8 +627,13 @@ export function createCharacterWindow({
       else state.inc = state.inc.filter(x => !same(x));
       paintTools(); paintFeat(); resetResults(); return;
     }
-    if (t.closest('[data-chw-gopt]')) { void setDrawer(!drawerOpen); return; }
+    const dm = t.closest('[data-chw-drawer-mode]');
+    if (dm) { const m = dm.dataset.chwDrawerMode; void setDrawer(drawerMode === m ? null : m); return; }
+    const vb = t.closest('[data-chw-var]');
+    if (vb) { pickVariant(vb.dataset.chwVar); return; }
     const a = t.closest('[data-chw-act]');
+    if (a && a.dataset.chwDtC !== undefined && (!selected || a.dataset.chwDtG !== selected.group
+      || a.dataset.chwDtC !== selected.character || a.dataset.chwDtV !== selVariant)) return;   // 옛 상세의 단추
     if (a) void act(a.dataset.chwAct);
   }
 
@@ -590,8 +699,8 @@ export function createCharacterWindow({
     /** 생성 설정 조각이 떠 있는 창(Find ⚙)으로 옮겨 갔다 - 빈 서랍을 닫는다. */
     // 조각을 가져간 쪽이 부른다 - 그 이동을 무르면 안 되니 서랍만 접는다(setDrawer(false) 는 기다리는 열기를 무른다).
     closeDrawer: () => {
-      if (!drawerOpen) return;
-      drawerOpen = false;
+      if (drawerMode !== 'gen') return;            // 상세보기가 열려 있으면 그대로 둔다
+      drawerMode = null;
       const box = el('[data-chw-drawer]');
       if (box) box.hidden = true;
       paintSel();

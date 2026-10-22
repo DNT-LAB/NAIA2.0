@@ -13,8 +13,12 @@
 분류(무엇이 '입는 것' 인가) = **이벤트 맵 3단 지도**(`core/event_map/tree_3depth.json` · Danbooru 위키 tag_groups) -
 `TreeAttireClassifier` 참조. 기본값이다(사용자 지시 2026-10-22: "더 성능이 좋은 분류 도구가 있다").
   · 옛 분류(`--classifier legacy` = `add_alternate_costumes.classify_tag` · `data/clothes_list.txt`)는 목록 자체가 거칠어
-    `low ponytail` · `red nails` · `nail polish` · `bare shoulders` 를 의상으로 쳤다. 변형(`alternates[*].attire`)은 아직
-    그 분류로 만든 값이다 - 변형 의상은 변형 프롬프트에 실리므로 이 도구는 건드리지 않는다.
+    `low ponytail` · `red nails` · `nail polish` · `bare shoulders` 를 의상으로 쳤다.
+
+`--alternates` = 변형(`alternates[*].attire`)도 같은 지도로 다시 가른다(사용자 승인 2026-10-22 - 변형 의상은 변형
+프롬프트에 실리므로 **생성 결과가 바뀐다**). `rebuild_alternate_attire` 참조. 원천은 변형을 만든 그 parquet 이고
+(`--alt-parquet` · 읽기만 한다), 묶음 · 라벨 · 행 수는 `add_alternate_costumes.extract_variants` 를 그대로 쓴다.
+라벨 · 행 수가 배포본과 맞는 변형만 의상을 바꾼다 - 그 밖의 필드(색 · 특징 · rows · label)는 손대지 않는다.
 
 원천 = 프로필과 같은 코퍼스 · 같은 필터:
     data/tags/tags_*.parquet (+ --corpus 증분 버킷)
@@ -57,6 +61,8 @@ sys.path.insert(0, str(REPO_ROOT))
 from add_alternate_costumes import BREAST_TAGS, classify_tag  # noqa: E402  옛 분류(--classifier legacy)
 
 TREE_PATH = REPO_ROOT / "core" / "event_map" / "tree_3depth.json"
+# 변형을 만든 원천(공식 의상 변형 · 1girl solo). 리포 밖이다 - 읽기만 한다.
+ALT_PARQUET = Path(r"C:\VNR\NAIA2.0\.experimental\official_alt_costume_1girl_solo.parquet")
 
 # 저장 문턱 30% - 색(personal_color) 문턱과 같다. 화면 문턱은 소비자(`CharacterViewerService.DEFAULT_ATTIRE_MIN_PCT`
 # = 40)가 따로 건다 - 저장을 화면보다 낮게 두어 화면 문턱을 다시 스캔 없이 30 까지 내릴 수 있게 했다.
@@ -121,6 +127,7 @@ class TreeAttireClassifier:
     UMBRELLA = frozenset({"headwear", "footwear", "eyewear", "legwear", "handwear", "neckwear", "sleeves", "trim",
                           "jewelry"})
     BODY_D1 = "Body"
+    HOLDING_D2 = "tag_group:holding_tags"
 
     def __init__(self, tree_path: Path = TREE_PATH):
         tree = json.loads(Path(tree_path).read_text(encoding="utf-8"))
@@ -144,8 +151,8 @@ class TreeAttireClassifier:
         nude = any(d2 == self.NUDITY_D2 for _, d2, _ in hits)
         if strong or (weak and not nude):
             return True
-        if any(d1 in (self.BODY_D1, self.ATTIRE_D1) for d1, _, _ in hits):
-            return False                    # 몸 · 노출 · 화장 자리 = 확정
+        if any(d1 in (self.BODY_D1, self.ATTIRE_D1) or d2 == self.HOLDING_D2 for d1, d2, _ in hits):
+            return False                    # 몸 · 노출 · 화장 · '들고 있다' 자리 = 확정(`holding umbrella` -> umbrella 금지)
         return None                         # 딴 갈래(무늬 · 동물 · 사물)뿐 - 더 짧은 꼬리를 본다
 
     def is_attire(self, tag: str) -> bool:
@@ -295,6 +302,79 @@ def with_attire(entry: dict, attire: list[dict]) -> dict:
     return out
 
 
+def rebuild_alternate_attire(analysis: dict, parquet: Path, attire_tag) -> dict:
+    """변형 의상(`alternates[*].attire`)을 다시 만든다 - 제자리에서 고치고 집계를 돌려준다.
+
+    · 묶음 · 라벨 · 행 수 = `add_alternate_costumes.extract_variants` 그대로(공식 의상 변형 행 중 괄호 이름이 있는
+      것만 - 괄호 없는 행은 버린다 · 비공식 alternate costume 은 원천에 없다).
+    · 조회표는 **변형을 가진 캐릭터만**으로 만든다. 처음 변형을 만든 때의 사전은 9,738종이었다 - 그 뒤 들어온
+      캐릭터까지 넣으면 그 이름이 행을 가져가 행 수가 어긋난다(실측: 전체 사전 3,698/3,736 · 변형 보유만 3,724).
+    · 세는 법 = `analyze_variants` 와 같다(무시 태그 · 색 · 가슴 태그는 먼저 빼고, 남은 것 중 `attire_tag` 가 의상이라는 것) ·
+      15%(`MIN_CLOTHES_PCT`) 이상 · 개수 상한 없음 · `most_common` 순서 · 태그는 밑줄 -> 공백.
+    · 그 변형의 색 · 특징에 이미 있는 태그는 뺀다(프롬프트에 두 번 실리지 않게).
+    · 라벨이 없거나 행 수가 다르면 그 변형은 그대로 둔다(`unmatched`).
+    """
+    import add_alternate_costumes as aac
+
+    lookup: dict[str, tuple[str, str]] = {}
+    for gk, members in analysis.items():
+        if gk.startswith("_") or not isinstance(members, dict):
+            continue
+        for name, ch in members.items():
+            if not isinstance(ch, dict) or not ch.get("alternates"):
+                continue
+            lookup[name.replace(" ", "_")] = (gk, name)
+            for alias in ch.get("aliases") or []:
+                lookup[str(alias).replace(" ", "_")] = (gk, name)
+    df = pd.read_parquet(parquet, columns=["tag_string_general", "tag_string_character"])
+    variant_rows = aac.extract_variants(df, lookup)
+
+    def worn(tag: str) -> bool:
+        if tag in aac.IGNORE_TAGS or tag in aac.BREAST_TAGS or aac.PC_PATTERNS.fullmatch(tag):
+            return False
+        return attire_tag(tag)
+
+    stats = Counter()
+    for gk, members in analysis.items():
+        if gk.startswith("_") or not isinstance(members, dict):
+            continue
+        for name, ch in members.items():
+            if not isinstance(ch, dict):
+                continue
+            by_label: dict[str, list] = {}
+            for raw_label, rows_list in (variant_rows.get((gk, name)) or {}).items():
+                by_label.setdefault(raw_label.strip("()"), []).append(rows_list)
+            for variant in ch.get("alternates") or []:
+                stats["variants"] += 1
+                label = str(variant.get("label") or "")
+                want = int(variant.get("rows") or 0)
+                rows_list = next((r for r in by_label.get(label, []) if len(r) == want), None)
+                if rows_list is None:
+                    stats["unmatched"] += 1
+                    continue
+                counter: Counter = Counter()
+                for gen_tags in rows_list:
+                    for tag in gen_tags:
+                        if worn(tag):
+                            counter[tag] += 1
+                taken = {str(e.get("tag")) for key in ("personal_color", "characteristics")
+                         for e in variant.get(key) or [] if isinstance(e, dict)}
+                items = []
+                for tag, cnt in counter.most_common():
+                    pct = round(cnt / want * 100, 1)
+                    if pct < aac.MIN_CLOTHES_PCT:
+                        break
+                    shown = tag.replace("_", " ")
+                    if shown in taken:
+                        continue
+                    items.append({"tag": shown, "count": cnt, "pct": pct})
+                if items != variant.get("attire"):
+                    stats["changed"] += 1
+                variant["attire"] = items
+                stats["rebuilt"] += 1
+    return stats
+
+
 def dump(analysis: dict) -> bytes:
     return json.dumps(analysis, ensure_ascii=False, indent=2).replace("\n", NEWLINE).encode("utf-8")
 
@@ -310,6 +390,9 @@ def main() -> int:
                     help="의상 분류 - tree = 이벤트 맵 3단 지도(기본) · legacy = clothes_list.txt(변형과 같은 옛 잣대)")
     ap.add_argument("--refresh", action="store_true",
                     help="이미 attire 가 있는 엔트리도 다시 계산해 덮는다(자격이 없어진 엔트리는 attire 를 뗀다)")
+    ap.add_argument("--alternates", action="store_true",
+                    help="기본 보기 대신 변형(alternates[*].attire)을 원천 parquet 에서 다시 가른다(변형 프롬프트가 바뀐다)")
+    ap.add_argument("--alt-parquet", type=Path, default=ALT_PARQUET, help="변형 원천 parquet(읽기만 한다)")
     ap.add_argument("--apply", action="store_true", help="실제로 파일을 쓴다")
     args = ap.parse_args()
 
@@ -319,6 +402,11 @@ def main() -> int:
         raise SystemExit("무변경 왕복이 바이트 일치하지 않는다 - 형식(CRLF · indent · 끝 줄바꿈)이 바뀌었다. 쓰지 않는다")
 
     attire_tag = make_classifier(args.classifier)
+    if args.alternates:
+        stats = rebuild_alternate_attire(analysis, args.alt_parquet, attire_tag)
+        print(f"[alternates] 변형 {stats['variants']:,} · 다시 만듦 {stats['rebuilt']:,} (값이 바뀐 것 {stats['changed']:,})"
+              f" · 라벨/행 수가 안 맞아 그대로 둠 {stats['unmatched']:,}  [분류 {args.classifier}]")
+        return write_out(analysis, raw, args.apply)
     if args.cache and args.cache.exists():
         cache = json.loads(args.cache.read_text(encoding="utf-8"))
         print(f"[캐시] {args.cache}  {len(cache):,}종")
@@ -361,9 +449,13 @@ def main() -> int:
           f" · 코퍼스 행 없음(other 포함) {no_rows:,} · 행 {args.min_rows} 미만 {few_rows:,}"
           f" · 뗌 {dropped:,}  [분류 {args.classifier}]")
 
+    return write_out(analysis, raw, args.apply)
+
+
+def write_out(analysis: dict, raw: bytes, apply: bool) -> int:
     body = dump(analysis)
     print(f"  크기 {len(raw)/1024/1024:.1f} MB -> {len(body)/1024/1024:.1f} MB")
-    if not args.apply:
+    if not apply:
         print("  [dry-run] 쓰지 않았다 - --apply 로 쓴다")
         return 0
     shutil.copy2(ANALYSIS_PATH, ANALYSIS_PATH.with_suffix(".json.attire.bak"))

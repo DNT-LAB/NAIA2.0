@@ -21,12 +21,20 @@
 const KEYS = {pre_prompt: 'prefix', post_prompt: 'postfix'};
 // Characters 탭 Detail 의 옵션도 이 창으로(사용자 결정 2026-10-22: 옮기되 Find 와 같은 인프라 - Find ⚙ 도 같은 창).
 // 값 = `/api/character-viewer/options` 의 같은 키(넘긴 키만 저장). 탭의 체크와 서로 맞춘다(onSaved / sync).
-const OPTION_CHECKS = [
-  ['auto_copyright', 'copyright 자동 추가'],
-  ['auto_characteristics', 'characteristics 자동 추가'],
-  ['hide_charname', '캐릭터명 숨김'],
-  ['no_save', '썸네일로 저장 안 함'],
+// 줄을 만드는 셋은 캐릭터 프롬프트 칸 머리에(사용자 지시 2026-10-22 · 누르면 줄을 다시 만든다).
+const LINE_CHECKS = [
+  ['auto_copyright', '작품명'],
+  ['auto_characteristics', '특징'],
+  ['hide_charname', '캐릭터명'],
 ];
+// 이제 모든 캐릭터에 기본 썸네일이 있다 - '저장 안 함' 대신 '바꾼다' 로 묻는다(켬 = no_save 꺼짐).
+const OPTION_CHECKS = [
+  ['no_save', '생성 결과를 기본 썸네일로 변경'],
+];
+// 저장 키와 체크의 뜻이 반대인 것 - 체크 = 키가 false.
+const INVERTED = new Set(['hide_charname', 'no_save']);
+const optBox = ([key, label]) =>
+  `<label><input type="checkbox" data-cqgen-opt="${key}"><span>${label}</span></label>`;
 
 export function createCharacterGenSettingsWindow({
   document: doc,
@@ -142,7 +150,8 @@ export function createCharacterGenSettingsWindow({
     slotEl.innerHTML = `<div class="cqgen-slot-top"><span class="cqgen-pill">캐릭터 1</span>`
       + `<span class="cqgen-slotname" data-cqgen-slotname></span>`
       + `<button type="button" class="cqgen-clear" data-cqgen-clear hidden>비우기</button></div>`
-      + `<label class="cqgen-lab" for="cqgenPrompt">캐릭터 프롬프트</label>`
+      + `<div class="cqgen-labrow"><label class="cqgen-lab" for="cqgenPrompt">캐릭터 프롬프트</label>`
+      + `<span class="cqgen-linechecks">${LINE_CHECKS.map(optBox).join('')}</span></div>`
       + `<textarea class="cqgen-ta" id="cqgenPrompt" data-cqgen-prompt rows="2" spellcheck="false"></textarea>`
       + `<label class="cqgen-lab" for="cqgenExtra">추가 프롬프트</label>`
       + `<textarea class="cqgen-ta is-extra" id="cqgenExtra" data-cqgen-extra rows="1" spellcheck="false"></textarea>`
@@ -182,18 +191,22 @@ export function createCharacterGenSettingsWindow({
   }
 
   function paintOptions() {
-    if (!optsEl) return;
+    if (!contentEl) return;
     const o = options || {};
-    optsEl.querySelectorAll('[data-cqgen-opt]').forEach(box => { box.checked = !!o[box.dataset.cqgenOpt]; });
+    contentEl.querySelectorAll('[data-cqgen-opt]').forEach(box => {
+      const key = box.dataset.cqgenOpt;
+      box.checked = INVERTED.has(key) ? !o[key] : !!o[key];
+    });
   }
   let loading = null;
 
   function paintWarn() {
     if (!warnEl) return;
     const o = options || {};
-    const why = [o.no_save && '저장 안 함', o.hide_charname && '캐릭터명 숨김', o.cosplay_enabled && '코스프레'].filter(Boolean);
+    // 바꾸겠다고 했는데 서버가 막는 경우만 알린다(캐릭터명이 빠진 줄 · 코스프레 줄은 그 캐릭터의 썸네일이 아니다).
+    const why = o.no_save ? [] : [o.hide_charname && '캐릭터명이 빠져', o.cosplay_enabled && '코스프레가 켜져'].filter(Boolean);
     warnEl.hidden = !why.length;
-    warnEl.textContent = why.length ? `${why.join(' · ')} 이(가) 켜져 있어 Find [생성] 그림이 썸네일로 남지 않습니다.` : '';
+    warnEl.textContent = why.length ? `${why.join(' · ')} 있어 생성 결과가 기본 썸네일로 바뀌지 않습니다.` : '';
   }
 
   function load() {
@@ -307,11 +320,13 @@ export function createCharacterGenSettingsWindow({
   function buildOptions() {
     optsEl = doc.createElement('div');
     optsEl.className = 'cqgen-opts';
-    optsEl.innerHTML = OPTION_CHECKS.map(([key, label]) =>
-      `<label><input type="checkbox" data-cqgen-opt="${key}"><span>${escHtml(label)}</span></label>`).join('');
-    optsEl.addEventListener('change', event => {
+    optsEl.innerHTML = OPTION_CHECKS.map(optBox).join('');
+    // 슬롯 머리의 줄 체크와 아래 옵션 체크를 한 곳에서 받는다.
+    contentEl.addEventListener('change', event => {
       const box = event.target.closest('[data-cqgen-opt]');
-      if (box) saveOption(box.dataset.cqgenOpt, !!box.checked);
+      if (!box) return;
+      const key = box.dataset.cqgenOpt;
+      saveOption(key, INVERTED.has(key) ? !box.checked : !!box.checked);
     });
     contentEl.appendChild(optsEl);
     warnEl = doc.createElement('div');

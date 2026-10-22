@@ -2983,7 +2983,7 @@ window.addEventListener('naia:character-picked', event => {
 });
 function ensureCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-grip1')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-lchk1')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,

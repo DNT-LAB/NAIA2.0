@@ -30918,6 +30918,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
 }
 .cqgen-content .cqgen-gen:disabled { opacity: 0.45; cursor: default; }
 .cqgen-content .cqgen-lab { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+/* 캐릭터 프롬프트 칸 머리 - 이름 왼쪽 · 줄 체크 셋 오른쪽(누르면 줄을 다시 만든다). */
+.cqgen-content .cqgen-labrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.cqgen-content .cqgen-linechecks { display: flex; gap: 10px; font-size: 10px; color: var(--text-secondary); }
+.cqgen-content .cqgen-linechecks label { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+.cqgen-content .cqgen-linechecks input { margin: 0; width: 12px; height: 12px; }
 .cqgen-content .cqgen-note { flex: none; padding: 6px 10px 8px; font-size: 10px; line-height: 1.4; color: #f2dc8c; }
 .cqgen-content .cqgen-ta[readonly] { opacity: 0.6; }
 /* 생성 설정 조각(한 벌) - 떠 있는 창에도 Characters 창 서랍에도 붙는다. */

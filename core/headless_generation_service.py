@@ -238,7 +238,7 @@ class HeadlessGenerationService:
 
         params = self._normalized_params(command, api_mode, credential)
         if self.is_sequence_command_text(params.get("_raw_input")):
-            if not enqueue or params.get("_session_pool_character"):
+            if not enqueue or params.get("_session_pool_character") or params.get("_temporary_character"):
                 # Enhance 같은 비-큐 경로는 요청 하나만 돌려줄 수 있다 - N 컷을 놓을 자리가 없다.
                 return HeadlessGenerationDispatch(
                     request=None, api_mode=api_mode,
@@ -294,7 +294,8 @@ class HeadlessGenerationService:
                     api_mode=api_mode,
                     blocked_reason=str(exc),
                 )
-        if params.get("_session_pool_character") and nai_model_spec is not None and not nai_model_spec.uses_v4_payload:
+        if ((params.get("_session_pool_character") or params.get("_temporary_character"))
+                and nai_model_spec is not None and not nai_model_spec.uses_v4_payload):
             return HeadlessGenerationDispatch(None, api_mode, "캐릭터 슬롯을 지원하는 NAI 모델을 선택해 주세요.")
         base_negative = str(params.get("negative_prompt") or "")
         prompt_run_id = self._prompt_run_id_for_command(command, params)
@@ -616,11 +617,19 @@ class HeadlessGenerationService:
         with pipeline_swap_lock(self.context):
             self._expand_input_wildcards(params)
         selected = params.get("_session_pool_character")
-        if isinstance(selected, dict):
+        temporary = params.get("_temporary_character")
+        if isinstance(selected, dict) or isinstance(temporary, dict):
             from core.character_settings import session_pool_request_characters, record_session_pool_request_pick
 
-            with pipeline_swap_lock(self.context):
-                characters = session_pool_request_characters(self.context, selected)
+            if isinstance(selected, dict):
+                with pipeline_swap_lock(self.context):
+                    characters = session_pool_request_characters(self.context, selected)
+            else:
+                # Characters 창 [생성(메인화면)] · [랜덤+생성](사용자 지시 2026-10-22) - 이 요청에만 임시 C1 하나.
+                # 메인 화면의 캐릭터 슬롯은 이 그림에 쓰지 않고, 어떤 슬롯 · 풀 · 고정도 바꾸지 않는다.
+                characters = {"characters": [str(temporary.get("prompt") or "")],
+                              "uc": [str(temporary.get("uc") or "")],
+                              "character_ids": ["character-window-c1"], "character_positions": [None]}
             params["_session_pool_characters"] = characters
             # 결과에 남는 출처 표시 - 파생 요청은 이 그림만 실행된 캐릭터로 묶는다(일반 결과는 late binding 그대로).
             params["_session_pool_executed"] = True
@@ -632,7 +641,8 @@ class HeadlessGenerationService:
                 params["_executed_characters"] = list(characters["characters"])
                 params["_executed_character_ids"] = list(characters["character_ids"])
                 params["_executed_characters_uc"] = list(characters["uc"])
-            record_session_pool_request_pick(self.context, selected)
+            if isinstance(selected, dict):
+                record_session_pool_request_pick(self.context, selected)
         request.mark_processing()
         api_service = self._api_service()
         api_result = api_service.call_generation_api(

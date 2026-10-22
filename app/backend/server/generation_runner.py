@@ -294,7 +294,7 @@ def _auto_gen_prefetch_eligible(context: WebSessionContext, request) -> bool:
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
-    if params.get("_session_pool_character"):
+    if params.get("_session_pool_character") or params.get("_temporary_character"):
         return False
     if str(params.get("event_stream_run_id") or ""):
         return False  # Story
@@ -1233,7 +1233,7 @@ async def _maybe_continue_auto_generation(
     if search_transition_pending(context):
         return False
     params = getattr(request, "params", {}) or {}
-    if params.get("_session_pool_character"):
+    if params.get("_session_pool_character") or params.get("_temporary_character"):
         return False  # This manual selection is exactly one image.
 
     # Sequence 연속 생성(Auto Gen): 시퀀스 프레임이면 _advance_sequence_run 이 라운드 카운트를
@@ -1626,7 +1626,7 @@ def _automation_should_bind(context: WebSessionContext, request) -> bool:
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
-    if params.get("_session_pool_character"):
+    if params.get("_session_pool_character") or params.get("_temporary_character"):
         return False  # This manual selection is exactly one image.
     if any(
         context._coerce_bool(params.get(key, False))
@@ -1650,7 +1650,7 @@ def _should_continue_auto_generation(context: WebSessionContext, request) -> boo
     params = getattr(request, "params", {}) or {}
     if not isinstance(params, dict):
         return False
-    if params.get("_session_pool_character"):
+    if params.get("_session_pool_character") or params.get("_temporary_character"):
         return False  # This manual selection is exactly one image.
     automation_run_id = str(params.get("automation_run_id") or "")
     if automation_run_id:

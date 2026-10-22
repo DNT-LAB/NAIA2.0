@@ -4,7 +4,10 @@
  *   [ 검색(이름 · 한글 · 초성 · work:) | ALL 여 남 외 | ★ | + 필터 ]
  *   [ 특징 칩 +포함 / −제외 / work: ]
  *   [ 그룹(전부 · 보이는 만큼만) |  썸네일 격자(전부 · 보이는 만큼만 · 창 폭에 맞춘 칸 수) ]
- *   [ 고른 캐릭터 줄: 이름 · 작품 · 게시물 · 프롬프트 줄 · [+ 슬롯] [+ 풀] [생성] [★] [복사] [숨김] [⋯] ]
+ *   [ 고른 캐릭터 줄: 이름 · 작품 · 게시물 · 프롬프트 줄 · [+ 슬롯] [+ 풀] [생성(메인)] [★] [복사] [숨김] [⋯] ]
+ *   생성 셋(사용자 지시 2026-10-22): 생성(메인화면) = 메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장 · 랜덤+생성 = Random 뒤 같은 길
+ *   (POST /api/character-viewer/main-generate - 메인 슬롯 · 풀은 안 바뀐다) · 생성(벤치) = 썸네일 생성(생성 설정 창).
+ *   단추 줄은 한 줄이라 [생성(메인)] 만 두고 벤치 · 랜덤+생성은 [⋯] 와 우클릭 메뉴에.
  *
  * 탭 규칙(Artist 와 같다): 창이 없거나 접혀 있으면 창부터 세우고 탭으로 가지 않는다. 창이 펴져 있을 때 다시 누르면 탭으로.
  * Find(퀵 패널)와는 **따로**다(사용자 결정) - 다만 같은 인프라를 쓴다: 같은 검색 라우트(`/list` · 검색 색인) · 같은 특징 자동완성 ·
@@ -411,12 +414,14 @@ export function createCharacterWindow({
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
       + `<button type="button" class="chw-act is-pool" data-chw-act="pool"${off}>+ 풀</button>`
-      + `<button type="button" class="chw-act" data-chw-act="gen"${off} title="썸네일 생성(생성 설정 창의 Prefix · Postfix · 옵션)">생성</button>`
+      + `<button type="button" class="chw-act" data-chw-act="genmain"${off} title="메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장(메인 슬롯은 그대로)">생성(메인)</button>`
       + `<button type="button" class="chw-act${s.favorite ? ' is-on' : ''}" data-chw-act="fav"${off} title="즐겨찾기">★</button>`
       + `<button type="button" class="chw-act" data-chw-act="copy"${off} title="프롬프트 줄 복사">복사</button>`
       + `<button type="button" class="chw-act is-hide" data-chw-act="hide"${off} title="숨김(검색 · 랜덤에서 빠진다 · Find [제외] 에서 되돌린다)">숨김</button>`
       + `<button type="button" class="chw-act" data-chw-act="more"${off} title="썸네일 삭제 · Characters 탭에서 열기">⋯</button></div>`
       + `<div class="chw-more" data-chw-more hidden>`
+      + `<button type="button" data-chw-act="genrandom"${off}>랜덤+생성</button>`
+      + `<button type="button" data-chw-act="gen"${off} title="썸네일 생성(생성 설정 창의 Prefix · Postfix · 옵션)">생성(벤치)</button>`
       + `<button type="button" data-chw-act="delthumb">내 썸네일 삭제</button>`
       + `<button type="button" data-chw-act="tab">Characters 탭에서 열기(연속 생성 등)</button></div>`;
   }
@@ -470,6 +475,17 @@ export function createCharacterWindow({
       // [생성] = 가상 슬롯으로(그 슬롯에서 고친 줄 · 추가 프롬프트 · 네거티브가 함께 나간다).
       else if (kind === 'gen') await (actions.generateVirtual ? actions.generateVirtual(s.group, s.character, selVariant)
         : actions.generateThumb?.(s.group, s.character, {variant: selVariant}));
+      // [생성(메인화면)] · [랜덤+생성] - 이 요청에만 임시 C1(메인 슬롯 · 풀 · 고정은 그대로). 랜덤은 메인 Random 과 같이 프롬프트를 새로 뽑는다.
+      else if (kind === 'genmain' || kind === 'genrandom') {
+        const random = kind === 'genrandom';
+        const res = await fetch('/api/character-viewer/main-generate', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({group: s.group, character: s.character, variant: selVariant, random}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || data.message || '생성 요청을 보내지 못했습니다.');
+        showToast(random ? `${s.character} - 랜덤 프롬프트로 한 장 생성합니다` : `${s.character} - 메인 프롬프트로 한 장 생성합니다`, 'info');
+      }
       else if (kind === 'fav' || kind === 'hide') {
         const fav = kind === 'fav';
         const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {
@@ -590,7 +606,8 @@ export function createCharacterWindow({
     menu.className = 'result-context-menu chw-ctx-menu open';
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `<div class="chw-ctx-head">${escHtml(s.character)}<span>${escHtml(groupLabel(s.group))}</span></div>`
-      + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}${btn('gen', '생성')}</div>`
+      + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}</div>`
+      + `<div class="result-context-group">${btn('gen', '생성(벤치)')}${btn('genmain', '생성(메인화면)')}${btn('genrandom', '랜덤+생성')}</div>`
       + `<div class="result-context-group">${btn('fav', s.favorite ? '★ 즐겨찾기 해제' : '★ 즐겨찾기')}${btn('copy', '복사')}</div>`
       + `<div class="result-context-group">${btn('hide', '숨김', ' danger')}${btn('delthumb', '내 썸네일 삭제')}`
       + `${btn('tab', 'Characters 탭에서 열기')}</div>`

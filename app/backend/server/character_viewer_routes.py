@@ -880,6 +880,85 @@ def register_character_viewer_routes(
             start_generation_runner(session_context, clients)
         return dispatch.websocket_payload()
 
+    @app.post("/api/character-viewer/main-generate")
+    async def api_character_viewer_main_generate(req: Request):
+        # Characters 창 [생성(메인화면)] · [랜덤+생성](사용자 지시 2026-10-22). 메인 프롬프트 그대로(랜덤이면 Random 으로 새로) 한 장,
+        # 캐릭터는 이 요청에만 임시 C1(_temporary_character) - 메인 화면의 슬롯 · 풀 · 고정은 건드리지 않는다.
+        # 캐릭터 줄은 Find 가 슬롯에 담는 줄과 같다(/detail · 옵션 고정).
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        group = str(payload.get("group") or "").strip()
+        character = str(payload.get("character") or "").strip()
+        if not character:
+            return JSONResponse({"error": "character is required"}, status_code=400)
+        mode = str(session_context.get_api_mode())
+        try:
+            detail = await run_in_thread(
+                character_viewer_service(session_context).build_detail, group, character,
+                str(payload.get("variant") or ""),
+                {"hide_charname": False, "cosplay_enabled": False, "auto_copyright": True}, mode)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character prompt failed: {exc}"}, status_code=500)
+        line = str(((detail or {}).get("prompt") or {}).get("character_prompt") or "").strip()
+        if not line:
+            return JSONResponse({"error": "이 캐릭터의 프롬프트 줄이 비어 있습니다."}, status_code=400)
+        try:
+            service = _generation_service(session_context)
+            from core.generation_access_policy import access_policy
+            from core.headless_generation_service import HeadlessGenerationDispatch
+
+            policy = access_policy(session_context)
+            if policy.blocked or not service._credential_for_mode(mode):
+                reason = policy.reason() if policy.blocked else f"{mode} credential is not configured."
+                return JSONResponse(HeadlessGenerationDispatch(None, mode, reason).websocket_payload(), status_code=409)
+            random_result = None
+            if payload.get("random") is True:
+                from app.backend.server.generation_commands import handle_random_command
+                from core.wildcard_processor import suppress_session_pick_recording
+
+                # Random 은 프롬프트만 새로 뽑는다 - 그사이 랜덤 슬롯이 굴린 캐릭터는 이 그림에 안 쓰이므로 픽으로 세지 않는다.
+                with suppress_session_pick_recording(session_context.wildcard_manager):
+                    random_result = await handle_random_command(
+                        None, session_context, clients,
+                        {"type": "random", "random_request_id": f"character-window-{_uuid.uuid4().hex}",
+                         "force_naia_skip_generate": True},
+                        start_generation_runner=start_generation_runner, enqueue=False,
+                    )
+                if not random_result.success:
+                    return JSONResponse(random_result.websocket_payload(), status_code=409)
+
+            def enqueue():
+                overrides = {"_temporary_character": {"prompt": line, "uc": ""}, "auto_generate": False,
+                             "_remote_queue_source": "Characters", "_remote_queue_label": character}
+                if random_result is not None:
+                    from app.backend.server.generation_runner import _reroll_random_resolution
+
+                    _reroll_random_resolution(session_context, overrides)
+                    if random_result.detected_resolution:
+                        width, height = random_result.detected_resolution
+                        overrides.update(width=width, height=height, resolution=f"{width} x {height}")
+                command = {"type": "generate", "api_mode": mode,
+                           "prompt": random_result.prompt if random_result is not None else session_context.prompt_text,
+                           "negative_prompt": session_context.negative_prompt_text, "overrides": overrides}
+                if random_result is not None and random_result.prompt_run_id:
+                    command["prompt_run_id"] = random_result.prompt_run_id
+                return service.enqueue_remote_request(command)
+
+            dispatch = await run_in_thread(enqueue)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character generate failed: {exc}"}, status_code=500)
+        if not dispatch.ok:
+            return JSONResponse(dispatch.websocket_payload(), status_code=409)
+        if session_context.headless_generation_execute_enabled:
+            start_generation_runner(session_context, clients)
+        return {"ok": True, **dispatch.websocket_payload()}
+
     def read_pool_history(key):
         with _HIDE_LOCK, session_context._character_service()._commit_lock:
             roster, _ = require_session_pool(key)

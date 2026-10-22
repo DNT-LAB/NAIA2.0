@@ -27,6 +27,7 @@ def strip_session_pool_controls(params: dict) -> None:
     """One-shot selection instructions must never survive into result/replay params."""
     params.pop("_session_pool_character", None)
     params.pop("_session_pool_characters", None)
+    params.pop("_temporary_character", None)
 
 
 def restore_executed_character_params(params: dict) -> None:

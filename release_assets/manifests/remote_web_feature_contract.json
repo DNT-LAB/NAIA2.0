@@ -455,6 +455,7 @@
         {"method": "POST", "path": "/api/character-viewer/session-pool/clear", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/character-viewer/session-pool/pin", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/character-viewer/session-pool/generate", "smoke": "external_live"},
+        {"method": "POST", "path": "/api/character-viewer/main-generate", "smoke": "external_live"},
         {"method": "GET", "path": "/api/character-viewer/session-pool/images", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/character-viewer/session-pool/history", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/character-viewer/session-pool/file", "smoke": "non_destructive"},

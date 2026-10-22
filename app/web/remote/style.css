@@ -32474,6 +32474,8 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
   transition: opacity 0.2s ease;
 }
 .state-veil.lifted { opacity: 0; pointer-events: none; }
+/* API 설정(첫 실행 · 토큰 없음) 창이 뜨면 그 창이 먼저다 - 베일 글이 반투명한 창 너머로 비치지 않게 숨긴다. */
+body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .state-veil-spinner {
   width: 22px;
   height: 22px;

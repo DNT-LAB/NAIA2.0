@@ -126,16 +126,24 @@ def _prompt_highlight_read_json_tags(path: Path) -> set[str]:
     return tags
 
 
+def _shared_kr_raw(context: WebSessionContext) -> dict[str, Any]:
+    """자동완성과 같은 KR 원장 한 벌 - 잠금 아래 세션당 한 번만 읽는다.
+
+    전에는 이 파일의 두 길이 잠금 없이 따로 읽었다. 첫 화면에서 자동완성 색인과 하이라이트 색인이 동시에 오면
+    20만 행 원장을 두 번 병렬로 읽어 CPU 를 20초 넘게 잡았다(사용자 제보 2026-10-22: 시작 뒤 한참 시스템 점유).
+    autocomplete_commands 가 이 모듈을 import 하므로 여기서는 늦게 import 한다.
+    """
+    from app.backend.server.autocomplete_commands import _ensure_kr_raw
+
+    raw_tags = _ensure_kr_raw(context)
+    return raw_tags if isinstance(raw_tags, dict) else {}
+
+
 def prompt_highlight_index(context: WebSessionContext) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
-        from core.kr_tag_loader import load_kr_tag_records
-        from core.tag_relation_ranker import TagRelationRanker
-
-        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
-        raw_tags = load_result.raw
-        context.kr_tags_raw = raw_tags
-        context.tag_relation_ranker = TagRelationRanker(raw_tags) if raw_tags else None
+        # 랭커는 쓰는 곳(tag_lookup_info · 자동완성)이 늦게 만든다 - 여기서 만들 이유가 없다.
+        raw_tags = _shared_kr_raw(context)
     if not isinstance(raw_tags, dict):
         raw_tags = {}
 
@@ -362,11 +370,7 @@ def tag_lookup_info(context: WebSessionContext, tag: str, *, recommend: bool = F
                     prompt_tags: list[str] | None = None) -> dict[str, Any]:
     raw_tags = getattr(context, "kr_tags_raw", None)
     if not isinstance(raw_tags, dict) or not raw_tags:
-        from core.kr_tag_loader import load_kr_tag_records
-
-        load_result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
-        raw_tags = load_result.raw
-        context.kr_tags_raw = raw_tags
+        raw_tags = _shared_kr_raw(context)
     if not raw_tags:
         return {}
     # **랭커 생성은 raw 적재와 분리해야 한다.** 전에는 위 `if` 안에서만 만들었는데,
@@ -650,6 +654,20 @@ def register_prompt_tools_routes(
         return Response(
             content=json.dumps(data, ensure_ascii=False),
             media_type="application/json",
+            headers=_no_cache_headers(),
+        )
+
+    @app.get("/api/startup-status")
+    async def api_startup_status():
+        # 첫 상태 베일(app.js liftStateVeil)이 묻는다 - 자동완성 색인이 준비됐거나 시작 예열이 끝났으면 ready.
+        from app.backend.server.autocomplete_commands import tag_index_warming
+
+        index_ready = getattr(session_context, "tag_search_index", None) is not None
+        warmup_done = bool(getattr(session_context, "headless_tag_index_warmup_done", False))
+        return JSONResponse(
+            {"tag_index_ready": index_ready, "tag_index_warmup_done": warmup_done,
+             "tag_index_warming": bool(tag_index_warming(session_context)),
+             "ready": index_ready or warmup_done},
             headers=_no_cache_headers(),
         )
 

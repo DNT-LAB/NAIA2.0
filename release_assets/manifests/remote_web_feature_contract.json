@@ -224,6 +224,7 @@
       "legacy_dependency": "legacy_compat",
       "routes": [
         {"method": "GET", "path": "/api/prompt-highlight-index", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/startup-status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/tag/lookup", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/prompt-engineering/preset-thumbnail", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/prompt-engineering/preset-detail", "smoke": "non_destructive"},

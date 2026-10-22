@@ -4936,19 +4936,58 @@ function onLazyIndicesReady() {
   schedulePromptHighlightIndexLoad();
 }
 
-// 첫 상태 베일(index.html #stateVeil) - 첫 init_complete 에서 한 번만 걷는다. 재연결 때 다시 덮지 않는다.
-// 소켓이 끝내 안 열려도 화면을 가두지 않도록 30초 안전망을 둔다.
+// 첫 상태 베일(index.html #stateVeil) - 처음 한 번만. 재연결 때 다시 덮지 않는다.
+// 걷는 때 = 첫 상태(init_complete) + 저장된 검색 풀 · 퀵 필터(첫 search_state) + 자동완성 색인(/api/startup-status).
+// 사용자 제보(2026-10-22): 프롬프트만 오면 걷었더니 그 뒤 검색 풀 · 퀵 필터 · 자동완성 준비가 한참 시스템을 잡았다.
+// 검색 풀 소식이 안 오면(검색한 적 없음) 10초 뒤 그 조건은 놓는다. 무엇이 안 돼도 90초 안전망.
+const _veil = {initDone: false, searchDone: false, serverReady: false, polling: false};
+function _veilText(text) {
+  const el = document.getElementById('stateVeilText');
+  if (el && el.textContent !== text) el.textContent = text;
+}
+function _veilStep() {
+  if (!document.getElementById('stateVeil')) return;
+  if (!_veil.initDone) { _veilText('이전 작업 상태를 불러오는 중…'); return; }
+  if (!_veil.searchDone) { _veilText('검색 풀 · 퀵 필터를 적용하는 중…'); return; }
+  if (!_veil.serverReady) { _veilText('자동완성 색인을 준비하는 중…'); return; }
+  liftStateVeil();
+}
+async function _pollStartupStatus() {
+  if (_veil.polling) return;
+  _veil.polling = true;
+  while (!_veil.serverReady && document.getElementById('stateVeil')) {
+    try {
+      const res = await fetch('/api/startup-status', {cache: 'no-store'});
+      if (res.ok && (await res.json()).ready) _veil.serverReady = true;
+    } catch (_) { /* 서버가 아직이면 다음 차례 */ }
+    _veilStep();
+    if (!_veil.serverReady) await new Promise(r => setTimeout(r, 700));
+  }
+  _veil.polling = false;
+}
+function veilInitComplete() {
+  if (_veil.initDone) return;
+  _veil.initDone = true;
+  setTimeout(() => { _veil.searchDone = true; _veilStep(); }, 10000);
+  _veilStep();
+  void _pollStartupStatus();
+}
+function veilSearchState() {
+  if (_veil.searchDone) return;
+  _veil.searchDone = true;
+  _veilStep();
+}
 function liftStateVeil() {
   const veil = document.getElementById('stateVeil');
   if (!veil || veil.classList.contains('lifted')) return;
   veil.classList.add('lifted');
   setTimeout(() => veil.remove(), 400);
 }
-setTimeout(liftStateVeil, 30000);
+setTimeout(liftStateVeil, 90000);
 
 function onInitComplete() {
   _initDone = true;
-  liftStateVeil();
+  veilInitComplete();
   // 캐시 리플레이 도착 — 아직 사용 가능 단계 아님.
   // lazy 인덱스 warmup 완료 broadcast 가 와야 finalize.
   resetBootIndicatorState();
@@ -14530,6 +14569,7 @@ function openFirstRunTagFilter() {
 }
 
 function onSearchState(m) {
+  veilSearchState();
   if (m.workspace_changed && temporarySearchPreview?.hasPendingRestore()) m.preserve_local_workspace = true;
   // stale/superseded search_state(revision 가드 거부)는 pool 준비 완료가 아니므로 pool 잠금/
   // Random 게이트를 조기 해제하지 않는다 — newer 작업이 아직 진행 중(Codex NEW 선재 결함).

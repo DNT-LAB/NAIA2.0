@@ -330,6 +330,9 @@ async def send_startup_messages(
     ):
         await ws.send_text(json.dumps(message, ensure_ascii=False))
     await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
+    # 첫 화면이 첫 상태를 다 받았다 - 미뤄 둔 무거운 색인 예열이 이걸 기다린다(headless_lifespan._after_startup_gate ·
+    # 사용자 제보 2026-10-22: 화면이 빨리 뜬 뒤 예열과 겹쳐 첫 상태가 늦게 와 UI 가 '날아간' 것처럼 보였다).
+    context.headless_first_client_ready = True
 
 
 async def handle_json_command(

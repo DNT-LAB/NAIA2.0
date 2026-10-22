@@ -4936,8 +4936,19 @@ function onLazyIndicesReady() {
   schedulePromptHighlightIndexLoad();
 }
 
+// 첫 상태 베일(index.html #stateVeil) - 첫 init_complete 에서 한 번만 걷는다. 재연결 때 다시 덮지 않는다.
+// 소켓이 끝내 안 열려도 화면을 가두지 않도록 30초 안전망을 둔다.
+function liftStateVeil() {
+  const veil = document.getElementById('stateVeil');
+  if (!veil || veil.classList.contains('lifted')) return;
+  veil.classList.add('lifted');
+  setTimeout(() => veil.remove(), 400);
+}
+setTimeout(liftStateVeil, 30000);
+
 function onInitComplete() {
   _initDone = true;
+  liftStateVeil();
   // 캐시 리플레이 도착 — 아직 사용 가능 단계 아님.
   // lazy 인덱스 warmup 완료 broadcast 가 와야 finalize.
   resetBootIndicatorState();
@@ -15609,4 +15620,5 @@ Promise.all([
   })
   .catch(error => {
     console.error('Failed to initialize remote shell', error);
+    liftStateVeil();
   });

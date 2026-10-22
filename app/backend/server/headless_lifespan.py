@@ -204,6 +204,12 @@ async def _after_startup_gate(gate: asyncio.Event, warmup, context: WebSessionCo
             while (getattr(context, "headless_initialize_inflight", 0) > 0 and not gate.is_set()
                    and loop.time() < until):
                 await asyncio.sleep(0.2)
+        # 그다음 첫 화면이 첫 상태(프롬프트 · 모드 · 옵션 …)를 다 받을 때까지 - 화면이 붙자마자 예열이 CPU 를 잡으면
+        # 그 첫 상태가 몇 초 늦어 빈 화면이 보였다(사용자 제보 2026-10-22). 화면이 안 붙으면(원격 서버만 켬) 20초 상한.
+        loop = asyncio.get_running_loop()
+        until = loop.time() + 20.0
+        while not getattr(context, "headless_first_client_ready", False) and loop.time() < until:
+            await asyncio.sleep(0.2)
     await warmup(context, run_in_thread)
 
 

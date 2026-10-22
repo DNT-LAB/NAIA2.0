@@ -32455,3 +32455,37 @@ body.assets-v5-mode #charAssetSpecTabs { display: none; }
 /* add = 연노랑(앱의 길잡이 색) · rem = 메인 프롬프트 작가 태그의 옅은 붉은색 */
 .seq-frame-prompt.seq-add { color: #e8d98f; }
 .seq-frame-prompt.seq-rem { color: rgba(255, 205, 196, 1.00); }
+
+/* 첫 상태 베일 - 화면은 빨리 뜨지만 저장된 상태는 소켓으로 늦게 온다. 그 사이의 빈 기본값 화면을 가린다(2026-10-22).
+   걷기는 클래스로만 한다 - 트랜지션 끝을 기다리지 않는다(pointer-events 는 즉시 풀린다). */
+.state-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(18, 18, 24, 0.82);
+  color: rgba(232, 230, 245, 0.92);
+  font-family: var(--font-main);
+  font-size: 14px;
+  transition: opacity 0.2s ease;
+}
+.state-veil.lifted { opacity: 0; pointer-events: none; }
+.state-veil-spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(160, 160, 170, 0.25);
+  border-top-color: rgba(150, 140, 230, 0.95);
+  animation: boot-indicator-spin 0.8s linear infinite;
+}
+.state-veil-bar { width: 160px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.state-veil-bar-fill { width: 40%; height: 100%; border-radius: 2px; background: rgba(150, 140, 230, 0.9); animation: state-veil-slide 1.2s ease-in-out infinite; }
+@keyframes state-veil-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+@media (prefers-reduced-motion: reduce) {
+  .state-veil-spinner, .state-veil-bar-fill { animation: none; }
+  .state-veil { transition: none; }
+}

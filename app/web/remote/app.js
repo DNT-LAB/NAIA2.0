@@ -2035,7 +2035,16 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
     downloadDock = createDownloadDock({
       document, fetch, escHtml, showToast,
       // 캐릭터 확장 팩을 다 받았다 - 열려 있는 Characters 목록이 이니셜 타일 대신 그림을 청하게 다시 읽는다.
-      onDone: key => { if (key === 'character_pack') characterViewerControl?.reload?.(); },
+      // 캐릭터 확장 팩을 다 받았다 - 열려 있는 Characters 탭 · Find · Characters 창이 이니셜 타일 대신 그림을 청하게 다시 읽는다
+      // (사용자 제보 2026-10-22: 받기 전에 읽어 둔 Find 목록이 그대로였다).
+      onDone: key => {
+        if (key !== 'character_pack') return;
+        characterViewerControl?.reload?.();
+        try {
+          window.dispatchEvent(new CustomEvent('naia:character-pack-ready'));
+          window.dispatchEvent(new CustomEvent('naia:character-thumb-changed', {detail: {pack: true}}));
+        } catch (_) {}
+      },
     });
     // 캐릭터 확장 팩은 앱이 다 뜬 **뒤에** 받는다(사용자 지시 2026-10-22 - 시작 경로에서 받으면 initialize 가 막혔다).
     // 한 번만 부른다 - 서버도 프로세스당 한 번만 시작하고, 이미 있으면 아무것도 안 한다.
@@ -2941,7 +2950,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-dtl3')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-packready1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,

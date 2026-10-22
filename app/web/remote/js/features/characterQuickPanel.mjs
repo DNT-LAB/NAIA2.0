@@ -2213,6 +2213,25 @@ export function createCharacterQuickPanel({
     renderFeat();
   }
 
+  /** 확장 팩을 다 받았다(사용자 제보 2026-10-22: 받기 전에 읽어 둔 Find 목록은 이니셜 · [생성] 그대로였다).
+   *  지금까지 펼친 쪽수만큼 다시 받아 바꾼다 - 스크롤 자리는 둔다. 받는 중 조건이 바뀌면 버린다. */
+  async function refreshFindDex() {
+    if (findDexTotal == null && !findDexRows.length) return;      // 아직 연 적이 없다 - 열 때 새로 받는다
+    const seq = findDexSeq;
+    const pages = findDexPage + 1;
+    try {
+      const results = await Promise.all(Array.from({length: pages}, (_, page) =>
+        fetch(findDexUrl(page)).then(res => res.json().then(data => (res.ok ? data : null)))));
+      if (seq !== findDexSeq || results.some(data => !data)) return;
+      const seen = new Set();
+      findDexRows = results.flatMap(data => (Array.isArray(data.items) ? data.items : []))
+        .filter(row => { const key = `${row.group}\u0000${row.character}`; if (seen.has(key)) return false; seen.add(key); return true; });
+      findDexTotal = Number.isFinite(Number(results[0].total)) ? Number(results[0].total) : findDexTotal;
+      renderFindList();
+    } catch (_) { /* 다음 검색 때 새로 받는다 */ }
+  }
+  try { window.addEventListener('naia:character-pack-ready', () => { void refreshFindDex(); }); } catch (_) {}
+
   /** 보관함(활성이 아닌 것) - ★ 먼저, 그다음 그룹, 그다음 히스토리(최근 순). 검색은 이름 · 프롬프트 · 그룹. */
   function findLibRows() {
     const query = findQuery.lib.trim().toLowerCase();

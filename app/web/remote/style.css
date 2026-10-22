@@ -25018,6 +25018,10 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .chw-act.is-slot { border-color: rgba(124,106,239,0.6); background: rgba(124,106,239,0.14); color: var(--text-primary); }
 .chw-act.is-pool { border-color: rgba(107,195,140,0.55); color: #9fdcb4; }
 .chw-act.is-hide { border-color: rgba(240,120,120,0.38); color: #e8a2a2; background: rgba(240,100,100,0.08); }
+/* 메인 화면으로 나가는 생성 둘([생성(메인)] [랜덤+생성]) - 연노랑 글자 · 노랑 테 (사용자 지시 2026-10-22 · 목업 색). */
+.chw-act.is-main { border-color: #a8742e; background: rgba(168,116,46,0.18); color: #ffd9a3; }
+.chw-act.is-main:hover:not(:disabled) { color: #ffe9c7; border-color: #d39a45; }
+.chw-ctx-menu .result-context-item.is-main { color: #ffd9a3; }
 .chw-act.is-on { color: rgb(250,199,117); border-color: rgba(250,199,117,0.55); }
 .chw-act:disabled { opacity: 0.55; cursor: progress; }
 .chw-more { flex-basis: 100%; display: flex; gap: 6px; justify-content: flex-end; }

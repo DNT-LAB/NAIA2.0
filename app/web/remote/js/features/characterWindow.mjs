@@ -415,8 +415,8 @@ export function createCharacterWindow({
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
       + `<button type="button" class="chw-act is-pool" data-chw-act="pool"${off}>+ 풀</button>`
       + `<button type="button" class="chw-act" data-chw-act="gen"${off} title="썸네일 생성(생성 설정 창의 Prefix · Postfix · 옵션)">생성(벤치)</button>`
-      + `<button type="button" class="chw-act" data-chw-act="genmain"${off} title="메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장(메인 슬롯은 그대로)">생성(메인)</button>`
-      + `<button type="button" class="chw-act" data-chw-act="genrandom"${off} title="메인 Random 으로 프롬프트를 새로 뽑고 이 캐릭터를 임시 C1 로 한 장">랜덤+생성</button>`
+      + `<button type="button" class="chw-act is-main" data-chw-act="genmain"${off} title="메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장(메인 슬롯은 그대로)">생성(메인)</button>`
+      + `<button type="button" class="chw-act is-main" data-chw-act="genrandom"${off} title="메인 Random 으로 프롬프트를 새로 뽑고 이 캐릭터를 임시 C1 로 한 장">랜덤+생성</button>`
       + `<button type="button" class="chw-act${s.favorite ? ' is-on' : ''}" data-chw-act="fav"${off} title="즐겨찾기">★</button>`
       + `<button type="button" class="chw-act" data-chw-act="copy"${off} title="프롬프트 줄 복사">복사</button>`
       + `<button type="button" class="chw-act is-hide" data-chw-act="hide"${off} title="숨김(검색 · 랜덤에서 빠진다 · Find [제외] 에서 되돌린다)">숨김</button>`
@@ -607,7 +607,7 @@ export function createCharacterWindow({
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `<div class="chw-ctx-head">${escHtml(s.character)}<span>${escHtml(groupLabel(s.group))}</span></div>`
       + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}</div>`
-      + `<div class="result-context-group">${btn('gen', '생성(벤치)')}${btn('genmain', '생성(메인화면)')}${btn('genrandom', '랜덤+생성')}</div>`
+      + `<div class="result-context-group">${btn('gen', '생성(벤치)')}${btn('genmain', '생성(메인화면)', ' is-main')}${btn('genrandom', '랜덤+생성', ' is-main')}</div>`
       + `<div class="result-context-group">${btn('fav', s.favorite ? '★ 즐겨찾기 해제' : '★ 즐겨찾기')}${btn('copy', '복사')}</div>`
       + `<div class="result-context-group">${btn('hide', '숨김', ' danger')}${btn('delthumb', '내 썸네일 삭제')}`
       + `${btn('tab', 'Characters 탭에서 열기')}</div>`

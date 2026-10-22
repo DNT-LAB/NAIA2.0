@@ -1,15 +1,15 @@
-"""Build an immutable, uncompressed extension ZIP from generation manifests.
+"""생성 매니페스트로 캐릭터 썸네일 확장 JSON 을 만든다(개발 전용).
 
 Development-only. Example: python tools/build_character_preview_ext_pack.py --src DIR
 """
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
-import hashlib
+from datetime import datetime
+import base64
 import json
 from pathlib import Path
-import zipfile
+import os
 
 try:
     from tools.build_character_preview_pack import encode_preview
@@ -35,7 +35,7 @@ def source_images(sources):
                     local[row["key"]] = row["file"]
         for key, filename in local.items():
             path = (root / filename).resolve()
-            if path.is_relative_to(root) and path.suffix.lower() == ".png" and path.is_file():
+            if path.is_relative_to(root) and path.suffix.lower() in {".png", ".webp"} and path.is_file():
                 images[key] = path  # later source wins, missing PNG never erases an earlier one
     return images
 
@@ -47,30 +47,55 @@ def build_pack(sources, output: Path, bundled: Path, exclude_bundled: bool = Fal
     # 옛 동작(번들에 있는 키는 빼기)은 --exclude-bundled.
     excluded = json.loads(Path(bundled).read_text(encoding="utf-8"))["thumbs"] if exclude_bundled else {}
     images = source_images(sources)
-    manifest = {"format": 1, "built": datetime.now(timezone.utc).isoformat(), "count": 0, "keys": {}}
-    # Exclusive creation is also race safe; never overwrite an existing release name.
-    members = set()
-    with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_STORED) as archive:
-        for key, path in images.items():
-            if key in excluded:
-                continue
-            member = f"thumbs/{hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]}.webp"
-            if member in members:
-                raise ValueError(f"Thumbnail hash collision: {key}")
-            with Image.open(path) as image:
-                archive.writestr(member, encode_preview(image))
-            manifest["keys"][key] = member
-            members.add(member)
-        manifest["count"] = len(manifest["keys"])
-        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False).encode("utf-8"))
-    print(f"Saved: {output} ({manifest['count']} items, {output.stat().st_size / 1024**2:.1f} MB)")
-    return manifest
+    keys = sorted(key for key in images if key not in excluded)
+    metadata = {
+        "note": [
+            "캐릭터 썸네일 확장 팩 · 생성 사양 V5.",
+            "우선순위: 1) 사용자 썸네일 2) 확장 팩 3) 번들 팩.",
+            "384px / webp q72 · WebP 원본은 재인코딩하지 않는다.",
+            "tools/build_character_preview_ext_pack.py 가 만든다.",
+        ],
+        "size": 384, "quality": 72, "count": len(keys),
+    }
+    output = Path(output)
+    if output.exists():
+        raise FileExistsError(output)
+    # ⚠️ 같은 출력의 동시 빌드도 막는다. 완성 전에는 최종 이름으로 노출하지 않는다.
+    temporary = output.with_name(output.name + ".tmp")
+    handle = temporary.open("x", encoding="utf-8", newline="")
+    try:
+        with handle:
+            handle.write(json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))[:-1])
+            handle.write(',"thumbs":{')
+            for position, key in enumerate(keys):
+                path = images[key]
+                if path.suffix.lower() == ".webp":
+                    raw = path.read_bytes()
+                else:
+                    # PNG 입력은 기존 번들과 같은 자르기 · 크기 · 화질로 한 번만 변환한다.
+                    with Image.open(path) as image:
+                        raw = encode_preview(image)
+                if position:
+                    handle.write(",")
+                handle.write(json.dumps(key, ensure_ascii=False, separators=(",", ":")))
+                handle.write(":")
+                handle.write(json.dumps(base64.b64encode(raw).decode("ascii")))
+            handle.write("}}")
+            handle.flush()
+            os.fsync(handle.fileno())
+        if output.exists():
+            raise FileExistsError(output)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+    print(f"Saved: {output} ({metadata['count']} items, {output.stat().st_size / 1024**2:.1f} MB)")
+    return metadata
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--src", action="append", required=True, type=Path)
-    parser.add_argument("--out", type=Path, default=Path(f"NAIA_character_pack_{datetime.now():%y%m%d}.zip"))
+    parser.add_argument("--out", type=Path, default=Path(f"NAIA_character_pack_{datetime.now():%y%m%d}.json"))
     parser.add_argument("--bundled", type=Path,
                         default=Path(__file__).resolve().parents[1] / "data/character_preview_thumbs.json")
     parser.add_argument("--exclude-bundled", action="store_true", help="번들 팩에 있는 키는 빼기(옛 동작)")

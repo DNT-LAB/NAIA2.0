@@ -22,8 +22,21 @@ GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
 _SERVICE_LOCK = threading.RLock()
 
 
+def character_pack_lock(context: WebSessionContext):
+    """Share the pack lock without creating the viewer during install polling."""
+    with _SERVICE_LOCK:
+        service = getattr(context, "character_viewer_service", None)
+        if service is not None:
+            return service.extension_pack_lock()
+        lock = getattr(context, "character_pack_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            context.character_pack_lock = lock
+        return lock
+
+
 def character_viewer_service(context: WebSessionContext) -> CharacterViewerService:
-    # The download worker and first thumbnail request must share the same ZIP lock.
+    # The download worker and first thumbnail request must share the same pack lock.
     with _SERVICE_LOCK:
         return _character_viewer_service(context)
 
@@ -40,7 +53,8 @@ def _character_viewer_service(context: WebSessionContext) -> CharacterViewerServ
         # 소스   : %APPDATA%/NAIA/data/character_thumbnails
         thumbnail_root = (paths.data_dir / "character_thumbnails") if paths is not None else None
         service = CharacterViewerService(context.repo_root, save_root=save_root,
-                                         thumbnail_root=thumbnail_root)
+                                         thumbnail_root=thumbnail_root,
+                                         extension_lock=character_pack_lock(context))
         context.character_viewer_service = service
     return service
 

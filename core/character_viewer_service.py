@@ -6,11 +6,9 @@ import json
 import math
 import re
 import threading
-import zipfile
-import zlib
 from contextlib import contextmanager
 
-from core.character_preview_pack import read_manifest
+from core.character_preview_index import PreviewKeyIndex, character_pack_fingerprint
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -18,6 +16,8 @@ from urllib.parse import quote
 
 class CharacterViewerService:
     GROUP_ALL = "__ALL__"
+    # 캐릭터가 1명뿐인 작품들을 한 묶음으로(Characters 창 그룹 목록 'etc' · 사용자 지시 2026-10-22).
+    GROUP_ETC = "__ETC__"
     # [최신] 토글이 남기는 데뷔 하한의 기본값. 산출물에 적힌 값이 우선한다.
     RECENT_SINCE = "2025-01"
     # 작품 칩은 이만큼만 낸다 - 줄 하나에 들어가는 수다.
@@ -56,6 +56,7 @@ class CharacterViewerService:
         data_root: Path | str | None = None,
         save_root: Path | str | None = None,
         thumbnail_root: Path | str | None = None,
+        extension_lock=None,
     ):
         self.root = Path(root)
         self.data_dir = Path(data_root) if data_root is not None else self.root / "data"
@@ -70,6 +71,7 @@ class CharacterViewerService:
         # 코퍼스 자체(`data/tags/*.parquet` 1.4GB)는 배포본에 없고 사용자가 따로
         # 내려받는 것이라, 요약해 둔 이 파일만 번들 데이터 루트에 둔다.
         self.debut_path = self.data_dir / "character_debut.json"
+        self.group_ko_path = self.data_dir / "character_group_ko.json"
         # 번들 미리보기 팩(폴백). 사용자 썸네일과 같은 성격이 아니라 **배포에 딸려오는**
         # 것이라 번들 데이터 루트에 둔다 — 업데이트 때 갱신되는 것이 맞다.
         self.preview_path = self.data_dir / "character_preview_thumbs.json"
@@ -92,12 +94,12 @@ class CharacterViewerService:
                           else self.data_dir / "character_thumbnails")
         # 예전에 앱 트리로 써 둔 것. 최초 1회만 흡수한다(아래 `_adopt_legacy_thumbs`).
         self.legacy_thumb_dir = self.root / "data" / "character_thumbnails"
-        self.extension_pack_path = self.thumb_dir.parent / "character_preview" / "character_pack.zip"
-        self._extension_lock = threading.RLock()
+        self.extension_pack_path = self.thumb_dir.parent / "character_preview" / "character_pack.json"
+        self.extension_index_cache_path = self.extension_pack_path.parent / "ext-key-index.json"
+        self._extension_lock = extension_lock if extension_lock is not None else threading.RLock()
         # 옵션 저장 = 읽기 -> 고치기 -> 쓰기. 창 둘(생성 설정 창 · Characters 탭)이 동시에 보내면 앞선 쓰기가 뒤 값을 덮는다(Codex 리뷰).
         self._options_lock = threading.Lock()
-        self._extension_zip: zipfile.ZipFile | None = None
-        self._extension_keys: dict[str, str] | None = None
+        self._extension_keys: PreviewKeyIndex | dict[str, str] | None = None
         self._extension_rev = "0"
         self.thumb_index_path = self.thumb_dir / "index.json"
         self.tags_path = self.save_dir / "character_viewer_tags.json"
@@ -118,6 +120,7 @@ class CharacterViewerService:
         self._presets: dict[str, Any] | None = None
         self._preview_pack: dict[str, str] | None = None
         self._debut: dict[str, str] | None = None
+        self._group_ko: dict[str, str] | None = None
         self._recent_since: str = ""
         self._favorites: set[str] | None = None
         self._hidden: set[str] | None = None
@@ -173,6 +176,16 @@ class CharacterViewerService:
 
     def analysis(self) -> dict[str, Any]:
         return self._load_source_cache('_analysis', self.analysis_path)
+
+    def group_ko(self) -> dict[str, str]:
+        """미리 검수한 그룹 한글명. 번들 파일이 없으면 빈 사전을 캐시한다."""
+        def prepare(raw):
+            names = raw.get("names") if isinstance(raw, dict) else None
+            if not isinstance(names, dict):
+                return {}
+            return {group: name for group, name in names.items()
+                    if isinstance(group, str) and isinstance(name, str) and name.strip()}
+        return self._load_source_cache("_group_ko", self.group_ko_path, prepare)
 
     def debut_index(self) -> dict[str, str]:
         """캐릭터 이름 -> 처음 나타난 달("YYYY-MM"). 파일이 없으면 빈 사전이다.
@@ -423,8 +436,10 @@ class CharacterViewerService:
         terms = [t.strip().removeprefix("work:").strip() for t in query_text.split(",") if t.strip()]
         counts = self._group_counts()
         groups = [{"key": self.GROUP_ALL, "name": "All", "count": sum(c for _, c in counts)}]
-        groups.extend({"key": key, "name": key, "count": count} for key, count in counts
-                      if all(term in normalize(key) for term in terms))
+        # 한글 작품명(있으면 · `data/character_group_ko.json` - 3명 이상 작품만)을 같이 싣는다 - 창의 [한글] 표시.
+        ko = self.group_ko()
+        groups.extend({"key": key, "name": key, "count": count, **({"ko": ko[key]} if ko.get(key) else {})}
+                      for key, count in counts if all(term in normalize(key) for term in terms))
         total = len(groups)
         offset = max(0, int(offset))
         end = None if limit is None else offset + max(0, int(limit))
@@ -870,7 +885,8 @@ class CharacterViewerService:
             return self._refresh_search_sources_locked()
 
     def _refresh_search_sources_locked(self):
-        paths = (self.analysis_path, self.groups_path, self.aliases_path, self.debut_path)
+        paths = (self.analysis_path, self.groups_path, self.aliases_path, self.debut_path,
+                 self.group_ko_path)
         versions = tuple(self._file_version(p) for p in paths)
         previous = self._search_source_files
         if previous is not None and previous != versions:
@@ -884,6 +900,8 @@ class CharacterViewerService:
                 self._groups = None
             if previous[3] != versions[3]:
                 self._debut = None
+            if previous[4] != versions[4]:
+                self._group_ko = None
             self._search_index = None
             self._group_count_cache = None
         self._search_source_files = versions
@@ -931,8 +949,9 @@ class CharacterViewerService:
         self._refresh_search_sources()
         index = self._search_index or self.warm_search_index()
         if index is None:
-            return {'pending': True, 'version': None, 'groups': [], 'table': []}
-        return index.catalog
+            return {'pending': True, 'version': None, 'groups': [], 'table': [],
+                    'group_ko': self.group_ko()}
+        return {**index.catalog, 'group_ko': self.group_ko()}
 
     def build_list(self, group_key=GROUP_ALL, query='', page=0, per_page=48,
                    thumb_first=True, include_all=False, recent_only=False,
@@ -979,6 +998,9 @@ class CharacterViewerService:
     ) -> dict[str, Any]:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
+        elif group_key == self.GROUP_ETC:
+            singles = {key for key, count in self._group_counts() if count == 1}
+            chars = [item for item in self._iter_all_chars() if item[0] in singles]
         else:
             chars = [
                 (group_key, name, data)
@@ -1437,41 +1459,51 @@ class CharacterViewerService:
             self._preview_pack = PreviewKeyIndex(self.preview_path, self.preview_index_cache_path)
         return self._preview_pack
 
-    def extension_pack(self) -> dict[str, str]:
-        """Read only the manifest once; subsequent membership checks do no I/O."""
+    def extension_pack(self):
+        """최초 색인 뒤에는 키만 조회한다. 그림 본문은 요청한 오프셋만 읽는다."""
         if self._extension_keys is not None:
             return self._extension_keys
         with self._extension_lock:
             if self._extension_keys is None:
-                archive = None
                 try:
-                    archive = zipfile.ZipFile(self.extension_pack_path)
-                    manifest = read_manifest(archive)
-                    stat = self.extension_pack_path.stat()
-                    self._extension_rev = f"{stat.st_mtime_ns}-{stat.st_size}"
-                    self._extension_zip = archive
-                    self._extension_keys = dict(manifest["keys"])
-                except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
-                    if archive is not None:
-                        archive.close()
+                    if self.extension_pack_path.with_suffix(".corrupt").exists():
+                        self._extension_keys = {}
+                        return self._extension_keys
+                    index = PreviewKeyIndex(
+                        self.extension_pack_path, self.extension_index_cache_path,
+                        extension=True, source_fingerprint=character_pack_fingerprint(self.extension_pack_path))
+                    if index.signature is not None:
+                        self._extension_rev = f"{index.signature[2]}-{index.signature[1]}"
+                    self._extension_keys = index
+                except (OSError, ValueError, KeyError, TypeError):
                     self._extension_keys = {}
+                    if character_pack_fingerprint(self.extension_pack_path) is not None:
+                        self._mark_extension_pack_corrupt()
             return self._extension_keys
+
+    def extension_pack_lock(self):
+        """Pure shared lock for readiness/index writes, reads, and replacement."""
+        return self._extension_lock
+
+    def _mark_extension_pack_corrupt(self):
+        # Persist the failure for readiness/retry, including across a restart.
+        # Only a successfully validated installation clears this marker.
+        self._extension_keys = {}
+        self._invalidate_search("pack")
+        self.extension_pack_path.with_suffix(".corrupt").write_text("corrupt\n", encoding="ascii")
 
     def invalidate_extension_pack(self) -> None:
         with self._extension_lock:
-            if self._extension_zip is not None:
-                self._extension_zip.close()
-            self._extension_zip = None
             self._extension_keys = None
             self._extension_rev = "0"
             self._invalidate_search("pack")
 
     @contextmanager
     def replacing_extension_pack(self):
-        # Keep this lock across rename: a concurrent thumbnail must not reopen the old ZIP
-        # after close but before os.replace (Windows disallows replacing an open file).
+        # ⚠️ 오프셋 읽기는 잠금 안에서 핸들을 닫는다. 교체가 끝날 때까지 다시 열지 못하게 한다.
         with self._extension_lock:
             self.invalidate_extension_pack()
+            self.extension_index_cache_path.unlink(missing_ok=True)
             try:
                 yield
             finally:
@@ -1479,16 +1511,15 @@ class CharacterViewerService:
 
     def _extension_thumb(self, key: str) -> bytes | None:
         with self._extension_lock:
-            member = self.extension_pack().get(key)
-            if member and self._extension_zip is not None:
-                try:
-                    return self._extension_zip.read(member)
-                except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
-                    # Cache the failure until an explicit install invalidation.
-                    self._extension_zip.close()
-                    self._extension_zip = None
-                    self._extension_keys = {}
-            return None
+            pack = self.extension_pack()
+            if key not in pack:
+                return None
+            try:
+                import base64
+                return base64.b64decode(pack[key], validate=True)
+            except (OSError, ValueError, KeyError, TypeError):
+                self._mark_extension_pack_corrupt()
+                return None
 
     def preview_thumb(self, group_key: str, name: str, variant_label: str = "") -> bytes | None:
         """폴백 미리보기 이미지 바이트. 없으면 None.
@@ -1515,7 +1546,7 @@ class CharacterViewerService:
         """사용자 썸네일이 없어도 폴백이 있으면 True — 그리드가 이니셜 대신 그림을 청한다.
 
         ⚠️ `thumbnail_source()` 의 kind 와 **정의상 같은 판정**이다(인덱스 항목 또는 팩).
-        팩의 최초 manifest 로딩 뒤에는 키 집합만 조회한다 — `include_all=True` 목록이 전 캐릭터를
+        팩의 최초 색인 로딩 뒤에는 키 집합만 조회한다 — `include_all=True` 목록이 전 캐릭터를
         직렬화하면서 이 판정을 쓰기 때문에 syscall 을 붙이면 통째로 느려진다.
         """
         if self.thumb_index().get(self._thumb_key(group_key, name, variant_label)):

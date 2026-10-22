@@ -3,6 +3,8 @@ from __future__ import annotations
 from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
+import json
+import re
 from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
@@ -14,10 +16,9 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-import zlib
 
 from app.backend.runtime import RuntimePaths
-from core.character_preview_pack import read_manifest
+from core.character_preview_index import PreviewKeyIndex, character_pack_fingerprint
 
 
 TAG_ARCHIVE_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/naia_tags.zip"
@@ -66,12 +67,13 @@ EVENT_MAP_INDEX_NAME = "event_map.naiamap"
 # 시작 전 고지용 근사치(실제 크기는 응답의 Content-Length 가 준다).
 EVENT_MAP_INDEX_APPROX_MB = 879
 
-# 캐릭터 썸네일 확장 팩(사용자 결정 2026-10-22 · HF lazy download · 사용자가 직접 올린다).
-# ⚠️ **올리기 전에는 비워 둔다** - 없는 파일을 가리키면 앱을 켤 때마다 404 로 실패 띠가 뜬다.
-#    올린 뒤 그 파일의 resolve 주소를 넣는다(예: .../NAIA/2026/NAIA_character_pack_<YYMMDD>.zip).
+# 캐릭터 썸네일 확장 팩(사용자 결정 2026-10-22 · HF lazy download · 사용자가 직접 올린다 · 번들과 같은 JSON · V5 18,235장 · 419MB).
 #    판이 바뀌면 **이름을 바꿔** 올리고 여기도 바꾼다 - 받은 파일 옆 `character_pack.source` 와 다르면 새 판을 받는다.
-#    시험 · 개발에서는 `NAIA_CHARACTER_PACK_URL` 로 가리킬 수 있다.
-CHARACTER_PACK_URL = os.environ.get("NAIA_CHARACTER_PACK_URL", "").strip()
+#    시험 · 개발에서는 `NAIA_CHARACTER_PACK_URL` 로 가리킬 수 있다(빈 값 = 받지 않음 · tests/conftest.py 가 빈 값으로 둔다).
+CHARACTER_PACK_URL = os.environ.get(
+    "NAIA_CHARACTER_PACK_URL",
+    "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/2026/NAIA_character_pack_261022.json",
+).strip()
 
 
 @dataclass(frozen=True)
@@ -232,6 +234,7 @@ class RuntimeInstallManager:
         character_pack_url: str | None = None,       # None = 모듈의 CHARACTER_PACK_URL(만들 때 읽는다)
         on_character_pack_complete: Callable[[], None] | None = None,
         character_pack_replace_guard: Callable[[], Any] | None = None,
+        character_pack_lock: Callable[[], Any] | None = None,
     ):
         self.runtime_paths = runtime_paths
         if character_pack_url is None:
@@ -245,6 +248,9 @@ class RuntimeInstallManager:
         self.event_map_url = event_map_url
         self._on_event_map_complete = on_event_map_complete
         self._character_pack_replace_guard = character_pack_replace_guard
+        pack_lock = RLock()
+        self._character_pack_lock = character_pack_lock or (lambda: pack_lock)
+        self._character_pack_ready_cache = None
         self._character_pack_auto_requested = False
         self._character_pack_queued = False
         self._downloads: dict[str, dict[str, Any]] = {}
@@ -302,11 +308,11 @@ class RuntimeInstallManager:
         }
         self._specs["character_pack"] = ArchiveSpec(
             key="character_pack", url=character_pack_url, subdir="character_preview",
-            suffixes=(".zip",), label="캐릭터 썸네일 확장 팩",
+            suffixes=(".json",), label="캐릭터 썸네일 확장 팩",
             # A different URL must never resume bytes from the preceding edition.
             temp_name="character_pack_" + hashlib.sha256(character_pack_url.encode()).hexdigest()[:16] + ".download_tmp",
-            count_glob="character_pack.zip", required_names=("character_pack.zip",),
-            raw_name="character_pack.zip",
+            count_glob="character_pack.json", required_names=("character_pack.json",),
+            raw_name="character_pack.json",
         )
         self._completion_hooks: dict[str, Callable[[], None] | None] = {
             "character_pack": on_character_pack_complete,
@@ -362,14 +368,29 @@ class RuntimeInstallManager:
 
     def _archive_ready(self, spec: ArchiveSpec, count: int | None = None) -> bool:
         if spec.key == "character_pack":
-            try:
-                target = self._archive_dir(spec)
-                if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
+            # Same pure lock as service reads and installation; never invalidate
+            # the service simply because a snapshot asks whether the pack is ready.
+            with self._character_pack_lock():
+                try:
+                    target = self._archive_dir(spec)
+                    if (target / "character_pack.corrupt").exists():
+                        self._character_pack_ready_cache = None
+                        return False
+                    if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
+                        self._character_pack_ready_cache = None
+                        return False
+                    path = target / spec.raw_name
+                    fingerprint = character_pack_fingerprint(path)
+                    stat = path.stat()
+                    generation = (fingerprint, stat.st_size, stat.st_mtime_ns, spec.url)
+                    if fingerprint is not None and self._character_pack_ready_cache == generation:
+                        return True
+                    self._character_pack_manifest(path, source_fingerprint=fingerprint)
+                    self._character_pack_ready_cache = generation if fingerprint is not None else None
+                    return True
+                except (OSError, ValueError, KeyError, TypeError):
+                    self._character_pack_ready_cache = None
                     return False
-                self._character_pack_manifest(target / spec.raw_name)
-                return True
-            except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
-                return False
         found = self._archive_file_count(spec) if count is None else count
         target = self._archive_dir(spec)
         for name in spec.required_names:
@@ -380,11 +401,36 @@ class RuntimeInstallManager:
         return found >= spec.min_count
 
     @staticmethod
-    def _character_pack_manifest(path: Path) -> dict:
+    def _character_pack_manifest(path: Path, *, cache_write: bool = True,
+                                 source_fingerprint: str | None = None,
+                                 staging_target: Path | None = None) -> dict:
         if path.stat().st_size < 1024 * 1024:
             raise ValueError("다운로드된 캐릭터 썸네일 확장 팩 파일이 너무 작습니다.")
-        with zipfile.ZipFile(path) as archive:
-            return read_manifest(archive)
+        # Metadata and image validation stay bounded; an installed generation
+        # can reuse its verified sidecar without decoding image pixels.
+        with path.open("rb") as handle:
+            head = handle.read(64 * 1024)
+        match = re.search(rb',\s*"thumbs"\s*:\s*\{', head)
+        if match is None:
+            raise ValueError("캐릭터 썸네일 확장 팩 JSON 형식이 올바르지 않습니다.")
+        metadata = json.loads(head[:match.start()] + b"}")
+        if (list(metadata) != ["note", "size", "quality", "count"]
+                or not isinstance(metadata["note"], list)
+                or metadata["size"] != 384 or metadata["quality"] != 72
+                or type(metadata["count"]) is not int or metadata["count"] <= 0):
+            raise ValueError("캐릭터 썸네일 확장 팩 메타데이터가 올바르지 않습니다.")
+        staging = staging_target is not None
+        index = PreviewKeyIndex(path, None if staging else path.parent / "ext-key-index.json",
+                                cache_write=cache_write, extension=True,
+                                source_fingerprint=source_fingerprint, validate_images=staging)
+        if len(index) != metadata["count"]:
+            raise ValueError("캐릭터 썸네일 확장 팩 개수가 맞지 않습니다.")
+        if staging and cache_write:
+            # Rename preserves size/mtime. Prepare the destination signature outside
+            # the service lock, and publish this index with the same SHA-256 receipt.
+            index._save(path.parent / "ext-key-index.json.install_tmp",
+                        signature=[str(staging_target.resolve()), *index.signature[1:]], strict=True)
+        return metadata
 
     def _download_entry(self, spec: ArchiveSpec, state: str) -> None:
         self._downloads[spec.key] = {
@@ -875,14 +921,36 @@ class RuntimeInstallManager:
         # downloads_dir 와 data_dir 가 다른 볼륨일 수 있다(사용자가 user-data 를 옮긴 경우).
         shutil.move(str(temp_file), str(staging))
         if spec.key == "character_pack":
-            manifest = self._character_pack_manifest(staging)
+            digest = hashlib.sha256()
+            with staging.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+                    digest.update(chunk)
+            generation_sha256 = digest.hexdigest()
+            manifest = self._character_pack_manifest(
+                staging, source_fingerprint=generation_sha256, staging_target=target)
+            staged_stat = staging.stat()
+            fingerprint = target.with_suffix(".sha256")
+            fingerprint_tmp = fingerprint.with_suffix(".sha256.install_tmp")
+            fingerprint_tmp.write_text(generation_sha256 + "\n", encoding="ascii")
             source = target.with_suffix(".source")
             source_tmp = source.with_suffix(".source.install_tmp")
             source_tmp.write_text(spec.url + "\n", encoding="utf-8")
             guard = self._character_pack_replace_guard
-            with guard() if guard is not None else nullcontext():
+            with self._character_pack_lock(), guard() if guard is not None else nullcontext():
+                self._character_pack_ready_cache = None
+                # 서비스가 없는 설치 경로에서도 이전 판의 색인은 버린다.
+                (target.parent / "ext-key-index.json").unlink(missing_ok=True)
+                # Invalidate the old receipt first, so an interrupted replacement
+                # can never pair a new body with the preceding generation.
+                fingerprint.unlink(missing_ok=True)
                 os.replace(staging, target)
+                os.replace(target.parent / "ext-key-index.json.install_tmp",
+                           target.parent / "ext-key-index.json")
+                os.replace(fingerprint_tmp, fingerprint)
                 os.replace(source_tmp, source)
+                target.with_suffix(".corrupt").unlink(missing_ok=True)
+                self._character_pack_ready_cache = (
+                    generation_sha256, staged_stat.st_size, staged_stat.st_mtime_ns, spec.url)
             with self._lock:
                 self._downloads[spec.key]["items"] = manifest["count"]
         else:

@@ -171,6 +171,11 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
 
             return character_viewer_service(context).replacing_extension_pack()
 
+        def character_pack_lock():
+            from app.backend.server.character_viewer_routes import character_pack_lock as shared_lock
+
+            return shared_lock(context)
+
         def refresh_character_pack_state() -> None:
             from app.backend.server.character_viewer_routes import character_viewer_service
 
@@ -186,6 +191,7 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
             on_event_map_complete=refresh_event_map_state,
             on_character_pack_complete=refresh_character_pack_state,
             character_pack_replace_guard=character_pack_replace_guard,
+            character_pack_lock=character_pack_lock,
         )
         context.runtime_install_manager = service
     return service

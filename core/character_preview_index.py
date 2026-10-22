@@ -4,13 +4,25 @@ The distributed JSON remains unchanged. A small, versioned byte-offset sidecar
 under user-data avoids decoding/retaining image bodies during list requests.
 """
 from collections.abc import Mapping
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 import base64
 import hashlib
+import io
 import json
 import os
 import re
 from pathlib import Path
 import tempfile
+
+
+def character_pack_fingerprint(path):
+    """Read the install receipt, never hash the large pack on a runtime query."""
+    try:
+        value = Path(path).with_suffix('.sha256').read_text(encoding='ascii').strip()
+    except (OSError, UnicodeError):
+        return None
+    return value if re.fullmatch(r'[0-9a-f]{64}', value) else None
 
 
 class _ByteWindow:
@@ -95,8 +107,12 @@ class _ByteWindow:
 
 
 class PreviewKeyIndex(Mapping):
-    def __init__(self, path, cache_path=None, *, cache_write=True):
+    def __init__(self, path, cache_path=None, *, cache_write=True,
+                 extension=False, source_fingerprint=None, validate_images=False):
         self.path = Path(path)
+        self.extension = extension
+        self.source_fingerprint = source_fingerprint
+        self.validate_images = validate_images
         self.offsets = {}
         self.reused = False
         self.cache_path = Path(cache_path) if cache_path is not None else None
@@ -108,11 +124,12 @@ class PreviewKeyIndex(Mapping):
             self.signature = None
             return
         self.signature = [str(self.path.resolve()), stat.st_size, stat.st_mtime_ns]
-        if cache_path is not None:
+        if not validate_images and cache_path is not None and (not extension or source_fingerprint is not None):
             try:
                 data = json.loads(Path(cache_path).read_text(encoding='utf-8'))
                 offsets = data['offsets']
                 if (data.get('schema') == 3 and data.get('signature') == self.signature
+                        and (not extension or data.get('source_sha256') == source_fingerprint)
                         and self._valid_offsets(offsets, data.get('count'), stat.st_size,
                                                 data.get('keys_sha1'))):
                     self.offsets = offsets
@@ -150,7 +167,7 @@ class PreviewKeyIndex(Mapping):
                 match = re.search(rb'("(?:[^"\\]|\\.)*")\s*:\s*$', header)
                 if match is None or json.loads(match[1]) != key:
                     return False
-                self._decode(handle.read(end - start))
+                self._decode_value(handle.read(end - start))
         return True
 
     @staticmethod
@@ -159,6 +176,22 @@ class PreviewKeyIndex(Mapping):
         if not isinstance(value, str):
             raise ValueError('Preview body must be a base64 string')
         base64.b64decode(value, validate=True)
+        return value
+
+    def _decode_value(self, body, *, validate_image=False):
+        if not self.extension:
+            return self._decode(body)
+        value = json.loads(body)
+        if not isinstance(value, str):
+            raise ValueError('Preview body must be a base64 string')
+        image = base64.b64decode(value, validate=True)
+        if len(image) < 12 or image[:4] != b'RIFF' or image[8:12] != b'WEBP':
+            raise ValueError('Preview body must contain a RIFF/WEBP image')
+        if validate_image:
+            # Installation only: runtime reads must never decode image pixels.
+            from PIL import Image
+            with Image.open(io.BytesIO(image)) as decoded:
+                decoded.load()
         return value
 
     def _rebuild(self):
@@ -170,10 +203,97 @@ class PreviewKeyIndex(Mapping):
             signature = [str(self.path.resolve()), stat.st_size, stat.st_mtime_ns]
             if signature != self.signature:
                 raise ValueError('Preview bundle changed while indexing')
-            offsets = self._scan(_ByteWindow(handle, stat.st_size)) if stat.st_size else {}
+            body = _ByteWindow(handle, stat.st_size)
+            offsets = (self._scan_extension(body) if self.extension else self._scan(body)) if stat.st_size else {}
         self.offsets = offsets
         if self.cache_path is not None and self.cache_write:
             self._save(self.cache_path)
+
+    def _scan_extension(self, body):
+        """Keep decoding bounded and outside the service lock during staging."""
+        if not self.validate_images:
+            return self._scan_extension_body(body, self._decode_value)
+        from PIL import Image
+        Image.init()  # Initialize plugins before concurrent Image.open calls.
+        with ThreadPoolExecutor(max_workers=4, thread_name_prefix='pack-validate') as pool:
+            pending = deque()
+
+            def validate(raw):
+                pending.append(pool.submit(self._decode_value, raw, validate_image=True))
+                if len(pending) >= 8:
+                    pending.popleft().result()
+
+            offsets = self._scan_extension_body(body, validate)
+            for future in pending:
+                future.result()
+            return offsets
+
+    def _scan_extension_body(self, body, validate):
+        """Strict streaming scan; retain only keys/offsets and bounded image work."""
+        head = body[0:min(len(body), 64 * 1024)]
+        match = re.search(rb',\s*"thumbs"\s*:\s*\{', head)
+        if match is None:
+            raise ValueError('Invalid extension pack header')
+        metadata = json.loads(head[:match.start()] + b'}')
+        if (list(metadata) != ['note', 'size', 'quality', 'count']
+                or not isinstance(metadata['note'], list)
+                or metadata['size'] != 384 or metadata['quality'] != 72
+                or type(metadata['count']) is not int or metadata['count'] <= 0):
+            raise ValueError('Invalid extension pack metadata')
+
+        def space(pos):
+            while pos < len(body):
+                body._load(pos)
+                found = re.search(rb'[^ \t\r\n]',
+                                  memoryview(body.chunk)[pos-body.start:body.valid])
+                if found is not None:
+                    return pos + found.start()
+                pos = body.start + body.valid
+            return pos
+
+        offsets = {}
+        pos = space(match.end())
+        while body[pos] != 125:
+            # A member header can cross a streaming block boundary.
+            length = 4096
+            while True:
+                header = body[pos:min(len(body), pos + length)]
+                member = re.match(rb'("(?:[^"\\]|\\.)*")[ \t\r\n]*:[ \t\r\n]*(")', header)
+                if member is not None:
+                    break
+                if pos + length >= len(body) or length >= 64 * 1024:
+                    raise ValueError('Invalid extension thumbnail member')
+                length *= 2
+            key = json.loads(member[1])
+            if key in offsets:
+                raise ValueError('Duplicate extension thumbnail key')
+            start = pos + member.start(2)
+            end = start
+            while True:
+                end = body.find(b'"', end + 1)
+                if end < 0:
+                    raise ValueError('Unterminated extension thumbnail')
+                slash = end - 1
+                while slash > start and body[slash] == 92:
+                    slash -= 1
+                if (end - 1 - slash) % 2 == 0:
+                    break
+            validate(body[start:end + 1])
+            offsets[key] = [start, end + 1]
+            pos = space(end + 1)
+            if body[pos] == 125:
+                break
+            if body[pos] != 44:
+                raise ValueError('Missing extension thumbnail separator')
+            pos = space(pos + 1)
+            if body[pos] == 125:
+                raise ValueError('Trailing extension thumbnail separator')
+        pos = space(pos + 1)
+        if body[pos] != 125 or space(pos + 1) != len(body):
+            raise ValueError('Invalid extension pack terminator')
+        if len(offsets) != metadata['count']:
+            raise ValueError('Extension thumbnail count mismatch')
+        return offsets
 
     @staticmethod
     def _scan(body):
@@ -228,18 +348,22 @@ class PreviewKeyIndex(Mapping):
                 pos = space(pos + 1)
         return {}
 
-    def _save(self, path):
+    def _save(self, path, *, signature=None, strict=False):
         temp = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
                                              prefix=path.name, suffix='.tmp', delete=False) as handle:
                 temp = handle.name
-                json.dump({'schema': 3, 'signature': self.signature, 'count': len(self.offsets),
+                json.dump({'schema': 3, 'signature': self.signature if signature is None else signature,
+                           'count': len(self.offsets),
+                           **({'source_sha256': self.source_fingerprint} if self.extension else {}),
                            'keys_sha1': self._keys_sha1(self.offsets), 'offsets': self.offsets},
                           handle, ensure_ascii=False, separators=(',', ':'))
             os.replace(temp, path)
         except OSError:
+            if strict:
+                raise  # Installation requires the prepared sidecar before replacement.
             pass  # A read-only user directory must not break thumbnail lookup.
         finally:
             if temp and os.path.exists(temp):
@@ -260,10 +384,22 @@ class PreviewKeyIndex(Mapping):
             stat = os.fstat(handle.fileno())
             if [str(self.path.resolve()), stat.st_size, stat.st_mtime_ns] != self.signature:
                 raise KeyError(key)  # Never read an old offset from a replaced bundle.
-            handle.seek(start)
-            return self._decode(handle.read(end-start))
+            if self.extension:
+                header_start = max(0, start - (len(key.encode('utf-8')) * 6 + 64))
+                handle.seek(header_start)
+                header = handle.read(start - header_start)
+                match = re.search(rb'("(?:[^"\\]|\\.)*")\s*:\s*$', header)
+                if match is None or json.loads(match[1]) != key:
+                    raise ValueError('Extension thumbnail offset key mismatch')
+            else:
+                handle.seek(start)
+            return self._decode_value(handle.read(end-start))
 
     def __getitem__(self, key):
+        if self.extension:
+            # Propagate corruption to the service; repairing here would hide it
+            # from readiness and suppress the user's retry/download action.
+            return self._read(key)
         try:
             return self._read(key)
         except (OSError, ValueError, TypeError, KeyError):

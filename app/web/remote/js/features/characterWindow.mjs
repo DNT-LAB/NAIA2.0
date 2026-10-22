@@ -271,7 +271,9 @@ export function createCharacterWindow({
       const focused = doc.activeElement && spacer.contains(doc.activeElement) ? doc.activeElement.dataset.chwI : null;
       spacer._html = html;
       spacer.innerHTML = html;
-      if (focused != null) spacer.querySelector(`[data-chw-i="${focused}"]`)?.focus();
+      // preventScroll 필수 - 그냥 focus() 는 그 칸을 화면 안으로 끌어와 휠 스크롤과 싸운다
+      // (사용자 제보 2026-10-22: 칸을 누른 뒤 휠을 올리면 화면이 올라가다 아래로 떨어지기를 되풀이).
+      if (focused != null) spacer.querySelector(`[data-chw-i="${focused}"]`)?.focus({preventScroll: true});
     }
     const count = el('[data-chw-count]');
     const label = blocks.get(0) === 'error' && !total ? '불러오지 못했습니다 - 검색을 바꾸거나 창을 다시 여세요'

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -72,7 +73,10 @@ NEGATIVE = (
     "agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text, loli")
 STEPS, WIDTH, HEIGHT = 28, 1024, 1024
 NONHUMAN_RATIO = 0.3
-V5_USAGE_FLOOR = 1         # V5 사용량(%)이 이 이하면 그 계정을 멈춘다 - 0 이 된 뒤 Anlas 로 넘어갈지 모른다(사용자 2026-10-22: 계정별로 소진)
+# V5 사용량(%) 바닥 멈춤 - **끔**(사용자 2026-10-22: 한도까지 다 쓴다 · 멈춤 기준은 25장마다 잰 Anlas 가 줄었을 때뿐).
+# 사용량은 계속 기록만 한다. 다시 켜려면 정수(예: 1).
+V5_USAGE_FLOOR = None
+CLAIM_STALE_SECONDS = 900  # 공용 목록(--any)에서 잡은 표시가 이보다 오래되면 죽은 프로세스의 것으로 보고 가져간다
 SLOW_SECONDS = 40         # 최근 10장 평균이 이보다 길면 할당량 소진으로 본다(평소 6~15초)
 
 # V5 몫(사용자 지정 2026-10-22 · 2판: 구도 태그 + -1::shaded face). 빈 줄은 앱처럼 빼고,
@@ -442,7 +446,26 @@ def _v5_usage(client, token: str):
         return None
 
 
-def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -> str:
+def _claim(out_dir: Path, rank: int):
+    """이 장을 잡는다(원자적 생성). 남이 잡았으면 None - 오래된 표시는 죽은 프로세스의 것이라 가져간다."""
+    claim = out_dir / f"{rank:05d}.claim"
+    for _ in range(2):
+        try:
+            fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode())
+            os.close(fd)
+            return claim
+        except FileExistsError:
+            try:
+                if time.time() - claim.stat().st_mtime < CLAIM_STALE_SECONDS:
+                    return None
+                claim.unlink(missing_ok=True)
+            except FileNotFoundError:
+                continue
+    return None
+
+
+def run_account(client, label: str, items: list[dict], logf, v5: bool = False, pool: bool = False) -> str:
     token = (TOOL / ACCOUNTS[label]).read_text(encoding="utf-8").strip()
     out_dir = OUT_V5 if v5 else OUT
     if not client.is_free_generation(*((V5_STEPS, V5_WIDTH, V5_HEIGHT) if v5 else (STEPS, WIDTH, HEIGHT))):
@@ -451,7 +474,7 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
     if v5:
         usage = _v5_usage(client, token)
         _log(logf, ev="v5_usage", account=label, percent=usage)
-        if usage is not None and usage <= V5_USAGE_FLOOR:
+        if V5_USAGE_FLOOR is not None and usage is not None and usage <= V5_USAGE_FLOOR:
             print(f"[{label}] V5 usage {usage}% - nothing to spend, skipping", flush=True)
             return "usage_low"
     _log(logf, ev="account_start", account=label, todo=len(items), anlas=start_anlas)
@@ -469,6 +492,11 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
         path = out_dir / f"{item['rank']:05d}.png"
         if path.exists() and path.stat().st_size > 0:
             continue
+        claim = None
+        if pool:
+            claim = _claim(out_dir, item["rank"])
+            if claim is None:
+                continue                        # 다른 계정이 그리는 중
         began_item = time.time()
         prompt = (TEMPLATE_V5 if v5 else TEMPLATE).format(head="1" + item["kind"], line=item["line"])
         seed = random.randint(1, 9_999_999_999)
@@ -487,6 +515,8 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
                 print(f"[{label}] #{item['rank']} retry {attempt}: {msg[:90]}", flush=True)
                 time.sleep(wait)
         if png is None:
+            if claim is not None:
+                claim.unlink(missing_ok=True)
             _log(logf, ev="give_up", account=label, rank=item["rank"])
             give_ups += 1
             if give_ups >= 5:
@@ -498,6 +528,8 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
         tmp = path.with_suffix(".part")
         tmp.write_bytes(png)
         tmp.replace(path)
+        if claim is not None:
+            claim.unlink(missing_ok=True)
         done += 1
         manifest.write(json.dumps({"rank": item["rank"], "key": item["key"], "file": path.name, "seed": seed,
                                    "kind": item["kind"], "line": item["line"], "account": label,
@@ -511,7 +543,7 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
                 usage = _v5_usage(client, token)
                 _log(logf, ev="v5_usage", account=label, done=done, percent=usage)
                 print(f"[{label}] v5 usage {usage}%", flush=True)
-                if usage is not None and usage <= V5_USAGE_FLOOR:
+                if V5_USAGE_FLOOR is not None and usage is not None and usage <= V5_USAGE_FLOOR:
                     print(f"[{label}] V5 usage {usage}% <= {V5_USAGE_FLOOR}% - stopping this account", flush=True)
                     return "usage_low"
             if start_anlas is not None and now is not None and now < start_anlas:
@@ -529,17 +561,19 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
     return "done"
 
 
-def run_lane(lane: str, limit: int | None, v5: bool = False, account: str = "") -> None:
+def run_lane(lane: str, limit: int | None, v5: bool = False, account: str = "", pool: bool = False) -> None:
     client = _load_client()
     out_dir = OUT_V5 if v5 else OUT
     data = json.loads((out_dir / "_targets.json").read_text(encoding="utf-8"))
     # --account = 계정 하나만(사용자 지시 2026-10-22: 4계정 동시). 같은 계정을 두 프로세스로 돌리지 말 것(429 Concurrent).
     logf = (out_dir / f"run_{account or 'lane' + lane}.jsonl").open("a", encoding="utf-8")
     for label in ([account] if account else LANES[lane]):
-        items = [t for t in data["targets"] if t["account"] == label]
+        # --any = 공용 목록(배정 무시 · 순번대로 · 잡기 표시로 겹치지 않게) - 사용자 2026-10-22: 계정마다 한도까지.
+        items = (sorted(data["targets"], key=lambda t: t["rank"]) if pool
+                 else [t for t in data["targets"] if t["account"] == label])
         if limit:
             items = items[:limit]
-        result = run_account(client, label, items, logf, v5=v5)
+        result = run_account(client, label, items, logf, v5=v5, pool=pool)
         if result == "stopped":
             break
 
@@ -552,6 +586,7 @@ def main() -> None:
     r = sub.add_parser("run")
     r.add_argument("--lane", choices=sorted(LANES), default="A")
     r.add_argument("--account", choices=sorted(ACCOUNTS), default="", help="이 계정 하나만")
+    r.add_argument("--any", action="store_true", help="공용 목록 - 배정 무시하고 아무도 안 잡은 장을 그린다")
     r.add_argument("--limit", type=int, default=None, help="계정마다 앞에서 N 장만(시험)")
     r.add_argument("--v5", action="store_true", help="V5 몫(NAID5F-medium · 20261022_pack_v5)")
     r.add_argument("--out", default="", help="4.5F 출력 폴더 이름(기본 20261021_pack2)")
@@ -580,7 +615,7 @@ def main() -> None:
     elif a.cmd == "v5-assign":
         assign_v5([x.strip() for x in a.accounts.split(",") if x.strip()])
     else:
-        run_lane(a.lane, a.limit, v5=a.v5, account=a.account)
+        run_lane(a.lane, a.limit, v5=a.v5, account=a.account, pool=a.any)
 
 
 if __name__ == "__main__":

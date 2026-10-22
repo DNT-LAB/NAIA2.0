@@ -517,6 +517,13 @@ class RuntimeInstallManager:
         ready = self._tag_archive_ready(count)
         with self._lock:
             download = dict(self._download_state)
+        # `tag_archive.download` 는 Electron 의 첫 실행 태그 게이트 · 웹 첫 실행 패널이 **태그 상태**로 읽는다(진행률 · 오류 ·
+        # 선택 화면 여부). 진행 상태는 하나뿐이라 확장 팩 체인이 여기 비치면 선택 화면이 사라지고 팩 오류가 태그 오류가 된다
+        # (사용자 제보 2026-10-22). 확장 팩만 받는 체인이면 이 칸에는 쉬는 상태를 준다 - `character_pack` · `downloads` 는 그대로.
+        tag_download = download
+        if set(download.get("chain") or [download.get("phase")]) == {"character_pack"}:
+            tag_download = {"active": False, "phase": "idle", "percent": 0, "downloaded_mb": 0.0, "total_mb": 0.0,
+                            "message": "", "error": "", "done": False, "updated_at": download.get("updated_at", "")}
         return {
             "ok": True,
             "runtime": {
@@ -536,7 +543,7 @@ class RuntimeInstallManager:
                 "target": str(self.tag_dir),
                 "downloadable": bool(self.tag_archive_url),
                 "url": self.tag_archive_url,
-                "download": download,
+                "download": tag_download,
                 "last_download": self._last_download_result("tag_archive"),
             },
             # 증분은 **베이스가 준비된 뒤에만** 의미가 있다. 베이스가 없는 사용자에게
@@ -588,6 +595,12 @@ class RuntimeInstallManager:
         with self._lock:
             if self._character_pack_auto_requested or self._downloads.get("character_pack", {}).get("state") == "error":
                 return dict(self._download_state)
+            # 첫 설치(태그 없음)에는 받지 않는다 - 요청 표시도 남기지 않아 태그가 준비된 뒤의 요청(app.js)이 받는다.
+            # 사용자 제보(2026-10-22 · v2.0.61 드래프트): 태그 선택 화면에서 서버의 자동 시작이 팩을 받아 공용 진행 상태가
+            # 'character_pack' -> 'complete 100%' 가 되자 Electron 이 그것을 태그 상태로 읽어 [다운로드 | 가져오기] 선택이 사라졌다.
+            # 받기는 단일 비행이라 팩을 받는 동안 고른 태그 다운로드는 아예 시작되지도 않는다.
+            if not self._tag_archive_ready():
+                return dict(self._download_state)
             self._character_pack_auto_requested = True
         return self.start_character_pack_download()
 
@@ -638,6 +651,7 @@ class RuntimeInstallManager:
                 return self._set_state(
                     active=False,
                     phase="complete",
+                    chain=[item.key for item in specs],
                     percent=100,
                     downloaded_mb=0.0,
                     total_mb=0.0,
@@ -659,6 +673,7 @@ class RuntimeInstallManager:
             self._download_state.update({
                 "active": True,
                 "phase": spec.key,
+                "chain": [item.key for item in pending],
                 "percent": 0,
                 "downloaded_mb": 0.0,
                 "total_mb": 0.0,

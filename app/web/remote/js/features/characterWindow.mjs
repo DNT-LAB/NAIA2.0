@@ -99,6 +99,7 @@ export function createCharacterWindow({
     body.addEventListener('focusout', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = false; paintFeat(); } });
     body.querySelector('[data-chw-grid]').addEventListener('scroll', () => paintGrid(), {passive: true});
     body.querySelector('[data-chw-grip]').addEventListener('pointerdown', onGripDown);
+    body.querySelector('[data-chw-grid]').addEventListener('contextmenu', onGridContextMenu);
     body.querySelector('[data-chw-glist]').addEventListener('scroll', () => paintGroups(), {passive: true});
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => layoutGrid()).observe(body.querySelector('[data-chw-grid]'));
     return panel;
@@ -469,6 +470,75 @@ export function createCharacterWindow({
   function onSlotClick(event) {
     const actions = getActions() || {};
     if (event.target.closest('[data-chw-pool]')) actions.openPoolWindow?.();
+  }
+
+  // ── 우클릭 메뉴 ─────────────────────────────────────────────────────────────
+  // 아래 선택 줄의 단추와 같은 일(사용자 지시 2026-10-22). 누른 칸을 먼저 고르고(고르기만 해도 슬롯에 담기 - 같은 규칙)
+  // 그 캐릭터에 대해 연다. 옷은 결과 뷰어 · Artist 격자와 같은 `.result-context-menu`.
+  let ctxMenu = null;
+  let ctxTarget = null;
+  function closeCtxMenu() {
+    if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; }
+    ctxTarget = null;
+    doc.removeEventListener('pointerdown', onCtxOutside, true);
+    doc.removeEventListener('keydown', onCtxKey, true);
+    win.removeEventListener('blur', closeCtxMenu);
+    win.removeEventListener('resize', closeCtxMenu);
+    el('[data-chw-grid]')?.removeEventListener('scroll', closeCtxMenu);
+  }
+  function onCtxOutside(event) { if (ctxMenu && !ctxMenu.contains(event.target)) closeCtxMenu(); }
+  function onCtxKey(event) {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCtxMenu();
+  }
+  function onGridContextMenu(event) {
+    const cell = event.target.closest('[data-chw-i]');
+    if (!cell) return;
+    const item = itemAt(Number(cell.dataset.chwI));
+    if (!item) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeCtxMenu();
+    const same = selected && selected.group === item.group && selected.character === item.character;
+    if (!same) void select(item);
+    const s = selected;
+    ctxTarget = s;
+    const off = busy ? ' disabled' : '';
+    const btn = (act, label, cls = '') =>
+      `<button type="button" class="result-context-item${cls}" data-chw-ctx="${act}" role="menuitem"${off}><span>${label}</span></button>`;
+    const menu = doc.createElement('div');
+    menu.className = 'result-context-menu chw-ctx-menu open';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = `<div class="chw-ctx-head">${escHtml(s.character)}<span>${escHtml(s.group)}</span></div>`
+      + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}${btn('gen', '생성')}</div>`
+      + `<div class="result-context-group">${btn('fav', s.favorite ? '★ 즐겨찾기 해제' : '★ 즐겨찾기')}${btn('copy', '복사')}</div>`
+      + `<div class="result-context-group">${btn('hide', '숨김', ' danger')}${btn('delthumb', '내 썸네일 삭제')}`
+      + `${btn('tab', 'Characters 탭에서 열기')}</div>`;
+    menu.addEventListener('contextmenu', e => e.preventDefault());
+    menu.addEventListener('click', e => {
+      const b = e.target.closest('[data-chw-ctx]');
+      if (!b) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const target = ctxTarget;
+      closeCtxMenu();
+      // 그사이 다른 캐릭터가 골라졌으면(다른 칸을 눌렀다) 이 메뉴의 대상이 아니다 - 안 한다.
+      if (!target || target !== selected) return;
+      void act(b.dataset.chwCtx);
+    });
+    doc.body.appendChild(menu);
+    ctxMenu = menu;
+    const margin = 8;
+    const rect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.min(Math.max(margin, event.clientX), win.innerWidth - rect.width - margin)}px`;
+    menu.style.top = `${Math.min(Math.max(margin, event.clientY), win.innerHeight - rect.height - margin)}px`;
+    doc.addEventListener('pointerdown', onCtxOutside, true);
+    doc.addEventListener('keydown', onCtxKey, true);
+    win.addEventListener('blur', closeCtxMenu);
+    win.addEventListener('resize', closeCtxMenu);
+    el('[data-chw-grid]')?.addEventListener('scroll', closeCtxMenu, {passive: true});
   }
 
   // ── 생성 옵션 서랍 ───────────────────────────────────────────────────────────

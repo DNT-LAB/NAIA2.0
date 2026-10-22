@@ -30974,6 +30974,11 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   border: 1px solid #d9823b; background: rgba(217,130,59,0.12); color: #f3b27a;
 }
 .chw-gopt.is-on { background: #d9823b; color: #1b1206; }
+/* Characters 창 우클릭 메뉴 머리 - 누른 캐릭터 이름(결과 뷰어 메뉴 옷 그대로). */
+/* ⚠️ 떠 있는 창(.dragpanel z 10150) 위에 떠야 한다 - 결과 메뉴의 기본 z(2400)로는 창 밑에 깔린다(실측). */
+.chw-ctx-menu { min-width: 200px; z-index: 10300; }
+.chw-ctx-head { padding: 4px 10px 6px; font-size: 11.5px; font-weight: 600; color: var(--text-primary); border-bottom: 1px solid rgba(255,255,255,0.08); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chw-ctx-head span { margin-left: 6px; font-weight: 400; font-size: 10px; color: var(--text-dim); }
 /* 캐릭터 상세보기(사용자 지시 2026-10-22) - 생성 옵션과 같은 서랍 · 하나만. 맨 아래 = 그 캐릭터 줄(예전엔 아래 줄에 숨어 있었다). */
 .chw-drawer-body[hidden], .chw-drawer-detail[hidden] { display: none; }
 .chw-drawer-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }

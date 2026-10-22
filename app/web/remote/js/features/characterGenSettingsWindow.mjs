@@ -40,6 +40,7 @@ export function createCharacterGenSettingsWindow({
   onSaved = () => {},           // (options) => void   서버가 돌려준 저장본 - 탭 칸을 맞춘다
   openCharacterPage = () => {}, // [↗] 나머지 옵션은 Characters 탭에서
   getActions = () => ({}),      // 퀵 패널 손잡이 - generateThumb(group, character, body)(Find [생성] 과 같은 길 · 결과 소식도 같이)
+  onMoved = () => {},           // ('window' | 'drawer') 조각이 옮겨 갔다 - 다른 쪽(서랍)은 닫는다
 } = {}) {
   let options = null;           // 서버 저장본(prefix · postfix · no_save …)
   let quick = null;
@@ -69,16 +70,12 @@ export function createCharacterGenSettingsWindow({
     slotEl.querySelector('[data-cqgen-clear]').hidden = !has;
     const prompt = slotEl.querySelector('[data-cqgen-prompt]');
     if (doc.activeElement !== prompt) prompt.value = slot.prompt;
-    const uc = slotEl.querySelector('[data-cqgen-uc]');
-    if (doc.activeElement !== uc) uc.value = slot.uc;
+
     // 줄을 받는 동안은 고치지도 생성하지도 못한다 - 받은 줄이 친 글을 덮거나, 빈 네거티브로 나가지 않게(Codex 리뷰).
     prompt.readOnly = !!slot.loading;
-    uc.readOnly = !!slot.loading;
     const extra = slotEl.querySelector('[data-cqgen-extra]');
     if (doc.activeElement !== extra) extra.value = String((options || {}).character_extra || '');
-    const gen = slotEl.querySelector('[data-cqgen-gen]');
-    gen.disabled = !has || slot.busy || !!slot.loading;
-    gen.textContent = slot.busy ? '보내는 중…' : slot.loading ? '줄 받는 중…' : '생성';
+
   }
 
   /** 고른 캐릭터를 담는다 - 줄은 저장된 옵션(작품명 · 특징 · 코스프레 …)으로 서버가 만든다. */
@@ -145,21 +142,19 @@ export function createCharacterGenSettingsWindow({
     slotEl.innerHTML = `<div class="cqgen-slot-top"><span class="cqgen-pill">캐릭터 1</span>`
       + `<span class="cqgen-slotname" data-cqgen-slotname></span>`
       + `<button type="button" class="cqgen-clear" data-cqgen-clear hidden>비우기</button></div>`
-      + `<label class="cqgen-lab" for="cqgenPrompt">캐릭터 프롬프트 <i>고를 때마다 바뀜</i></label>`
+      + `<label class="cqgen-lab" for="cqgenPrompt">캐릭터 프롬프트</label>`
       + `<textarea class="cqgen-ta" id="cqgenPrompt" data-cqgen-prompt rows="2" spellcheck="false"></textarea>`
-      + `<label class="cqgen-lab" for="cqgenExtra">추가 프롬프트 <i>남는다 · 캐릭터 줄 뒤에 · Find [생성] 도</i></label>`
+      + `<label class="cqgen-lab" for="cqgenExtra">추가 프롬프트</label>`
       + `<textarea class="cqgen-ta is-extra" id="cqgenExtra" data-cqgen-extra rows="1" spellcheck="false"></textarea>`
-      + `<label class="cqgen-lab" for="cqgenUc">캐릭터 네거티브 <i>코스프레면 자동</i></label>`
-      + `<textarea class="cqgen-ta is-neg" id="cqgenUc" data-cqgen-uc rows="1" spellcheck="false"></textarea>`
-      + `<div class="cqgen-gen-row"><span class="cqgen-meta">896×1152 · 메인 모델/스텝 · 그 캐릭터의 썸네일로 저장</span>`
-      + `<button type="button" class="cqgen-gen" data-cqgen-gen disabled>생성</button></div>`;
+
+      ;
     slotEl.addEventListener('input', event => {
       if (event.target.closest('[data-cqgen-prompt]')) slot.prompt = event.target.value;
-      if (event.target.closest('[data-cqgen-uc]')) slot.uc = event.target.value;
+
     });
     slotEl.addEventListener('focusout', event => {
       const extra = event.target.closest('[data-cqgen-extra]');
-      if (extra && extra.value !== String((options || {}).character_extra || '')) saveOption('character_extra', extra.value);
+      if (extra) commitExtra(extra);
     });
     slotEl.addEventListener('click', event => {
       if (event.target.closest('[data-cqgen-clear]')) {
@@ -167,7 +162,7 @@ export function createCharacterGenSettingsWindow({
         slot.seq += 1;
         paintSlot();
       }
-      if (event.target.closest('[data-cqgen-gen]')) void generate();
+
     });
     // prefix 와 postfix 사이에 - 나가는 글의 차례 그대로 보인다.
     const post = quick.el.querySelector('[data-peq-key="post_prompt"]');
@@ -175,12 +170,21 @@ export function createCharacterGenSettingsWindow({
     paintSlot();
   }
 
+  function commitExtra(extra) {
+    if (extra.value !== String((options || {}).character_extra || '')) saveOption('character_extra', extra.value);
+  }
+
+  /** 옮기거나 닫기 전에 친 글을 전부 저장 줄에 올린다 - 옮기는 동안 칸이 초점을 잃어도 focusout 을 믿지 않는다. */
+  function flushAll() {
+    quick?.flush();
+    const extra = slotEl?.querySelector('[data-cqgen-extra]');
+    if (extra) commitExtra(extra);
+  }
+
   function paintOptions() {
     if (!optsEl) return;
     const o = options || {};
     optsEl.querySelectorAll('[data-cqgen-opt]').forEach(box => { box.checked = !!o[box.dataset.cqgenOpt]; });
-    const cos = optsEl.querySelector('[data-cqgen-cos]');
-    if (cos && doc.activeElement !== cos) cos.value = String(o.cosplay_name || '');
   }
   let loading = null;
 
@@ -194,11 +198,18 @@ export function createCharacterGenSettingsWindow({
 
   function load() {
     if (loading) return loading;
-    loading = fetch('/api/character-viewer/state', {cache: 'no-store'})
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.options) options = data.options;
-        quick?.sync();
+    loading = (async () => {
+      // 기다리는 사이 저장이 더 붙었으면 그것까지 기다린다 - 기다린 저장과 잰 번호가 같아야 한다(Codex 재리뷰).
+      let sentAt;
+      do { sentAt = saveSeq; await saveChain.catch(() => {}); } while (sentAt !== saveSeq);
+      const data = await (await fetch('/api/character-viewer/state', {cache: 'no-store'})).json();
+      return {sentAt, data};
+    })()
+      .then(({sentAt, data}) => {
+        if (sentAt === saveSeq) {
+          if (data && data.options) options = data.options;
+          quick?.sync();
+        }
         paintWarn();
         paintOptions();
         paintSlot();
@@ -239,11 +250,15 @@ export function createCharacterGenSettingsWindow({
       .catch(error => showToast(`생성 설정 저장 실패 — ${error.message || error}`, 'error'));
   }
 
-  async function ensure() {
-    if (panel) return panel;
-    if (opening) return opening;
-    opening = (async () => {
-      const [createPeQuickEdit, createDraggablePanel] = await Promise.all([loadPeQuickEdit(), loadDraggablePanel()]);
+  let contentEl = null;
+  let contentReady = null;
+  let moveSeq = 0;               // 조각 이동(떠 있는 창 <-> 서랍) 요청 번호 - 마지막 요청만 끝까지 간다
+  let mountSeq = 0;              // 서랍 열기 번호 - 서랍을 닫으면 기다리는 서랍 열기만 무른다
+  async function ensureContent() {
+    if (contentEl) return contentEl;
+    if (contentReady) return contentReady;
+    contentReady = (async () => {
+      const createPeQuickEdit = await loadPeQuickEdit();
       quick = createPeQuickEdit({
         document: doc, escHtml, showToast, attachHighlight, bindAssist,
         getField: key => String((options || {})[KEYS[key]] ?? ''),
@@ -251,6 +266,21 @@ export function createCharacterGenSettingsWindow({
         getPreset: () => '',
         requestState: () => { void load(); },
       });
+      contentEl = doc.createElement('div');
+      contentEl.className = 'cqgen-content';
+      contentEl.appendChild(quick.el);
+      buildSlot();
+      buildOptions();
+      return contentEl;
+    })();
+    try { return await contentReady; } finally { contentReady = null; }
+  }
+
+  async function ensure() {
+    if (panel) return panel;
+    if (opening) return opening;
+    opening = (async () => {
+      const [createDraggablePanel] = await Promise.all([loadDraggablePanel(), ensureContent()]);
       panel = createDraggablePanel({
         document: doc, window: win,
         variant: 'pewin cqgen',
@@ -260,7 +290,7 @@ export function createCharacterGenSettingsWindow({
         resizable: true,
         escHtml,
         // 펼친 채 닫으면 마지막 편집이 날아간다 - 칸을 벗어난 것과 같이 친다.
-        onClose: () => { quick?.flush(); },
+        onClose: () => { flushAll(); },
       });
       const more = doc.createElement('button');
       more.type = 'button';
@@ -269,32 +299,30 @@ export function createCharacterGenSettingsWindow({
       more.title = '나머지 옵션(copyright 자동 추가 · 저장 안 함 …)은 Characters 탭에서';
       more.addEventListener('click', () => { quick?.flush(); openCharacterPage(); });
       panel.slot.appendChild(more);
-      panel.body.appendChild(quick.el);
-      buildSlot();
-      optsEl = doc.createElement('div');
-      optsEl.className = 'cqgen-opts';
-      optsEl.innerHTML = OPTION_CHECKS.map(([key, label]) =>
-        `<label><input type="checkbox" data-cqgen-opt="${key}"><span>${escHtml(label)}</span></label>`).join('')
-        + `<label class="is-cos"><input type="checkbox" data-cqgen-opt="cosplay_enabled"><span>코스프레</span>`
-        + `<input type="text" class="cqgen-cos" data-cqgen-cos placeholder="코스프레할 캐릭터 이름" spellcheck="false"></label>`;
-      optsEl.addEventListener('change', event => {
-        const box = event.target.closest('[data-cqgen-opt]');
-        if (box) saveOption(box.dataset.cqgenOpt, !!box.checked);
-      });
-      // 이름 칸은 벗어날 때 저장(한 글자마다 보내지 않는다).
-      optsEl.addEventListener('focusout', event => {
-        const input = event.target.closest('[data-cqgen-cos]');
-        if (input && input.value !== String((options || {}).cosplay_name || '')) saveOption('cosplay_name', input.value);
-      });
-      panel.body.appendChild(optsEl);
-      warnEl = doc.createElement('div');
-      warnEl.className = 'cqgen-warn';
-      warnEl.hidden = true;
-      panel.body.appendChild(warnEl);
-      paintOptions();
       return panel;
     })();
     try { return await opening; } finally { opening = null; }
+  }
+
+  function buildOptions() {
+    optsEl = doc.createElement('div');
+    optsEl.className = 'cqgen-opts';
+    optsEl.innerHTML = OPTION_CHECKS.map(([key, label]) =>
+      `<label><input type="checkbox" data-cqgen-opt="${key}"><span>${escHtml(label)}</span></label>`).join('');
+    optsEl.addEventListener('change', event => {
+      const box = event.target.closest('[data-cqgen-opt]');
+      if (box) saveOption(box.dataset.cqgenOpt, !!box.checked);
+    });
+    contentEl.appendChild(optsEl);
+    warnEl = doc.createElement('div');
+    warnEl.className = 'cqgen-warn';
+    warnEl.hidden = true;
+    contentEl.appendChild(warnEl);
+    const note = doc.createElement('div');
+    note.className = 'cqgen-note';
+    note.textContent = '이 창의 설정은 Character 윈도우 내부/Find 생성에만 적용됩니다';
+    contentEl.appendChild(note);
+    paintOptions();
   }
 
   /** 두 칸을 함께 편다 - 창이 둘을 보여 주는 자리다(PE 창의 '한 칸씩' 탭 규칙은 머리줄 단추용). */
@@ -307,13 +335,35 @@ export function createCharacterGenSettingsWindow({
 
   return {
     async toggle() {
+      const mine = ++moveSeq;
       const p = await ensure();
-      if (p.isOpen()) { p.close(); return; }
+      if (mine !== moveSeq) return;
+      if (p.isOpen() && contentEl.parentElement === p.body) { p.close(); return; }
+      flushAll();                              // 옮기기 전에 친 글을 저장 줄에 올린다 - load 는 그 저장 뒤에 읽는다
+      p.body.appendChild(contentEl);           // 서랍에 가 있었으면 이리로 옮긴다(한 벌)
+      try { onMoved('window'); } catch (_) {}
       await load();
+      if (mine !== moveSeq || contentEl.parentElement !== p.body) return;
       p.open();
       p.raise?.();
       openBoth();
     },
+    /** Characters 창 서랍에 붙인다(사용자 지시 2026-10-22: 창 안의 떠 있는 카드). 떠 있는 창에 있었으면 그 창은 닫는다. */
+    async mountInto(container) {
+      const mine = ++moveSeq;
+      const myMount = ++mountSeq;
+      const el = await ensureContent();
+      if (mine !== moveSeq || myMount !== mountSeq) return;
+      flushAll();
+      if (panel && el.parentElement === panel.body) panel.close();
+      container.appendChild(el);
+      try { onMoved('drawer'); } catch (_) {}
+      await load();
+      if (mine !== moveSeq || myMount !== mountSeq || el.parentElement !== container) return;
+      openBoth();
+    },
+    /** 서랍을 닫았다 - 아직 기다리는 서랍 열기를 무른다. */
+    cancelMount() { mountSeq++; },              // 서랍 열기만 무른다 - 진행 중인 떠 있는 창 열기는 그대로(Codex 재리뷰)
     isOpen: () => !!(panel && panel.isOpen()),
     /** 캐릭터를 골랐다(Characters 창 · Find [생성]) - 창이 닫혀 있어도 담아 둔다. */
     setCharacter: (group, character) => setCharacter(group, character),

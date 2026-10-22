@@ -2983,7 +2983,7 @@ window.addEventListener('naia:character-picked', event => {
 });
 function ensureCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-vslot2')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-grip1')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,
@@ -3000,6 +3000,8 @@ function ensureCharacterGenSettings() {
             void characterViewerReady.then(() => characterViewerControl?.openCharacter?.('vocaloid', 'hatsune miku'));
           },
           getActions: () => characterQuickPanel?.characterActions || characterActionsWhenReady,
+          // 조각이 떠 있는 창으로 갔다 - Characters 창의 서랍은 비었으니 닫는다.
+          onMoved: where => { if (where === 'window') characterWindow?.closeDrawer?.(); },
         });
         return characterGenSettings;
       })
@@ -7689,12 +7691,16 @@ const characterWindowActions = new Proxy({}, {
     if (name === 'generateVirtual') {
       return async (group, character) => (await ensureCharacterGenSettings())?.generateFor(group, character);
     }
+    if (name === 'mountGenOptions') {
+      return async container => (await ensureCharacterGenSettings())?.mountInto(container);
+    }
+    if (name === 'cancelGenOptions') return () => characterGenSettings?.cancelMount?.();
     return (characterQuickPanel?.characterActions || characterActionsWhenReady)[name];
   },
 });
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-ac1')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-grip1')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,

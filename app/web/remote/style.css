@@ -30885,46 +30885,76 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 11px;
 }
 .dragpanel.cqgen .cqgen-more:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.7); }
-.dragpanel.cqgen .cqgen-warn {
+.cqgen-content .cqgen-warn {
   flex: none; margin: 4px 8px 6px; padding: 4px 7px; border-radius: 4px;
   background: rgba(250,199,117,0.12); color: rgb(242,201,126); font-size: 11px; line-height: 1.4;
 }
-.dragpanel.cqgen .cqgen-warn[hidden] { display: none; }
+.cqgen-content .cqgen-warn[hidden] { display: none; }
 /* 가상 캐릭터 슬롯 1개(2026-10-22) - prefix 와 postfix 사이 · 메인 슬롯과 따로. */
-.dragpanel.cqgen .cqgen-slot {
+.cqgen-content .cqgen-slot {
   flex: none; display: flex; flex-direction: column; gap: 4px; margin: 4px 6px; padding: 6px 7px; border-radius: 7px;
   border: 1px solid rgba(124,106,239,0.55); background: rgba(124,106,239,0.07);
 }
-.dragpanel.cqgen .cqgen-slot-top { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; }
-.dragpanel.cqgen .cqgen-pill { flex: none; padding: 0 6px; border-radius: 999px; background: rgba(124,106,239,0.3); color: var(--text-primary); font-size: 9.5px; }
-.dragpanel.cqgen .cqgen-slotname { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; }
-.dragpanel.cqgen .cqgen-slotname b { color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
-.dragpanel.cqgen .cqgen-slotname span { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
-.dragpanel.cqgen .cqgen-hint { color: var(--text-dim); font-size: 10.5px; white-space: normal; }
-.dragpanel.cqgen .cqgen-clear { flex: none; padding: 0 6px; height: 18px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 10px; }
-.dragpanel.cqgen .cqgen-clear[hidden] { display: none; }
-.dragpanel.cqgen .cqgen-ta {
+.cqgen-content .cqgen-slot-top { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; }
+.cqgen-content .cqgen-pill { flex: none; padding: 0 6px; border-radius: 999px; background: rgba(124,106,239,0.3); color: var(--text-primary); font-size: 9.5px; }
+.cqgen-content .cqgen-slotname { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; }
+.cqgen-content .cqgen-slotname b { color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.cqgen-content .cqgen-slotname span { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.cqgen-content .cqgen-hint { color: var(--text-dim); font-size: 10.5px; white-space: normal; }
+.cqgen-content .cqgen-clear { flex: none; padding: 0 6px; height: 18px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 10px; }
+.cqgen-content .cqgen-clear[hidden] { display: none; }
+.cqgen-content .cqgen-ta {
   width: 100%; box-sizing: border-box; resize: vertical; min-height: 24px; padding: 4px 6px; border-radius: 5px;
   border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.3); color: var(--text-primary);
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
 }
-.dragpanel.cqgen .cqgen-ta.is-extra { border-color: rgba(107,195,140,0.4); }
-.dragpanel.cqgen .cqgen-ta.is-neg { border-color: rgba(240,120,120,0.35); }
-.dragpanel.cqgen .cqgen-gen-row { display: flex; align-items: center; gap: 8px; }
-.dragpanel.cqgen .cqgen-meta { flex: 1; min-width: 0; font-size: 9.5px; color: var(--text-dim); }
-.dragpanel.cqgen .cqgen-gen {
+.cqgen-content .cqgen-ta.is-extra { border-color: rgba(107,195,140,0.4); }
+.cqgen-content .cqgen-ta.is-neg { border-color: rgba(240,120,120,0.35); }
+.cqgen-content .cqgen-gen-row { display: flex; align-items: center; gap: 8px; }
+.cqgen-content .cqgen-meta { flex: 1; min-width: 0; font-size: 9.5px; color: var(--text-dim); }
+.cqgen-content .cqgen-gen {
   flex: none; padding: 4px 14px; border-radius: 6px; cursor: pointer; border: 0; background: #d9823b; color: #1b1206;
   font-family: var(--font-mono); font-size: 11px; font-weight: 700;
 }
-.dragpanel.cqgen .cqgen-gen:disabled { opacity: 0.45; cursor: default; }
-.dragpanel.cqgen .cqgen-lab { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
-.dragpanel.cqgen .cqgen-lab i { font-style: normal; color: var(--text-dim); }
-.dragpanel.cqgen .cqgen-ta[readonly] { opacity: 0.6; }
+.cqgen-content .cqgen-gen:disabled { opacity: 0.45; cursor: default; }
+.cqgen-content .cqgen-lab { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+.cqgen-content .cqgen-note { flex: none; padding: 6px 10px 8px; font-size: 10px; line-height: 1.4; color: #f2dc8c; }
+.cqgen-content .cqgen-ta[readonly] { opacity: 0.6; }
+/* 생성 설정 조각(한 벌) - 떠 있는 창에도 Characters 창 서랍에도 붙는다. */
+.cqgen-content { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+/* Characters 창 서랍 = 창 안의 떠 있는 카드 - 아래 줄 바로 위에서 위로 열린다(사용자 지시 2026-10-22 · 좌우로 늘리지 않는다). */
+.chw-main { position: relative; }
+.chw-drawer {
+  position: absolute; left: 8px; bottom: 6px; z-index: 20; width: min(440px, calc(100% - 16px)); max-height: calc(100% - 12px);
+  display: flex; flex-direction: column; overflow: hidden; border-radius: 10px;
+  border: 1px solid rgba(217,130,59,0.7); background: rgba(26,25,35,0.98); box-shadow: 0 -10px 34px rgba(0,0,0,0.5);
+}
+.chw-drawer[hidden] { display: none; }
+/* 머리 손잡이 - 레퍼런스 인셋의 알약과 같은 꼴. 위로 끌면 서랍이 커지고 그만큼 캐릭터 · 추가 프롬프트 칸이 늘어난다. */
+.chw-drawer-grip { flex: none; position: relative; height: 14px; cursor: ns-resize; touch-action: none; }
+.chw-drawer-grip::after {
+  content: ''; position: absolute; left: 50%; top: 2px; width: 36px; height: 10px; margin-left: -18px;
+  box-sizing: border-box; border-radius: 5px; background: #d9823b; border: 2px solid #ffffff;
+}
+.chw-drawer-grip:hover::after, .chw-drawer-grip.is-drag::after { background: #f0a060; }
+.chw-drawer-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.chw-drawer .peq { flex: 1 1 auto; min-height: 0; padding: 0 6px; background: transparent; border: 0; border-radius: 0; box-shadow: none; }
+.chw-drawer .peq-text { min-height: 44px; resize: none; }
+/* 남는 높이는 슬롯이 먹는다 - 캐릭터 프롬프트 2 : 추가 프롬프트 1. */
+.chw-drawer .cqgen-slot { flex: 1 1 auto; min-height: 130px; }
+.chw-drawer .cqgen-ta { resize: none; }
+.chw-drawer .cqgen-ta[data-cqgen-prompt] { flex: 2 1 0; min-height: 40px; }
+.chw-drawer .cqgen-ta[data-cqgen-extra] { flex: 1 1 0; min-height: 26px; }
+.chw-gopt {
+  flex: none; padding: 4px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap; font-family: var(--font-mono); font-size: 10.5px; font-weight: 700;
+  border: 1px solid #d9823b; background: rgba(217,130,59,0.12); color: #f3b27a;
+}
+.chw-gopt.is-on { background: #d9823b; color: #1b1206; }
 /* 생성 설정 창의 옵션 체크(Characters 탭 Detail 에서 옮김 · 2026-10-22). */
-.dragpanel.cqgen .cqgen-opts { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px 4px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: var(--text-secondary); }
-.dragpanel.cqgen .cqgen-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
-.dragpanel.cqgen .cqgen-opts label.is-cos { flex-basis: 100%; }
-.dragpanel.cqgen .cqgen-cos {
+.cqgen-content .cqgen-opts { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px 4px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: var(--text-secondary); }
+.cqgen-content .cqgen-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.cqgen-content .cqgen-opts label.is-cos { flex-basis: 100%; }
+.cqgen-content .cqgen-cos {
   flex: 1; min-width: 0; height: 22px; padding: 0 7px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.14);
   background: rgba(0,0,0,0.3); color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
 }

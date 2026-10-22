@@ -20,6 +20,9 @@ const CELL_GAP = 7;
 const NAME_H = 34;                      // 칸 아래 이름 두 줄
 const GROUP_ROW = 24;
 const GENDER_KEY = 'naia_chw_gender';
+const DRAWER_H_KEY = 'naia_chw_drawer_h';
+const DRAWER_H_MIN = 260;              // 서랍 높이 - 머리 손잡이로 끈다(사용자 지시 2026-10-22 · 우하단 자유 크기는 없다)
+const DRAWER_H_DEFAULT = 440;
 const GENDERS = [['all', 'ALL', '전체'], ['girl', '여', '여성'], ['boy', '남', '남성'], ['other', '외', '비인간']];
 
 export function createCharacterWindow({
@@ -67,8 +70,7 @@ export function createCharacterWindow({
       escHtml,
       onResize: () => layoutGrid(),
     });
-    panel.slot.innerHTML = `<button type="button" class="chw-hb" data-chw-gset title="[생성] 이 붙이는 Prefix · Postfix · 옵션(Find ⚙ 와 같은 창)">생성 설정</button>`
-      + `<button type="button" class="chw-hb" data-chw-pool title="세션 와일드카드(랜덤 풀) 창">풀</button>`;
+    panel.slot.innerHTML = `<button type="button" class="chw-hb" data-chw-pool title="세션 와일드카드(랜덤 풀) 창">풀</button>`;
     panel.slot.addEventListener('click', onSlotClick);
     panel.body.innerHTML = `<div class="chw">`
       + `<div class="chw-tools"><input class="chw-q" type="search" data-chw-q spellcheck="false" autocomplete="off"`
@@ -79,7 +81,11 @@ export function createCharacterWindow({
       + `<div class="chw-chips" data-chw-chips hidden></div>`
       + `<div class="chw-main"><div class="chw-groups"><input class="chw-gq" type="search" data-chw-gq placeholder="그룹 검색" spellcheck="false">`
       + `<div class="chw-glist" data-chw-glist><div class="chw-gspacer" data-chw-gspacer></div></div></div>`
-      + `<div class="chw-grid" data-chw-grid tabindex="0"><div class="chw-count" data-chw-count></div><div class="chw-spacer" data-chw-spacer></div></div></div>`
+      + `<div class="chw-grid" data-chw-grid tabindex="0"><div class="chw-count" data-chw-count></div><div class="chw-spacer" data-chw-spacer></div></div>`
+      // 생성 옵션 서랍 - 창 안의 떠 있는 카드(아래에서 위로 · 좌우로 늘리지 않는다). 내용은 생성 설정 조각을 옮겨 붙인다.
+      + `<div class="chw-drawer" data-chw-drawer hidden>`
+      + `<div class="chw-drawer-grip" data-chw-grip data-naia-title="위아래로 끌어 높이를 바꿉니다"></div>`
+      + `<div class="chw-drawer-body" data-chw-drawer-body></div></div></div>`
       + `<div class="chw-sel" data-chw-sel></div></div>`;
     const body = panel.body;
     body.addEventListener('click', onClick);
@@ -90,6 +96,7 @@ export function createCharacterWindow({
     body.addEventListener('focusin', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = true; paintFeat(); } });
     body.addEventListener('focusout', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = false; paintFeat(); } });
     body.querySelector('[data-chw-grid]').addEventListener('scroll', () => paintGrid(), {passive: true});
+    body.querySelector('[data-chw-grip]').addEventListener('pointerdown', onGripDown);
     body.querySelector('[data-chw-glist]').addEventListener('scroll', () => paintGroups(), {passive: true});
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => layoutGrid()).observe(body.querySelector('[data-chw-grid]'));
     return panel;
@@ -327,10 +334,12 @@ export function createCharacterWindow({
   function paintSel() {
     const box = el('[data-chw-sel]');
     if (!box) return;
-    if (!selected) { box.innerHTML = '<div class="chw-empty">캐릭터를 누르면 여기서 슬롯 · 풀 · 생성을 합니다.</div>'; return; }
+    const gopt = `<button type="button" class="chw-gopt${drawerOpen ? ' is-on' : ''}" data-chw-gopt aria-expanded="${drawerOpen}"`
+      + ` title="Prefix · 캐릭터 슬롯 · Postfix · 옵션">생성 옵션 ${drawerOpen ? '▾' : '▴'}</button>`;
+    if (!selected) { box.innerHTML = `${gopt}<div class="chw-empty">캐릭터를 누르면 여기서 슬롯 · 풀 · 생성을 합니다.</div>`; return; }
     const s = selected;
     const off = busy ? ' disabled' : '';
-    box.innerHTML = `<div class="chw-st"><b>${escHtml(s.character)}</b>`
+    box.innerHTML = `${gopt}<div class="chw-st"><b>${escHtml(s.character)}</b>`
       + `<span>${escHtml(s.group)} · ${Number(s.count || 0).toLocaleString()}${selectedLine ? ` · ${escHtml(selectedLine)}` : ''}</span></div>`
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
@@ -439,8 +448,55 @@ export function createCharacterWindow({
   // ── 손 ──────────────────────────────────────────────────────────────────────
   function onSlotClick(event) {
     const actions = getActions() || {};
-    if (event.target.closest('[data-chw-gset]')) actions.openGenSettings?.();
-    else if (event.target.closest('[data-chw-pool]')) actions.openPoolWindow?.();
+    if (event.target.closest('[data-chw-pool]')) actions.openPoolWindow?.();
+  }
+
+  // ── 생성 옵션 서랍 ───────────────────────────────────────────────────────────
+  let drawerOpen = false;
+  let drawerH = (() => {
+    try { return Number(storage?.getItem(DRAWER_H_KEY)) || DRAWER_H_DEFAULT; } catch (_) { return DRAWER_H_DEFAULT; }
+  })();
+  /** 서랍 높이를 놓는다 - 창 안(.chw-main)을 넘지 않게. 칸 높이는 CSS 가 나눈다(캐릭터 · 추가 프롬프트가 늘어난다). */
+  function applyDrawerH(h) {
+    const box = el('[data-chw-drawer]');
+    const room = (el('.chw-main')?.clientHeight || 0) - 12;
+    const max = room > DRAWER_H_MIN ? room : DRAWER_H_MIN;
+    drawerH = Math.round(Math.min(Math.max(h, DRAWER_H_MIN), max));
+    if (box) box.style.height = `${drawerH}px`;
+  }
+  function onGripDown(event) {
+    if (event.button !== 0) return;
+    const grip = event.currentTarget;
+    const box = el('[data-chw-drawer]');
+    const startY = event.clientY;
+    const startH = box.getBoundingClientRect().height;
+    event.preventDefault();
+    try { grip.setPointerCapture(event.pointerId); } catch (_) {}
+    grip.classList.add('is-drag');
+    // 아래에 붙어 위로 자란다 - 위로 끌면 커진다.
+    const move = e => applyDrawerH(startH + (startY - e.clientY));
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      grip.classList.remove('is-drag');
+      try { storage?.setItem(DRAWER_H_KEY, String(drawerH)); } catch (_) {}
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  }
+  async function setDrawer(open) {
+    const box = el('[data-chw-drawer]');
+    if (!box) return;
+    drawerOpen = !!open;
+    box.hidden = !drawerOpen;
+    if (drawerOpen) applyDrawerH(drawerH);
+    paintSel();
+    const actions = getActions() || {};
+    if (!drawerOpen) { actions.cancelGenOptions?.(); return; }
+    try { await actions.mountGenOptions?.(el('[data-chw-drawer-body]')); }
+    catch (error) { showToast(error.message || String(error), 'error'); }
   }
 
   function onClick(event) {
@@ -467,6 +523,7 @@ export function createCharacterWindow({
       else state.inc = state.inc.filter(x => !same(x));
       paintTools(); paintFeat(); resetResults(); return;
     }
+    if (t.closest('[data-chw-gopt]')) { void setDrawer(!drawerOpen); return; }
     const a = t.closest('[data-chw-act]');
     if (a) void act(a.dataset.chwAct);
   }
@@ -530,5 +587,14 @@ export function createCharacterWindow({
     },
     isOpen: () => !!(panel && panel.isOpen()),
     refresh: () => { if (panel && panel.isOpen()) resetResults(); },
+    /** 생성 설정 조각이 떠 있는 창(Find ⚙)으로 옮겨 갔다 - 빈 서랍을 닫는다. */
+    // 조각을 가져간 쪽이 부른다 - 그 이동을 무르면 안 되니 서랍만 접는다(setDrawer(false) 는 기다리는 열기를 무른다).
+    closeDrawer: () => {
+      if (!drawerOpen) return;
+      drawerOpen = false;
+      const box = el('[data-chw-drawer]');
+      if (box) box.hidden = true;
+      paintSel();
+    },
   };
 }

@@ -65,6 +65,11 @@ class CharacterSearchIndex:
         raw = {name: {'_tag': name, '_cat': 'character'} for _, name, _ in service._iter_all_chars()}
         self.alias_stats = apply_named_entity_aliases(raw, service.aliases_path)
         debut = service.debut_index()
+        # 추가 그룹 소속(사용자 결정 2026-10-22: 한 캐릭터가 여러 그룹) - 레코드 · 정체성(`주그룹::이름`)은 하나 그대로,
+        # 그룹 명단(self.groups)과 작품 색인(self.works)에만 더한다. 그 그룹에 같은 이름이 주 소속으로 있으면 넣지 않는다.
+        membership = service.group_membership()
+        analysis = service.analysis()
+        extra_pairs = []
         for group, name, data in service._iter_all_chars():
             rid = len(self.records)
             norm = normalize(name)
@@ -105,21 +110,41 @@ class CharacterSearchIndex:
             copyright = str(data.get('copyright') or '').strip()
             if copyright and copyright != service.ORIGINAL_GROUP:
                 works.add(intern(normalize(copyright)))
+            extras = tuple(g for g in membership.get(f'{group}::{name}', ())
+                           if name not in (analysis.get(g) or {}))
+            for extra in extras:
+                works.add(intern(normalize(extra)))
             works.discard('')
             for work in works:
                 self.works[work].append(rid)
             tags = normalize(service._tag_search_str(data))
             self.groups[group].append(rid)
+            for extra in extras:
+                self.groups[extra].append(rid)
+                extra_pairs.append((rid, extra))
             self.records.append(Record(group, name, norm, group_ids[group], service.prompt_head(data),
                 debut.get(name, ''), data.get('danbooru_posts'), norm + ', ' + tags,
                 '\n'.join(sorted(aliases)), f'{group}::{name}', data))
         del raw
+        # 추가 소속으로만 있는 그룹은 뒤에 붙인다 - 주 그룹 id(카탈로그 table 의 group_id)는 그대로.
+        self.group_names.extend(sorted(g for g in self.groups if g not in group_ids))
+        group_ids = {g: i for i, g in enumerate(self.group_names)}
         self.names = {k: tuple(v) for k, v in self.names.items()}
         self.aliases = {k: tuple(v) for k, v in self.aliases.items()}
         self.initials = {k: tuple(set(v)) for k, v in self.initials.items()}
         self.features = dict(self.features)
         self.works = dict(self.works)
         self.groups = dict(self.groups)
+        # 작품명(영문 그룹 키 · 한글 작품명)도 윗줄 검색이 본다 - 'steins' · '슈타인즈' 로 그 작품 캐릭터 전부(사용자 제보 10-22).
+        # 그룹뿐 아니라 copyright · parent_works 로 묶인 작품도 같은 색인(self.works)이다.
+        ko = {normalize(k): normalize(str(v or '')) for k, v in (service.group_ko() or {}).items()}
+        self.work_by_label = {}
+        for work in self.works:
+            self.work_by_label.setdefault(work, work)
+            label = ko.get(work)
+            if label:
+                self.work_by_label.setdefault(label, work)
+                self.work_by_label.setdefault(label.replace(' ', ''), work)
         self.name_keys = sorted(self.names)
         self.alias_keys = sorted(self.aliases)
         self.initial_keys = sorted(self.initials)
@@ -131,9 +156,11 @@ class CharacterSearchIndex:
         self.lock = threading.RLock()
         self.source_version = source_version
         table = [[r.group_id, r.name] for r in self.records]
-        digest = hashlib.sha256(json.dumps([source_version, self.group_names, table],
+        # 추가 소속 = [레코드 번호, 그룹 id] - table 은 한 캐릭터 한 줄(주 그룹) 그대로 둔다.
+        extra = [[rid, group_ids[g]] for rid, g in extra_pairs]
+        digest = hashlib.sha256(json.dumps([source_version, self.group_names, table, extra],
             ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()[:24]
-        self.catalog = {'version': digest, 'groups': self.group_names, 'table': table}
+        self.catalog = {'version': digest, 'groups': self.group_names, 'table': table, 'extra': extra}
 
     def clear_results(self):
         with self.lock:
@@ -162,7 +189,9 @@ class CharacterSearchIndex:
                 term = term.lstrip('*').strip()
             if term.startswith('work:'):
                 if term[5:].strip():
-                    works.append('work:' + term[5:].strip())
+                    # 한글 작품명도 받는다(work:슈타인즈 게이트) - 필터 색인은 영문 키다.
+                    work = term[5:].strip()
+                    works.append('work:' + self.work_by_label.get(work, self.work_by_label.get(work.replace(' ', ''), work)))
             elif term:
                 terms.append(term)
         ranks = None
@@ -188,6 +217,12 @@ class CharacterSearchIndex:
                 elif not exact and term in record.search:
                     found[rid] = 6
             add(self.features.get(term, ()), 6)
+            # 작품명 일치 = 가장 낮은 순위(이름 · 별칭 · 태그로 찾은 것이 먼저). 짧은 영문은 너무 넓다 - 3자부터(한글 2자).
+            loose = term.replace(' ', '')
+            if exact or len(loose) >= (2 if re.search('[가-힣]', term) else 3):
+                for label, work in self.work_by_label.items():
+                    if (label == term) if exact else (term in label or loose in label):
+                        add(self.works.get(work, ()), 7)
             ranks = found if ranks is None else {rid: max(rank, found[rid]) for rid, rank in ranks.items() if rid in found}
             if not ranks:
                 break
@@ -258,7 +293,7 @@ class CharacterSearchIndex:
             ids = [i for i in order if i in candidates]
             if ranks:
                 # Stable bucket sort keeps the precomputed legacy order within a tier.
-                buckets = [[] for _ in range(7)]
+                buckets = [[] for _ in range(8)]
                 for i in ids:
                     buckets[ranks[i]].append(i)
                 ids = [i for bucket in buckets for i in bucket]

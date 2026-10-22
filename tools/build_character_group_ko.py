@@ -262,6 +262,126 @@ REVIEW_REASONS["chromashift"] = "v2 후보 아이돌 코프는 다른 그룹 키
 REVIEW_REASONS["vee (vtuber)"] = "사전의 소니 뮤직은 운영사명. 그룹 VEE의 한국어 표기 미확정."
 REVIEW_REASONS["vampire (game)"] = "괄호가 붙은 별도 그룹. darkstalkers와 임의 병합하지 않음; 한국어 표기 미확정."
 
+# 추가 소속(data/character_group_membership.json)으로 3명이 된 새 그룹(2026-10-22 · 한 캐릭터가 여러 그룹).
+# 사전 후보가 분류어 · 상위 시리즈명(예: '나루토시리즈' · '축구' · '수집형 RPG')이거나 표기가 들쭉날쭉한 것만 고쳤다.
+# 시리즈 번호는 아라비아 숫자, 기존 그룹명과 같은 표기(러브라이브 · 페이트/…)를 따른다.
+MEMBERSHIP_REVIEWED_NAMES: dict[str, str | None] = {
+    ".hack//g.u.": "닷핵 G.U.",
+    "aikatsu friends!": "아이카츠 프렌즈!",
+    "aikatsu stars!": "아이카츠 스타즈!",
+    "ar tonelico ii": "아르토네리코 2",
+    "bang dream! it's mygo!!!!!": "뱅드림! It's MyGO!!!!!",
+    "boruto: naruto next generations": "보루토: 나루토 넥스트 제너레이션즈",
+    "bravely second: end layer": "브레이블리 세컨드 엔드 레이어",
+    "cinderella girls gekijou": "신데렐라 걸즈 극장",
+    "code geass: lost stories": "코드 기어스: 로스트 스토리즈",
+    "dead or alive xtreme venus vacation": "데드 오어 얼라이브 익스트림 비너스 버케이션",
+    "devil may cry 5": "데빌 메이 크라이 5",
+    "digimon liberator": "디지몬 리버레이터",
+    "digimon story: cyber sleuth": "디지몬 스토리 사이버 슬루스",
+    "drag-on dragoon 3": "드래그 온 드라군 3",
+    "dragon musume ni naritakunai!": None,
+    "dragon quest iv": "드래곤 퀘스트 4",
+    "dragon quest vii": "드래곤 퀘스트 7",
+    "dream c club": "드림 C 클럽",
+    "duel masters play's": "듀얼 마스터즈 플레이스",
+    "elden ring: shadow of the erdtree": "엘든 링 황금 나무의 그림자",
+    "equestria girls: rainbow rocks": "마이 리틀 포니: 이퀘스트리아 걸스 레인보우 록스",
+    "eureka seven": "교향시편 유레카 세븐",
+    "fate/apocrypha": "페이트/아포크리파",
+    "fate/extra": "페이트/엑스트라",
+    "fate/extra ccc": "페이트/엑스트라 CCC",
+    "fate/hollow ataraxia": "페이트/할로우 아타락시아",
+    "fate/prototype: fragments of blue and silver": "페이트/프로토타입 창은의 프래그먼츠",
+    "fate/samurai remnant": "페이트/사무라이 렘넌트",
+    "fate/stay night": "페이트/스테이 나이트",
+    "final fantasy ix": "파이널 판타지 9",
+    "final fantasy vii remake": "파이널 판타지 7 리메이크",
+    "final fantasy xv": "파이널 판타지 15",
+    "final fantasy xvi": "파이널 판타지 16",
+    "fire emblem fates": "파이어 엠블렘 if",
+    "fire emblem: genealogy of the holy war": "파이어 엠블렘 성전의 계보",
+    "fire emblem: new mystery of the emblem": "파이어 엠블렘 신 문장의 수수께끼",
+    "fire emblem: the blazing blade": "파이어 엠블렘 열화의 검",
+    "girls und panzer ribbon no musha": "걸즈 앤 판처 리본의 무사",
+    "god eater 2: rage burst": "갓 이터 2 레이지 버스트",
+    "gundam 00": "기동전사 건담 00",
+    "gundam build fighters try": "건담 빌드 파이터즈 트라이",
+    "gundam gquuuuuux": "기동전사 건담 지쿠악스",
+    "gundam seed destiny": "기동전사 건담 SEED DESTINY",
+    "gundam seed freedom": "기동전사 건담 SEED FREEDOM",
+    "hachigatsu no cinderella nine": "8월의 신데렐라 나인",
+    "hades 2": "하데스 2",
+    "hollow knight: silksong": "할로우 나이트: 실크송",
+    "hololive dev is": "홀로라이브 DEV_IS",
+    "hololive english": "홀로라이브 English",
+    "holostars english": "홀로스타즈 English",
+    "idol time pripara": "아이돌 타임 프리파라",
+    "idolmaster cinderella girls": "아이돌마스터 신데렐라 걸즈",
+    "idolmaster cinderella girls starlight stage": "아이돌마스터 신데렐라 걸즈 스타라이트 스테이지",
+    "inazuma eleven go": "이나즈마 일레븐 GO",
+    "kage no jitsuryokusha ni naritakute! master of garden": "어둠의 실력자가 되고 싶어서! 마스터 오브 가든",
+    "kai no kiseki": "영웅전설 계의 궤적",
+    "kai-ri-sei million arthur": "괴리성 밀리언 아서",
+    "kaitou tenshi twin angel": "괴도천사 트윈엔젤",
+    "link! like! love live!": "링크! 라이크! 러브라이브!",
+    "love live! nijigasaki high school idol club": "러브라이브! 니지가사키 학원 스쿨 아이돌 동호회",
+    "love live! school idol project": "러브라이브! 스쿨 아이돌 프로젝트",
+    "love live! sunshine!!": "러브라이브! 선샤인!!",
+    "love live! superstar!!": "러브라이브! 슈퍼스타!!",
+    "macross delta": "마크로스 델타",
+    "mahou shoujo ikusei keikaku unmarked": "마법소녀 육성계획 unmarked",
+    "mahou shoujo lyrical nanoha detonation": "마법소녀 리리컬 나노하 Detonation",
+    "mahou shoujo madoka magica (anime)": "마법소녀 마도카☆마기카 (애니메이션)",
+    "mahou shoujo madoka magica: hangyaku no monogatari": "마법소녀 마도카☆마기카 반역의 이야기",
+    "mega man legends": "록맨 DASH",
+    "mega man legends (series)": "록맨 DASH 시리즈",
+    "mega man zx": "록맨 ZX",
+    "monster hunter: world": "몬스터 헌터: 월드",
+    "mortal kombat 9": "모탈 컴뱃 9",
+    "nier:automata": "니어 오토마타",
+    "nijiura maids": None,
+    "osomatsu (series)": "오소마츠 시리즈",
+    "persona 3": "페르소나 3",
+    "pokemon (anime)": "포켓몬스터 (애니메이션)",
+    "pokemon pokopia": "포켓몬 포코피아",
+    "portrait of exotic girls": None,
+    "rune factory: guardians of azuma": None,
+    "saki achiga-hen": "사키 아치가편",
+    "sakura taisen ii": "사쿠라 대전 2",
+    "scott pilgrim takes off": "스콧 필그림 테이크 오프",
+    "senran kagura estival versus": "섬란 카구라 ESTIVAL VERSUS",
+    "senran kagura new wave": "섬란 카구라 NEW WAVE",
+    "shin jigen game neptune vii": "신차원게임 넵튠 VII",
+    "shin megami tensei v: vengeance": "진 여신전생 5 벤전스",
+    "shining resonance": "샤이닝 레조넌스",
+    "sonic the hedgehog (idw)": "소닉 더 헤지혹 (IDW)",
+    "spider-man: into the spider-verse": "스파이더맨: 뉴 유니버스",
+    "splatoon 2": "스플래툰 2",
+    "steins;gate 0": "슈타인즈 게이트 제로",
+    "street fighter 6": "스트리트 파이터 6",
+    "summon night 3": "서몬나이트 3",
+    "sword art online: alicization": "소드 아트 온라인 앨리시제이션",
+    "tales of arise": "테일즈 오브 어라이즈",
+    "tales of graces": "테일즈 오브 그레이스",
+    "the king of fighters xv": "더 킹 오브 파이터즈 XV",
+    "the legend of zelda: breath of the wild": "젤다의 전설 야생의 숨결",
+    "thor (marvel) (series)": "토르",
+    "to love-ru darkness": "투 러브 트러블 다크니스",
+    "toaru majutsu no index: old testament": "어떤 마술의 금서목록 구약",
+    "tokyo mirage sessions fe": "환영이문록 #FE",
+    "waccha primagi!": "왓챠 프리마지!",
+    "vspo! en": "브이스포! EN",
+    "witches of africa": None,
+    "xenoblade chronicles 2": "제노블레이드 크로니클스 2",
+    "xenoblade chronicles 3: future redeemed": "제노블레이드 크로니클스 3 새로운 미래",
+    "zero escape: toki no dilemma": None,
+}
+for _group, _name in MEMBERSHIP_REVIEWED_NAMES.items():
+    REVIEWED_NAMES.setdefault(_group, _name)
+    if _name is None:
+        REVIEW_REASONS.setdefault(_group, "사전 후보가 분류어 · 상위 시리즈명뿐이고 정식 한국어 표기를 확정하지 못함.")
+
 
 def normalize_tag(value: str) -> str:
     return " ".join(value.replace("_", " ").replace(r"\(", "(")
@@ -313,12 +433,25 @@ def keyword_names(keywords: str, label_counts: dict[str, int]) -> list[str]:
     return result
 
 
-def build_names(analysis, sources, reviewed=None):
+def group_sizes(analysis, membership=None):
+    """그룹 -> 인원. 추가 소속(`data/character_group_membership.json` 의 extra)도 센다 - 추가 소속만으로
+    3명이 되는 새 그룹(예: steins;gate 0)도 이름을 받는다(사용자 결정 2026-10-22: 한 캐릭터가 여러 그룹)."""
+    sizes = Counter({group: len(characters) for group, characters in analysis.items()
+                     if isinstance(characters, dict)})
+    extra = (membership or {}).get("extra") if isinstance(membership, dict) else None
+    for groups in (extra or {}).values():
+        for group in groups or []:
+            sizes[group] += 1
+    return sizes
+
+
+def build_names(analysis, sources, reviewed=None, membership=None):
     prepared = {source: prepare_source(rows) for source, rows in sources.items()}
     reviewed = REVIEWED_NAMES if reviewed is None else reviewed
     names, records = {}, {}
-    for group, characters in sorted(analysis.items()):
-        if not isinstance(characters, dict) or len(characters) < MIN_CHARACTERS:
+    sizes = group_sizes(analysis, membership)
+    for group, size in sorted(sizes.items()):
+        if size < MIN_CHARACTERS:
             continue
         key = normalize_tag(group)
         # A missing suffix may be resolved, but an explicit disambiguator is
@@ -348,7 +481,7 @@ def build_names(analysis, sources, reviewed=None):
                   next((src for name, src, _ in candidates if name == chosen), "직접")) if chosen else ""
         if chosen:
             names[group] = chosen
-        records[group] = {"count": len(characters), "name": chosen or "", "source": source,
+        records[group] = {"count": size, "name": chosen or "", "source": source,
                           "candidates": candidates,
                           "reason": REVIEW_REASONS.get(group, "한국어 이름 미확정" if not chosen else
                               "대표 이름 선택 / 통용명·띄어쓰기 보정" if group in reviewed else ""),
@@ -426,12 +559,14 @@ def main():
     parser.add_argument("--interactive", type=Path, default=ROOT / "data/interactive_tags.json")
     parser.add_argument("--kr-tags", type=Path, default=ROOT / "data/KR_tags.parquet")
     parser.add_argument("--v2", type=Path, default=ROOT.parent / "KR_danbooru_tags_with_description-20260907-v2.csv")
+    parser.add_argument("--membership", type=Path, default=ROOT / "data/character_group_membership.json")
     parser.add_argument("--output", type=Path, default=ROOT / "data/character_group_ko.json")
     parser.add_argument("--review", type=Path, default=ROOT / "docs/character_group_ko_review_2026_10_22.md")
     args = parser.parse_args()
     analysis = json.loads(args.analysis.read_text(encoding="utf-8"))
     sources = read_sources(args.interactive, args.kr_tags, args.v2)
-    names, records, counts = build_names(analysis, sources)
+    membership = json.loads(args.membership.read_text(encoding="utf-8")) if args.membership.exists() else None
+    names, records, counts = build_names(analysis, sources, membership=membership)
     payload = {"note": ["캐릭터 3명 이상 그룹만 수록. 미확정 이름과 2명 이하 그룹은 제외.",
                         "사전 후보와 직접 검수한 한국어 이름. 검수표: docs/character_group_ko_review_2026_10_22.md",
                         "개발 도구 tools/build_character_group_ko.py로 생성. 런타임은 이 JSON만 읽음."],

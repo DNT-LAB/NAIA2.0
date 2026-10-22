@@ -73,6 +73,9 @@ class CharacterViewerService:
         # 내려받는 것이라, 요약해 둔 이 파일만 번들 데이터 루트에 둔다.
         self.debut_path = self.data_dir / "character_debut.json"
         self.group_ko_path = self.data_dir / "character_group_ko.json"
+        # 추가 그룹 소속(tools/build_character_group_membership.py 산출물 · 사용자 결정 2026-10-22: 한 캐릭터가 여러 그룹).
+        # 키 = `주그룹::이름`(정체성 그대로) · 값 = 그 캐릭터가 **더** 나오는 그룹들. 없으면 추가 소속 없음(옛 동작).
+        self.membership_path = self.data_dir / "character_group_membership.json"
         # 번들 미리보기 팩(폴백). 사용자 썸네일과 같은 성격이 아니라 **배포에 딸려오는**
         # 것이라 번들 데이터 루트에 둔다 — 업데이트 때 갱신되는 것이 맞다.
         self.preview_path = self.data_dir / "character_preview_thumbs.json"
@@ -122,6 +125,7 @@ class CharacterViewerService:
         self._preview_pack: dict[str, str] | None = None
         self._debut: dict[str, str] | None = None
         self._group_ko: dict[str, str] | None = None
+        self._membership: dict[str, Any] | None = None
         self._recent_since: str = ""
         self._favorites: set[str] | None = None
         self._hidden: set[str] | None = None
@@ -144,6 +148,7 @@ class CharacterViewerService:
         self._search_preview_file = None
         self._search_versions = dict(favorites=0, hidden=0, thumbs=0, pack=0)
         self._group_count_cache = None
+        self._group_primary_total = 0
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -204,6 +209,33 @@ class CharacterViewerService:
             return {group: name for group, name in names.items()
                     if isinstance(group, str) and isinstance(name, str) and name.strip()}
         return self._load_source_cache("_group_ko", self.group_ko_path, prepare)
+
+    def _membership_table(self) -> dict[str, Any]:
+        def prepare(raw):
+            table = raw.get("extra") if isinstance(raw, dict) else None
+            extra: dict[str, tuple[str, ...]] = {}
+            members: dict[str, list[tuple[str, str]]] = {}
+            for key, groups in (table.items() if isinstance(table, dict) else ()):
+                if not isinstance(key, str) or "::" not in key or not isinstance(groups, list):
+                    continue
+                primary, _, name = key.partition("::")
+                # 주 그룹 자신 · original 은 덧붙이지 않는다(original 은 고정 그룹 - 오리지널 캐릭터만).
+                wanted = tuple(dict.fromkeys(g for g in groups if isinstance(g, str) and g.strip()
+                                             and g != primary and g != self.ORIGINAL_GROUP))
+                if wanted:
+                    extra[key] = wanted
+                    for group in wanted:
+                        members.setdefault(group, []).append((primary, name))
+            return {"extra": extra, "members": members}
+        return self._load_source_cache("_membership", self.membership_path, prepare)
+
+    def group_membership(self) -> dict[str, tuple[str, ...]]:
+        """`주그룹::이름` -> 그 캐릭터가 더 나오는 그룹들. 파일이 없으면 빈 사전(추가 소속 없음)."""
+        return self._membership_table()["extra"]
+
+    def extra_members(self) -> dict[str, list[tuple[str, str]]]:
+        """그룹 -> 추가 소속으로 그 그룹에 나오는 (주그룹, 이름) 들."""
+        return self._membership_table()["members"]
 
     def debut_index(self) -> dict[str, str]:
         """캐릭터 이름 -> 처음 나타난 달("YYYY-MM"). 파일이 없으면 빈 사전이다.
@@ -419,19 +451,24 @@ class CharacterViewerService:
                 if self._group_count_cache is not None:
                     return self._group_count_cache
                 generation = self._source_generation
-            out: list[tuple[str, int]] = []
+            totals: dict[str, int] = {}
             for group_key, data in self.groups().items():
                 if str(group_key).startswith("_") or not isinstance(data, dict):
                     continue
-                total = len(data.get("girl", []) or []) + len(data.get("boy", []) or [])
-                out.append((group_key, total))
-            out.sort(key=lambda item: (-item[1], item[0].lower()))
+                totals[group_key] = len(data.get("girl", []) or []) + len(data.get("boy", []) or [])
+            # All = 캐릭터 수(주 그룹으로만 센다) - 추가 소속까지 더하면 한 캐릭터를 두 번 센다.
+            primary_total = sum(totals.values())
+            # 추가 소속(한 캐릭터가 여러 그룹 · 2026-10-22)도 그 그룹 인원이다. 추가 소속만 있는 새 그룹도 생긴다.
+            for group_key, members in self._listed_extra_members().items():
+                totals[group_key] = totals.get(group_key, 0) + len(members)
+            out: list[tuple[str, int]] = sorted(totals.items(), key=lambda item: (-item[1], item[0].lower()))
             with self._source_lock:
                 self._refresh_search_sources()
                 if generation != self._source_generation:
                     continue  # Never publish counts from an invalidated dictionary.
                 if self._group_count_cache is None:
                     self._group_count_cache = out
+                    self._group_primary_total = primary_total
                 return self._group_count_cache
 
     def state(self) -> dict[str, Any]:
@@ -455,14 +492,20 @@ class CharacterViewerService:
         query_text = normalize(query).lstrip("*").strip()
         terms = [t.strip().removeprefix("work:").strip() for t in query_text.split(",") if t.strip()]
         counts = self._group_counts()
+        character_total = self._group_primary_total if counts else 0
         # 성별을 고르면 그룹 인원도 그 성별로 센다(사용자 지시 2026-10-22) - 목록과 같은 잣대(색인 레코드의 gender).
         # `total` = 성별과 무관한 그룹 크기(창이 1명짜리 작품을 etc 로 묶는 기준 · 그대로 둔다).
         wanted = {str(g or "").strip().lower() for g in (genders or [])} & {"girl", "boy", "other"}
         per_gender: Counter | None = None
+        gender_total = 0
         if wanted:
             index = self._search_index or self.warm_search_index()
             if index is not None:
-                per_gender = Counter(r.group for r in index.records if r.gender in wanted)
+                # 그룹 명단(추가 소속 포함)으로 센다 - 레코드의 주 그룹으로 세면 추가 소속이 빠진다.
+                records = index.records
+                per_gender = Counter({group: sum(1 for rid in ids if records[rid].gender in wanted)
+                                      for group, ids in index.groups.items()})
+                gender_total = sum(1 for r in records if r.gender in wanted)
             else:
                 # 색인을 다른 스레드가 만드는 중이다 - 전체 수로 대신하면 '여' 에서도 남자만 있는 작품이 뜬다(3차 리뷰 P2).
                 # 그룹 사전의 여/남 명단으로 센다(비인간 `other` 는 색인에만 있다 - 그동안 0).
@@ -471,10 +514,16 @@ class CharacterViewerService:
                     if str(group_key).startswith("_") or not isinstance(data, dict):
                         continue
                     per_gender[group_key] = sum(len(data.get(g, []) or []) for g in ("girl", "boy") if g in wanted)
+                    gender_total += per_gender[group_key]
+                # 추가 소속도 그 캐릭터의 주 그룹 명단에 적힌 성별로 센다.
+                for group_key, members in self._listed_extra_members().items():
+                    added = sum(1 for _member, gender in members if gender in wanted)
+                    if added:
+                        per_gender[group_key] += added
         count_of = (lambda key, total: per_gender.get(key, 0)) if per_gender is not None else (lambda key, total: total)
         groups = [{"key": self.GROUP_ALL, "name": "All",
-                   "count": sum(per_gender.values()) if per_gender is not None else sum(c for _, c in counts),
-                   "total": sum(c for _, c in counts)}]
+                   "count": gender_total if per_gender is not None else character_total,
+                   "total": character_total}]
         # 한글 작품명(있으면 · `data/character_group_ko.json` - 3명 이상 작품만)을 같이 싣는다 - 창의 [한글] 표시.
         ko = self.group_ko()
         groups.extend({"key": key, "name": key, "count": count_of(key, count), "total": count,
@@ -589,6 +638,7 @@ class CharacterViewerService:
         if self._work_sets is None or self._work_totals is None:
             sets: dict[tuple[str, str], frozenset[str]] = {}
             totals: dict[str, int] = {}
+            membership = self.group_membership()
             for group_key, name, data in self._iter_all_chars():
                 works = {self._norm_feature(group_key)}
                 copyright_tag = str(data.get("copyright") or "").strip()
@@ -596,6 +646,8 @@ class CharacterViewerService:
                     works.add(self._norm_feature(copyright_tag))
                 for parent in data.get("parent_works") or []:
                     works.add(self._norm_feature(parent))
+                for extra in membership.get(f"{group_key}::{name}", ()):
+                    works.add(self._norm_feature(extra))
                 works.discard("")
                 sets[(group_key, name)] = frozenset(works)
                 for work in works:
@@ -926,7 +978,7 @@ class CharacterViewerService:
 
     def _refresh_search_sources_locked(self):
         paths = (self.analysis_path, self.groups_path, self.aliases_path, self.debut_path,
-                 self.group_ko_path)
+                 self.group_ko_path, self.membership_path)
         versions = tuple(self._file_version(p) for p in paths)
         previous = self._search_source_files
         if previous is not None and previous != versions:
@@ -942,6 +994,9 @@ class CharacterViewerService:
                 self._debut = None
             if previous[4] != versions[4]:
                 self._group_ko = None
+            if previous[5] != versions[5]:
+                self._membership = None
+                self._work_sets = self._work_totals = None
             self._search_index = None
             self._group_count_cache = None
         self._search_source_files = versions
@@ -1039,14 +1094,20 @@ class CharacterViewerService:
         if group_key == self.GROUP_ALL:
             chars = list(self._iter_all_chars())
         elif group_key == self.GROUP_ETC:
+            # 1명짜리 그룹 = 추가 소속까지 센 인원으로(`_group_counts`).
             singles = {key for key, count in self._group_counts() if count == 1}
             chars = [item for item in self._iter_all_chars() if item[0] in singles]
+            seen = {(gk, name) for gk, name, _ in chars}
+            for single in singles:
+                chars.extend(self._extra_chars(single, seen))
         else:
             chars = [
                 (group_key, name, data)
                 for name, data in (self.analysis().get(group_key, {}) or {}).items()
                 if isinstance(data, dict)
             ]
+            # 추가 소속(한 캐릭터가 여러 그룹) - 항목의 `group` 은 주 그룹 그대로(정체성).
+            chars.extend(self._extra_chars(group_key, {(gk, name) for gk, name, _ in chars}))
         chars = [item for item in chars if self._matches_query(item[1], item[2], query)]
         # 숨긴 캐릭터는 검색에 나오지 않는다(사용자 지시 2026-10-19) - 되돌리는 곳은 Find 의 [제외] 목록이다.
         hidden = set() if include_hidden else self.hidden()
@@ -1139,6 +1200,43 @@ class CharacterViewerService:
             ],
             "all_items": all_items,
         }
+
+    def _listed_extra_members(self) -> dict[str, list[tuple[tuple[str, str], str]]]:
+        """그룹 -> [((주그룹, 이름), 성별)] - 그룹 사전(`copyright_groups.json`) 명단에 있는 추가 소속만.
+
+        인원을 세는 길(`_group_counts` · 색인 없는 성별 인원)은 도감(28MB)을 읽지 않는다 - 대신 그룹 사전 명단으로
+        목록 길(색인 · `_extra_chars`)과 같은 규칙을 맞춘다: 낡은 키는 빼고, 그 그룹에 같은 이름이 주 소속이면 뺀다."""
+        listed: dict[str, dict[str, str]] = {}
+        for group_key, data in self.groups().items():
+            if str(group_key).startswith("_") or not isinstance(data, dict):
+                continue
+            names = listed.setdefault(group_key, {})
+            for gender in ("girl", "boy"):
+                for entry in data.get(gender, []) or []:
+                    name = entry.get("name") if isinstance(entry, dict) else entry
+                    if isinstance(name, str):
+                        names.setdefault(name, gender)
+        out: dict[str, list[tuple[tuple[str, str], str]]] = {}
+        for group_key, members in self.extra_members().items():
+            own = listed.get(group_key, {})
+            kept = [((primary, name), listed[primary][name]) for primary, name in members
+                    if name in listed.get(primary, {}) and name not in own]
+            if kept:
+                out[group_key] = kept
+        return out
+
+    def _extra_chars(self, group_key: str, seen: set[tuple[str, str]]):
+        """추가 소속으로 그 그룹에 나오는 (주그룹, 이름, 데이터) - 도감에 없는 것 · 이미 있는 것 · 같은 이름이 그 그룹에
+        주 소속으로 있는 것은 뺀다(색인 길과 같은 규칙)."""
+        analysis = self.analysis()
+        own = analysis.get(group_key) or {}
+        out = []
+        for primary, name in self.extra_members().get(group_key, ()):
+            data = (analysis.get(primary) or {}).get(name)
+            if isinstance(data, dict) and (primary, name) not in seen and name not in own:
+                seen.add((primary, name))
+                out.append((primary, name, data))
+        return out
 
     def _get_character(self, group_key: str, name: str) -> dict[str, Any]:
         data = (self.analysis().get(group_key, {}) or {}).get(name)

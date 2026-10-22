@@ -7694,7 +7694,7 @@ const characterWindowActions = new Proxy({}, {
 });
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-vslot1')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-ac1')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,

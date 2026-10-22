@@ -24927,13 +24927,22 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .chw-feat[hidden], .chw-chips[hidden] { display: none; }
 .chw-feat-row { display: flex; gap: 5px; }
 .chw-ft { flex: 1; }
-.chw-fsug { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-.chw-fs {
-  display: inline-flex; gap: 6px; align-items: baseline; padding: 2px 8px; border-radius: 999px; cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
+.chw-fwrap { flex: 1; min-width: 0; position: relative; display: flex; }
+.chw-fwrap .chw-ft { flex: 1; }
+/* 자동완성 목록(2026-10-22) - 입력칸 아래 떠 있다. */
+.chw-fdrop {
+  position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 30; max-height: 260px; overflow-y: auto;
+  border: 1px solid rgba(124,106,239,0.5); border-radius: 6px; background: rgba(22,21,31,0.98); box-shadow: 0 12px 30px rgba(0,0,0,0.45);
 }
-.chw-fs i { font-style: normal; font-size: 9.5px; color: var(--text-dim); }
-.chw-fs:hover { border-color: rgba(124,106,239,0.7); }
+.chw-fdrop[hidden] { display: none; }
+.chw-fdrop .chw-empty { padding: 7px 9px; }
+.chw-fs {
+  display: flex; gap: 8px; align-items: baseline; padding: 5px 9px; cursor: pointer;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+}
+.chw-fs span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chw-fs i { flex: none; font-style: normal; font-size: 9.5px; color: var(--text-dim); }
+.chw-fs:hover, .chw-fs.is-on { background: rgba(124,106,239,0.22); }
 .chw-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; flex: none; }
 .chw-chip { padding: 1px 8px; border-radius: 999px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px; background: transparent; border: 1px solid; }
 .chw-chip.is-inc { border-color: rgba(107,195,140,0.55); color: #a6e3bd; background: rgba(107,195,140,0.08); }

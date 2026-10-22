@@ -49,7 +49,8 @@ export function createCharacterWindow({
   let busy = '';
   let groups = [];                      // [{key, name, count}]
   let groupQuery = '';
-  let feat = {open: false, line: 'inc', text: '', rows: [], seq: 0, timer: 0};
+  // 필터 줄은 늘 보인다 · 추천 낱말은 칩 나열이 아니라 입력칸 아래 자동완성 목록(사용자 지시 2026-10-22).
+  let feat = {open: true, line: 'inc', text: '', rows: [], seq: 0, timer: 0, active: 0, show: false};
   let failedSeq = -1;                   // 이 조건(seq)에서 이미 실패를 알렸다 - 토스트는 한 번만
 
   // ── 틀 ────────────────────────────────────────────────────────────────────
@@ -73,9 +74,8 @@ export function createCharacterWindow({
       + `<div class="chw-tools"><input class="chw-q" type="search" data-chw-q spellcheck="false" autocomplete="off"`
       + ` placeholder="이름 · 한글 · 초성 · work:작품">`
       + `<span class="chw-seg" data-chw-seg></span>`
-      + `<button type="button" class="chw-tb" data-chw-fav title="즐겨찾기만">★</button>`
-      + `<button type="button" class="chw-tb" data-chw-featbtn title="색 · 특징 · 작품으로 거르기(Find [필터] 와 같은 낱말)">+ 필터</button></div>`
-      + `<div class="chw-feat" data-chw-feat hidden></div>`
+      + `<button type="button" class="chw-tb" data-chw-fav title="즐겨찾기만">★</button></div>`
+      + `<div class="chw-feat" data-chw-feat></div>`
       + `<div class="chw-chips" data-chw-chips hidden></div>`
       + `<div class="chw-main"><div class="chw-groups"><input class="chw-gq" type="search" data-chw-gq placeholder="그룹 검색" spellcheck="false">`
       + `<div class="chw-glist" data-chw-glist><div class="chw-gspacer" data-chw-gspacer></div></div></div>`
@@ -85,6 +85,10 @@ export function createCharacterWindow({
     body.addEventListener('click', onClick);
     body.addEventListener('input', onInput);
     body.addEventListener('keydown', onKey);
+    // 목록을 누르는 동안 입력칸 초점을 지킨다(누르기 전에 blur 로 목록이 닫히지 않게) · 칸을 떠나면 닫는다.
+    body.addEventListener('mousedown', event => { if (event.target.closest('[data-chw-fdrop]')) event.preventDefault(); });
+    body.addEventListener('focusin', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = true; paintFeat(); } });
+    body.addEventListener('focusout', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = false; paintFeat(); } });
     body.querySelector('[data-chw-grid]').addEventListener('scroll', () => paintGrid(), {passive: true});
     body.querySelector('[data-chw-glist]').addEventListener('scroll', () => paintGroups(), {passive: true});
     if (typeof ResizeObserver === 'function') new ResizeObserver(() => layoutGrid()).observe(body.querySelector('[data-chw-grid]'));
@@ -255,10 +259,6 @@ export function createCharacterWindow({
     }).join('');
     if (seg._html !== html) { seg._html = html; seg.innerHTML = html; }
     el('[data-chw-fav]').classList.toggle('is-on', state.fav);
-    const n = state.inc.length + state.exc.length;
-    const featBtn = el('[data-chw-featbtn]');
-    featBtn.textContent = n ? `필터 ${n}` : '+ 필터';
-    featBtn.classList.toggle('is-on', feat.open || !!n);
     const chips = el('[data-chw-chips]');
     const chipHtml = [...state.inc.map(t => ['inc', t]), ...state.exc.map(t => ['exc', t])].map(([line, t]) =>
       `<button type="button" class="chw-chip is-${t.kind === 'work' ? 'work' : line}" data-chw-unchip="${line}"`
@@ -268,25 +268,41 @@ export function createCharacterWindow({
     if (chips._html !== chipHtml) { chips._html = chipHtml; chips.innerHTML = chipHtml; }
   }
 
+  function shownSuggestions() {
+    const chosen = new Set([...state.inc, ...state.exc].map(t => `${t.kind}\u0000${t.tag}`));
+    return feat.rows.filter(r => !chosen.has(`${r.kind}\u0000${r.tag}`)).slice(0, 12);
+  }
+
   function paintFeat() {
     const box = el('[data-chw-feat]');
     if (!box) return;
-    box.hidden = !feat.open;
-    if (!feat.open) return;
     if (!box.querySelector('[data-chw-ft]')) {
       box.innerHTML = `<div class="chw-feat-row"><span class="chw-fseg">`
         + `<button type="button" data-chw-fline="inc">포함</button><button type="button" data-chw-fline="exc">제외</button></span>`
-        + `<input class="chw-ft" data-chw-ft type="search" placeholder="색 · 특징 · 가슴 · 작품 (예: pink hair)" spellcheck="false" autocomplete="off"></div>`
-        + `<div class="chw-fsug" data-chw-fsug></div>`;
+        + `<div class="chw-fwrap"><input class="chw-ft" data-chw-ft type="search" role="combobox" aria-autocomplete="list"`
+        + ` aria-controls="chwFdrop" placeholder="필터 - 색 · 특징 · 가슴 · 작품 (예: pink hair)" spellcheck="false" autocomplete="off">`
+        + `<div class="chw-fdrop" id="chwFdrop" role="listbox" data-chw-fdrop hidden></div></div></div>`;
     }
     box.querySelectorAll('[data-chw-fline]').forEach(b => b.classList.toggle('is-on', b.dataset.chwFline === feat.line));
-    const chosen = new Set([...state.inc, ...state.exc].map(t => `${t.kind}\u0000${t.tag}`));
-    const html = feat.rows.filter(r => !chosen.has(`${r.kind}\u0000${r.tag}`)).slice(0, 12).map(r =>
-      `<button type="button" class="chw-fs" data-chw-fs data-chw-tag="${escAttr(r.tag)}" data-chw-kind="${escAttr(r.kind)}">`
-      + `<span>${escHtml(r.tag)}</span><i>${escHtml(r.label || r.kind)} · ${Number(r.count || 0).toLocaleString()}</i></button>`).join('')
+    const rows = shownSuggestions();
+    if (feat.active >= rows.length) feat.active = Math.max(0, rows.length - 1);
+    const html = rows.map((r, i) =>
+      `<div class="chw-fs${i === feat.active ? ' is-on' : ''}" role="option" aria-selected="${i === feat.active}" data-chw-fs="${i}">`
+      + `<span>${escHtml(r.tag)}</span><i>${escHtml(r.label || r.kind)} · ${Number(r.count || 0).toLocaleString()}</i></div>`).join('')
       || (feat.text.trim() ? '<div class="chw-empty">맞는 낱말이 없습니다</div>' : '');
-    const sug = box.querySelector('[data-chw-fsug]');
-    if (sug._html !== html) { sug._html = html; sug.innerHTML = html; }
+    const drop = box.querySelector('[data-chw-fdrop]');
+    drop.hidden = !(feat.show && feat.text.trim());
+    if (drop._html !== html) { drop._html = html; drop.innerHTML = html; }
+    drop.querySelector('.chw-fs.is-on')?.scrollIntoView({block: 'nearest'});
+  }
+
+  function pickSuggestion(index) {
+    const row = shownSuggestions()[index];
+    if (!row) return;
+    (feat.line === 'exc' ? state.exc : state.inc).push({tag: row.tag, kind: row.kind});
+    feat.text = ''; feat.rows = []; feat.active = 0;
+    const input = el('[data-chw-ft]'); if (input) input.value = '';
+    paintTools(); paintFeat(); resetResults();
   }
 
   function suggest() {
@@ -301,6 +317,7 @@ export function createCharacterWindow({
         if (mine !== feat.seq) return;
         if (data.pending) { feat.timer = setTimeout(suggest, 1500); return; }      // 색인 준비 중(Find 와 같다)
         feat.rows = Array.isArray(data.rows) ? data.rows : [];
+        feat.active = 0;
       } catch (_) { feat.rows = []; }
       paintFeat();
     }, 150);
@@ -439,21 +456,10 @@ export function createCharacterWindow({
       paintTools(); resetResults(); return;
     }
     if (t.closest('[data-chw-fav]')) { state.fav = !state.fav; paintTools(); resetResults(); return; }
-    if (t.closest('[data-chw-featbtn]')) {
-      feat.open = !feat.open; paintTools(); paintFeat();
-      if (feat.open) el('[data-chw-ft]')?.focus();
-      return;
-    }
     const line = t.closest('[data-chw-fline]');
-    if (line) { feat.line = line.dataset.chwFline; paintFeat(); return; }
+    if (line) { feat.line = line.dataset.chwFline; paintFeat(); el('[data-chw-ft]')?.focus(); return; }
     const fs = t.closest('[data-chw-fs]');
-    if (fs) {
-      const term = {tag: fs.dataset.chwTag, kind: fs.dataset.chwKind};
-      (feat.line === 'exc' ? state.exc : state.inc).push(term);
-      feat.text = ''; feat.rows = [];
-      const input = el('[data-chw-ft]'); if (input) input.value = '';
-      paintTools(); paintFeat(); resetResults(); return;
-    }
+    if (fs) { pickSuggestion(Number(fs.dataset.chwFs)); el('[data-chw-ft]')?.focus(); return; }
     const chip = t.closest('[data-chw-unchip]');
     if (chip) {
       const same = term => term.tag === chip.dataset.chwTag && term.kind === chip.dataset.chwKind;
@@ -479,13 +485,29 @@ export function createCharacterWindow({
       paintGroups();
       return;
     }
-    if (event.target.closest('[data-chw-ft]')) { feat.text = event.target.value || ''; suggest(); }
+    if (event.target.closest('[data-chw-ft]')) { feat.text = event.target.value || ''; feat.show = true; suggest(); }
   }
 
+  // 자동완성 손버릇: ↑ ↓ 고르기 · Enter 넣기 · Esc 닫기(조합 중 키는 입력기의 것).
   function onKey(event) {
-    if (event.key === 'Enter' && event.target.closest('[data-chw-ft]')) {
-      const first = el('[data-chw-fs]');
-      if (first) { event.preventDefault(); first.click(); }
+    if (!event.target.closest('[data-chw-ft]') || event.isComposing || event.keyCode === 229) return;
+    const rows = shownSuggestions();
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (!rows.length) return;
+      event.preventDefault();
+      feat.show = true;
+      feat.active = (feat.active + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+      paintFeat();
+    } else if (event.key === 'Enter') {
+      if (!rows.length) return;
+      event.preventDefault();
+      pickSuggestion(feat.active);
+    } else if (event.key === 'Escape') {
+      if (!feat.show) return;
+      event.preventDefault();
+      event.stopPropagation();
+      feat.show = false;
+      paintFeat();
     }
   }
 
@@ -494,7 +516,7 @@ export function createCharacterWindow({
     ensurePanel();
     if (panel.isOpen()) panel.raise(); else panel.open();
     if (panel.isCollapsed && panel.isCollapsed()) panel.expand();
-    paintTools(); paintSel();
+    paintTools(); paintSel(); paintFeat();
     if (!groups.length) void loadGroups();
     resetResults();
   }

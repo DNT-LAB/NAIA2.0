@@ -734,10 +734,11 @@ class CharacterViewerService:
             except (OSError, ValueError):
                 return "user", None, "u0"
             return "user", path, f"u{stat.st_mtime_ns}-{stat.st_size}"
-        if not variant_label and f"{group_key}::{name}" in self.preview_pack():
-            return "fallback", None, f"p{self._preview_revision()}"
+        # 확장 팩이 번들보다 먼저(사용자 결정 2026-10-22: 4.5 로 그린 번들 3,000 도 V5 로 통일 - 받은 사람은 V5 를 본다).
         if not variant_label and f"{group_key}::{name}" in self.extension_pack():
             return "fallback", None, f"e{self._extension_rev}"
+        if not variant_label and f"{group_key}::{name}" in self.preview_pack():
+            return "fallback", None, f"p{self._preview_revision()}"
         return "", None, ""
 
     def _thumb_url(self, group_key: str, name: str, variant_label: str = "", size: str = "") -> str:
@@ -1325,9 +1326,13 @@ class CharacterViewerService:
         """
         if str(variant_label or ""):
             return None
+        # 확장 팩 먼저 - thumbnail_source 와 같은 순서(사용자 > 확장 > 번들).
+        ext = self._extension_thumb(f"{group_key}::{name}")
+        if ext:
+            return ext
         enc = self.preview_pack().get(f"{group_key}::{name}")
         if not enc:
-            return self._extension_thumb(f"{group_key}::{name}")
+            return None
         try:
             import base64
             return base64.b64decode(enc)

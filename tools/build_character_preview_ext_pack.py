@@ -40,10 +40,12 @@ def source_images(sources):
     return images
 
 
-def build_pack(sources, output: Path, bundled: Path) -> dict:
+def build_pack(sources, output: Path, bundled: Path, exclude_bundled: bool = False) -> dict:
     from PIL import Image
 
-    excluded = json.loads(Path(bundled).read_text(encoding="utf-8"))["thumbs"]
+    # 번들 키도 담는다(사용자 결정 2026-10-22: 번들 3,000 도 V5 로 통일 - 서비스는 확장 팩을 번들보다 먼저 본다).
+    # 옛 동작(번들에 있는 키는 빼기)은 --exclude-bundled.
+    excluded = json.loads(Path(bundled).read_text(encoding="utf-8"))["thumbs"] if exclude_bundled else {}
     images = source_images(sources)
     manifest = {"format": 1, "built": datetime.now(timezone.utc).isoformat(), "count": 0, "keys": {}}
     # Exclusive creation is also race safe; never overwrite an existing release name.
@@ -71,8 +73,9 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=Path(f"NAIA_character_pack_{datetime.now():%y%m%d}.zip"))
     parser.add_argument("--bundled", type=Path,
                         default=Path(__file__).resolve().parents[1] / "data/character_preview_thumbs.json")
+    parser.add_argument("--exclude-bundled", action="store_true", help="번들 팩에 있는 키는 빼기(옛 동작)")
     args = parser.parse_args()
-    build_pack(args.src, args.out, args.bundled)
+    build_pack(args.src, args.out, args.bundled, exclude_bundled=args.exclude_bundled)
     return 0
 
 

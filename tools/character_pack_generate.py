@@ -72,6 +72,7 @@ NEGATIVE = (
     "agwing86]]], oldest female, simply drawn genitalia, unusual genitalia, text, loli")
 STEPS, WIDTH, HEIGHT = 28, 1024, 1024
 NONHUMAN_RATIO = 0.3
+V5_USAGE_FLOOR = 1         # V5 사용량(%)이 이 이하면 그 계정을 멈춘다 - 0 이 된 뒤 Anlas 로 넘어갈지 모른다(사용자 2026-10-22: 계정별로 소진)
 SLOW_SECONDS = 40         # 최근 10장 평균이 이보다 길면 할당량 소진으로 본다(평소 6~15초)
 
 # V5 몫(사용자 지정 2026-10-22 · 2판: 구도 태그 + -1::shaded face). 빈 줄은 앱처럼 빼고,
@@ -145,6 +146,123 @@ def build_more_targets(count: int, out_name: str) -> None:
     }, ensure_ascii=False, indent=1), encoding="utf-8")
     print("more targets", len(out), dict(Counter(t["kind"] for t in out)),
           "posts", out[0]["posts"] if out else None, "->", out[-1]["posts"] if out else None, target_dir)
+
+
+def extend_v5_targets() -> None:
+    """V5 몫에 **나머지 전부**를 잇는다(사용자 계획 2026-10-22: 4.5F 2,400 뒤 나머지는 V5F-medium 으로 · 한 번에 올린다).
+
+    나머지 = 사전 캐릭터 중 번들 팩 · 4.5F 5,000 · 4.5F 추가 · 지금 V5 목록 · 사용자 썸네일 어디에도 없는 것(게시물 순).
+    이미 그린 항목의 계정은 그대로 두고, 아직 안 그린 항목만 네 계정에 번갈아 다시 나눈다(레인 둘이 함께 내려가게).
+    """
+    import tempfile
+
+    sys.path.insert(0, str(ROOT))
+    from core.character_viewer_service import CharacterViewerService
+
+    doc = json.loads((OUT_V5 / "_targets.json").read_text(encoding="utf-8"))
+    targets = doc["targets"]
+    analysis = json.loads((ROOT / "data/character_analysis.json").read_text(encoding="utf-8"))
+    pack = set(json.loads((ROOT / "data/character_preview_thumbs.json").read_text(encoding="utf-8"))["thumbs"])
+    survey = json.loads((ROOT / "docs/character_pool_survey_2026_10_19/char_gender_survey.json").read_text(encoding="utf-8"))
+    covered = set(pack) | {t["key"] for t in targets}
+    for folder in ("20261021_pack2", "20261022_pack45b"):
+        covered |= {t["key"] for t in json.loads((OUT.parent / folder / "_targets.json").read_text(encoding="utf-8"))["targets"]}
+    if USER_THUMBS.is_dir():
+        for f in USER_THUMBS.glob("*.webp"):
+            group, _, rest = f.stem.partition("__")
+            covered.add(f"{group}::{rest.split('__')[0]}")
+    rest = sorted(((int(d.get("danbooru_posts") or 0), g, n, d.get("gender") or "girl")
+                   for g, cs in analysis.items() if isinstance(cs, dict)
+                   for n, d in cs.items() if isinstance(d, dict) and f"{g}::{n}" not in covered), reverse=True)
+    opts = {"hide_charname": False, "cosplay_enabled": False, "auto_copyright": True}
+    rank = max((t["rank"] for t in targets), default=0)
+    added = []
+    with tempfile.TemporaryDirectory() as tmp:
+        service = CharacterViewerService(ROOT, save_root=Path(tmp) / "save", thumbnail_root=Path(tmp) / "th")
+        for posts, group, name, gender in rest:
+            kind, line, ratio = _character_line(service, survey, group, name, gender, opts)
+            rank += 1
+            added.append({"rank": rank, "key": f"{group}::{name}", "posts": posts, "kind": kind,
+                          "nonhuman_ratio": round(ratio, 3), "line": line})
+    targets.extend(added)
+    accounts = ["GN5", "BKN", "MYT", "0UY"]
+    todo = [t for t in targets if not (OUT_V5 / f"{t['rank']:05d}.png").exists()]
+    half = len(todo) // 2
+    for i, t in enumerate(todo):
+        # 레인 A = GN5 -> MYT · 레인 B = BKN -> 0UY - 앞 절반은 GN5 · BKN, 뒤 절반은 MYT · 0UY 가 번갈아.
+        t["account"] = accounts[(2 if i >= half else 0) + (i % 2)]
+    from collections import Counter
+    doc.update({"count": len(targets), "assign_todo": dict(Counter(t["account"] for t in todo)), "targets": targets,
+                "extended": f"+{len(added)} (나머지 전부 · 2026-10-22)"})
+    (OUT_V5 / "_targets.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("v5 extended +", len(added), "total", len(targets), "todo", len(todo), dict(Counter(t["account"] for t in todo)))
+
+
+def redo_in_v5() -> None:
+    """4.5 로 그린 것을 V5 로 다시(사용자 결정 2026-10-22: 품질 차이 - V5 로 통일).
+
+    대상 = 4.5F 5,000(`20261021_pack2`) · 4.5F 추가 2,400(`20261022_pack45b`) · 번들 팩 3,000(`data/character_preview_thumbs.json`).
+    V5 목록 뒤에 이어 붙인다(같은 팩에 담긴다). 4.5 원본은 그 폴더에 그대로 둔다. 새 항목은 MYT · 0UY 에 번갈아.
+    번들 키는 확장 팩이 번들보다 먼저 보여야 바뀐다 - 서비스 우선순위(사용자 > 확장 > 번들)와 빌드 도구(번들 키 포함)가 맞춰져 있어야 한다.
+    """
+    import tempfile
+
+    sys.path.insert(0, str(ROOT))
+    from core.character_viewer_service import CharacterViewerService
+
+    doc = json.loads((OUT_V5 / "_targets.json").read_text(encoding="utf-8"))
+    targets = doc["targets"]
+    have = {t["key"] for t in targets}
+    analysis = json.loads((ROOT / "data/character_analysis.json").read_text(encoding="utf-8"))
+    survey = json.loads((ROOT / "docs/character_pool_survey_2026_10_19/char_gender_survey.json").read_text(encoding="utf-8"))
+    order = []
+    for folder in ("20261021_pack2", "20261022_pack45b"):
+        order += [t["key"] for t in json.loads((OUT.parent / folder / "_targets.json").read_text(encoding="utf-8"))["targets"]]
+    bundled = list(json.loads((ROOT / "data/character_preview_thumbs.json").read_text(encoding="utf-8"))["thumbs"])
+    # 번들(게시물 상위 3,000)을 먼저 - 사용자가 가장 자주 보는 캐릭터다.
+    keys = [k for k in dict.fromkeys(bundled + order) if k not in have]
+    user = set()
+    if USER_THUMBS.is_dir():
+        for f in USER_THUMBS.glob("*.webp"):
+            group, _, rest = f.stem.partition("__")
+            user.add(f"{group}::{rest.split('__')[0]}")
+    opts = {"hide_charname": False, "cosplay_enabled": False, "auto_copyright": True}
+    rank = max((t["rank"] for t in targets), default=0)
+    added, skipped = [], []
+    with tempfile.TemporaryDirectory() as tmp:
+        service = CharacterViewerService(ROOT, save_root=Path(tmp) / "save", thumbnail_root=Path(tmp) / "th")
+        for i, key in enumerate(keys):
+            group, _, name = key.partition("::")
+            data = (analysis.get(group) or {}).get(name)
+            # 사용자 썸네일이 있어도 뺀다 **않는다** - 이 팩은 다른 사용자에게 간다(그들에게는 이 기계의 썸네일이 없다).
+            if not isinstance(data, dict):
+                skipped.append(key)
+                continue
+            kind, line, ratio = _character_line(service, survey, group, name, data.get("gender") or "girl", opts)
+            rank += 1
+            added.append({"rank": rank, "key": key, "posts": int(data.get("danbooru_posts") or 0), "kind": kind,
+                          "nonhuman_ratio": round(ratio, 3), "line": line, "redo_from": "v4.5",
+                          "account": ("MYT", "0UY")[len(added) % 2]})
+    targets.extend(added)
+    from collections import Counter
+    doc.update({"count": len(targets), "targets": targets,
+                "redo": f"+{len(added)} (4.5 -> V5 · 번들 포함 · 2026-10-22) · 뺌 {len(skipped)}"})
+    (OUT_V5 / "_targets.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("redo +", len(added), "skipped", len(skipped), skipped[:8], dict(Counter(t["account"] for t in added)),
+          "total", len(targets))
+
+
+def assign_v5(accounts: list[str]) -> None:
+    """아직 안 그린 V5 항목을 `accounts` 에 번갈아 다시 나눈다(그린 것은 그대로).
+    사용자 2026-10-22: GN5 · BKN 의 V5 사용량을 먼저 다 쓴다 -> 멈추면 남은 것을 MYT · 0UY 로."""
+    doc = json.loads((OUT_V5 / "_targets.json").read_text(encoding="utf-8"))
+    todo = [t for t in doc["targets"] if not (OUT_V5 / f"{t['rank']:05d}.png").exists()]
+    for i, t in enumerate(todo):
+        t["account"] = accounts[i % len(accounts)]
+    from collections import Counter
+    doc["assign_todo"] = dict(Counter(t["account"] for t in todo))
+    (OUT_V5 / "_targets.json").write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
+    print("v5 assigned", len(todo), doc["assign_todo"])
 
 
 def build_v5_targets() -> None:
@@ -316,12 +434,26 @@ def _anlas(client, token: str):
         return None
 
 
+def _v5_usage(client, token: str):
+    try:
+        usage = client.fetch_subscription(token).get("usage") or {}
+        return None if usage.get("is_negative") else int(usage.get("percent"))
+    except Exception:
+        return None
+
+
 def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -> str:
     token = (TOOL / ACCOUNTS[label]).read_text(encoding="utf-8").strip()
     out_dir = OUT_V5 if v5 else OUT
     if not client.is_free_generation(*((V5_STEPS, V5_WIDTH, V5_HEIGHT) if v5 else (STEPS, WIDTH, HEIGHT))):
         raise SystemExit("not free band - refusing")
     start_anlas = _anlas(client, token)
+    if v5:
+        usage = _v5_usage(client, token)
+        _log(logf, ev="v5_usage", account=label, percent=usage)
+        if usage is not None and usage <= V5_USAGE_FLOOR:
+            print(f"[{label}] V5 usage {usage}% - nothing to spend, skipping", flush=True)
+            return "usage_low"
     _log(logf, ev="account_start", account=label, todo=len(items), anlas=start_anlas)
     print(f"[{label}] start todo={len(items)} anlas={start_anlas}", flush=True)
     manifest = (out_dir / f"manifest_{label}.jsonl").open("a", encoding="utf-8")
@@ -329,6 +461,7 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
     # 할당량 소진 감지(사용자 2026-10-22: 4.5F 버킷 = 1,200장 · 시간당 60장 회복). 소진되면 장당 시간이 분 단위로 늘어난다 -
     # 최근 10장 평균이 SLOW_SECONDS 를 넘으면 그 계정을 멈추고(bucket_empty) 남은 몫은 다른 계정에 다시 나눈다.
     recent: list[float] = []
+    give_ups = 0                 # 잇달아 포기한 수 - V5 사용량이 바닥나면 모든 요청이 실패한다(그때 재시도로 시간을 태우지 않는다)
     for item in items:
         if (out_dir / "STOP").exists():
             _log(logf, ev="stop_file", account=label)
@@ -355,7 +488,13 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
                 time.sleep(wait)
         if png is None:
             _log(logf, ev="give_up", account=label, rank=item["rank"])
+            give_ups += 1
+            if give_ups >= 5:
+                _log(logf, ev="give_up_streak", account=label, done=done)
+                print(f"[{label}] 5 give-ups in a row - quota or service problem, stopping this account", flush=True)
+                return "give_up_streak"
             continue
+        give_ups = 0
         tmp = path.with_suffix(".part")
         tmp.write_bytes(png)
         tmp.replace(path)
@@ -368,6 +507,13 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
             now = _anlas(client, token)
             _log(logf, ev="progress", account=label, done=done, anlas=now)
             print(f"[{label}] done {done} anlas={now}", flush=True)
+            if v5:
+                usage = _v5_usage(client, token)
+                _log(logf, ev="v5_usage", account=label, done=done, percent=usage)
+                print(f"[{label}] v5 usage {usage}%", flush=True)
+                if usage is not None and usage <= V5_USAGE_FLOOR:
+                    print(f"[{label}] V5 usage {usage}% <= {V5_USAGE_FLOOR}% - stopping this account", flush=True)
+                    return "usage_low"
             if start_anlas is not None and now is not None and now < start_anlas:
                 _log(logf, ev="anlas_dropped", account=label, start=start_anlas, now=now)
                 print(f"[{label}] ANLAS DROPPED {start_anlas} -> {now} - stopping this account", flush=True)
@@ -383,12 +529,13 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False) -
     return "done"
 
 
-def run_lane(lane: str, limit: int | None, v5: bool = False) -> None:
+def run_lane(lane: str, limit: int | None, v5: bool = False, account: str = "") -> None:
     client = _load_client()
     out_dir = OUT_V5 if v5 else OUT
     data = json.loads((out_dir / "_targets.json").read_text(encoding="utf-8"))
-    logf = (out_dir / f"run_lane{lane}.jsonl").open("a", encoding="utf-8")
-    for label in LANES[lane]:
+    # --account = 계정 하나만(사용자 지시 2026-10-22: 4계정 동시). 같은 계정을 두 프로세스로 돌리지 말 것(429 Concurrent).
+    logf = (out_dir / f"run_{account or 'lane' + lane}.jsonl").open("a", encoding="utf-8")
+    for label in ([account] if account else LANES[lane]):
         items = [t for t in data["targets"] if t["account"] == label]
         if limit:
             items = items[:limit]
@@ -403,11 +550,16 @@ def main() -> None:
     t = sub.add_parser("targets")
     t.add_argument("--count", type=int, default=5000)
     r = sub.add_parser("run")
-    r.add_argument("--lane", choices=sorted(LANES), required=True)
+    r.add_argument("--lane", choices=sorted(LANES), default="A")
+    r.add_argument("--account", choices=sorted(ACCOUNTS), default="", help="이 계정 하나만")
     r.add_argument("--limit", type=int, default=None, help="계정마다 앞에서 N 장만(시험)")
     r.add_argument("--v5", action="store_true", help="V5 몫(NAID5F-medium · 20261022_pack_v5)")
     r.add_argument("--out", default="", help="4.5F 출력 폴더 이름(기본 20261021_pack2)")
     sub.add_parser("v5-targets")
+    sub.add_parser("v5-extend")
+    sub.add_parser("v5-redo")
+    asg = sub.add_parser("v5-assign")
+    asg.add_argument("--accounts", required=True, help="쉼표로 - 예: GN5,BKN")
     m = sub.add_parser("more-targets")
     m.add_argument("--count", type=int, default=2400)
     m.add_argument("--out", required=True)
@@ -421,8 +573,14 @@ def main() -> None:
         build_targets(a.count)
     elif a.cmd == "v5-targets":
         build_v5_targets()
+    elif a.cmd == "v5-extend":
+        extend_v5_targets()
+    elif a.cmd == "v5-redo":
+        redo_in_v5()
+    elif a.cmd == "v5-assign":
+        assign_v5([x.strip() for x in a.accounts.split(",") if x.strip()])
     else:
-        run_lane(a.lane, a.limit, v5=a.v5)
+        run_lane(a.lane, a.limit, v5=a.v5, account=a.account)
 
 
 if __name__ == "__main__":

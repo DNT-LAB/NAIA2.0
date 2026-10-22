@@ -4,10 +4,10 @@
  *   [ 검색(이름 · 한글 · 초성 · work:) | ALL 여 남 외 | ★ | + 필터 ]
  *   [ 특징 칩 +포함 / −제외 / work: ]
  *   [ 그룹(전부 · 보이는 만큼만) |  썸네일 격자(전부 · 보이는 만큼만 · 창 폭에 맞춘 칸 수) ]
- *   [ 고른 캐릭터 줄: 이름 · 작품 · 게시물 · 프롬프트 줄 · [+ 슬롯] [+ 풀] [생성(메인)] [★] [복사] [숨김] [⋯] ]
+ *   [ 고른 캐릭터 줄: 이름 · 작품 · 게시물 · 프롬프트 줄 · [+ 슬롯] [+ 풀] [생성(벤치)] [생성(메인)] [랜덤+생성] [★] [복사] [숨김] [⋯] ]
  *   생성 셋(사용자 지시 2026-10-22): 생성(메인화면) = 메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장 · 랜덤+생성 = Random 뒤 같은 길
  *   (POST /api/character-viewer/main-generate - 메인 슬롯 · 풀은 안 바뀐다) · 생성(벤치) = 썸네일 생성(생성 설정 창).
- *   단추 줄은 한 줄이라 [생성(메인)] 만 두고 벤치 · 랜덤+생성은 [⋯] 와 우클릭 메뉴에.
+ *   셋 다 단추 줄에 둔다(사용자 2026-10-22 - 자리가 남는다). 우클릭 메뉴에도 한 무리로.
  *
  * 탭 규칙(Artist 와 같다): 창이 없거나 접혀 있으면 창부터 세우고 탭으로 가지 않는다. 창이 펴져 있을 때 다시 누르면 탭으로.
  * Find(퀵 패널)와는 **따로**다(사용자 결정) - 다만 같은 인프라를 쓴다: 같은 검색 라우트(`/list` · 검색 색인) · 같은 특징 자동완성 ·
@@ -78,7 +78,7 @@ export function createCharacterWindow({
       title: 'Characters',
       variant: 'chw',
       storageKey: 'character-window',
-      width: 720, height: 640, minWidth: 480, minHeight: 360, maxWidth: 1600,
+      width: 720, height: 640, minWidth: 500, minHeight: 360, maxWidth: 1600,
       resizable: true, collapsible: true,
       initial: {right: 24, y: 80},
       escHtml,
@@ -414,14 +414,14 @@ export function createCharacterWindow({
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
       + `<button type="button" class="chw-act is-pool" data-chw-act="pool"${off}>+ 풀</button>`
+      + `<button type="button" class="chw-act" data-chw-act="gen"${off} title="썸네일 생성(생성 설정 창의 Prefix · Postfix · 옵션)">생성(벤치)</button>`
       + `<button type="button" class="chw-act" data-chw-act="genmain"${off} title="메인 프롬프트 그대로 이 캐릭터를 임시 C1 로 한 장(메인 슬롯은 그대로)">생성(메인)</button>`
+      + `<button type="button" class="chw-act" data-chw-act="genrandom"${off} title="메인 Random 으로 프롬프트를 새로 뽑고 이 캐릭터를 임시 C1 로 한 장">랜덤+생성</button>`
       + `<button type="button" class="chw-act${s.favorite ? ' is-on' : ''}" data-chw-act="fav"${off} title="즐겨찾기">★</button>`
       + `<button type="button" class="chw-act" data-chw-act="copy"${off} title="프롬프트 줄 복사">복사</button>`
       + `<button type="button" class="chw-act is-hide" data-chw-act="hide"${off} title="숨김(검색 · 랜덤에서 빠진다 · Find [제외] 에서 되돌린다)">숨김</button>`
       + `<button type="button" class="chw-act" data-chw-act="more"${off} title="썸네일 삭제 · Characters 탭에서 열기">⋯</button></div>`
       + `<div class="chw-more" data-chw-more hidden>`
-      + `<button type="button" data-chw-act="genrandom"${off}>랜덤+생성</button>`
-      + `<button type="button" data-chw-act="gen"${off} title="썸네일 생성(생성 설정 창의 Prefix · Postfix · 옵션)">생성(벤치)</button>`
       + `<button type="button" data-chw-act="delthumb">내 썸네일 삭제</button>`
       + `<button type="button" data-chw-act="tab">Characters 탭에서 열기(연속 생성 등)</button></div>`;
   }

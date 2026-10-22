@@ -105,12 +105,17 @@ class TreeAttireClassifier:
         `nail polish` = 화장 · `bare shoulders` = 노출).
       · 단, 그 자리가 몸 · 노출 · 화장이 **아닌** 딴 갈래뿐이면(무늬 · 동물 · 사물 - `heart earrings` = symbols ·
         `cat hair ornament` = cats) 아래 '앞 낱말 떼기' 를 계속한다 -> earrings · hair ornament.
-        몸 · 노출 자리는 계속하지 않는다 - `no shoes` -> shoes · `no bra` -> bra 로 뒤집히면 안 된다.
+        몸 · 노출 · 들고 있다 · 구도(무늬 제외) 자리는 계속하지 않는다 - `no shoes` -> shoes · `no bra` -> bra ·
+        `diffraction spikes` -> spikes 로 뒤집히면 안 된다.
     지도에 없는 태그(지도는 **색 태그를 버렸다** - `white shirt` · `red bow`)는 앞 낱말을 하나씩 떼며 처음 걸리는
     자리로 본다: `white shirt` -> shirt · `plaid skirt` -> skirt · `black-framed eyewear` -> eyewear ·
     `red nails` -> nails(어디에도 없다 = 의상 아님) · `very long braid` -> long braid(머리 모양).
     지도에 없는 포괄 낱말(`UMBRELLA` - `black headwear` · `white footwear` · `gold trim`)만 손으로 둔다.
     끝까지 못 찾으면 의상이 아니다(`striped` · `animal print` - 무늬만으로는 옷이 아니다).
+
+    **들고 다니는 것은 의상이 아니다**(사용자 결정 2026-10-22): 지도는 가방 · 우산 · 부채를 장신구(Bags · Misc)에 두지만
+    몸에 걸친 것이 아니다 - `CARRIED` 로 뺀다. `unworn ` · `holding ` 으로 시작하는 태그도 의상이 아니다.
+    몸에 차는 것(머리 장식 · 장신구 · 안경 · 머리에 얹은 가면/고글 · 허벅지 파우치)은 그대로 의상이다.
     """
 
     ATTIRE_D1 = "Attire and body accessories"
@@ -127,6 +132,36 @@ class TreeAttireClassifier:
     UMBRELLA = frozenset({"headwear", "footwear", "eyewear", "legwear", "handwear", "neckwear", "sleeves", "trim",
                           "jewelry"})
     BODY_D1 = "Body"
+    # 들고 다니는 것 - 지도의 장신구 > Bags · Misc · Decorations 에서 몸에 걸치지 않는 것을 골랐다.
+    # 몸에 차는 thigh pouch · arm pouch · belt bag 과 몸 · 옷에 붙는 것(vision · tail ornament · ofuda on clothes ·
+    # soul gem · wing ornament · core crystal · purity seal · shide)은 남긴다.
+    CARRIED = frozenset({
+        # Bags
+        "bag", "backpack", "school bag", "handbag", "randoseru", "shopping bag", "paper bag", "plastic bag",
+        "duffel bag", "animal bag", "satchel", "rolling suitcase", "grocery bag", "school briefcase", "kinchaku",
+        "coin purse", "luggage", "heart-shaped bag", "tote bag", "open bag", "backpack basket", "book holster",
+        "bear bag", "money bag", "transparent bag", "rabbit bag", "heart pouch", "drawstring bag",
+        # Misc - 우산 · 부채 · 손에 드는 물건
+        "umbrella", "oil-paper umbrella", "beach umbrella", "parasol", "closed umbrella", "transparent umbrella",
+        "shared umbrella", "frilled umbrella", "leaf umbrella", "planted umbrella", "torn umbrella",
+        "animal-themed umbrella",
+        "hand fan", "folding fan", "paper fan", "folded fan", "uchiwa", "tuanshan", "transparent fan", "war fan",
+        "leaf fan", "harisen",
+        "cane", "pocket watch", "handkerchief", "pencil case", "wallet", "ritual baton", "keyring", "tucked money",
+        "virtual pet (toy)", "shakujou", "omamori", "talisman", "mp3 player", "cigarette holder", "cellphone strap",
+        "pop socket", "muff",
+        # Decorations 중 몸에 걸치지 않는 것
+        "bag charm", "keychain", "animal keychain", "cellphone charm", "frilled pillow", "frilled innertube",
+        # 손에 드는 것(지도는 갑옷 · 손 장비에 둔다)
+        "shield", "puppet", "hand puppet",
+    })
+    # 이 낱말로 시작하면 의상이 아니다 - 벗어 둔 것 · 들고 있는 것 · 옷을 만지는 동작(`lifting own clothes`).
+    STOP_FIRST = frozenset({"unworn", "holding", "lifting", "adjusting", "removing"})
+    # 구도 · 스타일 갈래는 무늬(symbols)만 빼고 확정이다 - `diffraction spikes`(촬영 효과)가 spikes(장식)로 넘어가면
+    # 안 된다. 나머지 딴 갈래(무늬 · 동물 · 운동 · 물 …)는 앞 낱말 떼기를 계속한다(`baseball uniform` -> uniform ·
+    # `wet shirt` -> shirt · `heart earrings` -> earrings).
+    COMPOSITION_D1 = "Image composition and style"
+    SYMBOLS_D2 = "tag_group:symbols"
     HOLDING_D2 = "tag_group:holding_tags"
 
     def __init__(self, tree_path: Path = TREE_PATH):
@@ -141,6 +176,8 @@ class TreeAttireClassifier:
 
     def _direct(self, tag: str) -> bool | None:
         """True = 의상 · False = 의상 아님(확정) · None = 모름(앞 낱말을 떼고 계속)."""
+        if tag in self.CARRIED:
+            return False
         if tag in self.UMBRELLA:
             return True
         hits = self.place.get(tag)
@@ -151,9 +188,10 @@ class TreeAttireClassifier:
         nude = any(d2 == self.NUDITY_D2 for _, d2, _ in hits)
         if strong or (weak and not nude):
             return True
-        if any(d1 in (self.BODY_D1, self.ATTIRE_D1) or d2 == self.HOLDING_D2 for d1, d2, _ in hits):
-            return False                    # 몸 · 노출 · 화장 · '들고 있다' 자리 = 확정(`holding umbrella` -> umbrella 금지)
-        return None                         # 딴 갈래(무늬 · 동물 · 사물)뿐 - 더 짧은 꼬리를 본다
+        if any(d1 in (self.BODY_D1, self.ATTIRE_D1) or d2 == self.HOLDING_D2
+               or (d1 == self.COMPOSITION_D1 and d2 != self.SYMBOLS_D2) for d1, d2, _ in hits):
+            return False                    # 몸 · 노출 · 화장 · 들고 있다 · 촬영 효과 = 확정
+        return None                         # 딴 갈래(무늬 · 동물 · 운동 · 물 …)뿐 - 더 짧은 꼬리를 본다
 
     def is_attire(self, tag: str) -> bool:
         tag = " ".join(str(tag or "").replace("_", " ").lower().split())
@@ -161,7 +199,7 @@ class TreeAttireClassifier:
         if hit is None:
             words = tag.split(" ")
             hit = False
-            for i in range(len(words)):
+            for i in range(0 if words[0] in self.STOP_FIRST else len(words)):
                 found = self._direct(" ".join(words[i:]))
                 if found is not None:
                     hit = found

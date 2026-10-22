@@ -439,8 +439,10 @@ export function createNaiAccountPanel({
         + (onAnlasBasis()
           ? ''
           : session.onV5
-            ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}`
-              + `${extra ? ` <em class="nai-acct-extra">+ 추가 ~${formatImages(extra)}</em>` : ''}</span>`
+            // 'V5 23step' = 이 장수의 기준(1MP · 23스텝 - IMAGES_PER_PERCENT) · 사용자 지시 2026-10-22.
+            // 추가분의 장수는 이 줄에 안 적는다 - 막대 옆 '+94%' 가 이미 말하고, 적으면 '갱신 n일' 이 밀려난다(실측 29px).
+            //   합은 위의 합계 줄이 '+ 추가 ~장' 으로 적는다.
+            ? `<i>|</i><span>V5 23step : ${esc(remain)}</span>`
             : `<i>|</i><span>${esc(rotationText(row))}</span>`)
         // 재결제까지 남은 일수(사용자 요청 2026-09-03). 줄 오른쪽 빈자리에 붙는다.
         // 백엔드가 **내림**한 정수를 주므로 시간 단위로 남으면 "0일" 이다 - 정확한
@@ -551,7 +553,7 @@ export function createNaiAccountPanel({
             ? `<span>무료 ~${sumImages.toLocaleString()}장 남음</span>`
               + '<em>지금 설정은 Anlas 를 씁니다</em>'
             : session.onV5
-              ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}`
+              ? `<i>|</i><span>V5 23step : ~${sumImages.toLocaleString()}`
                 + `${sumExtra ? ` <em class="nai-acct-extra">+ 추가 ~${imageCount(sumExtra).toLocaleString()}</em>` : ''}</span>`
                 + `<em>${esc(IMAGE_BASIS_NOTE)}</em>`
               : '')

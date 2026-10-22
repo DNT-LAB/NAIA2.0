@@ -2614,7 +2614,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026092
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20261022-extra1')
+    return import('./js/features/naiAccountPanel.mjs?v=20261022-extra3')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -11195,7 +11195,7 @@ function onNaiUsageUpdate(m) {
   const extraEl = $('naiUsageExtra');
   const extra = onV5 && !m.is_negative ? Math.max(0, Math.round(Number(m.purchased_percent) || 0)) : 0;
   if (extraEl) {
-    extraEl.textContent = extra ? `+${extra}` : '';
+    extraEl.textContent = extra ? `+${extra}%` : '';
     extraEl.classList.toggle('hidden', !extra);
   }
   // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).

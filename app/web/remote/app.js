@@ -1048,7 +1048,7 @@ const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-pic
   .catch(error => {
     console.error('Failed to initialize Artist Thumb tab module', error);
   });
-const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261021-gset1')
+const characterViewerReady = import('./js/features/characterViewerTab.mjs?v=20261022-chw1')
   .then(({createCharacterViewerController}) => {
     characterViewerControl = createCharacterViewerController({
       document,
@@ -2934,7 +2934,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-sph3')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-chw2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2975,7 +2975,7 @@ let characterGenSettings = null;
 let characterGenSettingsReady = null;
 function openCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261021-gset1')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-chw3')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,
@@ -7660,6 +7660,50 @@ function getDetachedModuleGeometry(moduleId) {
  *  전부 리모컨으로 옮겨 간 뒤로, 탭은 데이터를 관리하는 화면이지 작가를 보는 곳이
  *  아니다. 판단은 탭 쪽이 한다(리모컨 상태를 아는 쪽이 거기다).
  */
+/** [Characters] 탭 단추 전용 문(사용자 결정 2026-10-22: Artist 탭처럼).
+ *  창이 없거나 접혀 있으면 **떠 있는 Characters 창부터** 세우고 탭으로는 가지 않는다. 창이 펴져 있을 때 다시 누르면 탭으로
+ *  (옛 화면 - 상세 · 연속 생성). Find(퀵 패널)는 따로다 - 다만 슬롯 · 풀 · 생성은 Find 의 손잡이를 같이 쓴다. */
+let characterWindow = null;
+let characterWindowReady = null;
+// 퀵 패널 모듈이 아직 안 왔을 때 Characters 창의 단추가 조용히 사라지지 않게 - 도착을 기다렸다가 같은 손잡이를 부른다.
+const characterActionsWhenReady = new Proxy({}, {
+  get: (_target, name) => async (...args) => {
+    await characterQuickPanelReady;
+    const fn = characterQuickPanel?.characterActions?.[name];
+    if (typeof fn !== 'function') { showToast('캐릭터 패널을 아직 불러오지 못했습니다.', 'error'); return null; }
+    return fn(...args);
+  },
+});
+function ensureCharacterWindow() {
+  if (!characterWindowReady) {
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-chw3')
+      .then(({createCharacterWindow}) => {
+        characterWindow = createCharacterWindow({
+          document, window, escHtml, showToast,
+          storage: localStorage,
+          getActions: () => characterQuickPanel?.characterActions || characterActionsWhenReady,
+          openCharacterPage: (group, character) => {
+            switchRightTab('characters');
+            void characterViewerReady.then(() => characterViewerControl?.openCharacter?.(group, character));
+          },
+        });
+        return characterWindow;
+      })
+      .catch(error => {
+        characterWindowReady = null;
+        console.error('Failed to initialize character window module', error);
+        return null;
+      });
+  }
+  return characterWindowReady;
+}
+function requestCharactersTab() {
+  // 모듈이 아직이면 불러서 창을 세운다(탭으로는 가지 않는다 - 첫 누름).
+  if (!characterWindow) { void ensureCharacterWindow().then(win => win?.open()); return; }
+  if (!characterWindow.requestTab()) return;
+  switchRightTab('characters');
+}
+
 function requestArtistsTab() {
   if (artistThumbControl && typeof artistThumbControl.requestArtistsTab === 'function') {
     if (!artistThumbControl.requestArtistsTab()) return;

@@ -24899,6 +24899,96 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .ilb-stage.is-panning { cursor: grabbing; }
 /* `vp-stage` 는 preload 의 Ctrl+휠 비켜 가기용 이름뿐 - 히스토리 팝업 무대의 자리(아래 44px 비움)는 받지 않는다. */
 .ilb-stage.vp-stage { bottom: 0; display: block; }
+/* Characters 창(characterWindow.mjs · 2026-10-22) - 떠 있는 창 · 그룹 | 썸네일 격자(보이는 만큼만) · 고른 캐릭터 줄. */
+.dragpanel.chw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
+.chw { flex: 1; min-height: 0; display: flex; flex-direction: column; font-family: var(--font-mono); }
+.chw-hb {
+  height: 20px; padding: 0 8px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+  border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary);
+}
+.chw-hb:hover { color: var(--text-primary); border-color: rgba(124,106,239,0.7); }
+.chw-tools { display: flex; gap: 5px; align-items: center; padding: 6px 8px; flex: none; }
+.chw-q, .chw-gq, .chw-ft {
+  min-width: 0; height: 26px; padding: 0 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.3); color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+}
+.chw-q { flex: 1; }
+.chw-seg, .chw-fseg { display: flex; flex: none; border: 1px solid rgba(255,255,255,0.14); border-radius: 5px; overflow: hidden; }
+.chw-seg button, .chw-fseg button {
+  padding: 3px 7px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+}
+.chw-seg button.is-on, .chw-fseg button.is-on { background: rgba(124,106,239,0.3); color: var(--text-primary); }
+.chw-tb {
+  flex: none; height: 26px; padding: 0 8px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+  border: 1px solid rgba(255,255,255,0.14); background: transparent; color: var(--text-secondary);
+}
+.chw-tb.is-on { border-color: rgba(124,106,239,0.7); background: rgba(124,106,239,0.2); color: var(--text-primary); }
+.chw-feat { flex: none; padding: 0 8px 6px; }
+.chw-feat[hidden], .chw-chips[hidden] { display: none; }
+.chw-feat-row { display: flex; gap: 5px; }
+.chw-ft { flex: 1; }
+.chw-fsug { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.chw-fs {
+  display: inline-flex; gap: 6px; align-items: baseline; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.03); color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
+}
+.chw-fs i { font-style: normal; font-size: 9.5px; color: var(--text-dim); }
+.chw-fs:hover { border-color: rgba(124,106,239,0.7); }
+.chw-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; flex: none; }
+.chw-chip { padding: 1px 8px; border-radius: 999px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px; background: transparent; border: 1px solid; }
+.chw-chip.is-inc { border-color: rgba(107,195,140,0.55); color: #a6e3bd; background: rgba(107,195,140,0.08); }
+.chw-chip.is-exc { border-color: rgba(240,120,120,0.45); color: #efa3a3; background: rgba(240,100,100,0.07); }
+.chw-chip.is-work { border-color: rgba(124,106,239,0.55); color: #cfc8ff; }
+.chw-main { flex: 1; min-height: 0; display: flex; border-top: 1px solid rgba(255,255,255,0.08); }
+.chw-groups { width: 170px; flex: none; display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,0.08); }
+.chw-gq { margin: 6px; }
+.chw-glist { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+.chw-gspacer { position: relative; }
+.chw-gi {
+  position: absolute; left: 0; right: 0; top: 0; height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 9px;
+  border: 0; background: transparent; cursor: pointer; color: var(--text-secondary); font-family: var(--font-mono); font-size: 11px; text-align: left;
+}
+.chw-gi span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chw-gi i { font-style: normal; font-size: 10px; color: var(--text-dim); }
+.chw-gi:hover { background: rgba(124,106,239,0.12); color: var(--text-primary); }
+.chw-gi.is-on { background: rgba(124,106,239,0.26); color: var(--text-primary); }
+.chw-grid { flex: 1; min-width: 0; overflow-y: auto; position: relative; outline: none; }
+.chw-count { position: sticky; top: 0; z-index: 2; padding: 4px 10px; font-size: 10px; color: var(--text-dim); background: rgba(16,16,26,0.85); }
+.chw-spacer { position: relative; }
+.chw-cell {
+  position: absolute; left: 0; top: 0; padding: 0; border-radius: 7px; overflow: hidden; cursor: pointer; text-align: left;
+  border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); color: var(--text-primary);
+}
+.chw-cell:hover { border-color: rgba(124,106,239,0.6); }
+.chw-cell.is-on { border-color: #7c6aef; box-shadow: 0 0 0 1px #7c6aef; }
+.chw-im { position: relative; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.04); }
+.chw-im img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.chw-ini { font-size: 28px; color: var(--text-dim); }
+.chw-star { position: absolute; right: 4px; top: 3px; color: rgb(250,199,117); font-size: 12px; text-shadow: 0 0 3px #000; }
+.chw-nm { padding: 3px 6px 0; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chw-mt { padding: 0 6px 4px; font-size: 9.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chw-sel { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border-top: 1px solid rgba(255,255,255,0.08); }
+.chw-st { flex: 1 1 220px; min-width: 0; }
+.chw-st b { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.chw-st span { display: block; font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chw-acts { display: flex; gap: 4px; flex: none; }
+.chw-act {
+  padding: 4px 8px; border-radius: 5px; cursor: pointer; white-space: nowrap; font-family: var(--font-mono); font-size: 10.5px;
+  border: 1px solid rgba(255,255,255,0.16); background: rgba(0,0,0,0.25); color: var(--text-secondary);
+}
+.chw-act:hover:not(:disabled) { color: var(--text-primary); border-color: rgba(124,106,239,0.6); }
+.chw-act.is-slot { border-color: rgba(124,106,239,0.6); background: rgba(124,106,239,0.14); color: var(--text-primary); }
+.chw-act.is-pool { border-color: rgba(107,195,140,0.55); color: #9fdcb4; }
+.chw-act.is-hide { border-color: rgba(240,120,120,0.38); color: #e8a2a2; background: rgba(240,100,100,0.08); }
+.chw-act.is-on { color: rgb(250,199,117); border-color: rgba(250,199,117,0.55); }
+.chw-act:disabled { opacity: 0.55; cursor: progress; }
+.chw-more { flex-basis: 100%; display: flex; gap: 6px; justify-content: flex-end; }
+.chw-more[hidden] { display: none; }
+.chw-more button {
+  padding: 3px 9px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
+  border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary);
+}
+.chw-empty { padding: 8px 2px; font-size: 10.5px; color: var(--text-dim); }
 .ilb-img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transform-origin: center; user-select: none; }
 .ilb-img:not([style]) { opacity: 0; }
 .ilb-nav {
@@ -30791,6 +30881,14 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   background: rgba(250,199,117,0.12); color: rgb(242,201,126); font-size: 11px; line-height: 1.4;
 }
 .dragpanel.cqgen .cqgen-warn[hidden] { display: none; }
+/* 생성 설정 창의 옵션 체크(Characters 탭 Detail 에서 옮김 · 2026-10-22). */
+.dragpanel.cqgen .cqgen-opts { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px 4px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: var(--text-secondary); }
+.dragpanel.cqgen .cqgen-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.dragpanel.cqgen .cqgen-opts label.is-cos { flex-basis: 100%; }
+.dragpanel.cqgen .cqgen-cos {
+  flex: 1; min-width: 0; height: 22px; padding: 0 7px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.3); color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
+}
 
 /* ══ PE 빠른 수정 (js/features/peQuickEdit.mjs) ═══════════════════════════
    믹스 판 아래에 붙는 접이식 칸 둘. Prompt Engineering 의 prefix·postfix 를

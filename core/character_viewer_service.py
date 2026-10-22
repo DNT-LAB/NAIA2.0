@@ -94,6 +94,8 @@ class CharacterViewerService:
         self.legacy_thumb_dir = self.root / "data" / "character_thumbnails"
         self.extension_pack_path = self.thumb_dir.parent / "character_preview" / "character_pack.zip"
         self._extension_lock = threading.RLock()
+        # 옵션 저장 = 읽기 -> 고치기 -> 쓰기. 창 둘(생성 설정 창 · Characters 탭)이 동시에 보내면 앞선 쓰기가 뒤 값을 덮는다(Codex 리뷰).
+        self._options_lock = threading.Lock()
         self._extension_zip: zipfile.ZipFile | None = None
         self._extension_keys: dict[str, str] | None = None
         self._extension_rev = "0"
@@ -352,6 +354,10 @@ class CharacterViewerService:
         }
 
     def save_options(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._options_lock:
+            return self._save_options_locked(payload)
+
+    def _save_options_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.load_options()
         for key in (
             "prefix",

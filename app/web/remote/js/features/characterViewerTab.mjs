@@ -1389,6 +1389,13 @@ export function createCharacterViewerController({
       state = {...(state || {}), options: {...((state && state.options) || {}), ...options}};
       if (prefixEl && 'prefix' in options && document.activeElement !== prefixEl) prefixEl.value = String(options.prefix || '');
       if (postfixEl && 'postfix' in options && document.activeElement !== postfixEl) postfixEl.value = String(options.postfix || '');
+      // 옵션 체크도(생성 설정 창으로 옮긴 것 - 2026-10-22). 안 맞추면 이 탭의 옛 체크가 다음 저장 때 창의 새 값을 덮는다.
+      if (autoCopyrightEl && 'auto_copyright' in options) autoCopyrightEl.checked = !!options.auto_copyright;
+      if (autoCharacteristicsEl && 'auto_characteristics' in options) autoCharacteristicsEl.checked = !!options.auto_characteristics;
+      if (hideNameEl && 'hide_charname' in options) hideNameEl.checked = !!options.hide_charname;
+      if (noSaveEl && 'no_save' in options) noSaveEl.checked = !!options.no_save;
+      if (cosplayEl && 'cosplay_enabled' in options) cosplayEl.checked = !!options.cosplay_enabled;
+      if (cosplayNameEl && 'cosplay_name' in options && document.activeElement !== cosplayNameEl) cosplayNameEl.value = String(options.cosplay_name || '');
     },
     handleResultMeta,
     handleResultBlob,

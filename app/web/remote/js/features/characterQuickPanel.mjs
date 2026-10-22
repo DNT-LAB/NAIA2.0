@@ -2548,6 +2548,8 @@ export function createCharacterQuickPanel({
     if (meta.character_viewer_thumbnail_saved) {
       // 그 줄만 썸네일 주소를 단다 - 목록을 처음부터 다시 받으면 이어 붙인 쪽 · 스크롤 자리를 잃는다.
       const [group, character] = entry.key.split('\u0000');
+      // Characters 창도 같은 소식으로 갱신한다(2026-10-22 · 타이머로 짐작하지 않는다).
+      try { window.dispatchEvent(new CustomEvent('naia:character-thumb-changed', {detail: {group, character}})); } catch (_) {}
       const row = findDexRows.find(item => item.group === group && item.character === character);
       if (row) {
         row.thumbnail_url = `/api/character-viewer/thumbnail?${new URLSearchParams({group, character, size: 'grid', v: String(Date.now())})}`;
@@ -2592,6 +2594,7 @@ export function createCharacterQuickPanel({
       if (fav) {
         row.favorite = !!data.favorite;
         showToast(row.favorite ? `${character} - 즐겨찾기에 넣었습니다` : `${character} - 즐겨찾기에서 뺐습니다`, 'info');
+        try { window.dispatchEvent(new CustomEvent('naia:character-favorite-changed')); } catch (_) {}
         if (findFavOnly && !row.favorite) dropRow();       // [★] 보기에서는 빠진다
       } else {
         dropRow();
@@ -3485,5 +3488,19 @@ export function createCharacterQuickPanel({
   }
 
   // noteRandom - Random 이 굴렸다(그림이 없어도) - 마지막으로 뽑힌 캐릭터를 보인다(A).
-  return {render, setVisible, isOpen: () => open, noteRandom, noteCharacterResult, noteCharacterError};
+  /** Characters 창(characterWindow.mjs)이 Find 와 **같은 길**로 일하도록 내준다(사용자 결정 2026-10-22: 따로 두되 인프라는 같이).
+   *  슬롯 담기 = pickFindDex(중복이면 그 슬롯을 켠다 · 슬롯 한도) · 풀 = togglePool(지금 풀 키 · 없으면 1명 풀을 만든다) ·
+   *  생성 = generateFindThumb(Find [생성] 과 같은 quick-generate · 결과 소식도 같은 자리에서 받는다). */
+  const characterActions = {
+    addToSlot: (group, character) => pickFindDex(group, character),
+    poolAdd: async (group, character) => {
+      await loadPool();                                          // 지금 풀 키(그사이 바뀌었을 수 있다)
+      await togglePool(group, character, 'add', poolActive() ? poolInfo.key : '');
+    },
+    generateThumb: (group, character) => generateFindThumb(group, character),
+    openGenSettings: () => (typeof openGenSettings === 'function' ? openGenSettings() : null),
+    openPoolWindow: () => openPoolWindow(),
+  };
+
+  return {render, setVisible, isOpen: () => open, noteRandom, noteCharacterResult, noteCharacterError, characterActions};
 }

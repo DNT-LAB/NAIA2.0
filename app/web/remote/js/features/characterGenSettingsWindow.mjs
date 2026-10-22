@@ -19,6 +19,14 @@
  */
 
 const KEYS = {pre_prompt: 'prefix', post_prompt: 'postfix'};
+// Characters 탭 Detail 의 옵션도 이 창으로(사용자 결정 2026-10-22: 옮기되 Find 와 같은 인프라 - Find ⚙ 도 같은 창).
+// 값 = `/api/character-viewer/options` 의 같은 키(넘긴 키만 저장). 탭의 체크와 서로 맞춘다(onSaved / sync).
+const OPTION_CHECKS = [
+  ['auto_copyright', 'copyright 자동 추가'],
+  ['auto_characteristics', 'characteristics 자동 추가'],
+  ['hide_charname', '캐릭터명 숨김'],
+  ['no_save', '썸네일로 저장 안 함'],
+];
 
 export function createCharacterGenSettingsWindow({
   document: doc,
@@ -37,6 +45,17 @@ export function createCharacterGenSettingsWindow({
   let panel = null;
   let opening = null;
   let warnEl = null;
+  let optsEl = null;
+  let saveSeq = 0;               // 마지막 저장 요청의 번호 - 겹친 저장의 늦은 응답이 최신 값을 되돌리지 않게(Codex 리뷰)
+  let saveChain = Promise.resolve();
+
+  function paintOptions() {
+    if (!optsEl) return;
+    const o = options || {};
+    optsEl.querySelectorAll('[data-cqgen-opt]').forEach(box => { box.checked = !!o[box.dataset.cqgenOpt]; });
+    const cos = optsEl.querySelector('[data-cqgen-cos]');
+    if (cos && doc.activeElement !== cos) cos.value = String(o.cosplay_name || '');
+  }
   let loading = null;
 
   function paintWarn() {
@@ -55,6 +74,7 @@ export function createCharacterGenSettingsWindow({
         if (data && data.options) options = data.options;
         quick?.sync();
         paintWarn();
+        paintOptions();
       })
       .catch(() => {})
       .finally(() => { loading = null; });
@@ -64,17 +84,26 @@ export function createCharacterGenSettingsWindow({
   function save(key, text) {
     const name = KEYS[key];
     if (!name) return;
-    options = {...(options || {}), [name]: text};
-    fetch('/api/character-viewer/options', {
+    saveOption(name, text);
+  }
+
+  function saveOption(name, value) {
+    options = {...(options || {}), [name]: value};
+    paintOptions();
+    const mine = ++saveSeq;
+    // 차례대로 보낸다 - 겹쳐 보내면 서버의 읽기 -> 쓰기가 서로를 덮을 수 있다(서버에도 잠금이 있다 · 이중 방어).
+    saveChain = saveChain.catch(() => {}).then(() => fetch('/api/character-viewer/options', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({[name]: text}),
-    })
+      body: JSON.stringify({[name]: value}),
+    }))
       .then(async res => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (mine !== saveSeq) return;          // 뒤에 보낸 저장이 있다 - 그 응답이 최신이다
         options = data;
         paintWarn();
+        paintOptions();
         try { onSaved(data); } catch (_) {}
       })
       .catch(error => showToast(`생성 설정 저장 실패 — ${error.message || error}`, 'error'));
@@ -111,10 +140,27 @@ export function createCharacterGenSettingsWindow({
       more.addEventListener('click', () => { quick?.flush(); openCharacterPage(); });
       panel.slot.appendChild(more);
       panel.body.appendChild(quick.el);
+      optsEl = doc.createElement('div');
+      optsEl.className = 'cqgen-opts';
+      optsEl.innerHTML = OPTION_CHECKS.map(([key, label]) =>
+        `<label><input type="checkbox" data-cqgen-opt="${key}"><span>${escHtml(label)}</span></label>`).join('')
+        + `<label class="is-cos"><input type="checkbox" data-cqgen-opt="cosplay_enabled"><span>코스프레</span>`
+        + `<input type="text" class="cqgen-cos" data-cqgen-cos placeholder="코스프레할 캐릭터 이름" spellcheck="false"></label>`;
+      optsEl.addEventListener('change', event => {
+        const box = event.target.closest('[data-cqgen-opt]');
+        if (box) saveOption(box.dataset.cqgenOpt, !!box.checked);
+      });
+      // 이름 칸은 벗어날 때 저장(한 글자마다 보내지 않는다).
+      optsEl.addEventListener('focusout', event => {
+        const input = event.target.closest('[data-cqgen-cos]');
+        if (input && input.value !== String((options || {}).cosplay_name || '')) saveOption('cosplay_name', input.value);
+      });
+      panel.body.appendChild(optsEl);
       warnEl = doc.createElement('div');
       warnEl.className = 'cqgen-warn';
       warnEl.hidden = true;
       panel.body.appendChild(warnEl);
+      paintOptions();
       return panel;
     })();
     try { return await opening; } finally { opening = null; }
@@ -143,6 +189,7 @@ export function createCharacterGenSettingsWindow({
       if (next && typeof next === 'object') options = {...(options || {}), ...next};
       quick?.sync();
       paintWarn();
+      paintOptions();
     },
   };
 }

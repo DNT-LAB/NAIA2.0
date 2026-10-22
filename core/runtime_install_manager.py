@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
@@ -12,8 +14,10 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+import zlib
 
 from app.backend.runtime import RuntimePaths
+from core.character_preview_pack import read_manifest
 
 
 TAG_ARCHIVE_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/naia_tags.zip"
@@ -61,6 +65,13 @@ EVENT_MAP_INDEX_URL = (
 EVENT_MAP_INDEX_NAME = "event_map.naiamap"
 # 시작 전 고지용 근사치(실제 크기는 응답의 Content-Length 가 준다).
 EVENT_MAP_INDEX_APPROX_MB = 879
+
+# 캐릭터 썸네일 확장 팩(사용자 결정 2026-10-22 · HF lazy download · 사용자가 직접 올린다).
+# ⚠️ **올리기 전에는 비워 둔다** - 없는 파일을 가리키면 앱을 켤 때마다 404 로 실패 띠가 뜬다.
+#    올린 뒤 그 파일의 resolve 주소를 넣는다(예: .../NAIA/2026/NAIA_character_pack_<YYMMDD>.zip).
+#    판이 바뀌면 **이름을 바꿔** 올리고 여기도 바꾼다 - 받은 파일 옆 `character_pack.source` 와 다르면 새 판을 받는다.
+#    시험 · 개발에서는 `NAIA_CHARACTER_PACK_URL` 로 가리킬 수 있다.
+CHARACTER_PACK_URL = os.environ.get("NAIA_CHARACTER_PACK_URL", "").strip()
 
 
 @dataclass(frozen=True)
@@ -218,8 +229,13 @@ class RuntimeInstallManager:
         on_corpus_archive_complete: Callable[[], None] | None = None,
         event_map_url: str = EVENT_MAP_INDEX_URL,
         on_event_map_complete: Callable[[], None] | None = None,
+        character_pack_url: str | None = None,       # None = 모듈의 CHARACTER_PACK_URL(만들 때 읽는다)
+        on_character_pack_complete: Callable[[], None] | None = None,
+        character_pack_replace_guard: Callable[[], Any] | None = None,
     ):
         self.runtime_paths = runtime_paths
+        if character_pack_url is None:
+            character_pack_url = CHARACTER_PACK_URL
         self.tag_archive_url = tag_archive_url
         self.expected_tag_files = int(expected_tag_files or 0)
         self._on_tag_archive_complete = on_tag_archive_complete
@@ -228,6 +244,12 @@ class RuntimeInstallManager:
         self._on_corpus_archive_complete = on_corpus_archive_complete
         self.event_map_url = event_map_url
         self._on_event_map_complete = on_event_map_complete
+        self._character_pack_replace_guard = character_pack_replace_guard
+        self._character_pack_auto_requested = False
+        self._character_pack_queued = False
+        self._downloads: dict[str, dict[str, Any]] = {}
+        self._download_done_at: dict[str, float] = {}
+        self._download_results: dict[str, dict[str, Any]] = {}
         self._specs: dict[str, ArchiveSpec] = {
             "tag_archive": ArchiveSpec(
                 key="tag_archive",
@@ -278,7 +300,16 @@ class RuntimeInstallManager:
                 raw_name=EVENT_MAP_INDEX_NAME,
             ),
         }
+        self._specs["character_pack"] = ArchiveSpec(
+            key="character_pack", url=character_pack_url, subdir="character_preview",
+            suffixes=(".zip",), label="캐릭터 썸네일 확장 팩",
+            # A different URL must never resume bytes from the preceding edition.
+            temp_name="character_pack_" + hashlib.sha256(character_pack_url.encode()).hexdigest()[:16] + ".download_tmp",
+            count_glob="character_pack.zip", required_names=("character_pack.zip",),
+            raw_name="character_pack.zip",
+        )
         self._completion_hooks: dict[str, Callable[[], None] | None] = {
+            "character_pack": on_character_pack_complete,
             "tag_archive": on_tag_archive_complete,
             # 증분도 베이스와 같은 후처리를 탄다 - 새 parquet 이 생겼다는 사실은
             # 같고, 검색·자동완성이 목록을 다시 잡아야 한다.
@@ -330,6 +361,15 @@ class RuntimeInstallManager:
         return len([path for path in target.glob(spec.count_glob) if path.is_file()])
 
     def _archive_ready(self, spec: ArchiveSpec, count: int | None = None) -> bool:
+        if spec.key == "character_pack":
+            try:
+                target = self._archive_dir(spec)
+                if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
+                    return False
+                self._character_pack_manifest(target / spec.raw_name)
+                return True
+            except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
+                return False
         found = self._archive_file_count(spec) if count is None else count
         target = self._archive_dir(spec)
         for name in spec.required_names:
@@ -338,6 +378,27 @@ class RuntimeInstallManager:
         if spec.expected_count:
             return found >= spec.expected_count
         return found >= spec.min_count
+
+    @staticmethod
+    def _character_pack_manifest(path: Path) -> dict:
+        if path.stat().st_size < 1024 * 1024:
+            raise ValueError("다운로드된 캐릭터 썸네일 확장 팩 파일이 너무 작습니다.")
+        with zipfile.ZipFile(path) as archive:
+            return read_manifest(archive)
+
+    def _download_entry(self, spec: ArchiveSpec, state: str) -> None:
+        self._downloads[spec.key] = {
+            "key": spec.key, "phase": spec.key, "label": spec.label, "state": state,
+            "bytes": 0, "total": 0, "percent": 0, "error": "", "retryable": False,
+        }
+        self._download_done_at.pop(spec.key, None)
+        self._download_results.pop(spec.key, None)
+
+    def _downloads_snapshot(self) -> list[dict[str, Any]]:
+        with self._lock:
+            now = time.monotonic()
+            return [dict(row) for key, row in self._downloads.items()
+                    if row["state"] != "done" or now - self._download_done_at.get(key, now) < 10]
 
     def _archive_snapshot(self, spec: ArchiveSpec, download: dict[str, Any]) -> dict[str, Any]:
         count = self._archive_file_count(spec)
@@ -351,7 +412,12 @@ class RuntimeInstallManager:
             "url": spec.url,
             "label": spec.label,
             "download": download,
+            "last_download": self._last_download_result(spec.key),
         }
+
+    def _last_download_result(self, key: str) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._download_results.get(key, {}))
 
     def initialize(self) -> dict[str, Any]:
         self.runtime_paths.ensure_writable_dirs()
@@ -385,6 +451,7 @@ class RuntimeInstallManager:
                 "downloadable": bool(self.tag_archive_url),
                 "url": self.tag_archive_url,
                 "download": download,
+                "last_download": self._last_download_result("tag_archive"),
             },
             # 증분은 **베이스가 준비된 뒤에만** 의미가 있다. 베이스가 없는 사용자에게
             # 권하면 1.4GB 를 건너뛰고 275MB 를 받아 반쪽 코퍼스가 된다.
@@ -402,6 +469,8 @@ class RuntimeInstallManager:
                 "release_samples": str(self.runtime_paths.resource_path("release_assets/samples")),
             },
             "bootstrap_data": dict(self._bootstrap_state),
+            "character_pack": self._archive_snapshot(self._spec("character_pack"), download),
+            "downloads": self._downloads_snapshot(),
         }
 
     def start_tag_archive_download(self, *, blocking: bool = False) -> dict[str, Any]:
@@ -428,6 +497,30 @@ class RuntimeInstallManager:
     def start_event_map_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("event_map", blocking=blocking)
 
+    def auto_start_character_pack(self) -> dict[str, Any]:
+        """Startup calls this once. Polling never starts or retries a download."""
+        with self._lock:
+            if self._character_pack_auto_requested or self._downloads.get("character_pack", {}).get("state") == "error":
+                return dict(self._download_state)
+            self._character_pack_auto_requested = True
+            return self.start_character_pack_download()
+
+    def start_character_pack_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        with self._lock:
+            spec = self._spec("character_pack")
+            if not spec.url or self._archive_ready(spec):
+                self._character_pack_queued = False
+                if self._downloads.get(spec.key, {}).get("state") == "queued":
+                    self._downloads.pop(spec.key, None)
+                return dict(self._download_state)
+            if self._download_state.get("active"):
+                if self._download_state.get("phase") != spec.key:
+                    self._character_pack_queued = True
+                    self._download_entry(spec, "queued")
+                return dict(self._download_state)
+            self._character_pack_queued = False
+            return self.start_archive_chain((spec.key,), blocking=blocking)
+
     def start_archive_download(self, key: str, *, blocking: bool = False) -> dict[str, Any]:
         """아카이브 **하나**를 받는다. 여러 개를 이어 받으려면 `start_archive_chain`."""
         return self.start_archive_chain((key,), blocking=blocking)
@@ -442,19 +535,26 @@ class RuntimeInstallManager:
         specs = [self._spec(str(key)) for key in keys]
         if not specs:
             raise ValueError("체인이 비어 있다")
+        # Do not let an already-ready request overwrite another active worker's state.
+        with self._lock:
+            if self._download_state.get("active"):
+                return dict(self._download_state)
         self.initialize()
         pending = [spec for spec in specs if spec.url and not self._archive_ready(spec)]
         if not pending:
-            return self._set_state(
-                active=False,
-                phase="complete",
-                percent=100,
-                downloaded_mb=0.0,
-                total_mb=0.0,
-                message=f"{specs[0].label}가 이미 설치되어 있습니다.",
-                error="",
-                done=True,
-            )
+            with self._lock:
+                if self._download_state.get("active"):
+                    return dict(self._download_state)
+                return self._set_state(
+                    active=False,
+                    phase="complete",
+                    percent=100,
+                    downloaded_mb=0.0,
+                    total_mb=0.0,
+                    message=f"{specs[0].label}가 이미 설치되어 있습니다.",
+                    error="",
+                    done=True,
+                )
         spec = pending[0]
 
         with self._lock:
@@ -463,6 +563,9 @@ class RuntimeInstallManager:
             if self._download_state.get("active"):
                 return dict(self._download_state)
             self._cancel.clear()
+            for queued_spec in pending:
+                self._download_entry(queued_spec, "queued")
+            self._downloads[spec.key]["state"] = "downloading"
             self._download_state.update({
                 "active": True,
                 "phase": spec.key,
@@ -492,17 +595,30 @@ class RuntimeInstallManager:
     def cancel_archive_download(self) -> dict[str, Any]:
         with self._lock:
             state = dict(self._download_state)
-        if state.get("active"):
-            self._cancel.set()
-            phase = str(state.get("phase") or "")
-            label = self._specs[phase].label if phase in self._specs else "데이터"
-            return self._set_state(message=f"{label} 다운로드 취소 중...")
-        return state
+            if state.get("active") and state.get("phase") != "character_pack":
+                self._cancel.set()
+                phase = str(state.get("phase") or "")
+                label = self._specs[phase].label if phase in self._specs else "데이터"
+                return self._set_state(message=f"{label} 다운로드 취소 중...")
+            return state
 
     def _run_archive_download(self, spec: ArchiveSpec) -> None:
         self._run_archive_chain([spec])
 
     def _run_archive_chain(self, specs: list[ArchiveSpec]) -> None:
+        try:
+            self._run_archive_chain_impl(specs)
+        finally:
+            with self._lock:
+                # A failed chain does not leave phantom queued entries behind.
+                for spec in specs:
+                    row = self._downloads.get(spec.key, {})
+                    if row.get("state") == "queued":
+                        self._downloads.pop(spec.key, None)
+                if self._character_pack_queued and not self._download_state.get("active"):
+                    self.start_character_pack_download()
+
+    def _run_archive_chain_impl(self, specs: list[ArchiveSpec]) -> None:
         """체인을 순서대로 설치한다. 하나가 실패하면 **거기서 멈춘다**.
 
         ⚠️ 앞의 것이 성공한 뒤 뒤의 것이 실패하면 "설치 실패" 로만 말하면 안 된다.
@@ -511,6 +627,7 @@ class RuntimeInstallManager:
         installed: list[str] = []
         for index, spec in enumerate(specs):
             if self._cancel.is_set():
+                self._set_state(phase=spec.key, active=False, error="다운로드가 취소되었습니다.", done=False)
                 return
             if index:
                 # 다음 아카이브로 넘어간다. `active` 는 계속 True 라 폴링이 끊기지 않는다.
@@ -535,6 +652,16 @@ class RuntimeInstallManager:
             except Exception as exc:
                 self._fail_chain(spec, installed, str(exc))
                 return
+            with self._lock:
+                row = self._downloads.get(spec.key)
+                if row is not None:
+                    row.update(state="done", percent=100, error="", retryable=False)
+                    self._download_done_at[spec.key] = time.monotonic()
+                self._download_results[spec.key] = {
+                    **self._download_state, "phase": spec.key, "active": False,
+                    "done": True, "percent": 100, "error": "",
+                    "message": f"{spec.label} 설치 완료 ({extracted}개)",
+                }
             installed.append(f"{spec.label} {extracted}개")
         self._set_state(
             active=False,
@@ -551,16 +678,19 @@ class RuntimeInstallManager:
                 ", ".join(installed), spec.label, reason)
         else:
             message = f"{spec.label} 설치 실패: {reason}"
-        self._set_state(active=False, message=message, error=message, done=False)
+        self._set_state(active=False, message=message,
+                        error=reason if spec.key == "character_pack" else message, done=False)
 
     def _install_archive(self, spec: ArchiveSpec) -> int:
         """아카이브 하나를 받아 풀고 검증한다. 성공하면 푼 파일 수를 돌려준다."""
         temp_zip = self.runtime_paths.downloads_dir / spec.temp_name
         target = self._archive_dir(spec)
+        download_complete = False
         try:
             self.runtime_paths.ensure_writable_dirs()
             target.mkdir(parents=True, exist_ok=True)
             self._download_archive(spec, temp_zip)
+            download_complete = True
             extracted = (self._install_raw_file(spec, temp_zip) if spec.raw_name
                          else self._extract_archive(spec, temp_zip))
             if spec.expected_count and extracted < spec.expected_count:
@@ -582,7 +712,9 @@ class RuntimeInstallManager:
             return extracted
         finally:
             try:
-                temp_zip.unlink(missing_ok=True)
+                # Preserve interrupted extension downloads for the user's explicit retry.
+                if spec.key != "character_pack" or download_complete:
+                    temp_zip.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -606,7 +738,8 @@ class RuntimeInstallManager:
         total_size = 0
         last_error: Exception | None = None
 
-        for attempt in range(1, _DOWNLOAD_ATTEMPTS + 1):
+        attempts = 1 if spec.key == "character_pack" else _DOWNLOAD_ATTEMPTS
+        for attempt in range(1, attempts + 1):
             if self._cancel.is_set():
                 raise InterruptedError(f"{spec.label} 다운로드가 취소되었습니다.")
             headers = {"User-Agent": "NAIA/2.0.60 RuntimeInstallManager"}
@@ -643,6 +776,8 @@ class RuntimeInstallManager:
                         downloaded = 0
                     body_size = int(response.headers.get("content-length", 0) or 0)
                     total_size = (downloaded + body_size) if body_size else total_size
+                    if spec.key == "character_pack":
+                        self._check_character_pack_space(total_size)
                     mode = "ab" if resuming else "wb"
                     downloaded = self._stream_to_file(
                         spec, response, temp_zip, mode, downloaded, total_size)
@@ -653,6 +788,9 @@ class RuntimeInstallManager:
             except urllib.error.HTTPError as exc:
                 # 416 = 이미 다 받아 둔 상태에서 그 뒤를 또 달라고 한 것.
                 if exc.code == 416 and downloaded > 0:
+                    if spec.key == "character_pack":
+                        self._check_character_pack_space(downloaded)
+                        self._set_state(bytes=downloaded, total=downloaded)
                     last_error = None
                     break
                 raise
@@ -663,7 +801,7 @@ class RuntimeInstallManager:
                 # Range 를 안 보내 이어받기가 통째로 무력화된다(테스트가 잡았다).
                 # 실제로 몇 바이트가 들어갔는지는 파일만이 안다.
                 downloaded = temp_zip.stat().st_size if temp_zip.exists() else 0
-                if attempt >= _DOWNLOAD_ATTEMPTS:
+                if attempt >= attempts:
                     break
                 # 취소에 즉시 반응해야 하므로 sleep 대신 이벤트 대기를 쓴다.
                 if self._cancel.wait(min(_DOWNLOAD_BACKOFF_CAP, 2 ** (attempt - 1))):
@@ -674,6 +812,12 @@ class RuntimeInstallManager:
         minimum = 1024 * 1024 if spec.raw_name else 1024
         if not temp_zip.exists() or temp_zip.stat().st_size < minimum:
             raise ValueError(f"다운로드된 {spec.label} 파일이 너무 작습니다.")
+
+    def _check_character_pack_space(self, total_size: int) -> None:
+        needed = (total_size or 400 * 1024 * 1024) * 2
+        roots = (self.runtime_paths.downloads_dir, self._archive_dir(self._spec("character_pack")))
+        if any(shutil.disk_usage(root).free < needed for root in roots):
+            raise OSError(f"디스크 공간 부족 (필요 약 {(needed + 1024**2 - 1) // 1024**2} MB)")
 
     def _stream_to_file(self, spec: ArchiveSpec, response: Any, temp_zip: Path,
                         mode: str, downloaded: int, total_size: int) -> int:
@@ -697,12 +841,17 @@ class RuntimeInstallManager:
                         percent=percent,
                         downloaded_mb=downloaded_mb,
                         total_mb=total_mb,
+                        bytes=downloaded, total=total_size,
                         message=(
                             f"{spec.label} 다운로드 중... {percent}% ({downloaded_mb}/{total_mb} MB)"
                             if total_size else f"{spec.label} 다운로드 중... {downloaded_mb} MB"
                         ),
                     )
                     last_update = now
+        self._set_state(bytes=downloaded, total=total_size,
+                        downloaded_mb=round(downloaded / 1024**2, 1), total_mb=total_mb)
+        if spec.key == "character_pack" and total_size and downloaded != total_size:
+            raise OSError("다운로드가 완료되기 전에 연결이 종료되었습니다.")
         return downloaded
 
     def _install_raw_file(self, spec: ArchiveSpec, temp_file: Path) -> int:
@@ -725,7 +874,19 @@ class RuntimeInstallManager:
             pass
         # downloads_dir 와 data_dir 가 다른 볼륨일 수 있다(사용자가 user-data 를 옮긴 경우).
         shutil.move(str(temp_file), str(staging))
-        os.replace(staging, target)
+        if spec.key == "character_pack":
+            manifest = self._character_pack_manifest(staging)
+            source = target.with_suffix(".source")
+            source_tmp = source.with_suffix(".source.install_tmp")
+            source_tmp.write_text(spec.url + "\n", encoding="utf-8")
+            guard = self._character_pack_replace_guard
+            with guard() if guard is not None else nullcontext():
+                os.replace(staging, target)
+                os.replace(source_tmp, source)
+            with self._lock:
+                self._downloads[spec.key]["items"] = manifest["count"]
+        else:
+            os.replace(staging, target)
         self._set_state(percent=99, message=f"{spec.label} 설치 중... 1/1")
         return 1
 
@@ -779,12 +940,27 @@ class RuntimeInstallManager:
     def _set_state(self, **updates: Any) -> dict[str, Any]:
         with self._lock:
             self._download_state.update(updates)
+            phase = self._download_state.get("phase")
+            row = self._downloads.get(phase)
+            if row is not None:
+                if updates.get("error"):
+                    row.update(state="error", error=str(updates["error"]), retryable=True)
+                elif self._download_state.get("active"):
+                    row["state"] = "installing" if self._download_state.get("percent", 0) >= 90 else "downloading"
+                for field in ("bytes", "total", "percent"):
+                    if field in updates:
+                        row[field] = updates[field]
             self._download_state["updated_at"] = datetime.now().isoformat(timespec="seconds")
+            # Keep terminal results across handoffs; shared progress still belongs
+            # to the current worker. A new request for this key clears its result.
+            if phase in self._specs and not self._download_state.get("active") and self._download_state.get("error"):
+                self._download_results[phase] = dict(self._download_state)
             return dict(self._download_state)
 
 
 __all__ = [
     "BOOTSTRAP_DATA_FILES",
+    "CHARACTER_PACK_URL",
     "EVENT_MAP_INDEX_APPROX_MB",
     "EVENT_MAP_INDEX_NAME",
     "EVENT_MAP_INDEX_URL",

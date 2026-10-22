@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+import threading
 from copy import deepcopy
 import uuid as _uuid
 from typing import Any, Awaitable, Callable
@@ -18,7 +19,16 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 GenerationRunnerStarter = Callable[[WebSessionContext, set[Any]], None]
 
 
+_SERVICE_LOCK = threading.RLock()
+
+
 def character_viewer_service(context: WebSessionContext) -> CharacterViewerService:
+    # The download worker and first thumbnail request must share the same ZIP lock.
+    with _SERVICE_LOCK:
+        return _character_viewer_service(context)
+
+
+def _character_viewer_service(context: WebSessionContext) -> CharacterViewerService:
     service = getattr(context, "character_viewer_service", None)
     if service is None:
         paths = context.runtime_paths
@@ -425,9 +435,8 @@ def character_viewer_thumbnail_payload(
     try:
         path = service.thumbnail_path(group, character, variant)
     except FileNotFoundError:
-        # **1순위는 사용자가 만든 썸네일, 2순위가 번들 미리보기 팩이다**(사용자 지정).
-        # 여기까지 왔다는 것은 1순위가 없다는 뜻이라 폴백을 준다. 폴백은 이미 256px webp 라
-        # 다시 줄이지 않는다 — grid 요청(384px)보다 작지만 목록 칸이 80px 이라 충분하다.
+        # 사용자 썸네일 > 번들 팩 > 다운로드 확장 팩. 두 팩 모두 384px WebP라
+        # grid 요청에서도 다시 줄이지 않고 해당 이미지 바이트만 돌려준다.
         raw = service.preview_thumb(group, character, variant)
         if raw is None:
             raise

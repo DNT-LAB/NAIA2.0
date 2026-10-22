@@ -5759,6 +5759,43 @@ body:not(.desktop-shell) .viewer-keys-row[data-shell-only] { display: none; }
   -webkit-backdrop-filter: blur(14px);
 }
 .queue-panel[hidden] { display: none; }
+/* 공용 다운로드 띠(2026-10-22) - Queue 창 옷 · 오른쪽 아래(시드 고정 알약과 같은 줄의 반대편) · 접기/취소 없음. */
+.download-dock {
+  position: absolute;
+  right: 10px;
+  bottom: calc(10px + var(--inpaint-dock-lift, 0px));
+  z-index: 12;
+  width: min(300px, calc(100% - 20px));
+  display: flex; flex-direction: column;
+  border: 1px solid rgba(124,106,239,0.32);
+  border-radius: 8px;
+  background: rgba(16,16,26,0.92);
+  box-shadow: 0 16px 44px rgba(0,0,0,0.38);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font-family: var(--font-mono);
+}
+.download-dock[hidden] { display: none; }
+.download-dock .dl-row { padding: 8px 10px 7px; }
+.download-dock .dl-row + .dl-row { border-top: 1px solid rgba(255,255,255,0.08); }
+.download-dock .dl-top { display: flex; align-items: baseline; gap: 7px; font-size: 11.5px; color: var(--text-primary); }
+.download-dock .dl-eyebrow { flex: none; font-size: 9px; font-weight: 800; letter-spacing: 0.04em; color: var(--text-dim); }
+.download-dock .dl-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.download-dock .dl-pct { flex: none; font-weight: 700; }
+.download-dock .dl-bar { height: 4px; margin-top: 6px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,0.08); }
+.download-dock .dl-bar i { display: block; height: 100%; background: #7c6aef; transition: width 0.4s ease; }
+.download-dock .is-done .dl-bar i { background: #4fb27a; }
+.download-dock .is-error .dl-bar i { background: #e0605a; }
+.download-dock .dl-sub { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 10px; color: var(--text-secondary); }
+.download-dock .dl-sub > span:first-child { flex: 1; min-width: 0; }
+.download-dock .is-error .dl-sub > span:first-child { color: #f08a84; }
+.download-dock .dl-retry {
+  flex: none; height: 20px; padding: 0 8px; border-radius: 5px; cursor: pointer;
+  border: 1px solid rgba(124,106,239,0.6); background: rgba(124,106,239,0.16); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10.5px;
+}
+.download-dock .dl-retry:disabled { opacity: 0.5; cursor: progress; }
+.download-dock .dl-note { flex: none; font-size: 10px; color: var(--text-dim); }
 /* 접힘 = 캐릭터 퀵 패널(.cq-box)처럼 좁고 반투명한 띠 · 호버 = 또렷(사용자 지시 2026-10-21).
    Pause · Clear 와 대기 문구는 숨기고 `▸ QUEUE n` + [▴] 만 남긴다 - 띠를 누르면 편다.
    [▴] 는 남긴다: 키보드로 펼 길이 그것뿐이다(Codex 리뷰). 일시정지면 'paused' 글을 남긴다(색만으로는 놓친다). */
@@ -24700,7 +24737,9 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 }
 .cq-find-act:hover:not(:disabled) { color: var(--text-primary); border-color: rgba(124,106,239,0.6); }
 .cq-find-act.is-on { color: rgb(250,199,117); border-color: rgba(250,199,117,0.55); }
-.cq-find-act.is-hide:hover:not(:disabled) { color: #f3b0b0; border-color: rgba(240,140,140,0.6); }
+/* [숨김] 은 약간 붉게(사용자 지시 2026-10-22). */
+.cq-find-act.is-hide { color: #e8a2a2; border-color: rgba(240,120,120,0.38); background: rgba(240,100,100,0.08); }
+.cq-find-act.is-hide:hover:not(:disabled) { color: #f6bcbc; border-color: rgba(240,130,130,0.7); background: rgba(240,100,100,0.16); }
 .cq-find-act:disabled { opacity: 0.55; cursor: progress; }
 .cq-find-list { flex: 1; min-height: 60px; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 1px; }
 .cq-find-row {

@@ -69,6 +69,22 @@ def prompt_of(image) -> str:
     return ""
 
 
+def encode_preview(image, size: int = 384, quality: int = 72) -> bytes:
+    """Shared bundle/extension crop and WebP encoding (development tools only)."""
+    from PIL import Image
+
+    img = image.convert("RGB")
+    w, h = img.size
+    if w != h:
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, (h - side) // 3,
+                        (w - side) // 2 + side, (h - side) // 3 + side))
+    img = img.resize((size, size), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "WEBP", quality=quality, method=6)
+    return buf.getvalue()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="캐릭터 미리보기 팩(폴백) 생성")
     ap.add_argument("sources", nargs="+", help="NAI PNG 폴더(들). 하위까지 훑는다")
@@ -139,19 +155,11 @@ def main() -> int:
                 if args.limit and rank.get(key, 1 << 30) >= args.limit:
                     skipped_rank += 1
                     continue
-                img = image.convert("RGB")
-                w, h = img.size
-                if w != h:                      # 정사각 중앙 크롭(인물은 위쪽이 중요)
-                    side = min(w, h)
-                    img = img.crop(((w - side) // 2, (h - side) // 3,
-                                    (w - side) // 2 + side, (h - side) // 3 + side))
-                img = img.resize((args.size, args.size), Image.LANCZOS)
-                buf = io.BytesIO()
-                img.save(buf, "WEBP", quality=args.quality, method=6)
+                encoded = encode_preview(image, args.size, args.quality)
         except Exception as exc:
             print(f"  !! {path.name}: {exc}")
             continue
-        enc = base64.b64encode(buf.getvalue()).decode("ascii")
+        enc = base64.b64encode(encoded).decode("ascii")
         if key in pack:
             if pack[key] == enc:
                 continue

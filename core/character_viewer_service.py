@@ -6,6 +6,11 @@ import json
 import math
 import re
 import threading
+import zipfile
+import zlib
+from contextlib import contextmanager
+
+from core.character_preview_pack import read_manifest
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -87,6 +92,11 @@ class CharacterViewerService:
                           else self.data_dir / "character_thumbnails")
         # 예전에 앱 트리로 써 둔 것. 최초 1회만 흡수한다(아래 `_adopt_legacy_thumbs`).
         self.legacy_thumb_dir = self.root / "data" / "character_thumbnails"
+        self.extension_pack_path = self.thumb_dir.parent / "character_preview" / "character_pack.zip"
+        self._extension_lock = threading.RLock()
+        self._extension_zip: zipfile.ZipFile | None = None
+        self._extension_keys: dict[str, str] | None = None
+        self._extension_rev = "0"
         self.thumb_index_path = self.thumb_dir / "index.json"
         self.tags_path = self.save_dir / "character_viewer_tags.json"
         # 도감 즐겨찾기. **사용자가 고른 것**이라 썸네일과 같은 이유로 save_dir(사용자
@@ -726,6 +736,8 @@ class CharacterViewerService:
             return "user", path, f"u{stat.st_mtime_ns}-{stat.st_size}"
         if not variant_label and f"{group_key}::{name}" in self.preview_pack():
             return "fallback", None, f"p{self._preview_revision()}"
+        if not variant_label and f"{group_key}::{name}" in self.extension_pack():
+            return "fallback", None, f"e{self._extension_rev}"
         return "", None, ""
 
     def _thumb_url(self, group_key: str, name: str, variant_label: str = "", size: str = "") -> str:
@@ -765,7 +777,8 @@ class CharacterViewerService:
             # 사용자 썸네일이 없어도 번들 폴백이 있으면 True — 그리드가 이니셜 대신
             # 그림을 청한다. 라우트가 같은 우선순위(사용자 -> 폴백)로 응답한다.
             "has_thumbnail": (self._thumb_key(group_key, name) in thumbs
-                              or f"{group_key}::{name}" in self.preview_pack()),
+                              or f"{group_key}::{name}" in self.preview_pack()
+                              or f"{group_key}::{name}" in self.extension_pack()),
         }
         # 화면이 '요즘 캐릭터' 를 가릴 수 있게 함께 보낸다(모르면 빈 문자열).
         item["debut"] = self.debut_index().get(name, "")
@@ -1242,16 +1255,67 @@ class CharacterViewerService:
         **사용자 썸네일의 폴백이다 — 덮지 않는다.** 우선순위는 사용자 지정이다:
 
             1순위  user-data/data/character_thumbnails/  (사용자가 만든 것)
-            2순위  이 팩                                  (번들, 256px webp q72)
+            2순위  이 팩                                  (번들, 384px webp q72)
+            3순위  character_preview/character_pack.zip       (런타임 다운로드)
 
         9,738명 전부를 넣으면 92MB 라 릴리즈에 다 담지 않는다. 빈도 상위 N명만 담고
-        (`tools/build_character_preview_pack.py --limit`), 나머지는 지금처럼 이니셜 타일이다.
+        (`tools/build_character_preview_pack.py --limit`), 나머지는 확장 팩 또는 이니셜 타일이다.
         """
         if self._preview_pack is None:
             data = self._load_json(self.preview_path, {})
             thumbs = data.get("thumbs") if isinstance(data, dict) else None
             self._preview_pack = thumbs if isinstance(thumbs, dict) else {}
         return self._preview_pack
+
+    def extension_pack(self) -> dict[str, str]:
+        """Read only the manifest once; subsequent membership checks do no I/O."""
+        with self._extension_lock:
+            if self._extension_keys is None:
+                self._extension_keys = {}
+                archive = None
+                try:
+                    archive = zipfile.ZipFile(self.extension_pack_path)
+                    manifest = read_manifest(archive)
+                    stat = self.extension_pack_path.stat()
+                    self._extension_rev = f"{stat.st_mtime_ns}-{stat.st_size}"
+                    self._extension_keys = manifest["keys"]
+                    self._extension_zip = archive
+                except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
+                    if archive is not None:
+                        archive.close()
+            return self._extension_keys
+
+    def invalidate_extension_pack(self) -> None:
+        with self._extension_lock:
+            if self._extension_zip is not None:
+                self._extension_zip.close()
+            self._extension_zip = None
+            self._extension_keys = None
+            self._extension_rev = "0"
+
+    @contextmanager
+    def replacing_extension_pack(self):
+        # Keep this lock across rename: a concurrent thumbnail must not reopen the old ZIP
+        # after close but before os.replace (Windows disallows replacing an open file).
+        with self._extension_lock:
+            self.invalidate_extension_pack()
+            try:
+                yield
+            finally:
+                self.invalidate_extension_pack()
+
+    def _extension_thumb(self, key: str) -> bytes | None:
+        with self._extension_lock:
+            member = self.extension_pack().get(key)
+            if member and self._extension_zip is not None:
+                try:
+                    return self._extension_zip.read(member)
+                except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
+                    # Cache the failure until an explicit install invalidation.
+                    self._extension_zip.close()
+                    self._extension_zip = None
+                    self._extension_keys = {}
+            return None
 
     def preview_thumb(self, group_key: str, name: str, variant_label: str = "") -> bytes | None:
         """폴백 미리보기 이미지 바이트. 없으면 None.
@@ -1263,7 +1327,7 @@ class CharacterViewerService:
             return None
         enc = self.preview_pack().get(f"{group_key}::{name}")
         if not enc:
-            return None
+            return self._extension_thumb(f"{group_key}::{name}")
         try:
             import base64
             return base64.b64decode(enc)
@@ -1274,12 +1338,14 @@ class CharacterViewerService:
         """사용자 썸네일이 없어도 폴백이 있으면 True — 그리드가 이니셜 대신 그림을 청한다.
 
         ⚠️ `thumbnail_source()` 의 kind 와 **정의상 같은 판정**이다(인덱스 항목 또는 팩).
-        여기는 stat 을 하지 않는다 — `include_all=True` 목록이 전 캐릭터(11,890명)를
+        팩의 최초 manifest 로딩 뒤에는 키 집합만 조회한다 — `include_all=True` 목록이 전 캐릭터를
         직렬화하면서 이 판정을 쓰기 때문에 syscall 을 붙이면 통째로 느려진다.
         """
         if self.thumb_index().get(self._thumb_key(group_key, name, variant_label)):
             return True
-        return not str(variant_label or "") and f"{group_key}::{name}" in self.preview_pack()
+        return not str(variant_label or "") and (
+            f"{group_key}::{name}" in self.preview_pack()
+            or f"{group_key}::{name}" in self.extension_pack())
 
     def delete_thumbnail(self, group_key: str, name: str, variant_label: str = "") -> dict[str, Any]:
         """Delete ONE image's thumbnail: the .webp file AND its index entry.

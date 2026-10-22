@@ -72,12 +72,27 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
         }
     sanitized.pop("samples", None)
     # 아카이브가 늘어날 때 여기를 빠뜨리면 절대 경로가 원격으로 샌다.
-    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map"):
+    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack"):
         archive = sanitized.get(key)
         if isinstance(archive, dict):
             archive = dict(archive)
             archive.pop("target", None)
             sanitized[key] = archive
+    sanitized["downloads"] = [
+        {**row, "retryable": False, "error": "다운로드에 실패했습니다." if row.get("error") else ""}
+        for row in sanitized.get("downloads", []) if isinstance(row, dict)
+    ]
+    # Errors can contain a local path (e.g. an os.replace PermissionError).
+    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack"):
+        archive = sanitized.get(key)
+        if isinstance(archive, dict):
+            for field in ("download", "last_download"):
+                if not isinstance(archive.get(field), dict):
+                    continue
+                download = dict(archive[field])
+                if download.get("error"):
+                    download.update(error="다운로드에 실패했습니다.", message="다운로드에 실패했습니다.")
+                archive[field] = download
     return sanitized
 
 
@@ -151,11 +166,26 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
 
             invalidate_event_map_service(context)
 
+        def character_pack_replace_guard():
+            from app.backend.server.character_viewer_routes import character_viewer_service
+
+            return character_viewer_service(context).replacing_extension_pack()
+
+        def refresh_character_pack_state() -> None:
+            from app.backend.server.character_viewer_routes import character_viewer_service
+
+            character_viewer_service(context).invalidate_extension_pack()
+            notify = getattr(context, "character_pack_complete_notify", None)
+            if callable(notify):
+                notify()
+
         service = RuntimeInstallManager(
             runtime_paths,
             on_tag_archive_complete=refresh_tag_state,
             on_corpus_archive_complete=refresh_corpus_state,
             on_event_map_complete=refresh_event_map_state,
+            on_character_pack_complete=refresh_character_pack_state,
+            character_pack_replace_guard=character_pack_replace_guard,
         )
         context.runtime_install_manager = service
     return service
@@ -167,6 +197,34 @@ def register_install_manager_routes(
     *,
     run_in_thread: AsyncRunner,
 ) -> None:
+    def notify_character_pack_complete() -> None:
+        import asyncio
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        loop = getattr(session_context, "headless_main_loop", None)
+        clients = getattr(app.state, "headless_clients", set())
+        if loop is None or loop.is_closed() or not clients:
+            return
+
+        async def refresh() -> None:
+            await broadcast_json(clients, session_context.module_state_payload("character"))
+
+        # Completion only: no progress messages or changes to startup WS ordering.
+        loop.call_soon_threadsafe(lambda: asyncio.create_task(refresh()))
+
+    session_context.character_pack_complete_notify = notify_character_pack_complete
+
+    @app.post("/api/install-manager/character-pack/download")
+    async def api_install_manager_character_pack_download(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.start_character_pack_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Character pack download failed: {exc}"}, status_code=500)
+
     @app.get("/api/install-manager")
     async def api_install_manager_state(req: Request):
         try:

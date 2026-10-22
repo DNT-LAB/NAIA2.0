@@ -60,9 +60,13 @@ def _install_view(context: WebSessionContext, can_start: bool) -> dict[str, Any]
        그 경우를 `busy_other` 로 구분해 준다("다른 다운로드가 끝나야 합니다").
     """
     try:
-        from app.backend.server.install_manager_routes import runtime_install_manager
+        from app.backend.server.install_manager_routes import (
+            runtime_install_manager, _sanitize_snapshot_for_remote,
+        )
 
         snapshot = runtime_install_manager(context).snapshot()
+        if not can_start:
+            snapshot = _sanitize_snapshot_for_remote(snapshot)
     except Exception:
         return {}
     archive = snapshot.get("event_map")
@@ -71,6 +75,11 @@ def _install_view(context: WebSessionContext, can_start: bool) -> dict[str, Any]
     download = dict(archive.get("download") or {})
     running = bool(download.get("active"))
     mine = running and str(download.get("phase") or "") == "event_map"
+    last = archive.get("last_download") or {}
+    # Preserve busy/active semantics from the shared worker, but let the existing
+    # panel's stop-on-failure check see this archive's result after a handoff.
+    if not mine and last.get("error"):
+        download = dict(last)
     return {
         "ready": bool(archive.get("ready")),
         "downloadable": bool(archive.get("downloadable")),

@@ -73,6 +73,14 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         tag_task = getattr(context, "headless_tag_index_warmup_task", None)
         if tag_task is None or tag_task.done():
             context.headless_tag_index_warmup_task = asyncio.create_task(_run_tag_index_warmup(context, run_in_thread))
+        # One startup request, never a poll/retry loop. The manager queues it behind
+        # an active tag/corpus download and returns without waiting for the network.
+        try:
+            from app.backend.server.install_manager_routes import runtime_install_manager
+
+            await run_in_thread(runtime_install_manager(context).auto_start_character_pack)
+        except Exception as exc:
+            print(f"Headless Remote: character pack startup skipped - {ascii(str(exc))}", flush=True)
         try:
             yield
         finally:

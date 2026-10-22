@@ -168,6 +168,7 @@
       "source_files": [
         "app/backend/server/install_manager_routes.py",
         "core/runtime_install_manager.py",
+        "core/character_preview_pack.py",
         "app/web/remote/js/features/setupController.mjs",
         "app/electron/renderer/maintenance.html"
       ],
@@ -180,6 +181,7 @@
       {"method": "POST", "path": "/api/install-manager/tag-archive-increment/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/corpus-archive/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/corpus-archive/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/character-pack/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/event-map/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/event-map/download/cancel", "smoke": "state_mutation"}
       ]
@@ -1099,6 +1101,13 @@
       "description": "Offline license texts and notices pinned by the ANIMA manifest.",
       "paths": ["core/anima_engine/licenses/**"],
       "provisioning": "bundled"
+    },
+    {
+      "feature": "thumb_character_viewer",
+      "description": "Optional character preview extension ZIP, automatically queued once at web-session startup; explicit loopback retry after failure. User thumbnails take precedence over the bundled previews, then this lazy ZIP. GET install-manager downloads provides shared progress; completion invalidates the ZIP and emits the existing character module_state only.",
+      "paths": ["<user-data>/data/character_preview/character_pack.zip", "<user-data>/data/character_preview/character_pack.source"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/character-pack/download"
     },
     {
       "feature": "event_map",

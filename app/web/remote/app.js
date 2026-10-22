@@ -2028,6 +2028,17 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20261021-qstart2'
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
+// 공용 다운로드 띠(사용자 지시 2026-10-22) - 서버가 앱을 켤 때 스스로 받기 시작한다. 이 띠는 보이기와 [재시도]만.
+let downloadDock = null;
+import('./js/features/downloadDock.mjs?v=20261022-dock1')
+  .then(({createDownloadDock}) => {
+    downloadDock = createDownloadDock({
+      document, fetch, escHtml, showToast,
+      // 캐릭터 확장 팩을 다 받았다 - 열려 있는 Characters 목록이 이니셜 타일 대신 그림을 청하게 다시 읽는다.
+      onDone: key => { if (key === 'character_pack') characterViewerControl?.reload?.(); },
+    });
+  })
+  .catch(error => console.error('Failed to initialize download dock module', error));
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapsave1')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({

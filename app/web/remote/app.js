@@ -7700,12 +7700,13 @@ const characterWindowActions = new Proxy({}, {
 });
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-ctx1')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-ext2')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,
           storage: localStorage,
           getActions: () => characterWindowActions,
+          openExternalUrl: openUrlInSystemBrowser,
           openCharacterPage: (group, character) => {
             switchRightTab('characters');
             void characterViewerReady.then(() => characterViewerControl?.openCharacter?.(group, character));

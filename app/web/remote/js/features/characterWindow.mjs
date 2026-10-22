@@ -20,6 +20,11 @@ const CELL_GAP = 7;
 const NAME_H = 34;                      // 칸 아래 이름 두 줄
 const GROUP_ROW = 24;
 const GENDER_KEY = 'naia_chw_gender';
+const LANG_KEY = 'naia_chw_lang';       // 그룹(작품) 이름 [한글 | 영문] - 사용자 지시 2026-10-22
+// 특수 그룹(사용자 지시 2026-10-22): 1명짜리 작품은 'etc' 한 묶음으로 모으고, original(작가 캐릭터)은 따로 -
+// 둘 다 All 바로 밑에 고정한다(일반 작품과 섞이지 않게). etc 는 서버의 특수 그룹 키다.
+const GROUP_ETC = '__ETC__';
+const PINNED_GROUPS = ['original'];
 const DRAWER_H_KEY = 'naia_chw_drawer_h';
 const DRAWER_H_MIN = 260;              // 서랍 높이 - 머리 손잡이로 끈다(사용자 지시 2026-10-22 · 우하단 자유 크기는 없다)
 const DRAWER_H_DEFAULT = 440;
@@ -33,6 +38,7 @@ export function createCharacterWindow({
   showToast = () => {},
   getActions = () => ({}),            // 퀵 패널 손잡이: addToSlot · poolAdd · generateThumb · openGenSettings · openPoolWindow · poolCount
   openCharacterPage = () => {},       // [⋯] Characters 탭에서 열기(옛 화면 - 연속 생성 등)
+  openExternalUrl = null,             // [외부 브라우저] - app.js openUrlInSystemBrowser(데스크톱 셸은 기본 브라우저 · 웹은 새 탭)
 } = {}) {
   let panel = null;
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
@@ -55,6 +61,10 @@ export function createCharacterWindow({
   let groupQuery = '';
   // 필터 줄은 늘 보인다 · 추천 낱말은 칩 나열이 아니라 입력칸 아래 자동완성 목록(사용자 지시 2026-10-22).
   let feat = {open: true, line: 'inc', text: '', rows: [], seq: 0, timer: 0, active: 0, show: false};
+  let lang = (() => { try { return storage?.getItem(LANG_KEY) === 'en' ? 'en' : 'ko'; } catch (_) { return 'ko'; } })();
+  /** 그룹(작품) 이름 - 한글 모드면 한글 이름이 있을 때 그것(없으면 영문 그대로). */
+  const groupLabel = (key, fallback = key) => (lang === 'ko' && groupKo[key]) || fallback;
+  let groupKo = {};
   let failedSeq = -1;                   // 이 조건(seq)에서 이미 실패를 알렸다 - 토스트는 한 번만
 
   // ── 틀 ────────────────────────────────────────────────────────────────────
@@ -71,7 +81,8 @@ export function createCharacterWindow({
       escHtml,
       onResize: () => layoutGrid(),
     });
-    panel.slot.innerHTML = `<button type="button" class="chw-hb" data-chw-pool title="세션 와일드카드(랜덤 풀) 창">풀</button>`;
+    panel.slot.innerHTML = `<button type="button" class="chw-hb" data-chw-ext title="캐릭터 목록을 기본 브라우저에서 엽니다 (보기 · 검색 · 프롬프트 복사)">외부 브라우저</button>`
+      + `<button type="button" class="chw-hb" data-chw-pool title="세션 와일드카드(랜덤 풀) 창">풀</button>`;
     panel.slot.addEventListener('click', onSlotClick);
     panel.body.innerHTML = `<div class="chw">`
       + `<div class="chw-tools"><input class="chw-q" type="search" data-chw-q spellcheck="false" autocomplete="off"`
@@ -95,7 +106,17 @@ export function createCharacterWindow({
     body.addEventListener('keydown', onKey);
     // 목록을 누르는 동안 입력칸 초점을 지킨다(누르기 전에 blur 로 목록이 닫히지 않게) · 칸을 떠나면 닫는다.
     body.addEventListener('mousedown', event => { if (event.target.closest('[data-chw-fdrop]')) event.preventDefault(); });
-    body.addEventListener('focusin', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = true; paintFeat(); } });
+    body.addEventListener('focusin', event => {
+      const input = event.target.closest('[data-chw-ft]');
+      if (!input) return;
+      // 칸을 옮기면 그 칸의 글로 다시 묻는다(포함 칸에 친 글이 제외 칸의 후보로 남지 않게).
+      if (feat.line !== input.dataset.chwFl) {
+        feat.line = input.dataset.chwFl;
+        feat.text = input.value || ''; feat.rows = []; feat.active = 0;
+        if (feat.text.trim()) suggest();
+      }
+      feat.show = true; paintFeat();
+    });
     body.addEventListener('focusout', event => { if (event.target.closest('[data-chw-ft]')) { feat.show = false; paintFeat(); } });
     body.querySelector('[data-chw-grid]').addEventListener('scroll', () => paintGrid(), {passive: true});
     body.querySelector('[data-chw-grip]').addEventListener('pointerdown', onGripDown);
@@ -170,7 +191,18 @@ export function createCharacterWindow({
     try {
       const res = await fetch('/api/character-viewer/groups?offset=0&limit=5000', {cache: 'no-store'});
       const data = await res.json().catch(() => ({}));
-      if (res.ok) groups = Array.isArray(data.items) ? data.items : [];
+      if (res.ok) {
+        const items = Array.isArray(data.items) ? data.items : [];
+        groupKo = {};
+        items.forEach(g => { if (g && g.ko) groupKo[g.key] = String(g.ko); });
+        // All · original · etc 를 위에 고정하고 그 아래 일반 작품(2명 이상). 1명짜리 작품은 etc 한 묶음으로.
+        const all = items.filter(g => g.key === '__ALL__');
+        const pinned = PINNED_GROUPS.map(key => items.find(g => g.key === key)).filter(Boolean);
+        const singles = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && Number(g.count || 0) === 1);
+        const rest = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && Number(g.count || 0) > 1);
+        groups = [...all, ...pinned,
+          ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: singles.length, special: true}] : []), ...rest];
+      }
     } catch (_) { /* 다음에 다시 */ }
     paintGroups();
   }
@@ -208,7 +240,7 @@ export function createCharacterWindow({
       + ` title="${escAttr(`${item.character} · ${item.group}`)}">`
       + `<div class="chw-im" style="height:${geo.cellW}px">${img}${item.favorite ? '<span class="chw-star">★</span>' : ''}</div>`
       + `<div class="chw-nm">${escHtml(item.character)}</div>`
-      + `<div class="chw-mt">${escHtml(item.group)} · ${Number(item.count || 0).toLocaleString()}</div></button>`;
+      + `<div class="chw-mt">${escHtml(groupLabel(item.group))} · ${Number(item.count || 0).toLocaleString()}</div></button>`;
   }
 
   function paintGrid() {
@@ -237,7 +269,8 @@ export function createCharacterWindow({
   // ── 그룹(보이는 만큼만) ─────────────────────────────────────────────────────
   function shownGroups() {
     const q = groupQuery.trim().toLowerCase();
-    return q ? groups.filter(g => g.key === '__ALL__' || String(g.name).toLowerCase().includes(q)) : groups;
+    return q ? groups.filter(g => g.key === '__ALL__' || String(g.name).toLowerCase().includes(q)
+      || String(groupKo[g.key] || '').includes(groupQuery.trim())) : groups;
   }
 
   function paintGroups() {
@@ -252,7 +285,8 @@ export function createCharacterWindow({
     for (let i = first; i < last; i += 1) {
       const g = rows[i];
       html += `<button type="button" class="chw-gi${g.key === state.group ? ' is-on' : ''}" style="transform:translateY(${i * GROUP_ROW}px)"`
-        + ` data-chw-g="${escAttr(g.key)}" title="${escAttr(g.name)}"><span>${escHtml(g.name)}</span>`
+        + ` data-chw-g="${escAttr(g.key)}" title="${escAttr(g.key === GROUP_ETC ? '캐릭터가 1명인 작품들' : g.name)}">`
+        + `<span>${escHtml(g.key === GROUP_ETC ? 'etc' : groupLabel(g.key, g.name))}</span>`
         + `<i>${Number(g.count || 0).toLocaleString()}</i></button>`;
     }
     if (spacer._html !== html) { spacer._html = html; spacer.innerHTML = html; }
@@ -287,23 +321,33 @@ export function createCharacterWindow({
     const box = el('[data-chw-feat]');
     if (!box) return;
     if (!box.querySelector('[data-chw-ft]')) {
-      box.innerHTML = `<div class="chw-feat-row"><span class="chw-fseg">`
-        + `<button type="button" data-chw-fline="inc">포함</button><button type="button" data-chw-fline="exc">제외</button></span>`
-        + `<div class="chw-fwrap"><input class="chw-ft" data-chw-ft type="search" role="combobox" aria-autocomplete="list"`
-        + ` aria-controls="chwFdrop" placeholder="필터 - 색 · 특징 · 가슴 · 작품 (예: pink hair)" spellcheck="false" autocomplete="off">`
-        + `<div class="chw-fdrop" id="chwFdrop" role="listbox" data-chw-fdrop hidden></div></div></div>`;
+      const wrap = (line, label, example) => `<div class="chw-fwrap is-${line}" data-chw-fwrap="${line}">`
+        + `<input class="chw-ft" data-chw-ft data-chw-fl="${line}" type="search" role="combobox" aria-autocomplete="list"`
+        + ` aria-controls="chwFdrop-${line}" placeholder="${label} - 색 · 특징 · 가슴 · 작품 (예: ${example})" spellcheck="false" autocomplete="off">`
+        + `<div class="chw-fdrop" id="chwFdrop-${line}" role="listbox" data-chw-fdrop="${line}" hidden></div></div>`;
+      box.innerHTML = `<div class="chw-feat-row"><span class="chw-fseg" title="그룹(작품) 이름">`
+        + `<button type="button" data-chw-lang="ko">한글</button><button type="button" data-chw-lang="en">영문</button></span>`
+        + wrap('inc', '포함', 'pink hair') + wrap('exc', '제외', 'glasses') + `</div>`;
     }
-    box.querySelectorAll('[data-chw-fline]').forEach(b => b.classList.toggle('is-on', b.dataset.chwFline === feat.line));
+    box.querySelectorAll('[data-chw-lang]').forEach(b => b.classList.toggle('is-on', b.dataset.chwLang === lang));
     const rows = shownSuggestions();
     if (feat.active >= rows.length) feat.active = Math.max(0, rows.length - 1);
     const html = rows.map((r, i) =>
       `<div class="chw-fs${i === feat.active ? ' is-on' : ''}" role="option" aria-selected="${i === feat.active}" data-chw-fs="${i}">`
       + `<span>${escHtml(r.tag)}</span><i>${escHtml(r.label || r.kind)} · ${Number(r.count || 0).toLocaleString()}</i></div>`).join('')
-      || (feat.text.trim() ? '<div class="chw-empty">맞는 낱말이 없습니다</div>' : '');
-    const drop = box.querySelector('[data-chw-fdrop]');
-    drop.hidden = !(feat.show && feat.text.trim());
-    if (drop._html !== html) { drop._html = html; drop.innerHTML = html; }
-    drop.querySelector('.chw-fs.is-on')?.scrollIntoView({block: 'nearest'});
+      || (feat.text.trim()
+        // 캐릭터 이름을 필터 칸에 치는 실수가 잦다(사용자 지시 2026-10-22) - 윗줄로 보낸다.
+        ? '<div class="chw-empty">맞는 낱말이 없습니다 · 캐릭터 이름은 윗줄에서 검색하세요</div>'
+          + `<button type="button" class="chw-fmove" data-chw-fmove>윗줄에서 '${escHtml(feat.text.trim())}' 찾기</button>`
+        : '');
+    // 자동완성은 지금 치는 칸(포함/제외) 아래에만.
+    box.querySelectorAll('[data-chw-fdrop]').forEach(drop => {
+      const mine = drop.dataset.chwFdrop === feat.line;
+      drop.hidden = !(mine && feat.show && feat.text.trim());
+      const body = mine ? html : '';
+      if (drop._html !== body) { drop._html = body; drop.innerHTML = body; }
+    });
+    box.querySelector(`[data-chw-fdrop="${feat.line}"] .chw-fs.is-on`)?.scrollIntoView({block: 'nearest'});
   }
 
   function pickSuggestion(index) {
@@ -311,7 +355,7 @@ export function createCharacterWindow({
     if (!row) return;
     (feat.line === 'exc' ? state.exc : state.inc).push({tag: row.tag, kind: row.kind});
     feat.text = ''; feat.rows = []; feat.active = 0;
-    const input = el('[data-chw-ft]'); if (input) input.value = '';
+    const input = el(`[data-chw-fl="${feat.line}"]`); if (input) input.value = '';
     paintTools(); paintFeat(); resetResults();
   }
 
@@ -346,7 +390,7 @@ export function createCharacterWindow({
     const s = selected;
     const off = busy ? ' disabled' : '';
     box.innerHTML = `${gopt}<div class="chw-st"><b>${escHtml(s.character)}</b>`
-      + `<span>${escHtml(s.group)} · ${Number(s.count || 0).toLocaleString()}`
+      + `<span>${escHtml(groupLabel(s.group))} · ${Number(s.count || 0).toLocaleString()}`
       + `${selVariant ? ` · ${escHtml(selVariant.replace(/_/g, ' '))}` : ''}</span></div>`
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
@@ -470,6 +514,24 @@ export function createCharacterWindow({
   function onSlotClick(event) {
     const actions = getActions() || {};
     if (event.target.closest('[data-chw-pool]')) actions.openPoolWindow?.();
+    if (event.target.closest('[data-chw-ext]')) openExternalViewer();
+  }
+
+  /** [외부 브라우저] - 지금 보던 그룹 · 검색어 · 성별 · 한글/영문 · 필터를 주소에 싣는다(character-viewer.html 이 읽는다). */
+  function externalViewerUrl() {
+    const p = new URLSearchParams();
+    if (state.group && state.group !== '__ALL__') p.set('group', state.group);
+    if (state.query.trim()) p.set('q', state.query.trim());
+    p.set('gender', state.gender);
+    p.set('lang', lang);
+    const enc = term => (term.kind === 'work' ? `work:${term.tag}` : term.tag);
+    state.inc.forEach(term => p.append('inc', enc(term)));
+    state.exc.forEach(term => p.append('exc', enc(term)));
+    return `/character-viewer.html?${p}`;
+  }
+  function openExternalViewer() {
+    const opened = typeof openExternalUrl === 'function' && openExternalUrl(externalViewerUrl());
+    if (!opened) showToast('브라우저를 열지 못했습니다 — 팝업 차단을 확인해 주세요.', 'error');
   }
 
   // ── 우클릭 메뉴 ─────────────────────────────────────────────────────────────
@@ -511,7 +573,7 @@ export function createCharacterWindow({
     const menu = doc.createElement('div');
     menu.className = 'result-context-menu chw-ctx-menu open';
     menu.setAttribute('role', 'menu');
-    menu.innerHTML = `<div class="chw-ctx-head">${escHtml(s.character)}<span>${escHtml(s.group)}</span></div>`
+    menu.innerHTML = `<div class="chw-ctx-head">${escHtml(s.character)}<span>${escHtml(groupLabel(s.group))}</span></div>`
       + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}${btn('gen', '생성')}</div>`
       + `<div class="result-context-group">${btn('fav', s.favorite ? '★ 즐겨찾기 해제' : '★ 즐겨찾기')}${btn('copy', '복사')}</div>`
       + `<div class="result-context-group">${btn('hide', '숨김', ' danger')}${btn('delthumb', '내 썸네일 삭제')}`
@@ -630,8 +692,10 @@ export function createCharacterWindow({
     const aliases = (d.aliases || []).filter(a => a && a !== d.character);
     // 생성(사용자) 썸네일만 지운다 - URL 의 v= 가 u 로 시작하면 사용자 것(서비스 thumbnail_source 의 접두사).
     const userThumb = /[?&]v=u/.test(String(d.thumbnail_url || ''));
-    const thumb = d.thumbnail_url
-      ? `<img class="chw-dt-img" src="${escHtml(d.thumbnail_url)}" alt="" draggable="false">`
+    // 변형에 제 썸네일이 없으면 기본 썸네일로 대신 보인다(빈 칸보다 낫다 · 2026-10-22).
+    const thumbUrl = d.thumbnail_url || d.default_thumbnail_url || '';
+    const thumb = thumbUrl
+      ? `<img class="chw-dt-img" src="${escHtml(thumbUrl)}" alt="" draggable="false">`
       : '<div class="chw-dt-img is-empty">썸네일 없음</div>';
     const sec = (title, items, tone) => (items && items.length
       ? `<div class="chw-dt-sec"><div class="chw-dt-lab">${title}</div>`
@@ -642,7 +706,7 @@ export function createCharacterWindow({
     const sections = d.sections || {};
     host.innerHTML = `<div class="chw-dt-scroll">`
       + `<div class="chw-dt-head">${thumb}<div class="chw-dt-info"><b>${escHtml(name)}</b>`
-      + `<span>${escHtml(d.group || '')}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}</span>`
+      + `<span>${escHtml(groupLabel(d.group || ''))}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}</span>`
       + `<span>데이터 ${n(d.count)}장${d.danbooru_posts ? ` · Danbooru ${n(d.danbooru_posts)}` : ''}</span>`
       + (aliases.length ? `<span class="chw-dt-alias">별칭: ${escHtml(aliases.join(', '))}</span>` : '')
       + (userThumb ? `<button type="button" class="chw-dt-del" data-chw-act="delthumb"`
@@ -686,10 +750,24 @@ export function createCharacterWindow({
       paintTools(); resetResults(); return;
     }
     if (t.closest('[data-chw-fav]')) { state.fav = !state.fav; paintTools(); resetResults(); return; }
-    const line = t.closest('[data-chw-fline]');
-    if (line) { feat.line = line.dataset.chwFline; paintFeat(); el('[data-chw-ft]')?.focus(); return; }
+    const lb = t.closest('[data-chw-lang]');
+    if (lb) {
+      lang = lb.dataset.chwLang === 'en' ? 'en' : 'ko';
+      try { storage?.setItem(LANG_KEY, lang); } catch (_) {}
+      paintFeat(); paintGroups(); paintGrid(); paintSel(); return;
+    }
     const fs = t.closest('[data-chw-fs]');
-    if (fs) { pickSuggestion(Number(fs.dataset.chwFs)); el('[data-chw-ft]')?.focus(); return; }
+    if (fs) { pickSuggestion(Number(fs.dataset.chwFs)); el(`[data-chw-fl="${feat.line}"]`)?.focus(); return; }
+    if (t.closest('[data-chw-fmove]')) {
+      // 필터 칸의 글을 이름 검색 칸으로 옮긴다.
+      const text = feat.text.trim();
+      const ft = el(`[data-chw-fl="${feat.line}"]`); if (ft) ft.value = '';
+      feat.text = ''; feat.rows = []; feat.show = false; paintFeat();
+      const q = el('[data-chw-q]');
+      if (q) { q.value = text; q.focus(); }
+      state.query = text; seq += 1; resetResults();
+      return;
+    }
     const chip = t.closest('[data-chw-unchip]');
     if (chip) {
       const same = term => term.tag === chip.dataset.chwTag && term.kind === chip.dataset.chwKind;
@@ -721,7 +799,8 @@ export function createCharacterWindow({
       paintGroups();
       return;
     }
-    if (event.target.closest('[data-chw-ft]')) { feat.text = event.target.value || ''; feat.show = true; suggest(); }
+    const ft = event.target.closest('[data-chw-ft]');
+    if (ft) { feat.line = ft.dataset.chwFl; feat.text = ft.value || ''; feat.show = true; suggest(); }
   }
 
   // 자동완성 손버릇: ↑ ↓ 고르기 · Enter 넣기 · Esc 닫기(조합 중 키는 입력기의 것).

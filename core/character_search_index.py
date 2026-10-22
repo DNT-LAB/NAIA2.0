@@ -209,7 +209,10 @@ class CharacterSearchIndex:
                 return cached, wanted
         ranks, query_works = self.query_matches(query)
         candidates = set(ranks) if ranks is not None else set(range(len(self.records)))
-        if group != service.GROUP_ALL:
+        if group == getattr(service, 'GROUP_ETC', None):
+            # 'etc' = 캐릭터가 1명뿐인 작품들(Characters 창 그룹 목록 · 2026-10-22).
+            candidates.intersection_update(i for ids in self.groups.values() if len(ids) == 1 for i in ids)
+        elif group != service.GROUP_ALL:
             candidates.intersection_update(self.groups.get(group, ()))
         def filter_values(values, excluding=False):
             work_ids = set()

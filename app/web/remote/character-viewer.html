@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Characters — NAIA</title>
+<!--
+  NAIA 의 캐릭터 목록을 NAIA 밖 브라우저에서 훑어보는 단독 화면(사용자 지시 2026-10-22 · Artist 의 artist-viewer.html 과 같은 갈래).
+  Characters 창 머리의 [외부 브라우저] 가 연다(characterWindow.mjs) - 그때 보던 그룹 · 검색어 · 성별 · 한글/영문 · 필터를 주소에 싣는다.
+  데이터는 전부 NAIA 가 준다: 그룹 = /api/character-viewer/groups · 목록 = /api/character-viewer/list(창과 같은 요청) ·
+  필터 낱말 = /api/character-viewer/feature-suggest · 상세 · 변형 = /api/character-viewer/detail · 그림 = 항목의 thumbnail_url.
+  보고, 찾고, 복사만 한다 - 생성 · 슬롯 · 풀 · 즐겨찾기 · 숨김 편집은 없다(앱 안의 Characters 창에서 한다).
+-->
+<style>
+  :root {
+    --bg: #0e1014; --panel: #161a22; --panel-2: #1d2330; --panel-3: #242b3a; --line: #262d3c;
+    --text: #e6e9ef; --muted: #7b8597; --accent: #6aa9ff; --accent-soft: #2a3a5a;
+    --selected: #ff9d4a; --inc: #0a1f14; --inc-line: rgba(90,190,130,0.45); --exc: #260d0f; --exc-line: rgba(240,120,120,0.45);
+    --prompt: #b9b2ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Inter", "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif; font-size: 13px; -webkit-font-smoothing: antialiased; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  button { font: inherit; color: inherit; }
+  input { font: inherit; color: var(--text); }
+
+  header { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header .title { font-weight: 600; white-space: nowrap; }
+  header .title span { color: var(--muted); font-weight: 400; }
+  .q { flex: 1 1 260px; max-width: 420px; height: 30px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--line); background: #0b1220; outline: none; }
+  .q:focus { border-color: var(--accent); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; flex: none; }
+  .seg button { border: 0; background: transparent; padding: 5px 10px; cursor: pointer; color: var(--muted); }
+  .seg button.on { background: var(--accent-soft); color: var(--text); }
+  .badge { margin-left: auto; background: #0b1220; border: 1px solid var(--line); color: var(--muted); padding: 4px 11px; border-radius: 999px; font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .badge b { color: var(--text); font-weight: 600; }
+
+  .filters { flex: 0 0 auto; display: flex; gap: 8px; padding: 7px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; align-items: flex-start; }
+  .fwrap { position: relative; flex: 1 1 240px; }
+  .fwrap input { width: 100%; height: 30px; padding: 0 10px; border-radius: 7px; outline: none; }
+  .fwrap.inc input { background: var(--inc); border: 1px solid var(--inc-line); }
+  .fwrap.exc input { background: var(--exc); border: 1px solid var(--exc-line); }
+  .fwrap.inc input:focus { border-color: rgba(90,190,130,0.85); }
+  .fwrap.exc input:focus { border-color: rgba(240,120,120,0.85); }
+  .drop { position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 20; max-height: 280px; overflow-y: auto;
+    background: #12161e; border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 12px 30px rgba(0,0,0,0.5); }
+  .drop[hidden] { display: none; }
+  .drop .opt { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .drop .opt i { font-style: normal; color: var(--muted); font-size: 11px; margin-left: auto; }
+  .drop .opt.on, .drop .opt:hover { background: var(--accent-soft); }
+  .drop .empty { padding: 7px 10px; color: var(--muted); font-size: 12px; }
+  .drop .move { display: block; margin: 0 10px 8px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; width: 100%; }
+  .chips:empty { display: none; }
+  .chip { border-radius: 999px; padding: 2px 10px; cursor: pointer; font-size: 11px; border: 1px solid var(--inc-line); background: var(--inc); }
+  .chip.exc { border-color: var(--exc-line); background: var(--exc); }
+
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr) 320px; }
+  aside.groups { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+  .gq { margin: 8px; height: 28px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--line); background: #0b1220; outline: none; }
+  .glist { flex: 1; min-height: 0; overflow-y: auto; }
+  .gi { display: flex; width: 100%; gap: 6px; align-items: baseline; border: 0; background: transparent; padding: 5px 12px; cursor: pointer; text-align: left; font-size: 12px; }
+  .gi span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gi i { font-style: normal; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .gi:hover { background: var(--panel-2); }
+  .gi.on { background: var(--accent-soft); }
+  .gi.pin { font-weight: 600; }
+  .gsep { height: 1px; margin: 4px 10px; background: var(--line); }
+
+  .gridwrap { position: relative; min-width: 0; min-height: 0; overflow-y: auto; }
+  .spacer { position: relative; }
+  .cell { position: absolute; top: 0; left: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: hidden; cursor: pointer; padding: 0; text-align: left; }
+  .cell:hover { border-color: var(--accent); }
+  .cell.on { border-color: var(--selected); box-shadow: 0 0 0 1px var(--selected); }
+  .cell .im { width: 100%; display: flex; align-items: center; justify-content: center; background: var(--panel-3); }
+  .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cell .ini { font-size: 30px; color: var(--muted); }
+  .cell .nm { padding: 4px 7px 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cell .mt { padding: 0 7px 5px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gridwrap::-webkit-scrollbar, .glist::-webkit-scrollbar, .detail::-webkit-scrollbar { width: 12px; }
+  .gridwrap::-webkit-scrollbar-track, .glist::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+  .gridwrap::-webkit-scrollbar-thumb, .glist::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb {
+    min-height: 44px; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; background-color: rgba(106,169,255,0.45); }
+  .status { position: absolute; left: 0; right: 0; top: 40%; text-align: center; color: var(--muted); }
+
+  .detail { border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .detail .ph { color: var(--muted); padding-top: 40%; text-align: center; }
+  .big { width: 100%; aspect-ratio: 1; border-radius: 10px; background: var(--panel-3); object-fit: cover; display: block; }
+  .big.empty { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  .dname { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .dmeta { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .lab { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .vchips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .vchip { height: 22px; padding: 0 9px; border-radius: 11px; border: 1px solid var(--line); background: transparent; cursor: pointer; font-size: 11px; }
+  .vchip b { font-weight: 400; color: var(--muted); margin-left: 4px; }
+  .vchip.on { border-color: var(--selected); background: var(--selected); color: #1b1206; }
+  .vchip.on b { color: #4a2a0c; }
+  .tag { display: grid; grid-template-columns: minmax(0, 1fr) 80px 42px; gap: 6px; align-items: center; font-size: 11.5px; line-height: 19px; }
+  .tag span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tag i { display: block; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.08); }
+  .tag i b { display: block; height: 100%; border-radius: 3px; background: #7c6aef; }
+  .tag.pc i b { background: #1d9e75; } .tag.at i b { background: var(--selected); }
+  .tag em { font-style: normal; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .prompt { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 11.5px; line-height: 1.5; color: var(--prompt);
+    background: #0b1220; border: 1px solid var(--line); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+  .copy { height: 32px; border-radius: 8px; border: 1px solid var(--accent); background: rgba(106,169,255,0.12); color: var(--accent); cursor: pointer; font-weight: 600; }
+  .copy:hover { background: rgba(106,169,255,0.25); }
+  .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); background: #1d2330; border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 14px; font-size: 12px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+  @media (max-width: 900px) { main { grid-template-columns: 160px minmax(0, 1fr); } .detail { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="title">Characters <span>— NAIA</span></div>
+  <input class="q" id="q" type="search" placeholder="이름 · 한글 · 초성 · work:작품" spellcheck="false" autocomplete="off">
+  <div class="seg" id="gender"></div>
+  <div class="seg" id="lang" title="그룹(작품) 이름"></div>
+  <div class="badge" id="count"><b>-</b></div>
+</header>
+<div class="filters">
+  <div class="fwrap inc"><input id="fInc" type="search" placeholder="포함 - 색 · 특징 · 가슴 · 작품 (예: pink hair)" spellcheck="false" autocomplete="off"><div class="drop" id="dInc" hidden></div></div>
+  <div class="fwrap exc"><input id="fExc" type="search" placeholder="제외 - 색 · 특징 · 가슴 · 작품 (예: glasses)" spellcheck="false" autocomplete="off"><div class="drop" id="dExc" hidden></div></div>
+  <div class="chips" id="chips"></div>
+</div>
+<main>
+  <aside class="groups"><input class="gq" id="gq" type="search" placeholder="그룹 검색" spellcheck="false" autocomplete="off"><div class="glist" id="glist"></div></aside>
+  <section class="gridwrap" id="grid"><div class="spacer" id="spacer"></div><div class="status" id="status" hidden></div></section>
+  <aside class="detail" id="detail"><div class="ph">캐릭터를 고르면 여기에 크게 보입니다.</div></aside>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const BLOCK = 60, CELL_MIN = 132, GAP = 8, NAME_H = 38;
+const GROUP_ALL = '__ALL__', GROUP_ETC = '__ETC__', PINNED = ['original'];
+const GENDERS = [['girl', '여'], ['boy', '남'], ['other', '외'], ['all', 'ALL']];
+const GENDER_LABEL = {girl: '여성', boy: '남성', other: '비인간'};
+
+const url = new URLSearchParams(location.search);
+const state = {
+  group: url.get('group') || GROUP_ALL, query: url.get('q') || '',
+  gender: GENDERS.some(([k]) => k === url.get('gender')) ? url.get('gender') : 'girl',
+  lang: url.get('lang') === 'en' ? 'en' : 'ko',
+  inc: url.getAll('inc'), exc: url.getAll('exc'),
+};
+let groups = [], groupKo = {}, groupQuery = '';
+let total = 0, blocks = new Map(), seq = 0, geo = {cols: 1, cellW: CELL_MIN, rowH: CELL_MIN + NAME_H + GAP};
+let selected = null, variant = '', detailSeq = 0, lastPrompt = '';
+const label = key => (state.lang === 'ko' && groupKo[key]) || key;
+
+function toast(text) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 1600); }
+function syncUrl() {
+  const p = new URLSearchParams();
+  if (state.group !== GROUP_ALL) p.set('group', state.group);
+  if (state.query.trim()) p.set('q', state.query.trim());
+  p.set('gender', state.gender); p.set('lang', state.lang);
+  state.inc.forEach(v => p.append('inc', v)); state.exc.forEach(v => p.append('exc', v));
+  history.replaceState(null, '', `?${p}`);
+}
+
+// ── 머리 ──
+function paintHead() {
+  $('gender').innerHTML = GENDERS.map(([k, l]) => `<button type="button" class="${k === state.gender ? 'on' : ''}" data-gender="${k}">${l}</button>`).join('');
+  $('lang').innerHTML = [['ko', '한글'], ['en', '영문']].map(([k, l]) => `<button type="button" class="${k === state.lang ? 'on' : ''}" data-lang="${k}">${l}</button>`).join('');
+  $('chips').innerHTML = [...state.inc.map(v => ['inc', v]), ...state.exc.map(v => ['exc', v])]
+    .map(([line, v]) => `<button type="button" class="chip ${line}" data-unchip="${line}" data-v="${esc(v)}" title="빼기">${line === 'exc' ? '− ' : '+ '}${esc(v)} ✕</button>`).join('');
+}
+$('gender').addEventListener('click', e => { const b = e.target.closest('[data-gender]'); if (b) { state.gender = b.dataset.gender; paintHead(); reset(); } });
+$('lang').addEventListener('click', e => { const b = e.target.closest('[data-lang]'); if (b) { state.lang = b.dataset.lang; paintHead(); paintGroups(); paintGrid(); paintDetailMeta(); syncUrl(); } });
+$('chips').addEventListener('click', e => {
+  const b = e.target.closest('[data-unchip]'); if (!b) return;
+  const list = b.dataset.unchip === 'exc' ? 'exc' : 'inc';
+  state[list] = state[list].filter(v => v !== b.dataset.v); paintHead(); reset();
+});
+$('q').value = state.query;
+let qTimer = 0;
+$('q').addEventListener('input', e => { state.query = e.target.value || ''; seq += 1; clearTimeout(qTimer); qTimer = setTimeout(reset, 180); });
+
+// ── 필터(포함 · 제외 · 칸마다 자기 자동완성) ──
+function makeFilter(input, drop, line) {
+  const f = {rows: [], active: 0, seq: 0, timer: 0};
+  const shown = () => { const chosen = new Set([...state.inc, ...state.exc]); return f.rows.filter(r => !chosen.has(r.kind === 'work' ? `work:${r.tag}` : r.tag)).slice(0, 12); };
+  const paint = () => {
+    const text = input.value.trim(); const rows = shown();
+    if (f.active >= rows.length) f.active = Math.max(0, rows.length - 1);
+    drop.innerHTML = rows.map((r, i) => `<div class="opt${i === f.active ? ' on' : ''}" data-i="${i}"><span>${esc(r.tag)}</span><i>${esc(r.label || r.kind)} · ${Number(r.count || 0).toLocaleString()}</i></div>`).join('')
+      || (text ? `<div class="empty">맞는 낱말이 없습니다 · 캐릭터 이름은 위 검색 칸에서 찾으세요</div><button type="button" class="move" data-move>위 칸에서 '${esc(text)}' 찾기</button>` : '');
+    drop.hidden = !(document.activeElement === input && text);
+  };
+  const pick = i => {
+    const r = shown()[i]; if (!r) return;
+    state[line].push(r.kind === 'work' ? `work:${r.tag}` : r.tag);
+    input.value = ''; f.rows = []; paint(); paintHead(); reset();
+  };
+  const suggest = () => {
+    clearTimeout(f.timer);
+    f.timer = setTimeout(async () => {
+      const mine = ++f.seq; const text = input.value.trim();
+      if (!text) { f.rows = []; paint(); return; }
+      try {
+        const data = await (await fetch(`/api/character-viewer/feature-suggest?q=${encodeURIComponent(text)}`)).json();
+        if (mine !== f.seq) return;
+        if (data.pending) { f.timer = setTimeout(suggest, 1500); return; }
+        f.rows = Array.isArray(data.rows) ? data.rows : []; f.active = 0;
+      } catch (_) { f.rows = []; }
+      paint();
+    }, 150);
+  };
+  input.addEventListener('input', suggest);
+  input.addEventListener('focus', paint);
+  input.addEventListener('blur', () => { drop.hidden = true; });
+  drop.addEventListener('mousedown', e => e.preventDefault());
+  drop.addEventListener('click', e => {
+    const o = e.target.closest('[data-i]'); if (o) { pick(Number(o.dataset.i)); return; }
+    if (e.target.closest('[data-move]')) {
+      state.query = input.value.trim(); $('q').value = state.query; input.value = ''; f.rows = []; drop.hidden = true; $('q').focus(); reset();
+    }
+  });
+  input.addEventListener('keydown', e => {
+    if (e.isComposing || e.keyCode === 229) return;
+    const rows = shown();
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && rows.length) { e.preventDefault(); f.active = (f.active + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length; paint(); }
+    else if (e.key === 'Enter' && rows.length) { e.preventDefault(); pick(f.active); }
+    else if (e.key === 'Escape') { drop.hidden = true; }
+  });
+}
+makeFilter($('fInc'), $('dInc'), 'inc');
+makeFilter($('fExc'), $('dExc'), 'exc');
+
+// ── 그룹 ──
+async function loadGroups() {
+  try {
+    const data = await (await fetch('/api/character-viewer/groups?offset=0&limit=5000', {cache: 'no-store'})).json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    groupKo = {}; items.forEach(g => { if (g && g.ko) groupKo[g.key] = String(g.ko); });
+    const all = items.filter(g => g.key === GROUP_ALL);
+    const pinned = PINNED.map(k => items.find(g => g.key === k)).filter(Boolean);
+    const singles = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && Number(g.count || 0) === 1);
+    const rest = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && Number(g.count || 0) > 1);
+    groups = [...all, ...pinned, ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: singles.length}] : []), {sep: true}, ...rest];
+  } catch (_) { groups = []; }
+  paintGroups();
+}
+function paintGroups() {
+  const q = groupQuery.trim().toLowerCase();
+  const rows = q ? groups.filter(g => !g.sep && (g.key === GROUP_ALL || String(g.key).toLowerCase().includes(q) || String(groupKo[g.key] || '').includes(groupQuery.trim()))) : groups;
+  $('glist').innerHTML = rows.map(g => g.sep ? '<div class="gsep"></div>'
+    : `<button type="button" class="gi${g.key === state.group ? ' on' : ''}${g.key === GROUP_ALL || g.key === GROUP_ETC || PINNED.includes(g.key) ? ' pin' : ''}" data-g="${esc(g.key)}" title="${esc(g.key === GROUP_ETC ? '캐릭터가 1명인 작품들' : g.key)}">`
+      + `<span>${esc(g.key === GROUP_ALL ? 'All' : g.key === GROUP_ETC ? 'etc' : label(g.key))}</span><i>${Number(g.count || 0).toLocaleString()}</i></button>`).join('');
+}
+$('gq').addEventListener('input', e => { groupQuery = e.target.value || ''; paintGroups(); });
+$('glist').addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) { state.group = b.dataset.g; paintGroups(); reset(); } });
+
+// ── 격자(보이는 만큼만) ──
+function params() {
+  const p = new URLSearchParams();
+  if (state.group !== GROUP_ALL) p.set('group', state.group);
+  if (state.query.trim()) p.set('query', state.query.trim());
+  if (state.gender !== 'all') p.append('gender', state.gender);
+  state.inc.forEach(v => p.append('inc', v)); state.exc.forEach(v => p.append('exc', v));
+  p.set('compact', '1');
+  return p;
+}
+function reset() {
+  seq += 1; blocks = new Map(); total = 0; $('grid').scrollTop = 0; syncUrl();
+  void loadBlock(0);
+}
+async function loadBlock(i) {
+  if (blocks.has(i)) return;
+  const mine = seq; blocks.set(i, 'loading');
+  try {
+    const p = params(); p.set('offset', String(i * BLOCK)); p.set('limit', String(BLOCK));
+    const res = await fetch(`/api/character-viewer/list?${p}`, {cache: 'no-store'});
+    const data = await res.json().catch(() => ({}));
+    if (mine !== seq) return;
+    if (!res.ok) throw new Error(data.error || '목록을 불러오지 못했습니다.');
+    total = Number(data.total || 0);
+    blocks.set(i, Array.isArray(data.items) ? data.items : []);
+    $('status').hidden = total > 0; $('status').textContent = total ? '' : '맞는 캐릭터가 없습니다.';
+    $('count').innerHTML = `<b>${total.toLocaleString()}</b>명`;
+    layout();
+  } catch (error) {
+    if (mine !== seq) return;
+    blocks.set(i, []); $('status').hidden = false; $('status').textContent = error.message || String(error);
+  }
+}
+function itemAt(i) { const b = blocks.get(Math.floor(i / BLOCK)); return Array.isArray(b) ? b[i % BLOCK] || null : null; }
+function layout() {
+  const grid = $('grid'); const width = grid.clientWidth - 16;
+  const cols = Math.max(1, Math.floor((width + GAP) / (CELL_MIN + GAP)));
+  const cellW = Math.floor((width - GAP * (cols - 1)) / cols);
+  geo = {cols, cellW, rowH: cellW + NAME_H + GAP};
+  $('spacer').style.height = `${Math.ceil(total / cols) * geo.rowH + 8}px`;
+  paintGrid();
+}
+function paintGrid() {
+  const grid = $('grid'); if (!total) { $('spacer').innerHTML = ''; return; }
+  const firstRow = Math.max(0, Math.floor(grid.scrollTop / geo.rowH) - 2);
+  const lastRow = Math.ceil((grid.scrollTop + grid.clientHeight) / geo.rowH) + 2;
+  const from = firstRow * geo.cols, to = Math.min(total, lastRow * geo.cols);
+  for (let b = Math.floor(from / BLOCK); b <= Math.floor(Math.max(from, to - 1) / BLOCK); b += 1) void loadBlock(b);
+  let html = '';
+  for (let i = from; i < to; i += 1) {
+    const x = (i % geo.cols) * (geo.cellW + GAP) + 8, y = Math.floor(i / geo.cols) * geo.rowH + 8;
+    const style = `transform:translate(${x}px,${y}px);width:${geo.cellW}px`;
+    const it = itemAt(i);
+    if (!it) { html += `<div class="cell" style="${style}"><div class="im" style="height:${geo.cellW}px"></div></div>`; continue; }
+    const on = selected && selected.group === it.group && selected.character === it.character;
+    const img = it.thumbnail_url ? `<img loading="lazy" decoding="async" alt="" src="${esc(it.thumbnail_url)}">` : `<span class="ini">${esc(String(it.character || '?').charAt(0).toUpperCase())}</span>`;
+    html += `<button type="button" class="cell${on ? ' on' : ''}" style="${style}" data-i="${i}" title="${esc(`${it.character} · ${label(it.group)}`)}">`
+      + `<div class="im" style="height:${geo.cellW}px">${img}</div><div class="nm">${esc(it.character)}</div>`
+      + `<div class="mt">${esc(label(it.group))} · ${Number(it.count || 0).toLocaleString()}</div></button>`;
+  }
+  $('spacer').innerHTML = html;
+}
+$('grid').addEventListener('scroll', () => paintGrid(), {passive: true});
+window.addEventListener('resize', () => layout());
+$('grid').addEventListener('click', e => {
+  const c = e.target.closest('[data-i]'); if (!c) return;
+  const it = itemAt(Number(c.dataset.i)); if (!it) return;
+  selected = {group: it.group, character: it.character}; variant = ''; paintGrid(); void loadDetail();
+});
+
+// ── 상세 · 변형 · 복사 ──
+let detailData = null;
+async function loadDetail() {
+  const mine = ++detailSeq; const s = selected, v = variant;
+  if (!s) return;
+  try {
+    const res = await fetch('/api/character-viewer/detail', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group: s.group, character: s.character, variant: v})});
+    const data = await res.json().catch(() => ({}));
+    if (mine !== detailSeq) return;
+    if (!res.ok) throw new Error(data.error || '상세를 받지 못했습니다.');
+    detailData = data; paintDetail();
+  } catch (error) { if (mine === detailSeq) $('detail').innerHTML = `<div class="ph">${esc(error.message || error)}</div>`; }
+}
+function paintDetailMeta() { if (detailData) paintDetail(); }
+function paintDetail() {
+  const d = detailData; const n = x => Number(x || 0).toLocaleString();
+  const name = d.variant ? `${d.character} (${String(d.variant).replace(/_/g, ' ')})` : d.character;
+  const variants = Array.isArray(d.variants) ? d.variants : [];
+  const sec = (title, items, cls) => (items && items.length ? `<div><div class="lab">${title}</div>`
+    + items.map(it => `<div class="tag ${cls}"><span>${esc(it.tag)}</span><i><b style="width:${Math.max(0, Math.min(100, Number(it.pct || 0)))}%"></b></i><em>${Number(it.pct || 0).toFixed(1)}%</em></div>`).join('') + '</div>' : '');
+  const s = d.sections || {};
+  lastPrompt = String(d.prompt?.character_prompt || '');
+  const thumbUrl = d.thumbnail_url || d.default_thumbnail_url || '';     // 변형에 제 그림이 없으면 기본 그림
+  $('detail').innerHTML = (thumbUrl ? `<img class="big" alt="" src="${esc(thumbUrl)}">` : '<div class="big empty">썸네일 없음</div>')
+    + `<div><div class="dname">${esc(name)}</div><div class="dmeta">${esc(label(d.group || ''))}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}`
+    + `<br>데이터 ${n(d.count)}장${d.danbooru_posts ? ` · Danbooru ${n(d.danbooru_posts)}` : ''}</div></div>`
+    + (variants.length > 1 ? `<div><div class="lab">Variations · ${variants.length}</div><div class="vchips">`
+      + variants.map(x => `<button type="button" class="vchip${String(x.label || '') === String(d.variant || '') ? ' on' : ''}" data-var="${esc(x.label || '')}">${esc(x.name || 'Default')}<b>${n(x.rows)}</b></button>`).join('') + '</div></div>' : '')
+    + sec('Personal Color', s.personal_color, 'pc') + sec('Characteristics', s.characteristics, '') + sec('Attire', s.attire, 'at')
+    + `<div><div class="lab">캐릭터 프롬프트</div><div class="prompt">${esc(lastPrompt)}</div></div>`
+    + `<button type="button" class="copy" data-copy>프롬프트 복사</button>`;
+}
+$('detail').addEventListener('click', async e => {
+  const v = e.target.closest('[data-var]');
+  if (v) { variant = v.dataset.var || ''; void loadDetail(); return; }
+  if (e.target.closest('[data-copy]')) {
+    try { await navigator.clipboard.writeText(lastPrompt); toast('프롬프트를 복사했습니다'); }
+    catch (_) {
+      const ta = document.createElement('textarea'); ta.value = lastPrompt; document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand('copy'); ta.remove(); toast(ok ? '프롬프트를 복사했습니다' : '복사하지 못했습니다');
+    }
+  }
+});
+
+paintHead();
+void loadGroups();
+reset();
+</script>
+</body>
+</html>

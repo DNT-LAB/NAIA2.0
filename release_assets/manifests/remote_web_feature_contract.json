@@ -431,13 +431,15 @@
         "core/character_search_index.py",
         "core/character_preview_index.py",
         "app/web/remote/js/features/thumbTab.mjs",
-        "app/web/remote/js/features/characterViewerTab.mjs"
+        "app/web/remote/js/features/characterViewerTab.mjs",
+        "app/web/remote/character-viewer.html"
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [
         {"method": "GET", "path": "/api/thumb/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/thumb/category/{category_key}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/thumb/image", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/character-viewer.html", "smoke": "static"},
         {"method": "GET", "path": "/api/character-viewer/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/character-viewer/groups", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/character-viewer/list", "smoke": "asset_runtime"},

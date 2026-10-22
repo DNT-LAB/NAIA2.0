@@ -72,6 +72,12 @@ def register_web_shell_routes(app: FastAPI, root_web_dir: Path) -> None:
         # 이 라우트는 페이지만 준다. 목록 · 그림은 기존 /api/artist-thumb/* 그대로다.
         return _web_file(root_web_dir / "artist-viewer.html", "text/html")
 
+    @app.get("/character-viewer.html")
+    async def character_viewer_page():
+        # NAIA 밖 브라우저에서 캐릭터 목록을 훑는 단독 화면 - Characters 창의 [외부 브라우저] 가 연다(10-22).
+        # 이 라우트는 페이지만 준다. 목록 · 그림 · 상세는 기존 /api/character-viewer/* 그대로다.
+        return _web_file(root_web_dir / "character-viewer.html", "text/html")
+
     @app.get("/style.css")
     async def serve_css():
         return _web_file(root_web_dir / "style.css", "text/css")

@@ -24938,6 +24938,14 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .chw-ft { flex: 1; }
 .chw-fwrap { flex: 1; min-width: 0; position: relative; display: flex; }
 .chw-fwrap .chw-ft { flex: 1; }
+/* 포함 = 짙은 녹색 · 제외 = 짙은 붉은색 배경(사용자 지시 2026-10-22 · 이름 검색 칸과 헷갈리지 않게). */
+.chw-fwrap.is-inc .chw-ft { background: #0a1f14; border-color: rgba(90,190,130,0.45); }
+.chw-fwrap.is-inc .chw-ft:focus { border-color: rgba(90,190,130,0.85); }
+.chw-fwrap.is-exc .chw-ft { background: #260d0f; border-color: rgba(240,120,120,0.45); }
+.chw-fwrap.is-exc .chw-ft:focus { border-color: rgba(240,120,120,0.85); }
+.chw-fdrop .chw-fmove { display: block; margin: 0 9px 8px; padding: 3px 9px; border-radius: 5px; cursor: pointer; font-size: 11px;
+  border: 1px solid rgba(124,106,239,0.6); background: rgba(124,106,239,0.15); color: var(--text-primary); }
+.chw-fdrop .chw-fmove:hover { background: rgba(124,106,239,0.35); }
 /* 자동완성 목록(2026-10-22) - 입력칸 아래 떠 있다. */
 .chw-fdrop {
   position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 30; max-height: 260px; overflow-y: auto;

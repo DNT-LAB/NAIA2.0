@@ -1092,11 +1092,21 @@ class CharacterViewerService:
                 return variant
         raise KeyError(f"Variant not found: {variant_label}")
 
-    def _variant_items(self, data: dict[str, Any], variant: dict[str, Any] | None):
+    # 기본(Default) 보기의 의상 문턱. 기본 보기는 여러 옷이 섞인 분포라 변형(60%)보다 낮게 - 40% 면 평균 5.5개로
+    # 대표 의상만 남는다(miku = shirt · necktie · detached sleeves · skirt · sleeveless / 여러 옷의 artoria = 0개).
+    # 데이터는 `tools/add_default_attire.py` 가 30% 이상만 저장한다.
+    DEFAULT_ATTIRE_MIN_PCT = 40.0
+
+    def _variant_items(self, data: dict[str, Any], variant: dict[str, Any] | None, default_attire: bool = False):
+        """(색, 특징, 의상). 기본 보기의 의상은 `default_attire=True`(상세보기 표시)일 때만 준다 - 프롬프트
+        (`build_prompt`)는 예전대로 기본 보기에 의상을 싣지 않는다(생성 결과가 바뀐다 - 사용자 결정 전)."""
         if variant is None:
             pc_items = list(data.get("personal_color", []) or [])
             ch_items = list(data.get("characteristics", []) or [])
-            attire_items: list[dict[str, Any]] = []
+            attire_items: list[dict[str, Any]] = (
+                [entry for entry in (data.get("attire", []) or [])
+                 if isinstance(entry, dict) and entry.get("pct", 0) >= self.DEFAULT_ATTIRE_MIN_PCT]
+                if default_attire else [])
             dist = (data.get("breast_size", {}) or {}).get("distribution", []) or []
             if dist:
                 ch_items.insert(0, max(dist, key=lambda entry: entry.get("pct", 0)))
@@ -1124,7 +1134,7 @@ class CharacterViewerService:
     ) -> dict[str, Any]:
         data = self._get_character(group_key, name)
         variant = self._resolve_variant(data, variant_label)
-        pc_items, ch_items, attire_items = self._variant_items(data, variant)
+        pc_items, ch_items, attire_items = self._variant_items(data, variant, default_attire=True)
         prompt_payload = self.build_prompt(group_key, name, variant_label, options or {}, api_mode)
         variants = [
             {"label": "", "name": "Default", "rows": int(data.get("total_rows", 0) or 0)}

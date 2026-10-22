@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import shutil
 import threading
 from contextlib import contextmanager
 
@@ -152,6 +153,23 @@ class CharacterViewerService:
             return fallback
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def _load_user_json(self, path: Path, fallback: dict) -> dict:
+        """사용자 파일(옵션 · 썸네일 색인) - 잘렸거나 루트가 객체가 아니면 기본값으로 계속 간다(업데이트 호환 리뷰 P2).
+        원본은 `.broken` 사본으로 한 번 남긴다 - 다음 저장이 깨진 원본을 덮어 버리기 전에."""
+        try:
+            data = self._load_json(path, fallback)
+            if isinstance(data, dict):
+                return data
+        except (OSError, ValueError):
+            pass
+        try:
+            broken = path.with_name(path.name + ".broken")
+            if path.exists() and not broken.exists():
+                shutil.copy2(path, broken)
+        except OSError:
+            pass
+        return dict(fallback)
 
     def _load_source_cache(self, attribute, path, prepare=None):
         # Loading is deliberately outside the lock: requests must not wait for warmup.
@@ -344,7 +362,7 @@ class CharacterViewerService:
     def thumb_index(self) -> dict[str, str]:
         if self._thumb_index is None:
             self._adopt_legacy_thumbs()
-            self._thumb_index = self._load_json(self.thumb_index_path, {})
+            self._thumb_index = self._load_user_json(self.thumb_index_path, {})
         return self._thumb_index
 
     def reload_thumbnails(self) -> None:
@@ -352,7 +370,7 @@ class CharacterViewerService:
         self._invalidate_search("thumbs")
 
     def load_options(self) -> dict[str, Any]:
-        data = self._load_json(self.tags_path, {})
+        data = self._load_user_json(self.tags_path, {})
         return {
             "prefix": data.get("prefix", self.DEFAULT_PREFIX),
             "postfix": data.get("postfix", self.DEFAULT_POSTFIX),
@@ -429,16 +447,38 @@ class CharacterViewerService:
             "options": self.load_options(),
         }
 
-    def build_groups(self, query: str = "", limit: int | None = None, offset: int = 0) -> dict[str, Any]:
+    def build_groups(self, query: str = "", limit: int | None = None, offset: int = 0,
+                     genders: list[str] | None = None) -> dict[str, Any]:
+        from collections import Counter
         from core.character_search_index import normalize
         self._refresh_search_sources()
         query_text = normalize(query).lstrip("*").strip()
         terms = [t.strip().removeprefix("work:").strip() for t in query_text.split(",") if t.strip()]
         counts = self._group_counts()
-        groups = [{"key": self.GROUP_ALL, "name": "All", "count": sum(c for _, c in counts)}]
+        # 성별을 고르면 그룹 인원도 그 성별로 센다(사용자 지시 2026-10-22) - 목록과 같은 잣대(색인 레코드의 gender).
+        # `total` = 성별과 무관한 그룹 크기(창이 1명짜리 작품을 etc 로 묶는 기준 · 그대로 둔다).
+        wanted = {str(g or "").strip().lower() for g in (genders or [])} & {"girl", "boy", "other"}
+        per_gender: Counter | None = None
+        if wanted:
+            index = self._search_index or self.warm_search_index()
+            if index is not None:
+                per_gender = Counter(r.group for r in index.records if r.gender in wanted)
+            else:
+                # 색인을 다른 스레드가 만드는 중이다 - 전체 수로 대신하면 '여' 에서도 남자만 있는 작품이 뜬다(3차 리뷰 P2).
+                # 그룹 사전의 여/남 명단으로 센다(비인간 `other` 는 색인에만 있다 - 그동안 0).
+                per_gender = Counter()
+                for group_key, data in self.groups().items():
+                    if str(group_key).startswith("_") or not isinstance(data, dict):
+                        continue
+                    per_gender[group_key] = sum(len(data.get(g, []) or []) for g in ("girl", "boy") if g in wanted)
+        count_of = (lambda key, total: per_gender.get(key, 0)) if per_gender is not None else (lambda key, total: total)
+        groups = [{"key": self.GROUP_ALL, "name": "All",
+                   "count": sum(per_gender.values()) if per_gender is not None else sum(c for _, c in counts),
+                   "total": sum(c for _, c in counts)}]
         # 한글 작품명(있으면 · `data/character_group_ko.json` - 3명 이상 작품만)을 같이 싣는다 - 창의 [한글] 표시.
         ko = self.group_ko()
-        groups.extend({"key": key, "name": key, "count": count, **({"ko": ko[key]} if ko.get(key) else {})}
+        groups.extend({"key": key, "name": key, "count": count_of(key, count), "total": count,
+                       **({"ko": ko[key]} if ko.get(key) else {})}
                       for key, count in counts if all(term in normalize(key) for term in terms))
         total = len(groups)
         offset = max(0, int(offset))

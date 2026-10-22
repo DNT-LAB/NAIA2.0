@@ -257,14 +257,18 @@ def register_install_manager_routes(
     async def api_install_manager_initialize(req: Request):
         if not _is_local_request(req):
             return _loopback_only_response()
+        # 처리 중인 initialize 수 - 미뤄 둔 예열이 이걸 보고 기다린다(headless_lifespan._after_startup_gate).
+        session_context.headless_initialize_inflight = getattr(session_context, "headless_initialize_inflight", 0) + 1
         try:
             return await run_in_thread(runtime_install_manager(session_context).initialize)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Install manager initialize failed: {exc}"}, status_code=500)
         finally:
-            # 첫 initialize 가 답을 받았다 - 미뤄 둔 무거운 색인 예열을 이제 시작한다(headless_lifespan).
+            session_context.headless_initialize_inflight = max(0, getattr(session_context, "headless_initialize_inflight", 1) - 1)
+            # initialize 가 답을 받았다 - 미뤄 둔 무거운 색인 예열을 이제 시작한다(headless_lifespan).
+            # ⚠️ 겹친 initialize 가 **모두** 끝났을 때만 연다(재리뷰 P2 - 하나만 끝나도 열려 남은 것과 예열이 겹쳤다).
             gate = getattr(session_context, "headless_startup_gate", None)
-            if gate is not None:
+            if gate is not None and session_context.headless_initialize_inflight == 0:
                 gate.set()
 
     @app.post("/api/install-manager/tag-archive/download")

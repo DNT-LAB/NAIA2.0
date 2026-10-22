@@ -2703,11 +2703,12 @@ class HeadlessCharacterAssetService:
     def _normalize_nai_model(self, value: Any, source: Any = "") -> str:
         source_text = str(source or "")
         raw = str(value or "").strip()
-        if raw.upper().startswith("NAID"):
-            return raw
-        # 사용자가 등록한 커스텀 모델이 먼저다 - 내장 라벨과 겹칠 수 있다.
+        # 저장된 커스텀 키는 옛 계보 별칭보다 우선한다.
         try:
-            custom_key = self.context._nai_model_registry().key_for_api_model(raw)
+            registry = self.context._nai_model_registry()
+            if registry.has_key(raw):
+                return raw.upper()
+            custom_key = registry.key_for_api_model(raw)
             if custom_key:
                 return custom_key
         except Exception:
@@ -2717,8 +2718,11 @@ class HeadlessCharacterAssetService:
         # 추가할 때 둘 다 안 고쳐서, V5 이미지의 라벨이 키 자리로 흘러가
         # `등록되지 않은 NAI 모델 키입니다: NOVELAI DIFFUSION V5` 로 생성이 막혔다
         # (사용자 제보 2026-08-22).
-        from core.nai_model_contract import nai_key_from_metadata
+        from core.nai_model_contract import NAI_LEGACY_KEY_ALIASES, nai_key_from_metadata
 
+        if raw.upper().startswith("NAID"):
+            # 모르는 NAID 키는 그대로 남겨 생성 직전의 엄격한 판정에 맡긴다.
+            return NAI_LEGACY_KEY_ALIASES.get(raw.upper(), raw)
         resolved = nai_key_from_metadata(raw, source_text)
         if resolved:
             return resolved

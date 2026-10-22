@@ -301,6 +301,7 @@ BUILTIN_NAI_MODEL_SPECS: dict[str, NaiModelSpec] = {
 # ⚠️ 이 이름들은 공백이 없어 **커스텀 키 문법에 맞는다.** 그래서 레지스트리가 새 커스텀
 #    모델이 이 이름을 못 쓰게 막는다 - 안 막으면 지운 커스텀 모델이 이 번역을 타고 V5 로
 #    둔갑해 다른 모델로 돈이 나간다(wire 이름 충돌과 같은 이유).
+#    기존 저장본의 동명 커스텀은 보존한다. 레지스트리를 아는 호출부는 그 키를 먼저 확인한다.
 # ⚠️ 프런트에 사본이 있다(`app.js` 의 `NAI_LEGACY_MODEL_KEY_ALIASES`) - 같이 고칠 것.
 #    `tests/test_nai_legacy_model_keys.py` 가 둘이 어긋나면 잡는다.
 NAI_LEGACY_KEY_ALIASES: dict[str, str] = {
@@ -566,8 +567,8 @@ def nai_key_from_display_name(value: Any) -> str:
     그래서 사용자 **선택**을 다루는 자리(파라미터 목·시작 시 치유)는 이 함수를 쓰고,
     메타데이터에서 온 값을 다루는 자리만 `nai_key_from_exact_name` 을 쓴다.
 
-    옛 계보 키(`NAID5.0F`)도 되돌린다. 이건 공백이 없지만 레지스트리가 그 이름의 커스텀
-    키를 받지 않으므로(`NAI_LEGACY_KEY_ALIASES` 주석) 남의 키를 삼키지 않는다.
+    옛 계보 키(`NAID5.0F`)도 되돌린다. 기존 저장본에 동명 커스텀이 있을 수 있으므로
+    레지스트리를 아는 호출부는 등록된 키를 먼저 확인하고, 없는 키만 이 함수에 넘긴다.
     """
     text = str(value or "").strip()
     if not text:

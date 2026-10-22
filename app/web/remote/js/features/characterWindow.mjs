@@ -187,21 +187,32 @@ export function createCharacterWindow({
     if (mine === seq) { paintTools(); layoutGrid(); }
   }
 
+  let groupSeq = 0;
   async function loadGroups() {
+    const mine = ++groupSeq;              // 성별을 빠르게 바꾸면 늦게 온 응답이 새 것을 덮지 않게
     try {
-      const res = await fetch('/api/character-viewer/groups?offset=0&limit=5000', {cache: 'no-store'});
+      // 성별을 실어 보낸다 - 그룹 인원이 지금 고른 성별의 수로 온다(사용자 지시 2026-10-22).
+      const gq = state.gender && state.gender !== 'all' ? `&gender=${encodeURIComponent(state.gender)}` : '';
+      const res = await fetch(`/api/character-viewer/groups?offset=0&limit=5000${gq}`, {cache: 'no-store'});
       const data = await res.json().catch(() => ({}));
+      if (mine !== groupSeq) return;
       if (res.ok) {
         const items = Array.isArray(data.items) ? data.items : [];
         groupKo = {};
         items.forEach(g => { if (g && g.ko) groupKo[g.key] = String(g.ko); });
         // All · original · etc 를 위에 고정하고 그 아래 일반 작품(2명 이상). 1명짜리 작품은 etc 한 묶음으로.
+        // 묶는 기준은 성별과 무관한 그룹 크기(total) - 성별을 바꿔도 etc 의 구성은 그대로, 인원(count)만 바뀐다.
+        // 고른 성별이 0명인 작품은 감춘다(고정 그룹은 남긴다).
+        const size = g => Number(g.total ?? g.count ?? 0);
         const all = items.filter(g => g.key === '__ALL__');
         const pinned = PINNED_GROUPS.map(key => items.find(g => g.key === key)).filter(Boolean);
-        const singles = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && Number(g.count || 0) === 1);
-        const rest = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && Number(g.count || 0) > 1);
+        const singles = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && size(g) === 1);
+        const etcCount = singles.reduce((sum, g) => sum + Number(g.count || 0), 0);
+        const rest = items.filter(g => g.key !== '__ALL__' && !PINNED_GROUPS.includes(g.key) && size(g) > 1
+          && Number(g.count || 0) > 0)
+          .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));   // 고른 성별의 인원 순
         groups = [...all, ...pinned,
-          ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: singles.length, special: true}] : []), ...rest];
+          ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: etcCount, special: true}] : []), ...rest];
       }
     } catch (_) { /* 다음에 다시 */ }
     paintGroups();
@@ -237,10 +248,12 @@ export function createCharacterWindow({
       ? `<img loading="lazy" decoding="async" alt="" src="${escAttr(item.thumbnail_url)}">`
       : `<span class="chw-ini">${escHtml(String(item.character || '?').charAt(0).toUpperCase())}</span>`;
     return `<button type="button" class="chw-cell${on ? ' is-on' : ''}" style="${style}" data-chw-i="${i}"`
-      + ` title="${escAttr(`${item.character} · ${item.group}`)}">`
+      // 툴팁은 달지 않는다 - 칸 아래 이름 · 작품과 같은 말이다(사용자 지시 2026-10-22). 화면 읽기용 이름만.
+      + ` aria-label="${escAttr(`${item.character} · ${groupLabel(item.group)}`)}">`
       + `<div class="chw-im" style="height:${geo.cellW}px">${img}${item.favorite ? '<span class="chw-star">★</span>' : ''}</div>`
       + `<div class="chw-nm">${escHtml(item.character)}</div>`
-      + `<div class="chw-mt">${escHtml(groupLabel(item.group))} · ${Number(item.count || 0).toLocaleString()}</div></button>`;
+      + `<div class="chw-mt"><span class="chw-glink" data-chw-goto="${escAttr(item.group)}" title="이 작품 그룹으로 가기">`
+      + `${escHtml(groupLabel(item.group))}</span> · ${Number(item.count || 0).toLocaleString()}</div></button>`;
   }
 
   function paintGrid() {
@@ -390,7 +403,8 @@ export function createCharacterWindow({
     const s = selected;
     const off = busy ? ' disabled' : '';
     box.innerHTML = `${gopt}<div class="chw-st"><b>${escHtml(s.character)}</b>`
-      + `<span>${escHtml(groupLabel(s.group))} · ${Number(s.count || 0).toLocaleString()}`
+      + `<span><span class="chw-glink" data-chw-goto="${escHtml(s.group)}" title="이 작품 그룹으로 가기">${escHtml(groupLabel(s.group))}</span>`
+      + ` · ${Number(s.count || 0).toLocaleString()}`
       + `${selVariant ? ` · ${escHtml(selVariant.replace(/_/g, ' '))}` : ''}</span></div>`
       + `<div class="chw-acts">`
       + `<button type="button" class="chw-act is-slot" data-chw-act="slot"${off}>+ 슬롯</button>`
@@ -577,7 +591,8 @@ export function createCharacterWindow({
       + `<div class="result-context-group">${btn('slot', '+ 슬롯')}${btn('pool', '+ 풀')}${btn('gen', '생성')}</div>`
       + `<div class="result-context-group">${btn('fav', s.favorite ? '★ 즐겨찾기 해제' : '★ 즐겨찾기')}${btn('copy', '복사')}</div>`
       + `<div class="result-context-group">${btn('hide', '숨김', ' danger')}${btn('delthumb', '내 썸네일 삭제')}`
-      + `${btn('tab', 'Characters 탭에서 열기')}</div>`;
+      + `${btn('tab', 'Characters 탭에서 열기')}</div>`
+      + `<div class="result-context-group">${btn('goto', `'${escHtml(groupLabel(s.group))}' 그룹으로 가기`)}</div>`;
     menu.addEventListener('contextmenu', e => e.preventDefault());
     menu.addEventListener('click', e => {
       const b = e.target.closest('[data-chw-ctx]');
@@ -588,6 +603,7 @@ export function createCharacterWindow({
       closeCtxMenu();
       // 그사이 다른 캐릭터가 골라졌으면(다른 칸을 눌렀다) 이 메뉴의 대상이 아니다 - 안 한다.
       if (!target || target !== selected) return;
+      if (b.dataset.chwCtx === 'goto') { jumpToGroup(target.group); return; }
       void act(b.dataset.chwCtx);
     });
     doc.body.appendChild(menu);
@@ -706,7 +722,8 @@ export function createCharacterWindow({
     const sections = d.sections || {};
     host.innerHTML = `<div class="chw-dt-scroll">`
       + `<div class="chw-dt-head">${thumb}<div class="chw-dt-info"><b>${escHtml(name)}</b>`
-      + `<span>${escHtml(groupLabel(d.group || ''))}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}</span>`
+      + `<span><span class="chw-glink" data-chw-goto="${escAttr(d.group || '')}" title="이 작품 그룹으로 가기">`
+      + `${escHtml(groupLabel(d.group || ''))}</span>${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}</span>`
       + `<span>데이터 ${n(d.count)}장${d.danbooru_posts ? ` · Danbooru ${n(d.danbooru_posts)}` : ''}</span>`
       + (aliases.length ? `<span class="chw-dt-alias">별칭: ${escHtml(aliases.join(', '))}</span>` : '')
       + (userThumb ? `<button type="button" class="chw-dt-del" data-chw-act="delthumb"`
@@ -737,8 +754,23 @@ export function createCharacterWindow({
     void loadLine();
   }
 
+  /** 작품 그룹으로 바로 간다(사용자 지시 2026-10-22 - 칸 · 아래 줄의 작품명 링크 · 우클릭). 그룹 목록도 그 자리로 굴린다. */
+  function jumpToGroup(key) {
+    if (!key) return;
+    state.group = key;
+    groupQuery = '';
+    const gq = el('[data-chw-gq]'); if (gq) gq.value = '';
+    const list = el('[data-chw-glist]');
+    const index = shownGroups().findIndex(g => g.key === key);
+    if (list && index >= 0) list.scrollTop = Math.max(0, index * GROUP_ROW - list.clientHeight / 2 + GROUP_ROW);
+    paintGroups(); resetResults();
+  }
+
   function onClick(event) {
     const t = event.target;
+    // 작품명 링크는 칸(고르기)보다 먼저 - 칸 안에 있다.
+    const go = t.closest('[data-chw-goto]');
+    if (go) { event.preventDefault(); jumpToGroup(go.dataset.chwGoto); return; }
     const cell = t.closest('[data-chw-i]');
     if (cell) { const item = itemAt(Number(cell.dataset.chwI)); if (item) void select(item); return; }
     const g = t.closest('[data-chw-g]');
@@ -747,7 +779,7 @@ export function createCharacterWindow({
     if (gender) {
       state.gender = gender.dataset.chwGender;
       try { storage?.setItem(GENDER_KEY, state.gender); } catch (_) {}
-      paintTools(); resetResults(); return;
+      paintTools(); resetResults(); void loadGroups(); return;
     }
     if (t.closest('[data-chw-fav]')) { state.fav = !state.fav; paintTools(); resetResults(); return; }
     const lb = t.closest('[data-chw-lang]');

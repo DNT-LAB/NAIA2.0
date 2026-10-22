@@ -78,6 +78,9 @@
   .cell .ini { font-size: 30px; color: var(--muted); }
   .cell .nm { padding: 4px 7px 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cell .mt { padding: 0 7px 5px; font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 작품명 = 그 그룹으로 가는 링크 - 글자 위만 눌린다(칸의 나머지는 캐릭터 고르기). */
+  .glink { cursor: pointer; border-radius: 3px; }
+  .glink:hover { color: var(--selected); text-decoration: underline; text-underline-offset: 2px; }
   .gridwrap::-webkit-scrollbar, .glist::-webkit-scrollbar, .detail::-webkit-scrollbar { width: 12px; }
   .gridwrap::-webkit-scrollbar-track, .glist::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
   .gridwrap::-webkit-scrollbar-thumb, .glist::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb {
@@ -170,7 +173,7 @@ function paintHead() {
   $('chips').innerHTML = [...state.inc.map(v => ['inc', v]), ...state.exc.map(v => ['exc', v])]
     .map(([line, v]) => `<button type="button" class="chip ${line}" data-unchip="${line}" data-v="${esc(v)}" title="빼기">${line === 'exc' ? '− ' : '+ '}${esc(v)} ✕</button>`).join('');
 }
-$('gender').addEventListener('click', e => { const b = e.target.closest('[data-gender]'); if (b) { state.gender = b.dataset.gender; paintHead(); reset(); } });
+$('gender').addEventListener('click', e => { const b = e.target.closest('[data-gender]'); if (b) { state.gender = b.dataset.gender; paintHead(); reset(); void loadGroups(); } });
 $('lang').addEventListener('click', e => { const b = e.target.closest('[data-lang]'); if (b) { state.lang = b.dataset.lang; paintHead(); paintGroups(); paintGrid(); paintDetailMeta(); syncUrl(); } });
 $('chips').addEventListener('click', e => {
   const b = e.target.closest('[data-unchip]'); if (!b) return;
@@ -233,17 +236,24 @@ makeFilter($('fInc'), $('dInc'), 'inc');
 makeFilter($('fExc'), $('dExc'), 'exc');
 
 // ── 그룹 ──
+let groupSeq = 0;
 async function loadGroups() {
+  const mine = ++groupSeq;
   try {
-    const data = await (await fetch('/api/character-viewer/groups?offset=0&limit=5000', {cache: 'no-store'})).json();
+    const gq = state.gender !== 'all' ? `&gender=${encodeURIComponent(state.gender)}` : '';   // 그룹 인원 = 고른 성별의 수
+    const data = await (await fetch(`/api/character-viewer/groups?offset=0&limit=5000${gq}`, {cache: 'no-store'})).json();
+    if (mine !== groupSeq) return;
     const items = Array.isArray(data.items) ? data.items : [];
     groupKo = {}; items.forEach(g => { if (g && g.ko) groupKo[g.key] = String(g.ko); });
     const all = items.filter(g => g.key === GROUP_ALL);
     const pinned = PINNED.map(k => items.find(g => g.key === k)).filter(Boolean);
-    const singles = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && Number(g.count || 0) === 1);
-    const rest = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && Number(g.count || 0) > 1);
-    groups = [...all, ...pinned, ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: singles.length}] : []), {sep: true}, ...rest];
-  } catch (_) { groups = []; }
+    const size = g => Number(g.total ?? g.count ?? 0);      // etc 로 묶는 기준 = 성별과 무관한 크기
+    const singles = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && size(g) === 1);
+    const etcCount = singles.reduce((sum, g) => sum + Number(g.count || 0), 0);
+    const rest = items.filter(g => g.key !== GROUP_ALL && !PINNED.includes(g.key) && size(g) > 1 && Number(g.count || 0) > 0)
+      .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));     // 고른 성별의 인원 순
+    groups = [...all, ...pinned, ...(singles.length ? [{key: GROUP_ETC, name: 'etc', count: etcCount}] : []), {sep: true}, ...rest];
+  } catch (_) { if (mine === groupSeq) groups = []; else return; }
   paintGroups();
 }
 function paintGroups() {
@@ -312,15 +322,24 @@ function paintGrid() {
     if (!it) { html += `<div class="cell" style="${style}"><div class="im" style="height:${geo.cellW}px"></div></div>`; continue; }
     const on = selected && selected.group === it.group && selected.character === it.character;
     const img = it.thumbnail_url ? `<img loading="lazy" decoding="async" alt="" src="${esc(it.thumbnail_url)}">` : `<span class="ini">${esc(String(it.character || '?').charAt(0).toUpperCase())}</span>`;
-    html += `<button type="button" class="cell${on ? ' on' : ''}" style="${style}" data-i="${i}" title="${esc(`${it.character} · ${label(it.group)}`)}">`
+    html += `<button type="button" class="cell${on ? ' on' : ''}" style="${style}" data-i="${i}" aria-label="${esc(`${it.character} · ${label(it.group)}`)}">`
       + `<div class="im" style="height:${geo.cellW}px">${img}</div><div class="nm">${esc(it.character)}</div>`
-      + `<div class="mt">${esc(label(it.group))} · ${Number(it.count || 0).toLocaleString()}</div></button>`;
+      + `<div class="mt"><span class="glink" data-goto="${esc(it.group)}" title="이 작품 그룹으로 가기">${esc(label(it.group))}</span> · ${Number(it.count || 0).toLocaleString()}</div></button>`;
   }
   $('spacer').innerHTML = html;
 }
 $('grid').addEventListener('scroll', () => paintGrid(), {passive: true});
 window.addEventListener('resize', () => layout());
+function jumpToGroup(key) {
+  if (!key) return;
+  state.group = key; groupQuery = ''; $('gq').value = '';
+  paintGroups();
+  $('glist').querySelector('.gi.on')?.scrollIntoView({block: 'center'});
+  reset();
+}
 $('grid').addEventListener('click', e => {
+  const go = e.target.closest('[data-goto]');
+  if (go) { e.preventDefault(); jumpToGroup(go.dataset.goto); return; }
   const c = e.target.closest('[data-i]'); if (!c) return;
   const it = itemAt(Number(c.dataset.i)); if (!it) return;
   selected = {group: it.group, character: it.character}; variant = ''; paintGrid(); void loadDetail();
@@ -351,7 +370,7 @@ function paintDetail() {
   lastPrompt = String(d.prompt?.character_prompt || '');
   const thumbUrl = d.thumbnail_url || d.default_thumbnail_url || '';     // 변형에 제 그림이 없으면 기본 그림
   $('detail').innerHTML = (thumbUrl ? `<img class="big" alt="" src="${esc(thumbUrl)}">` : '<div class="big empty">썸네일 없음</div>')
-    + `<div><div class="dname">${esc(name)}</div><div class="dmeta">${esc(label(d.group || ''))}${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}`
+    + `<div><div class="dname">${esc(name)}</div><div class="dmeta"><span class="glink" data-goto="${esc(d.group || '')}" title="이 작품 그룹으로 가기">${esc(label(d.group || ''))}</span>${GENDER_LABEL[d.gender] ? ` · ${GENDER_LABEL[d.gender]}` : ''}`
     + `<br>데이터 ${n(d.count)}장${d.danbooru_posts ? ` · Danbooru ${n(d.danbooru_posts)}` : ''}</div></div>`
     + (variants.length > 1 ? `<div><div class="lab">Variations · ${variants.length}</div><div class="vchips">`
       + variants.map(x => `<button type="button" class="vchip${String(x.label || '') === String(d.variant || '') ? ' on' : ''}" data-var="${esc(x.label || '')}">${esc(x.name || 'Default')}<b>${n(x.rows)}</b></button>`).join('') + '</div></div>' : '')
@@ -360,6 +379,8 @@ function paintDetail() {
     + `<button type="button" class="copy" data-copy>프롬프트 복사</button>`;
 }
 $('detail').addEventListener('click', async e => {
+  const go = e.target.closest('[data-goto]');
+  if (go) { jumpToGroup(go.dataset.goto); return; }
   const v = e.target.closest('[data-var]');
   if (v) { variant = v.dataset.var || ''; void loadDetail(); return; }
   if (e.target.closest('[data-copy]')) {

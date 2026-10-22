@@ -267,10 +267,14 @@ class HeadlessGenerationService:
             # 요청이 실어 온 옛 계보 키(`NAID5.0F`)는 여기서 지금 키로 - 파라미터 목(`set_param`)을 안 거치고
             # `overrides` 로 바로 오는 길이 있다(Enhance 는 원본 생성 파라미터를 통째로 싣는다 · Codex 리뷰).
             # ⚠️ 옛 계보 키만이다. 모르는 키를 다른 모델로 바꾸는 판단은 하지 않는다(아래 엄격한 판정).
-            legacy_key = NAI_LEGACY_KEY_ALIASES.get(normalize_nai_model_key(params.get("model")))
-            if legacy_key:
-                params["model"] = legacy_key
             try:
+                key = normalize_nai_model_key(params.get("model"))
+                legacy_key = NAI_LEGACY_KEY_ALIASES.get(key)
+                if legacy_key:
+                    # 업데이트 전에 등록된 동명 커스텀이 있으면 그 모델을 그대로 쓴다.
+                    getter = getattr(self.context, "_nai_model_registry", None)
+                    if not callable(getter) or not getter().has_key(key):
+                        params["model"] = legacy_key
                 nai_model_spec = resolve_nai_model_for_context(
                     self.context,
                     params.get("model") or "NAID4.5F",

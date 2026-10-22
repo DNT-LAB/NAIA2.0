@@ -25002,6 +25002,9 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .chw-star { position: absolute; right: 4px; top: 3px; color: rgb(250,199,117); font-size: 12px; text-shadow: 0 0 3px #000; }
 .chw-nm { padding: 3px 6px 0; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chw-mt { padding: 0 6px 4px; font-size: 9.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 작품명 = 그 그룹으로 가는 링크(2026-10-22). */
+.chw-glink { cursor: pointer; border-radius: 3px; }
+.chw-glink:hover { color: #f3b27a; text-decoration: underline; text-underline-offset: 2px; }
 .chw-sel { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 6px 8px; border-top: 1px solid rgba(255,255,255,0.08); }
 .chw-st { flex: 1 1 220px; min-width: 0; }
 .chw-st b { display: block; font-size: 12px; font-weight: 600; color: var(--text-primary); }

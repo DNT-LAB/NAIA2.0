@@ -450,10 +450,11 @@ def register_character_viewer_routes(
             return JSONResponse({"error": f"Character Viewer state failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/groups")
-    async def api_character_viewer_groups(query: str = "", offset: int = 0, limit: int | None = None):
+    async def api_character_viewer_groups(query: str = "", offset: int = 0, limit: int | None = None,
+                                          gender: list[str] = Query(default=[])):
         try:
             return await run_in_thread(lambda: JSONResponse(
-                character_viewer_service(session_context).build_groups(query, limit, offset)))
+                character_viewer_service(session_context).build_groups(query, limit, offset, gender)))
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer groups failed: {exc}"}, status_code=500)
 

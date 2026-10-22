@@ -1112,8 +1112,8 @@
     },
     {
       "feature": "thumb_character_viewer",
-      "description": "Optional character preview extension ZIP, automatically queued once at web-session startup; explicit loopback retry after failure. User thumbnails take precedence over the bundled previews, then this lazy ZIP. GET install-manager downloads provides shared progress; completion invalidates the ZIP and emits the existing character module_state only.",
-      "paths": ["<user-data>/data/character_preview/character_pack.zip", "<user-data>/data/character_preview/character_pack.source"],
+      "description": "Optional character preview extension pack (single JSON in the bundled-pack format, V5 18,235 thumbnails, ~419MB). Never started on the startup path: the local page requests POST character-pack/auto-start once ~15s after load, and the server also starts it once in the background ~20s after the first install-manager initialize (or the warmup delay) - once per process; explicit loopback retry after failure. Staging validates JSON structure, base64 and Pillow decode before replacing; the install SHA-256 receipt binds the key-offset sidecar. Precedence: user thumbnails, then this extension pack, then the bundled previews. Status snapshots never wait for the pack lock or re-verify the pack. GET install-manager downloads provides shared progress; completion invalidates the pack index and the page re-reads Find and the Characters window.",
+      "paths": ["<user-data>/data/character_preview/character_pack.json", "<user-data>/data/character_preview/character_pack.source", "<user-data>/data/character_preview/character_pack.sha256", "<user-data>/data/character_preview/ext-key-index.json"],
       "provisioning": "downloader",
       "provisioned_by": "POST /api/install-manager/character-pack/download"
     },

@@ -169,7 +169,7 @@ class NaiModelRegistry:
         return tuple(cleaned)
 
     @classmethod
-    def normalize_entry(cls, raw: Any) -> NaiModelSpec:
+    def normalize_entry(cls, raw: Any, *, allow_legacy_key: bool = False) -> NaiModelSpec:
         if not isinstance(raw, dict):
             raise NaiModelValidationError("모델 항목은 JSON 객체여야 합니다.")
         key = normalize_nai_model_key(raw.get("key"))
@@ -189,9 +189,9 @@ class NaiModelRegistry:
             raise NaiModelValidationError(
                 f"기본 모델의 API 이름과 같은 키는 쓸 수 없습니다: {key}"
             )
-        # 옛 계보 키(`NAID5.0F`)도 같은 이유로 막는다 - 화면 · 메타데이터 번역이 그 글자를
-        # 빌트인 키로 읽는다(`NAI_LEGACY_KEY_ALIASES`).
-        if key in NAI_LEGACY_KEY_ALIASES:
+        # 새 등록은 막되, 업데이트 전 저장된 커스텀 키는 로드 시 보존한다.
+        # 호출부는 레지스트리에 있는 키를 우선하고 없는 옛 키만 빌트인으로 번역한다.
+        if key in NAI_LEGACY_KEY_ALIASES and not allow_legacy_key:
             raise NaiModelValidationError(
                 f"옛 모델 키와 같은 키는 쓸 수 없습니다: {key} "
                 f"({NAI_LEGACY_KEY_ALIASES[key]} 로 읽힙니다)"
@@ -244,7 +244,7 @@ class NaiModelRegistry:
             return
         for index, item in enumerate(items[:MAX_CUSTOM_NAI_MODELS]):
             try:
-                spec = self.normalize_entry(item)
+                spec = self.normalize_entry(item, allow_legacy_key=True)
             except NaiModelValidationError as exc:
                 self._load_warnings.append(f"models[{index}] 무시: {exc}")
                 continue
@@ -344,7 +344,12 @@ class NaiModelRegistry:
             }
 
     def upsert(self, raw: Any) -> dict[str, Any]:
-        spec = self.normalize_entry(raw)
+        # 이미 있는 옛 계보 이름 커스텀(v2.0.60 이전에 등록 · `NAID5.0F`)은 **고쳐 저장**할 수 있어야 한다 - 새로 만드는 것만 막는다
+        # (업데이트 호환 재리뷰 P2: 라벨만 바꿔도 거절됐다).
+        key = normalize_nai_model_key(raw.get("key")) if isinstance(raw, dict) else ""
+        with self._lock:
+            existing_legacy = key in NAI_LEGACY_KEY_ALIASES and key in self._custom
+        spec = self.normalize_entry(raw, allow_legacy_key=existing_legacy)
         with self._lock:
             if spec.key not in self._custom and len(self._custom) >= MAX_CUSTOM_NAI_MODELS:
                 raise NaiModelValidationError(

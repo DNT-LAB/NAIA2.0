@@ -2999,7 +2999,7 @@ window.addEventListener('naia:character-picked', event => {
 });
 function ensureCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-dtl1')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-r3')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,
@@ -7716,7 +7716,7 @@ const characterWindowActions = new Proxy({}, {
 });
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-ext2')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-r3b')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,
@@ -8580,10 +8580,11 @@ function naiModelKeyFromMetadataText(raw) {
   if (!text) return '';
   const upper = text.toUpperCase();
   if (NAI_BUILTIN_MODEL_KEYS.includes(upper)) return upper;
-  if (NAI_LEGACY_MODEL_KEY_ALIASES.has(upper)) return NAI_LEGACY_MODEL_KEY_ALIASES.get(upper);
   // 사용자 등록 모델은 **글자 그대로** 있을 때만. 대소문자를 풀면 wire 이름
   // (`nai-diffusion-5-full`)이 같은 글자의 커스텀 키로 둔갑한다(백엔드와 같은 함정).
+  // ⚠️ 옛 계보 별칭보다 **먼저** 본다 - v2.0.60 까지는 `NAID5.0F` 를 커스텀 키로 등록할 수 있었다(업데이트 호환 리뷰 P1).
   if (naiModelMetaByKey.has(text)) return text;
+  if (NAI_LEGACY_MODEL_KEY_ALIASES.has(upper)) return NAI_LEGACY_MODEL_KEY_ALIASES.get(upper);
   // ⚠️ **키 모양인데 모르는 것은 아래 부분 문자열 추론으로 넘기지 않는다.** NAI 가 PNG 에 남기는 것은
   // 라벨(공백 있음) · wire 이름(소문자)이고, 공백 없는 대문자 · `NAID…` 는 키다. 넘기면 지운 커스텀 모델
   // `NAID-NAI-DIFFUSION-5-FULL` 이 `nai-diffusion-5-full` 을 품었다고 V5 Full 로 둔갑해 다른 모델로 돈이

@@ -84,9 +84,13 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         if character_task is None or character_task.done():
             context.headless_character_index_warmup_task = asyncio.create_task(
                 _after_startup_gate(gate, _run_character_index_warmup, context, run_in_thread))
-        # ⚠️ 캐릭터 확장 팩은 여기서 받지 않는다(사용자 지시 2026-10-22) - 시작 경로에서 받기를 걸었더니 포터블의
-        #    install-manager/initialize 가 시간 초과로 죽었다. 화면이 다 뜬 뒤 app.js 가 한 번 요청한다
-        #    (POST /api/install-manager/character-pack/auto-start).
+        # ⚠️ 캐릭터 확장 팩은 시작 경로에서 받지 않는다(사용자 지시 2026-10-22) - 시작 경로에서 받기를 걸었더니 포터블의
+        #    install-manager/initialize 가 시간 초과로 죽었다. 화면이 다 뜬 뒤 app.js 가 한 번 요청하고(로컬 화면),
+        #    원격 화면만 쓰는 경우를 위해 서버도 첫 initialize(또는 지연) 뒤 20초에 한 번 스스로 시작한다(뒤쪽 작업 - 시작을 막지 않는다).
+        pack_task = getattr(context, "headless_character_pack_autostart_task", None)
+        if pack_task is None or pack_task.done():
+            context.headless_character_pack_autostart_task = asyncio.create_task(
+                _after_startup_gate(gate, _run_character_pack_autostart, context, run_in_thread))
         try:
             yield
         finally:
@@ -165,17 +169,41 @@ async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunIn
         print(f"Headless Remote: assist korean warmup failed - {exc}", flush=True)
 
 
+async def _run_character_pack_autostart(context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    try:
+        delay = max(0.0, float(os.environ.get("NAIA_CHARACTER_PACK_AUTOSTART_DELAY", "20") or 0))
+    except ValueError:
+        delay = 20.0
+    if delay > 0:
+        await asyncio.sleep(delay)
+    try:
+        from app.backend.server.install_manager_routes import runtime_install_manager
+
+        await run_in_thread(runtime_install_manager(context).auto_start_character_pack)
+    except Exception as exc:
+        print(f"Headless Remote: character pack auto start skipped - {ascii(str(exc))}", flush=True)
+
+
 async def _after_startup_gate(gate: asyncio.Event, warmup, context: WebSessionContext, run_in_thread: RunInThread) -> None:
     """첫 initialize 응답(또는 지연 시간)을 기다렸다가 예열을 돈다 - 위 lifespan 주석 참조."""
+    # Electron(NAIA_ELECTRON=1 - v2.0.60 의 main.cjs 도 넘긴다)은 시작 때 initialize 를 반드시 한 번 부른다 - 그 응답까지 기다린다
+    # (안 오면 90초 뒤). 브라우저만 쓰면 initialize 가 안 오므로 짧게(기본 8초). 어느 쪽이든 그때 initialize 가 **처리 중**이면
+    # 끝날 때까지 기다린다 - 느린 디스크 · 백신 검사로 늦어진 initialize 와 예열이 겹치지 않게(업데이트 호환 리뷰 P1).
+    electron = os.environ.get("NAIA_ELECTRON") == "1"
     try:
-        delay = max(0.0, float(os.environ.get("NAIA_STARTUP_WARMUP_DELAY", "8") or 0))
+        delay = max(0.0, float(os.environ.get("NAIA_STARTUP_WARMUP_DELAY", "90" if electron else "8") or 0))
     except ValueError:
-        delay = 8.0
+        delay = 90.0 if electron else 8.0
     if delay > 0:
         try:
             await asyncio.wait_for(gate.wait(), timeout=delay)
         except asyncio.TimeoutError:
-            pass
+            # 그때 처리 중인 initialize 가 있으면 끝날 때까지 - 단 30초 상한(안 돌아오는 initialize 에 예열이 영영 묶이지 않게).
+            loop = asyncio.get_running_loop()
+            until = loop.time() + 30.0
+            while (getattr(context, "headless_initialize_inflight", 0) > 0 and not gate.is_set()
+                   and loop.time() < until):
+                await asyncio.sleep(0.2)
     await warmup(context, run_in_thread)
 
 

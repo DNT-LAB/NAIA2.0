@@ -125,9 +125,8 @@ export function createCharacterGenSettingsWindow({
   async function generate() {
     if (!slot.character || slot.busy || slot.loading) return;
     if (!slot.prompt.trim()) { showToast('캐릭터 줄이 비어 있습니다 - 캐릭터를 다시 고르세요.', 'info'); return; }
-    // 이 순간의 슬롯을 잡아 둔다 - 저장을 기다리는 사이 다른 캐릭터를 골라도 잡은 캐릭터 · 줄로 나간다.
-    const target = {group: slot.group, character: slot.character, variant: slot.variant, prompt: slot.prompt, uc: slot.uc,
-      seq: slot.seq};
+    // 누른 순간의 캐릭터 · 변형 - 기다리는 사이 다른 캐릭터를 골랐으면 내보내지 않는다.
+    const picked = {group: slot.group, character: slot.character, variant: slot.variant};
     slot.busy = true;
     paintSlot();
     try {
@@ -135,7 +134,21 @@ export function createCharacterGenSettingsWindow({
       quick?.flush();
       const extra = slotEl?.querySelector('[data-cqgen-extra]');
       if (extra && extra.value !== String((options || {}).character_extra || '')) saveOption('character_extra', extra.value);
-      await saveChain.catch(() => {});
+      // ⚠️ 줄을 바꾸는 옵션(캐릭터명 · 작품명 …)을 막 바꿨으면 그 저장이 슬롯 줄을 다시 만든다 - 그것까지 기다린 **뒤에** 줄을 잡는다
+      //    (업데이트 호환 리뷰 P1: 옛 줄 'girl, original' 이 새 옵션의 썸네일로 저장됐다). 기다리는 사이 새 저장이 붙거나
+      //    줄이 다시 만들어지면 그것까지 - 저장 줄과 슬롯 줄이 둘 다 조용해질 때까지(재리뷰 P1).
+      let settled = false;
+      for (let guard = 0; guard < 20 && !settled; guard += 1) {
+        const chain = saveChain;
+        await chain.catch(() => {});
+        if (slot.loading) await slot.loading;
+        settled = chain === saveChain && !slot.loading && !lineDirty;
+      }
+      // 끝내 조용해지지 않았으면 내보내지 않는다 - 옛 줄이 새 옵션의 썸네일로 저장될 수 있다(3차 리뷰 P1).
+      if (!settled) { showToast('생성 설정을 저장하는 중입니다 - 잠시 뒤 다시 눌러 주세요.', 'info'); return; }
+      if (slot.group !== picked.group || slot.character !== picked.character || slot.variant !== picked.variant) return;
+      if (!slot.prompt.trim()) { showToast('캐릭터 줄이 비어 있습니다 - 캐릭터를 다시 고르세요.', 'info'); return; }
+      const target = {...picked, prompt: slot.prompt, uc: slot.uc};
       const fn = (getActions() || {}).generateThumb;
       if (typeof fn !== 'function') throw new Error('캐릭터 패널을 아직 불러오지 못했습니다.');
       await fn(target.group, target.character,
@@ -247,6 +260,8 @@ export function createCharacterGenSettingsWindow({
     options = {...(options || {}), [name]: value};
     paintOptions();
     const mine = ++saveSeq;
+    // 줄을 바꾸는 옵션은 쌓아 둔다 - 뒤에 다른 옵션을 이어 바꿔 앞 응답을 버려도 줄 다시 만들기는 빠지지 않게(리뷰 P1).
+    if (LINE_OPTIONS.has(name)) lineDirty = true;
     // 차례대로 보낸다 - 겹쳐 보내면 서버의 읽기 -> 쓰기가 서로를 덮을 수 있다(서버에도 잠금이 있다 · 이중 방어).
     saveChain = saveChain.catch(() => {}).then(() => fetch('/api/character-viewer/options', {
       method: 'POST',
@@ -261,13 +276,23 @@ export function createCharacterGenSettingsWindow({
         paintWarn();
         paintOptions();
         // 줄을 바꾸는 옵션이 바뀌었으면 슬롯 줄을 다시 만든다(고친 글은 버린다 - 옵션이 우선).
-        if (LINE_OPTIONS.has(name) && slot.character) void setCharacter(slot.group, slot.character, slot.variant);
-        else paintSlot();
+        if (lineDirty && slot.character) { lineDirty = false; void setCharacter(slot.group, slot.character, slot.variant); }
+        else { lineDirty = false; paintSlot(); }
         try { onSaved(data); } catch (_) {}
       })
-      .catch(error => showToast(`생성 설정 저장 실패 — ${error.message || error}`, 'error'));
+      .catch(error => {
+        showToast(`생성 설정 저장 실패 — ${error.message || error}`, 'error');
+        // 마지막 저장이 실패해도 앞서 성공한 '줄을 바꾸는 옵션' 은 서버에 있다 - 슬롯 줄을 서버 기준으로 다시 만든다(3차 리뷰 P1).
+        if (mine === saveSeq && lineDirty && slot.character) {
+          lineDirty = false;
+          void setCharacter(slot.group, slot.character, slot.variant);
+        } else if (mine === saveSeq) {
+          lineDirty = false;
+        }
+      });
   }
 
+  let lineDirty = false;          // 아직 슬롯 줄에 반영 안 한 '줄을 바꾸는 옵션' 저장이 있다
   let contentEl = null;
   let contentReady = null;
   let moveSeq = 0;               // 조각 이동(떠 있는 창 <-> 서랍) 요청 번호 - 마지막 요청만 끝까지 간다

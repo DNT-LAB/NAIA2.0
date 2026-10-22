@@ -366,6 +366,18 @@ class RuntimeInstallManager:
             return 0
         return len([path for path in target.glob(spec.count_glob) if path.is_file()])
 
+    def _character_pack_ready_cheap(self, spec: ArchiveSpec) -> bool:
+        """설치된 것처럼 보이는가(손상 표시 없음 · 같은 주소 · 본문과 설치 영수증이 있다). 정확한 검증은 wait=True 쪽."""
+        try:
+            target = self._archive_dir(spec)
+            if (target / "character_pack.corrupt").exists():
+                return False
+            if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
+                return False
+            return (target / spec.raw_name).is_file() and (target / "character_pack.sha256").is_file()
+        except OSError:
+            return False
+
     def _character_pack_ready_locked(self, spec: ArchiveSpec) -> bool:
         try:
             target = self._archive_dir(spec)
@@ -384,8 +396,22 @@ class RuntimeInstallManager:
             self._character_pack_manifest(path, source_fingerprint=fingerprint)
             self._character_pack_ready_cache = generation if fingerprint is not None else None
             return True
-        except (OSError, ValueError, KeyError, TypeError):
+        except OSError:
+            # 없거나(설치 전) 잠깐 못 읽었다(백신 · 권한) - 손상이 아니다. 표시를 남기면 정상 팩이 영영 다시 받는 대상이 된다(3차 리뷰 P1).
             self._character_pack_ready_cache = None
+            return False
+        except (ValueError, KeyError, TypeError):
+            self._character_pack_ready_cache = None
+            # 본문 · 주소 · 영수증은 있는데 **내용** 검증이 실패했다 = 손상. 표시를 남겨 상태 조회(가벼운 판정)도 '설치 안 됨' 으로 본다
+            # - 안 남기면 영수증만 보는 판정이 계속 '설치됨' 이라 [재시도]가 안 뜬다. 새 설치가 표시를 지운다.
+            try:
+                target = self._archive_dir(spec)
+                # 주소가 다른 것(새 판)은 손상이 아니다 - 같은 주소의 본문 · 영수증이 다 있는데 검증이 실패할 때만.
+                if (all((target / name).is_file() for name in (spec.raw_name, "character_pack.source", "character_pack.sha256"))
+                        and (target / "character_pack.source").read_text(encoding="utf-8").strip() == spec.url):
+                    (target / "character_pack.corrupt").write_text("verification failed\n", encoding="utf-8")
+            except OSError:
+                pass
             return False
 
     def _archive_ready(self, spec: ArchiveSpec, count: int | None = None, *, wait: bool = False) -> bool:
@@ -395,9 +421,12 @@ class RuntimeInstallManager:
             # ⚠️ 상태 조회(snapshot · initialize)는 이 잠금을 **기다리지 않는다**(2026-10-22 포터블 시작 시간 초과).
             #    서비스가 색인을 만드는 동안 쥐고 있으면 몇 초씩 걸려 화면의 initialize 가 시간 초과로 죽었다.
             #    바쁘면 마지막으로 확인한 값을 돌려준다. 받기 · 설치처럼 정확해야 하는 쪽만 wait=True(잠금 밖 일꾼 스레드).
+            if not wait:
+                # 상태 조회 · initialize: 잠금도 전수 검사도 없이 파일 · 영수증만 본다(업데이트 호환 리뷰 P1 -
+                # 색인 사이드카가 없으면 419MB 를 검사하느라 initialize 가 10초를 넘을 수 있었다).
+                return self._character_pack_ready_cheap(spec)
             lock = self._character_pack_lock()
-            if not lock.acquire(blocking=wait):
-                return self._character_pack_ready_cache is not None
+            lock.acquire()
             try:
                 return self._character_pack_ready_locked(spec)
             finally:
@@ -600,7 +629,8 @@ class RuntimeInstallManager:
             if self._download_state.get("active"):
                 return dict(self._download_state)
         self.initialize()
-        pending = [spec for spec in specs if spec.url and not self._archive_ready(spec)]
+        # 받을지 정하는 자리라 정밀 판정(wait=True) - 가벼운 판정은 영수증만 보고 '이미 설치됨' 이라 할 수 있다(업데이트 호환 재리뷰 P1).
+        pending = [spec for spec in specs if spec.url and not self._archive_ready(spec, wait=True)]
         if not pending:
             with self._lock:
                 if self._download_state.get("active"):

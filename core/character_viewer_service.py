@@ -126,6 +126,18 @@ class CharacterViewerService:
         # 작품 색인 - 캐릭터마다 든 작품(그룹 · 그 캐릭터의 `copyright` · 웃 갈래 `parent_works`)과 작품별 캐릭터 수.
         self._work_sets: dict[tuple[str, str], frozenset[str]] | None = None
         self._work_totals: dict[str, int] | None = None
+        self.aliases_path = self.data_dir / "tag_index" / "named_entity_aliases.json"
+        self.preview_index_cache_path = (self.thumb_dir.parent / "character_preview" / "bundle-key-index.json"
+                                         if thumbnail_root is not None else None)
+        self._search_index = None
+        self._search_build_lock = threading.Lock()
+        self._source_lock = threading.RLock()
+        self._source_generation = 0
+        self._search_source_files = None
+        self._search_user_files = {}
+        self._search_preview_file = None
+        self._search_versions = dict(favorites=0, hidden=0, thumbs=0, pack=0)
+        self._group_count_cache = None
 
     def data_available(self) -> bool:
         return self.groups_path.exists() and self.analysis_path.exists()
@@ -136,15 +148,29 @@ class CharacterViewerService:
         with open(path, "r", encoding="utf-8") as handle:
             return json.load(handle)
 
+    def _load_source_cache(self, attribute, path, prepare=None):
+        # Loading is deliberately outside the lock: requests must not wait for warmup.
+        while True:
+            with self._source_lock:
+                cached = getattr(self, attribute)
+                if cached is not None:
+                    return cached
+                self._refresh_search_sources()
+                generation = self._source_generation
+            loaded = self._load_json(path, {})
+            with self._source_lock:
+                self._refresh_search_sources()
+                if generation != self._source_generation:
+                    continue  # A late loader must never resurrect an invalidated source.
+                if getattr(self, attribute) is None:
+                    setattr(self, attribute, prepare(loaded) if prepare else loaded)
+                return getattr(self, attribute)
+
     def groups(self) -> dict[str, Any]:
-        if self._groups is None:
-            self._groups = self._load_json(self.groups_path, {})
-        return self._groups
+        return self._load_source_cache('_groups', self.groups_path)
 
     def analysis(self) -> dict[str, Any]:
-        if self._analysis is None:
-            self._analysis = self._load_json(self.analysis_path, {})
-        return self._analysis
+        return self._load_source_cache('_analysis', self.analysis_path)
 
     def debut_index(self) -> dict[str, str]:
         """캐릭터 이름 -> 처음 나타난 달("YYYY-MM"). 파일이 없으면 빈 사전이다.
@@ -152,13 +178,12 @@ class CharacterViewerService:
         ⚠️ 왼쪽 끝은 잘려 있다 - 코퍼스가 2015-12 에서 시작하므로 그 이전에 데뷔한
            캐릭터는 전부 그 달로 뭉친다. [최신] 은 **반대쪽 끝**만 보므로 무관하다.
         """
-        if self._debut is None:
-            raw = self._load_json(self.debut_path, {})
+        def prepare(raw):
             table = raw.get("debut") if isinstance(raw, dict) else None
-            self._debut = table if isinstance(table, dict) else {}
             since = raw.get("recent_since") if isinstance(raw, dict) else ""
             self._recent_since = str(since or self.RECENT_SINCE)
-        return self._debut
+            return table if isinstance(table, dict) else {}
+        return self._load_source_cache('_debut', self.debut_path, prepare)
 
     def recent_since(self) -> str:
         """[최신] 이 남기는 데뷔 하한. 산출물에 적힌 값을 따른다(없으면 기본값)."""
@@ -309,6 +334,7 @@ class CharacterViewerService:
 
     def reload_thumbnails(self) -> None:
         self._thumb_index = None
+        self._invalidate_search("thumbs")
 
     def load_options(self) -> dict[str, Any]:
         data = self._load_json(self.tags_path, {})
@@ -347,14 +373,26 @@ class CharacterViewerService:
         return current
 
     def _group_counts(self) -> list[tuple[str, int]]:
-        out: list[tuple[str, int]] = []
-        for group_key, data in self.groups().items():
-            if str(group_key).startswith("_") or not isinstance(data, dict):
-                continue
-            total = len(data.get("girl", []) or []) + len(data.get("boy", []) or [])
-            out.append((group_key, total))
-        out.sort(key=lambda item: (-item[1], item[0].lower()))
-        return out
+        while True:
+            with self._source_lock:
+                self._refresh_search_sources()
+                if self._group_count_cache is not None:
+                    return self._group_count_cache
+                generation = self._source_generation
+            out: list[tuple[str, int]] = []
+            for group_key, data in self.groups().items():
+                if str(group_key).startswith("_") or not isinstance(data, dict):
+                    continue
+                total = len(data.get("girl", []) or []) + len(data.get("boy", []) or [])
+                out.append((group_key, total))
+            out.sort(key=lambda item: (-item[1], item[0].lower()))
+            with self._source_lock:
+                self._refresh_search_sources()
+                if generation != self._source_generation:
+                    continue  # Never publish counts from an invalidated dictionary.
+                if self._group_count_cache is None:
+                    self._group_count_cache = out
+                return self._group_count_cache
 
     def state(self) -> dict[str, Any]:
         group_counts = self._group_counts()
@@ -369,16 +407,19 @@ class CharacterViewerService:
             "options": self.load_options(),
         }
 
-    def build_groups(self, query: str = "", limit: int = 2000) -> dict[str, Any]:
-        query_text = str(query or "").strip().lower()
-        groups = [{"key": self.GROUP_ALL, "name": "All", "count": sum(c for _, c in self._group_counts())}]
-        for key, count in self._group_counts():
-            if query_text and query_text not in key.lower():
-                continue
-            groups.append({"key": key, "name": key, "count": count})
-            if len(groups) >= limit:
-                break
-        return {"items": groups, "total": len(groups)}
+    def build_groups(self, query: str = "", limit: int | None = None, offset: int = 0) -> dict[str, Any]:
+        from core.character_search_index import normalize
+        self._refresh_search_sources()
+        query_text = normalize(query).lstrip("*").strip()
+        terms = [t.strip().removeprefix("work:").strip() for t in query_text.split(",") if t.strip()]
+        counts = self._group_counts()
+        groups = [{"key": self.GROUP_ALL, "name": "All", "count": sum(c for _, c in counts)}]
+        groups.extend({"key": key, "name": key, "count": count} for key, count in counts
+                      if all(term in normalize(key) for term in terms))
+        total = len(groups)
+        offset = max(0, int(offset))
+        end = None if limit is None else offset + max(0, int(limit))
+        return {"items": groups[offset:end], "total": total, "offset": offset, "limit": limit}
 
     def _iter_all_chars(self):
         for group_key, chars in self.analysis().items():
@@ -507,8 +548,14 @@ class CharacterViewerService:
         ``ordered_tags`` 가 있으면(한글로 친 것을 태그 사전이 바꿔 준 차례) 그 차례대로 이 데이터에 있는 것만 고른다.
         없으면 친 글자로 찾는다 - 앞이 맞는 것 먼저, 그다음 중간이 맞는 것, 각각 캐릭터 수 많은 순.
         """
-        vocab, _sets = self.feature_index()
-        works = self._work_counts()
+        self._refresh_search_sources()
+        index = self._search_index or self.warm_search_index()
+        if index is not None:
+            vocab = index.feature_vocab
+            works = {key: len(ids) for key, ids in index.works.items()}
+        else:
+            vocab, _sets = self.feature_index()
+            works = self._work_counts()
 
         def row(tag: str) -> dict[str, Any] | None:
             if tag in vocab:
@@ -634,6 +681,7 @@ class CharacterViewerService:
         with open(tmp_path, "w", encoding="utf-8") as handle:
             json.dump({"favorites": sorted(favorites)}, handle, ensure_ascii=False, indent=1)
         tmp_path.replace(self.favorites_path)
+        self._invalidate_search("favorites")
         return {
             "group": group_key,
             "character": name,
@@ -676,6 +724,7 @@ class CharacterViewerService:
             tmp_path.replace(self.hidden_path)
             # 파일이 써진 뒤에야 메모리를 바꾼다 - 쓰다 실패하면 숨김도 없던 일이다.
             self._hidden = hidden
+            self._invalidate_search("hidden")
         return {"group": group_key, "character": name, "hidden": bool(on), "hidden_count": len(hidden)}
 
     def hidden_items(self) -> list[dict[str, Any]]:
@@ -793,7 +842,118 @@ class CharacterViewerService:
             item["thumbnail_url"] = self._thumb_url(group_key, name, size=thumbnail_size)
         return item
 
-    def build_list(
+    @staticmethod
+    def _file_version(path):
+        try:
+            stat = path.stat()
+            return (stat.st_size, stat.st_mtime_ns)
+        except OSError:
+            return (0, 0)
+
+    def _invalidate_search(self, kind):
+        self._search_versions[kind] += 1
+        index = self._search_index
+        if index is not None:
+            index.invalidate(kind)
+
+    def _refresh_search_sources(self):
+        with self._source_lock:
+            return self._refresh_search_sources_locked()
+
+    def _refresh_search_sources_locked(self):
+        paths = (self.analysis_path, self.groups_path, self.aliases_path, self.debut_path)
+        versions = tuple(self._file_version(p) for p in paths)
+        previous = self._search_source_files
+        if previous is not None and previous != versions:
+            self._source_generation += 1
+            if previous[0] != versions[0]:
+                self._analysis = None
+                self._tag_index = None
+                self._feature_vocab = self._feature_sets = None
+                self._work_sets = self._work_totals = None
+            if previous[1] != versions[1]:
+                self._groups = None
+            if previous[3] != versions[3]:
+                self._debut = None
+            self._search_index = None
+            self._group_count_cache = None
+        self._search_source_files = versions
+        # Detect out-of-process edits as well as mutations through this service.
+        for kind, path, attr in (('favorites', self.favorites_path, '_favorites'),
+                                 ('hidden', self.hidden_path, '_hidden'),
+                                 ('thumbs', self.thumb_index_path, '_thumb_index')):
+            signature = self._file_version(path)
+            old = self._search_user_files.get(kind)
+            if old is not None and old != signature:
+                setattr(self, attr, None)
+                self._invalidate_search(kind)
+            self._search_user_files[kind] = signature
+        preview = self._file_version(self.preview_path)
+        if self._search_preview_file is not None and preview != self._search_preview_file:
+            self._preview_pack = None
+            self._preview_rev = None
+            self._invalidate_search('pack')
+        self._search_preview_file = preview
+        return versions
+
+    def warm_search_index(self):
+        from core.character_search_index import CharacterSearchIndex
+        if not self._search_build_lock.acquire(blocking=False):
+            return None
+        try:
+            with self._source_lock:
+                versions = self._refresh_search_sources()
+                generation = self._source_generation
+            if self._search_index is None:
+                built = CharacterSearchIndex(self, versions)
+                # Invalidation and publication share the same generation and lock.
+                with self._source_lock:
+                    self._refresh_search_sources()
+                    if generation == self._source_generation:
+                        self._search_index = built
+                        # Drop temporary legacy postings built during warmup.
+                        self._feature_vocab = self._feature_sets = None
+                        self._work_sets = self._work_totals = None
+            return self._search_index
+        finally:
+            self._search_build_lock.release()
+
+    def build_catalog(self):
+        self._refresh_search_sources()
+        index = self._search_index or self.warm_search_index()
+        if index is None:
+            return {'pending': True, 'version': None, 'groups': [], 'table': []}
+        return index.catalog
+
+    def build_list(self, group_key=GROUP_ALL, query='', page=0, per_page=48,
+                   thumb_first=True, include_all=False, recent_only=False,
+                   favorites_only=False, include=None, exclude=None, include_hidden=False,
+                   genders=None, compact=False, offset=None, limit=None):
+        self._refresh_search_sources()
+        index = self._search_index or self.warm_search_index()
+        args = (group_key, query, page, per_page, thumb_first, include_all and not compact, recent_only,
+                favorites_only, include, exclude, include_hidden, genders)
+        if index is not None:
+            return index.build_list(self, *args, compact=compact, offset=offset, limit=limit)
+        result = self._legacy_build_list(*args)
+        if offset is not None or limit is not None:
+            # The old path still serves requests while startup warmup is building.
+            full = self._legacy_build_list(group_key, query, page, per_page, thumb_first,
+                True, recent_only, favorites_only, include, exclude, include_hidden, genders)
+            start = max(0, int(offset)) if offset is not None else result['page'] * result['per_page']
+            size = result['per_page'] if limit is None else max(0, min(1000, int(limit)))
+            result['items'] = [self._serialize_list_item(i, row['group'], row['character'],
+                self._get_character(row['group'], row['character']), self.thumb_index(),
+                include_thumbnail_url=True, thumbnail_size='grid')
+                for i, row in enumerate(full['all_items'][start:start+size], start)]
+            result.update(offset=start, limit=size)
+        if compact:
+            result.pop('all_items', None)
+            result.update(pending=True, ids=None, catalog_version=None,
+                          catalog_url='/api/character-viewer/catalog')
+        return result
+
+    def _legacy_build_list(
         self,
         group_key: str = GROUP_ALL,
         query: str = "",
@@ -1240,6 +1400,7 @@ class CharacterViewerService:
             json.dump(index, handle, ensure_ascii=False, indent=2)
         tmp_path.replace(self.thumb_index_path)
         self._thumb_index = index
+        self._invalidate_search("thumbs")
 
     def thumbnail_path(self, group_key: str, name: str, variant_label: str = "") -> Path:
         filename = self.thumb_index().get(self._thumb_key(group_key, name, variant_label))
@@ -1250,40 +1411,31 @@ class CharacterViewerService:
             raise FileNotFoundError("thumbnail not found")
         return path
 
-    def preview_pack(self) -> dict[str, str]:
-        """번들 미리보기 팩(`data/character_preview_thumbs.json`). 처음 쓸 때만 읽는다.
-
-        **사용자 썸네일의 폴백이다 — 덮지 않는다.** 우선순위는 사용자 지정이다:
-
-            1순위  user-data/data/character_thumbnails/  (사용자가 만든 것)
-            2순위  이 팩                                  (번들, 384px webp q72)
-            3순위  character_preview/character_pack.zip       (런타임 다운로드)
-
-        9,738명 전부를 넣으면 92MB 라 릴리즈에 다 담지 않는다. 빈도 상위 N명만 담고
-        (`tools/build_character_preview_pack.py --limit`), 나머지는 확장 팩 또는 이니셜 타일이다.
-        """
+    def preview_pack(self):
+        """Key-only membership; a value is read only by preview_thumb."""
         if self._preview_pack is None:
-            data = self._load_json(self.preview_path, {})
-            thumbs = data.get("thumbs") if isinstance(data, dict) else None
-            self._preview_pack = thumbs if isinstance(thumbs, dict) else {}
+            from core.character_preview_index import PreviewKeyIndex
+            self._preview_pack = PreviewKeyIndex(self.preview_path, self.preview_index_cache_path)
         return self._preview_pack
 
     def extension_pack(self) -> dict[str, str]:
         """Read only the manifest once; subsequent membership checks do no I/O."""
+        if self._extension_keys is not None:
+            return self._extension_keys
         with self._extension_lock:
             if self._extension_keys is None:
-                self._extension_keys = {}
                 archive = None
                 try:
                     archive = zipfile.ZipFile(self.extension_pack_path)
                     manifest = read_manifest(archive)
                     stat = self.extension_pack_path.stat()
                     self._extension_rev = f"{stat.st_mtime_ns}-{stat.st_size}"
-                    self._extension_keys = manifest["keys"]
                     self._extension_zip = archive
+                    self._extension_keys = dict(manifest["keys"])
                 except (OSError, ValueError, KeyError, zipfile.BadZipFile, RuntimeError, zlib.error):
                     if archive is not None:
                         archive.close()
+                    self._extension_keys = {}
             return self._extension_keys
 
     def invalidate_extension_pack(self) -> None:
@@ -1293,6 +1445,7 @@ class CharacterViewerService:
             self._extension_zip = None
             self._extension_keys = None
             self._extension_rev = "0"
+            self._invalidate_search("pack")
 
     @contextmanager
     def replacing_extension_pack(self):

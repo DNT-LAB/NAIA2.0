@@ -179,9 +179,13 @@ def _session_candidates(service: CharacterViewerService, payload: dict[str, Any]
     def values(key: str) -> list[str]:
         return [str(item) for item in payload.get(key) or [] if str(item or "").strip()]
 
-    listed = service.build_list(CharacterViewerService.GROUP_ALL, str(payload.get("query") or ""),
-                                0, 9, True, True, False, bool(payload.get("favorites_only")),
-                                values("inc"), values("exc"), genders=values("genders"))
+    listed = service.build_list(
+        str(payload.get("group") or CharacterViewerService.GROUP_ALL),
+        str(payload.get("query") or ""), 0, 9,
+        bool(payload.get("thumb_first", True)), True,
+        bool(payload.get("recent_only")), bool(payload.get("favorites_only")),
+        values("inc"), values("exc"),
+        genders=values("genders") if "genders" in payload else values("gender"))
     return listed.get("all_items") or []
 
 
@@ -432,11 +436,20 @@ def register_character_viewer_routes(
             return JSONResponse({"error": f"Character Viewer state failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/groups")
-    async def api_character_viewer_groups(query: str = ""):
+    async def api_character_viewer_groups(query: str = "", offset: int = 0, limit: int | None = None):
         try:
-            return await run_in_thread(character_viewer_service(session_context).build_groups, query)
+            return await run_in_thread(lambda: JSONResponse(
+                character_viewer_service(session_context).build_groups(query, limit, offset)))
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer groups failed: {exc}"}, status_code=500)
+
+    @app.get("/api/character-viewer/catalog")
+    async def api_character_viewer_catalog():
+        try:
+            return await run_in_thread(lambda: JSONResponse(
+                character_viewer_service(session_context).build_catalog()))
+        except Exception as exc:
+            return JSONResponse({"error": f"Character catalog failed: {exc}"}, status_code=500)
 
     @app.get("/api/character-viewer/list")
     async def api_character_viewer_list(
@@ -451,26 +464,17 @@ def register_character_viewer_routes(
         inc: list[str] = Query(default=[]),
         exc: list[str] = Query(default=[]),
         gender: list[str] = Query(default=[]),
+        compact: bool = False,
+        offset: int | None = None,
+        limit: int | None = None,
     ):
         try:
             group_key = str(group or CharacterViewerService.GROUP_ALL)
-            return await run_in_thread(
-                character_viewer_service(session_context).build_list,
-                group_key,
-                query,
-                page,
-                per_page,
-                thumb_first,
-                include_all,
-                recent_only,
-                favorites_only,
-                # Find [특징 검색] - 검색(inc) · 제외(exc) 낱말. 작품은 `work:<이름>`(사용자 지시 2026-10-19).
-                inc,
-                exc,
-                False,
-                # 성별 girl / boy / other(여러 번 줄 수 있다 · 없으면 전체 - 사용자 지시 2026-10-21).
-                gender,
-            )
+            return await run_in_thread(lambda: JSONResponse(
+                character_viewer_service(session_context).build_list(
+                    group_key, query, page, per_page, thumb_first, include_all,
+                    recent_only, favorites_only, inc, exc, False, gender,
+                    compact=compact, offset=offset, limit=limit)))
         except Exception as exc:
             return JSONResponse({"error": f"Character Viewer list failed: {exc}"}, status_code=500)
 
@@ -566,6 +570,7 @@ def register_character_viewer_routes(
         service = character_viewer_service(session_context)
 
         def read() -> dict[str, Any]:
+            service._refresh_search_sources()
             slots = session_context._character_service()
             with _HIDE_LOCK, slots._commit_lock:
                 roster, manager = _session_roster(session_context)
@@ -581,12 +586,18 @@ def register_character_viewer_routes(
                 for _, identity in roster["source"]:
                     if identity not in roster["present"]:
                         continue
-                    data = service._get_character(*identity)
+                    try:
+                        data = service._get_character(*identity)
+                    except KeyError:
+                        data = None
                     member = {"group": identity[0], "character": identity[1],
                               "line": _session_line_for(roster, identity), "picks": counts.get(identity, 0),
-                              "gender": service.prompt_head(data), "danbooru_posts": data.get("danbooru_posts"),
+                              "gender": service.prompt_head(data) if data is not None else None,
+                              "danbooru_posts": data.get("danbooru_posts") if data is not None else None,
                               "hidden": service.is_hidden(*identity)}
-                    if service.has_thumbnail(*identity):
+                    if data is None:
+                        member["missing"] = True
+                    elif service.has_thumbnail(*identity):
                         member["thumbnail_url"] = service._thumb_url(*identity, size="grid")
                     members.append(member)
                 frames = slots.settings_for(roster["mode"]).get("character_frames") or []

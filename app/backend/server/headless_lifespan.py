@@ -73,6 +73,10 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         tag_task = getattr(context, "headless_tag_index_warmup_task", None)
         if tag_task is None or tag_task.done():
             context.headless_tag_index_warmup_task = asyncio.create_task(_run_tag_index_warmup(context, run_in_thread))
+        character_task = getattr(context, "headless_character_index_warmup_task", None)
+        if character_task is None or character_task.done():
+            context.headless_character_index_warmup_task = asyncio.create_task(
+                _run_character_index_warmup(context, run_in_thread))
         # One startup request, never a poll/retry loop. The manager queues it behind
         # an active tag/corpus download and returns without waiting for the network.
         try:
@@ -157,3 +161,12 @@ async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunIn
         _warm_korean_async(context)
     except Exception as exc:
         print(f"Headless Remote: assist korean warmup failed - {exc}", flush=True)
+
+
+async def _run_character_index_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    try:
+        from app.backend.server.character_viewer_routes import character_viewer_service
+        await run_in_thread(character_viewer_service(context).warm_search_index)
+    except Exception as exc:
+        context.headless_character_index_warmup_error = str(exc)
+        print(f"Headless Remote: character search index warmup failed - {exc}", flush=True)

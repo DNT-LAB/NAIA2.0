@@ -428,6 +428,8 @@
         "core/character_instant_service.py",
         "app/backend/server/style_thumbnail_routes.py",
         "core/character_viewer_service.py",
+        "core/character_search_index.py",
+        "core/character_preview_index.py",
         "app/web/remote/js/features/thumbTab.mjs",
         "app/web/remote/js/features/characterViewerTab.mjs"
       ],
@@ -439,6 +441,7 @@
         {"method": "GET", "path": "/api/character-viewer/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/character-viewer/groups", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/character-viewer/list", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/character-viewer/catalog", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/character-viewer/feature-suggest", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/character-viewer/session-wildcard", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/character-viewer/session-pool", "smoke": "non_destructive"},

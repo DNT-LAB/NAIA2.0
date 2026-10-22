@@ -24971,6 +24971,15 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .chw-gi:hover { background: rgba(124,106,239,0.12); color: var(--text-primary); }
 .chw-gi.is-on { background: rgba(124,106,239,0.26); color: var(--text-primary); }
 .chw-grid { flex: 1; min-width: 0; overflow-y: auto; position: relative; outline: none; }
+/* 손잡이로 원하는 자리까지 끈다(사용자 지시 2026-10-22). 전역 4px 흐린 바 + 71만 px 목록이면 손잡이가 점만 해져
+   안 보였다 - 넓히고 손잡이에 최소 높이를 준다. ⚠️ scrollbar-width/-color 를 쓰면 크로미움이 아래 ::-webkit 을 버린다. */
+.chw-grid::-webkit-scrollbar, .chw-glist::-webkit-scrollbar { width: 12px; }
+.chw-grid::-webkit-scrollbar-track, .chw-glist::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+.chw-grid::-webkit-scrollbar-thumb, .chw-glist::-webkit-scrollbar-thumb {
+  min-height: 44px; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box;
+  background-color: rgba(217,130,59,0.55);
+}
+.chw-grid::-webkit-scrollbar-thumb:hover, .chw-glist::-webkit-scrollbar-thumb:hover { background-color: #d9823b; }
 .chw-count { position: sticky; top: 0; z-index: 2; padding: 4px 10px; font-size: 10px; color: var(--text-dim); background: rgba(16,16,26,0.85); }
 .chw-spacer { position: relative; }
 .chw-cell {

@@ -182,6 +182,7 @@ class HeadlessViewerBindingService:
             # 이름만 바뀐다(Codex 리뷰 P2).
             plain = dest_dir / src.name
             if plain.exists() and src.resolve() == plain.resolve():
+                self.context.result_store.remember_saved_path(item, plain)
                 return {"ok": True, "path": str(plain), "mode": "noop"}
             target = self._unique(plain)
             if action == ACTION_MOVE:
@@ -191,6 +192,7 @@ class HeadlessViewerBindingService:
                 self._point_at(item, target)
             else:
                 shutil.copy2(str(src), str(target))
+                self.context.result_store.remember_saved_path(item, target)
             return {"ok": True, "path": str(target), "mode": action}
 
         # 디스크에 원본이 없다 — 메모리에서 쓴다. `move` 는 옮길 것이 없으니 쓰기와 같다.
@@ -209,14 +211,15 @@ class HeadlessViewerBindingService:
             # 방금 만든 파일은 남는다(Codex 리뷰 P2). `copy` 는 그대로 둔다 —
             # 사본을 하나 떠 놓은 것이지 저장한 것이 아니다.
             self._point_at(item, target)
+        else:
+            # Keep the copy available to the pool after memory eviction, without
+            # changing the result item's Auto Save status.
+            self.context.result_store.remember_saved_path(item, target)
         return {"ok": True, "path": str(target), "mode": "write"}
 
-    @staticmethod
-    def _point_at(item: Any, target: Path) -> None:
-        try:
-            item.filepath = str(target)
-        except Exception:
-            pass
+    def _point_at(self, item: Any, target: Path) -> None:
+        # Update the item and pool together under pool -> commit -> store locks.
+        self.context.result_store.mark_saved(item, target)
 
     @staticmethod
     def _unique(path: Path) -> Path:

@@ -40,7 +40,7 @@ function isNarrowViewport() {
 // `#주석` 을 연노랑으로 물들이는 층(사용자 지정 2026-10-11) - 워크스페이스와 한 벌을 나눠 쓴다.
 import {SESSION_TOKEN, attachSessionKeyGuard} from './sessionKeyGuard.mjs?v=20261019-sk2';
 import {paintCommentLayer} from './promptCommentLayer.mjs?v=20261011-cmt5';
-import {createSessionPoolWindow} from './sessionPoolWindow.mjs?v=20261021-spw5';
+import {createSessionPoolWindow} from './sessionPoolWindow.mjs?v=20261022-sph3';
 
 export function createCharacterQuickPanel({
   document, escHtml, setModuleParam, onModTextEdit,

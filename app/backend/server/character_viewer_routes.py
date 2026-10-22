@@ -45,67 +45,10 @@ def _character_viewer_service(context: WebSessionContext) -> CharacterViewerServ
     return service
 
 
-def roll_name_token(prompt: str) -> str:
-    """캐릭터 프롬프트의 이름 자리(맨 앞 머리말 girl / boy / other 다음 낱말) - 소문자 · SD 이스케이프(`\\(`) 를 걷는다."""
-    tokens = [part.strip() for part in str(prompt or "").split(",") if part.strip()]
-    if tokens and tokens[0].lower() in ("girl", "boy", "other"):
-        tokens = tokens[1:]
-    return tokens[0].replace("\\", "").lower() if tokens else ""
-
-
-def _session_roster(context: WebSessionContext) -> tuple[dict[str, Any] | None, Any]:
-    """살아 있는 세션 와일드카드의 명단(이름 낱말 -> 그룹 · 캐릭터)과 와일드카드 관리자. 죽었으면 (None, 관리자)."""
-    roster = getattr(context, "character_session_roster", None)
-    manager = getattr(context, "wildcard_manager", None)
-    live = getattr(manager, "session_wildcards", None) or {}
-    if not isinstance(roster, dict) or roster.get("key") not in live:
-        return None, manager
-    return roster, manager
-
-
-# 숨김(파일 쓰기 + 지금 풀에서 빼기)은 한 번에 하나씩 - 동시에 둘이 같은 풀을 베껴 갈아 끼우면 서로 뺀 것을 되살린다(Codex 리뷰).
+from core.character_session_history import (
+    roll_name_token, _session_roster, _roll_identity, history_payload,
+)
 from core.character_settings import SESSION_POOL_LOCK as _HIDE_LOCK
-
-
-def _roll_identity(roster: dict[str, Any], prompt: str) -> tuple[str, str] | None:
-    """프롬프트 -> (그룹, 캐릭터). 먼저 **줄 그대로**(같은 이름이 두 작품에 있어도 갈린다 - misumi uika), 안 되면 이름 자리로 -
-    단 그 이름이 명단에서 **하나뿐**일 때만(둘 이상이면 어느 쪽인지 모른다 - 틀린 쪽에 별 · 숨김을 거느니 모른다고 한다)."""
-    text = str(prompt or "").strip()
-    lines = roster.get("lines") or {}          # 옵션이 바뀌면 새 사전으로 갈아 끼운다(`_rebuild_session_pool`) - 이 사전은 안 바뀐다
-    if text in lines:
-        # 풀의 줄 그대로다. None = 출력 옵션으로 둘 이상이 같은 줄이 됐다 - 이름으로 짐작하지 않는다(Codex 리뷰 15차:
-        # `girl, shirayuki hime` 가 이름 사전의 다른 작품 캐릭터로 확정됐다).
-        hit = lines[text]
-        return tuple(hit) if hit else None
-    # 랜덤 슬롯은 `__키__` 앞 · 뒤에 글을 붙일 수 있다(`smile, __키__`) - 그림의 글 **안에** 풀의 줄이 통째로 있으면 그것(긴 줄 먼저).
-    # (값이 None 인 줄 = 출력 옵션으로 줄이 같아진 둘 이상 - 모른다.)
-    #    ⚠️ 쉼표 토막 단위로 이어져 있어야 하고, 그 줄의 이름이 사전에서 **하나뿐**이어야 한다 - 짧은 줄이 다른 작품 같은 이름
-    #    캐릭터 줄의 앞부분과 같을 수 있다(`girl, hello kitty (character)` - sanrio · vocaloid, Codex 리뷰).
-    pieces = [piece.strip() for piece in text.split(",")]
-    names = roster.get("names") or {}
-
-    def contained(line: str) -> bool:
-        want = [piece.strip() for piece in line.split(",")]
-        return any(pieces[at:at + len(want)] == want for at in range(len(pieces) - len(want) + 1))
-
-    inside = [line for line in lines if line and line in text and contained(line)]
-    if inside:
-        best = max(inside, key=len)
-        owner = lines[best]
-        if not owner:
-            return None                    # 출력 옵션으로 같아진 줄 - 이름으로 짐작하지 않는다(Codex 리뷰 16차)
-        original = any(line == best for line, _owner in roster.get("source") or [])
-        # 원래 줄이면 그 이름이 사전에서 하나뿐이어야 한다(다른 작품 같은 이름의 앞부분일 수 있다 - hello kitty).
-        # 옵션을 건 줄은 풀 안에서 같아지면 이미 None 이다.
-        if not original or len(names.get(roll_name_token(best)) or []) == 1:
-            return tuple(owner)
-        return None
-    # 줄이 그대로가 아니면(사람이 고친 그림 등) 쉼표 토막마다 이름을 찾는다 - 그 이름이 사전에서 **하나뿐**일 때만.
-    for piece in text.split(","):
-        owners = names.get(piece.strip().replace("\\", "").lower()) or []
-        if len(owners) == 1:
-            return tuple(owners[0])
-    return None
 
 
 # ── 랜덤 슬롯 출력 옵션(사용자 지시 2026-10-19) - 뽑힌 캐릭터 줄에서 무엇을 낼지 ──────────────────────────────
@@ -651,7 +594,10 @@ def register_character_viewer_routes(
                               if frame.get("session_wildcard") and f'__{roster["key"]}__' in str(frame.get("prompt") or "")), "")
                 # 세션 와일드카드 창(2026-10-21): 와일드카드 이름 · 지금 출력 옵션 · 마지막으로 뽑힌 캐릭터(초록 표시).
                 last = _roll_identity(roster, picks[-1]) if picks else None
+                with session_context.result_store._mutation_lock:
+                    history = history_payload(roster)
                 return {"active": True, "key": roster["pool_id"], "label": label, "count": len(members),
+                        "history_total": history["total"], "history_lost": history["lost"],
                         "total_picks": len(picks), "members": members,
                         "pin": ({"group": roster["pin"][0], "character": roster["pin"][1]}
                                 if roster.get("pin") else None),
@@ -908,44 +854,73 @@ def register_character_viewer_routes(
             start_generation_runner(session_context, clients)
         return dispatch.websocket_payload()
 
-    @app.get("/api/character-viewer/session-pool/images")
-    async def api_character_viewer_session_pool_images(key: str = "", group: str = "", character: str = ""):
-        def read():
-            from core.character_settings import _frame_uuid
+    def read_pool_history(key):
+        with _HIDE_LOCK, session_context._character_service()._commit_lock:
+            roster, _ = require_session_pool(key)
+            with session_context.result_store._mutation_lock:
+                return history_payload(roster)
 
-            slots = session_context._character_service()
-            with _HIDE_LOCK, slots._commit_lock:
-                roster, _manager = require_session_pool(key)
-                identity = (group.strip(), character.strip())
-                if not all(identity):
-                    raise _SessionPoolError(400, "group and character are required")
-                frames = slots.settings_for(roster["mode"]).get("character_frames") or []
-                owns = {str(_frame_uuid(frame) or "") for frame in frames
-                        if frame.get("session_wildcard")
-                        and f'__{roster["key"]}__' in str(frame.get("prompt") or "")}
-                owns.discard("")
-                store = session_context.result_store
-                with store._mutation_lock:
-                    history = list(store._items)
-                items = []
-                for item in history:
-                    params = item.generation_params or {}
-                    ids = params.get("_executed_character_ids") or []
-                    prompts = params.get("_executed_characters") or []
-                    if not isinstance(ids, list) or not isinstance(prompts, list):
-                        continue
-                    if not any(str(slot) in owns and _roll_identity(roster, str(prompt)) == identity
-                               for slot, prompt in zip(ids, prompts)):
-                        continue
-                    items.append({"id": item.history_id, "path": item.rel_path,
-                                  "thumbnail_url": f"/api/history/thumb/{item.history_id}",
-                                  "created": item.created_at.isoformat()})
-                return {"items": items, "count": len(items)}
-
+    @app.get("/api/character-viewer/session-pool/history")
+    async def api_character_viewer_session_pool_history(key: str = ""):
         try:
-            return await run_in_thread(read)
+            return await run_in_thread(read_pool_history, key)
         except _SessionPoolError as exc:
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
+    @app.get("/api/character-viewer/session-pool/images")
+    async def api_character_viewer_session_pool_images(key: str = "", group: str = "", character: str = ""):
+        try:
+            history = await run_in_thread(read_pool_history, key)
+            identity = (group.strip(), character.strip())
+            if not all(identity):
+                raise _SessionPoolError(400, "group and character are required")
+            from core.headless_result_service import HISTORY_ITEM_PREFIX
+
+            items = [{"id": item["id"], "path": HISTORY_ITEM_PREFIX + item["id"],
+                      "thumbnail_url": item["thumbnail_url"], "created": item["created"]}
+                     for item in history["items"] if (item["group"], item["character"]) == identity]
+            return {"items": items, "count": len(items)}
+        except _SessionPoolError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
+    @app.get("/api/character-viewer/session-pool/file")
+    async def api_character_viewer_session_pool_file(key: str = "", id: str = "", size: str = "thumb"):
+        # Same access policy as /api/history/image and /api/history/thumb:
+        # neither existing image route has an extra loopback-only gate.
+        def read():
+            from pathlib import Path
+            from types import SimpleNamespace
+            from PIL import Image
+            from core.result_image_payload_service import (
+                image_media_type_for_bytes, memory_history_thumbnail_payload,
+            )
+
+            with _HIDE_LOCK, session_context._character_service()._commit_lock:
+                roster, _ = require_session_pool(key)
+                if size not in ("thumb", "full"):
+                    raise _SessionPoolError(400, "size must be thumb or full")
+                with session_context.result_store._mutation_lock:
+                    entry = (roster.get("history") or {}).get(id)
+                    if not entry or entry["in_memory"] or not entry["saved_path"]:
+                        raise FileNotFoundError("Pool image not found")
+                    path = entry["saved_path"]
+            # Only the server-recorded path is used; request paths are never opened.
+            raw = Path(path).read_bytes()
+            if size == "full":
+                return raw, image_media_type_for_bytes(raw)
+            with Image.open(io.BytesIO(raw)) as opened:
+                thumb = memory_history_thumbnail_payload(SimpleNamespace(image=opened))
+            if not thumb:
+                raise FileNotFoundError("Pool thumbnail unavailable")
+            return thumb, "image/webp"
+
+        try:
+            content, media_type = await run_in_thread(read)
+            return Response(content=content, media_type=media_type)
+        except _SessionPoolError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except OSError:
+            return JSONResponse({"error": "Pool image file not found"}, status_code=404)
 
     @app.post("/api/character-viewer/session-roll")
     async def api_character_viewer_session_roll(req: Request):

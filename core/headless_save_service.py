@@ -66,7 +66,7 @@ class HeadlessSaveService:
         self.context = context
 
     def enforce_history_limit(self) -> tuple[list[Any], str]:
-        """Apply the live/restored policy at insertion, under the store's RLock.
+        """Apply the live/restored policy at insertion, under pool -> commit -> store locks.
 
         Never drop unsaved bytes if saving fails. Stop mode retains completed
         results (including manual/in-flight results beyond the limit); the
@@ -80,7 +80,7 @@ class HeadlessSaveService:
                                     minimum=100, maximum=10000)
         action = context._coerce_int(state.get("memory_action"), default=1, minimum=1, maximum=3)
         store = context.result_store
-        with store._mutation_lock:
+        with store.history_mutation():
             if action == 3:
                 reason = (f"히스토리가 설정한 {limit}장에 도달하여 자동 생성을 중단했습니다."
                           if store.history_total() >= limit else "")
@@ -382,10 +382,7 @@ class HeadlessSaveService:
             if mode == "move":
                 shutil.move(str(src), str(target))
                 # 히스토리가 옛 경로를 가리키면 뷰어가 깨진다. 새 경로로 돌린다.
-                try:
-                    item.filepath = str(target)
-                except Exception:
-                    pass
+                context.result_store.mark_saved(item, target)
             else:
                 shutil.copy2(str(src), str(target))
             self._remember_quicksave(item, target)
@@ -413,13 +410,13 @@ class HeadlessSaveService:
         return {"ok": True, "path": str(target), "mode": "write",
                 "directory": str(directory)}
 
-    @staticmethod
-    def _remember_quicksave(item: Any, target: Path) -> None:
+    def _remember_quicksave(self, item: Any, target: Path) -> None:
         """이 항목을 어디에 빠른 저장했는지 기억한다(중복 저장/재이동 방지)."""
         try:
             item.quicksave_path = str(target)
         except Exception:
             pass
+        self.context.result_store.remember_saved_path(item, target)
 
     def save_history_items(
         self,

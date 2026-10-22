@@ -24852,6 +24852,63 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
   font-family: var(--font-mono); font-size: 10.5px; color: var(--text-primary); user-select: all;
 }
 .spw-chip { padding: 1px 7px; border-radius: 10px; border: 1px solid rgba(124,106,239,0.5); color: var(--text-secondary); font-size: 10px; }
+/* 키 줄 [총 n명] [히스토리 n장](2026-10-22). */
+.spw-chip.is-count { border-color: rgba(255,255,255,0.18); }
+.spw-histbtn {
+  padding: 1px 9px; border-radius: 10px; cursor: pointer; font-family: var(--font-mono); font-size: 10px;
+  border: 1px solid rgba(124,106,239,0.6); background: rgba(124,106,239,0.14); color: var(--text-primary);
+}
+.spw-histbtn:hover { background: rgba(124,106,239,0.28); }
+/* 세션 와일드카드 히스토리 창 - 왼쪽 캐릭터 · 오른쪽 격자(2026-10-22). */
+.dragpanel.sph .dragpanel-body { padding: 0; min-height: 0; display: flex; }
+.sph-body { flex: 1; min-height: 0; display: flex; }
+.sph-list { width: 170px; flex: none; overflow-y: auto; border-right: 1px solid rgba(255,255,255,0.08); padding: 4px 0; }
+.sph-item {
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 10px; border: 0; background: transparent; cursor: pointer;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; text-align: left;
+}
+.sph-item:hover { background: rgba(124,106,239,0.12); }
+.sph-item.is-on { background: rgba(124,106,239,0.26); }
+.sph-item.is-zero { color: var(--text-dim); }
+.sph-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sph-count { flex: none; font-size: 10px; color: var(--text-secondary); }
+.sph-grid {
+  flex: 1; min-width: 0; overflow-y: auto; padding: 8px; display: grid; gap: 6px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+}
+.sph-grid .spw-empty { grid-column: 1 / -1; }
+.sph-cell { position: relative; padding: 0; border: 1px solid transparent; border-radius: 5px; overflow: hidden; cursor: zoom-in; background: rgba(255,255,255,0.05); aspect-ratio: 3 / 4; }
+.sph-cell:hover { border-color: rgba(124,106,239,0.7); }
+.sph-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sph-unsaved {
+  position: absolute; left: 3px; top: 3px; padding: 0 4px; border-radius: 3px; font-size: 9px;
+  background: rgba(0,0,0,0.65); color: rgb(250,199,117);
+}
+/* 검은 배경 크게 보기(imageLightbox - 히스토리 브라우저와 같은 손버릇). */
+.ilb { position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,0.94); outline: none; }
+.ilb[hidden] { display: none; }
+.ilb-bar {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  font-family: var(--font-mono); font-size: 11.5px; color: #ddd; background: linear-gradient(rgba(0,0,0,0.55), transparent);
+}
+.ilb-sp { flex: 1; }
+.ilb-count { margin-left: 10px; color: #999; }
+.ilb-hint { color: #888; font-size: 10.5px; }
+.ilb-btn { padding: 3px 10px; border-radius: 5px; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #eee; font-family: var(--font-mono); font-size: 11px; }
+.ilb-stage { position: absolute; inset: 0; overflow: hidden; cursor: default; }
+.ilb-stage.is-panning { cursor: grabbing; }
+/* `vp-stage` 는 preload 의 Ctrl+휠 비켜 가기용 이름뿐 - 히스토리 팝업 무대의 자리(아래 44px 비움)는 받지 않는다. */
+.ilb-stage.vp-stage { bottom: 0; display: block; }
+.ilb-img { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); transform-origin: center; user-select: none; }
+.ilb-img:not([style]) { opacity: 0; }
+.ilb-nav {
+  position: absolute; top: 50%; z-index: 2; transform: translateY(-50%); width: 44px; height: 64px; border: 0; border-radius: 8px;
+  background: rgba(255,255,255,0.06); color: #ccc; font-size: 28px; cursor: pointer;
+}
+.ilb-nav:hover { background: rgba(255,255,255,0.14); }
+.ilb-nav.is-prev { left: 12px; }
+.ilb-nav.is-next { right: 12px; }
+.ilb-nav[hidden] { display: none; }
 .spw-tools { display: flex; gap: 5px; align-items: center; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); flex: none; }
 .spw-q {
   flex: 1 1 auto; min-width: 0; height: 26px; padding: 0 8px; border-radius: 5px;

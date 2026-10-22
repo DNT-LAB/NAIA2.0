@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 import io
@@ -16,6 +17,7 @@ from typing import Any, Optional
 from PIL import Image
 
 from core import result_image_payload_service as result_images
+from core import character_session_history as pool_history
 from core.event_stream_vibe import strip_event_stream_vibe_params
 from core.generation_request import strip_session_pool_controls
 
@@ -93,6 +95,7 @@ class HeadlessResultStore:
         # **목록을 바꾸는 구간만** 직렬화한다(이미지 인코딩 같은 무거운 작업은 락 밖).
         # 재진입 가능해야 한다 — 변형 메서드가 서로를 부른다.
         self._mutation_lock = threading.RLock()
+        self._history_mutation_state = threading.local()
         # 히스토리를 비울 때마다 올라간다. 항목 추가와 브로드캐스트 사이에는 락이
         # 없으므로(브로드캐스트는 async I/O), 그 틈에 초기화가 끼면 방금 지운 항목이
         # 새-이미지 알림으로 되살아난다. 알림에 세대를 실어 보내면 프론트가 낡은
@@ -101,6 +104,32 @@ class HeadlessResultStore:
         self.latest_item: HeadlessHistoryItem | None = None
         self.latest_webp: bytes | None = None
         self.latest_metadata_payload: dict[str, Any] | None = None
+
+    @contextmanager
+    def history_mutation(self):
+        """Pool -> commit -> store, including reentrant save-before-evict calls.
+
+        Callers must not enter this guard while holding only _mutation_lock.
+        Standalone stores without a character service retain their original lock.
+        """
+        # SESSION_POOL_LOCK is deliberately non-reentrant. Nested retention,
+        # save and removal calls reuse only this thread's already-held guard.
+        if getattr(self._history_mutation_state, "active", False):
+            yield
+            return
+        character_service = getattr(self._context, "_character_service", None)
+        if character_service is None:
+            with self._mutation_lock:
+                yield
+            return
+        from core.character_settings import SESSION_POOL_LOCK
+
+        with SESSION_POOL_LOCK, character_service()._commit_lock, self._mutation_lock:
+            self._history_mutation_state.active = True
+            try:
+                yield
+            finally:
+                self._history_mutation_state.active = False
 
     def _attach_interactive_snapshot_thumb(self, request, image_bytes: bytes) -> None:
         """Interactive 에셋에 결과 썸네일을 붙인다(있을 때만).
@@ -327,14 +356,17 @@ class HeadlessResultStore:
             api_metadata=dict(api_result.get("api_metadata", {}) or {}),
             png_payload_override=comfyui_png_override,
         )
-        with self._mutation_lock:
+        with self.history_mutation():
             item.epoch = self._epoch
             self._items.insert(0, item)
+            pool_history.record_result(self._context, item)
             evicted = []
             history_limit_stop_reason = ""
             if self.max_items is not None:
                 evicted = self._items[self.max_items:]
                 del self._items[self.max_items:]
+                for removed in evicted:
+                    pool_history.record_removed(self._context, removed.history_id)
             elif self._context is not None:
                 evicted, history_limit_stop_reason = self._context._save_service().enforce_history_limit()
             image_meta = self._set_latest_item(item) or {}
@@ -507,15 +539,27 @@ class HeadlessResultStore:
         return len(self.unsaved_items())
 
     def mark_saved(self, item: HeadlessHistoryItem, filepath: str | Path) -> None:
-        item.filepath = str(filepath)
+        with self.history_mutation():
+            item.filepath = str(filepath)
+            pool_history.record_saved(self._context, item, filepath)
 
-    def remove_item(self, item_or_history_id: HeadlessHistoryItem | str) -> HeadlessHistoryItem | None:
+    def remember_saved_path(self, item: HeadlessHistoryItem, filepath: str | Path) -> None:
+        # Copy/export leaves Auto Save's unsaved count untouched. A saved
+        # original remains authoritative; only memory-only images need the copy.
+        with self.history_mutation():
+            original = str(getattr(item, "filepath", "") or "")
+            target = original if original and Path(original).is_file() else filepath
+            pool_history.record_saved(self._context, item, target)
+
+    def remove_item(self, item_or_history_id: HeadlessHistoryItem | str,
+                    *, deleted: bool = False) -> HeadlessHistoryItem | None:
         history_id = (
             item_or_history_id.history_id
             if isinstance(item_or_history_id, HeadlessHistoryItem)
             else str(item_or_history_id or "")
         )
-        with self._mutation_lock:
+        with self.history_mutation():
+            pool_history.record_removed(self._context, history_id, deleted=deleted)
             for index, item in enumerate(self._items):
                 if item.history_id != history_id:
                     continue
@@ -528,9 +572,11 @@ class HeadlessResultStore:
     def clear_history(self) -> dict[str, int]:
         """메모리 히스토리를 통째로 비운다(Ctrl+S/자동저장으로 이미 디스크에
         내려간 파일은 건드리지 않는다 — 사라지는 것은 미저장분뿐이다)."""
-        with self._mutation_lock:
+        with self.history_mutation():
             total = len(self._items)
             unsaved = self.unsaved_history_count()
+            for item in self._items:
+                pool_history.record_removed(self._context, item.history_id, deleted=True)
             self._items.clear()
             self._set_latest_item(None)
             self._epoch += 1

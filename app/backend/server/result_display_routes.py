@@ -1348,7 +1348,7 @@ def register_result_display_routes(
                         #    보존하려던 목적이 무너진다.
                         rescue_attempted = True
                         rescued = _rescue_unsaved_to_trash(session_context, item)
-                    removed = session_context.result_store.remove_item(item)
+                    removed = session_context.result_store.remove_item(item, deleted=True)
                     if removed is None:
                         raise FileNotFoundError("History item not found")
                     removed_payloads.append({
@@ -1453,7 +1453,7 @@ def register_result_display_routes(
                         if not _move_to_trash(target):
                             raise OSError(f"Could not move file to recycle bin: {target}")
                         trashed = True
-                removed = session_context.result_store.remove_item(item)
+                removed = session_context.result_store.remove_item(item, deleted=True)
                 if removed is None:
                     raise FileNotFoundError("History item not found")
                 return {
@@ -1674,7 +1674,7 @@ def register_result_display_routes(
                     if not _move_to_trash(target):
                         raise OSError(f"Could not move file to recycle bin: {target}")
                     deleted_file = True
-            removed = session_context.result_store.remove_item(item)
+            removed = session_context.result_store.remove_item(item, deleted=True)
             if removed is None:
                 raise FileNotFoundError("History item not found")
             return removed, deleted_file, file_path

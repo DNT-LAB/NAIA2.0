@@ -4,16 +4,19 @@
  * 지금 랜덤 풀(세션 와일드카드)에 **실제로 들어 있는 줄**을 본다: 캐릭터마다 한 줄(썸네일 · 이름 · 작품 · 뽑힌 수 · ✕).
  * 줄을 누르면 그 줄 **하나만** 펼쳐진다(다른 줄은 접힌다 · 창 폭을 키우지 않는다): 단추 한 줄
  * [임시 고정] [즉시 생성] [랜덤+생성] + 그 캐릭터가 내보내는 프롬프트 줄(지금 출력 옵션이 걸린 모양).
- * 뽑힌 수는 단추 - 누르면 그 캐릭터로 나온 그림을 **따로 떠 있는 창**에 펼친다.
+ * 키 줄 = `__키__ [총 n명] [히스토리 n장]`(2026-10-22) - [히스토리] 는 이 풀의 그림 창(왼쪽 캐릭터 · 오른쪽 격자 · 크게 보기).
+ * 뽑힌 수 단추도 그 창을 그 캐릭터로 연다.
  *
  *   임시 고정  랜덤 슬롯은 그대로 두고 다음 생성부터 그 캐릭터만. 직접 풀기 · 풀이 바뀜 · 재시작에 풀린다.
  *   즉시 생성  지금 메인 프롬프트 그대로 그 캐릭터로 한 장. 랜덤+생성 = Random 으로 새 프롬프트 뒤 한 장. 둘 다 뽑힌 수에 든다.
  *   ✕          이 풀에서만 빼기(숨김 아님). [풀 비우기] = 슬롯까지 지운다(두 번 누른다 · 누른 때의 풀만).
  *
- * 서버 = GET /api/character-viewer/session-pool · POST session-pool/remove · clear · pin · generate · GET session-pool/images.
+ * 서버 = GET /api/character-viewer/session-pool · POST session-pool/remove · clear · pin · generate · GET session-pool/history.
  * 요청에는 **그린 때의 풀 키**를 싣는다 - 그사이 풀이 바뀌면 서버가 409 로 거절한다(Find 풀 탭 Codex 리뷰와 같은 규칙).
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
+import {createSessionPoolHistoryWindow} from './sessionPoolHistoryWindow.mjs?v=20261022-sph2';
+import {createImageLightbox} from './imageLightbox.mjs?v=20261022-sph3';
 
 /** 지금 출력 옵션 -> 슬롯의 단추 이름 그대로(묶음 [이름+작품만] = drop_features · [이름만] = 그것 + drop_copyright). */
 function optionLabels(options) {
@@ -42,10 +45,7 @@ export function createSessionPoolWindow({
   let busy = '';                      // 진행 중인 일 = `할 일\u0000그룹\u0000캐릭터` · 'clear'
   let clearArmed = 0;
   let clearKey = '';
-  // 그림 창(뽑힌 수 단추) - 따로 떠 있는 창 하나를 캐릭터마다 다시 채운다.
-  let gallery = null;
-  let galleryFor = null;              // {pool, group, character}
-  let gallerySeq = 0;
+  let history = null;                 // 히스토리 창(sessionPoolHistoryWindow) - 처음 열 때 만든다
 
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
   const keyOf = member => `${member.group}\u0000${member.character}`;
@@ -123,7 +123,7 @@ export function createSessionPoolWindow({
         : `<span class="spw-img is-initial">${escHtml(String(member.character || '?').trim().charAt(0).toUpperCase() || '?')}</span>`)
       + `<span class="spw-name"><b>${isPinned ? '📌 ' : ''}${escHtml(member.character)}</b>`
       + `<span>${escHtml(member.group)}${member.hidden ? ' · 숨김' : ''}</span></span>`
-      // 뽑힌 수 = 단추(사용자 결정) - 그 캐릭터로 나온 그림을 따로 떠 있는 창에.
+      // 뽑힌 수 = 단추(사용자 결정) - 히스토리 창을 이 캐릭터로 연다.
       // 0 이어도 누를 수 있다: 뽑힌 수는 최근 500회 기록이라 그림이 남아 있어도 0 일 수 있다.
       + `<button type="button" class="spw-picks" data-spw-images title="이 캐릭터로 나온 그림 보기">`
       + `${picks.toLocaleString()}</button>`
@@ -148,13 +148,16 @@ export function createSessionPoolWindow({
     const keyEl = panel.body.querySelector('[data-spw-key]');
     const pinEl = panel.body.querySelector('[data-spw-pin]');
     const list = panel.body.querySelector('[data-spw-list]');
-    // 슬롯 이름(`랜덤 · N명`)에 이미 수가 있다 - 없을 때만 줄 수를 붙인다.
-    const label = active()
-      ? `${info.label || `${Number(info.count || 0).toLocaleString()}줄`} · 뽑힌 ${Number(info.total_picks || 0).toLocaleString()}번`
-      : '';
-    panel.setTitle(label ? `세션 와일드카드 — ${label}` : '세션 와일드카드');
+    // 제목은 이름만 - 인원 · 장 수는 키 줄로 옮겼다(사용자 지시 2026-10-22).
+    panel.setTitle('세션 와일드카드');
+    const shots = Number(info?.history_total || 0);
+    const lost = Number(info?.history_lost || 0);
     const keyHtml = active()
       ? `<code>${escHtml(info.wildcard || '')}</code>`
+        + `<span class="spw-chip is-count">총 ${Number(info.count || 0).toLocaleString()}명</span>`
+        + `<button type="button" class="spw-histbtn" data-spw-history`
+        + ` title="이 풀에서 나온 그림${lost ? ` · ${lost.toLocaleString()}장은 저장 없이 지워짐` : ''}">`
+        + `히스토리 ${shots.toLocaleString()}장</button>`
         + optionLabels(info.options).map(text => `<span class="spw-chip">${escHtml(text)}</span>`).join('')
       : '';
     if (keyEl._html !== keyHtml) { keyEl._html = keyHtml; keyEl.innerHTML = keyHtml; }
@@ -200,7 +203,11 @@ export function createSessionPoolWindow({
   }
 
   async function refresh() {
-    if (!panel || !panel.isOpen()) return;
+    if (!panel || !panel.isOpen()) {
+      // 이 창은 닫았어도 히스토리 창이 떠 있으면 그것은 계속 따라간다(새 그림 · 풀이 바뀜 - Codex 리뷰).
+      if (history && history.isOpen()) await followHistoryOnly();
+      return;
+    }
     const mine = ++seq;
     let next;
     try {
@@ -216,7 +223,22 @@ export function createSessionPoolWindow({
     if (clearArmed && (!active() || info.key !== clearKey)) disarmClear();
     if (changedPool) openKey = '';              // 새 풀이면 펼침도 처음부터
     render();
-    if (gallery && gallery.isOpen()) void refreshGallery();
+    if (history && history.isOpen()) {
+      if (changedPool && active()) history.follow(info.key || '');
+      else void history.refresh();
+    }
+  }
+
+  async function followHistoryOnly() {
+    try {
+      const res = await fetch('/api/character-viewer/session-pool', {cache: 'no-store'});
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.active && data.key) {
+        if (!info || info.key !== data.key) info = data;
+        history.follow(data.key);
+        void history.refresh();
+      }
+    } catch (_) { /* 다음 갱신에서 다시 본다 */ }
   }
 
   async function request(path, body) {
@@ -285,62 +307,11 @@ export function createSessionPoolWindow({
     }
   }
 
-  // ── 그림 창(뽑힌 수 단추 · 사용자 결정 2026-10-21) ─────────────────────────────
-  function ensureGallery() {
-    if (gallery) return gallery;
-    gallery = createDraggablePanel({
-      document: doc,
-      title: '그림',
-      variant: 'spw-gal',
-      storageKey: 'session-pool-images',
-      width: 360,
-      height: 420,
-      minWidth: 220,
-      minHeight: 160,
-      maxWidth: 900,
-      resizable: true,
-      initial: {right: 24, y: 120},
-    });
-    gallery.body.innerHTML = '<div class="spwg-grid" data-spwg-grid></div>';
-    return gallery;
-  }
-
-  async function refreshGallery() {
-    if (!gallery || !galleryFor) return;
-    const mine = ++gallerySeq;
-    const {pool, group, character} = galleryFor;
-    const grid = gallery.body.querySelector('[data-spwg-grid]');
-    let html;
-    try {
-      const res = await fetch(`/api/character-viewer/session-pool/images?key=${encodeURIComponent(pool)}`
-        + `&group=${encodeURIComponent(group)}&character=${encodeURIComponent(character)}`, {cache: 'no-store'});
-      const data = await res.json().catch(() => ({}));
-      if (mine !== gallerySeq) return;
-      if (!res.ok) throw new Error(data.error || '그림을 불러오지 못했습니다.');
-      const items = Array.isArray(data.items) ? data.items : [];
-      html = items.length
-        ? items.map(item => `<a class="spwg-cell" href="${escAttr(item.url || item.thumbnail_url || '')}" target="_blank" rel="noopener">`
-          + `<img loading="lazy" decoding="async" alt="" src="${escAttr(item.thumbnail_url || item.url || '')}"></a>`).join('')
-        : '<div class="spw-empty">이번 세션에 이 캐릭터로 나온 그림이 없습니다.</div>';
-    } catch (error) {
-      if (mine !== gallerySeq) return;
-      html = `<div class="spw-empty">${escHtml(error.message || String(error))}</div>`;
-    }
-    if (grid._html !== html) { grid._html = html; grid.innerHTML = html; }
-  }
-
-  function openGallery(row) {
-    const group = row?.dataset.spwGroup || '';
-    const character = row?.dataset.spwChar || '';
-    if (!group || !character) return;
-    ensureGallery();
-    galleryFor = {pool: row.dataset.spwPool || '', group, character};
-    gallery.setTitle(`그림 — ${character}`);
-    if (gallery.isOpen()) gallery.raise(); else gallery.open();
-    const grid = gallery.body.querySelector('[data-spwg-grid]');
-    grid._html = '';
-    grid.innerHTML = '<div class="spw-empty">불러오는 중…</div>';
-    void refreshGallery();
+  // ── 히스토리 창(사용자 결정 2026-10-22) - 키 줄 [히스토리 n장] = 전체 · 줄의 뽑힌 수 = 그 캐릭터 ──────────
+  function openHistory(select = null) {
+    if (!active()) return;
+    if (!history) history = createSessionPoolHistoryWindow({document: doc, escHtml, lightbox: createImageLightbox({document: doc, escHtml})});
+    history.open(info.key || '', select);
   }
 
   function onClick(event) {
@@ -348,7 +319,12 @@ export function createSessionPoolWindow({
     const unpin = event.target.closest('[data-spw-unpin]');
     if (unpin) { void rowAction('unpin', unpin); return; }
     if (event.target.closest('[data-spw-rm]')) { event.stopPropagation(); void rowAction('remove', row); return; }
-    if (event.target.closest('[data-spw-images]')) { event.stopPropagation(); openGallery(row); return; }
+    if (event.target.closest('[data-spw-images]')) {
+      event.stopPropagation();
+      openHistory({group: row?.dataset.spwGroup || '', character: row?.dataset.spwChar || ''});
+      return;
+    }
+    if (event.target.closest('[data-spw-history]')) { openHistory(); return; }
     if (event.target.closest('[data-spw-pinact]')) { void rowAction('pin', row); return; }
     const gen = event.target.closest('[data-spw-gen]');
     if (gen) { void rowAction(gen.dataset.spwGen === 'random' ? 'random' : 'now', row); return; }

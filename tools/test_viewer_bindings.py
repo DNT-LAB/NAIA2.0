@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from core.headless_result_service import HeadlessResultStore  # noqa: E402
 from core.headless_viewer_binding_service import (  # noqa: E402
     HeadlessViewerBindingService,
     VIEWER_ACTIONS,
@@ -46,6 +47,7 @@ class FakeContext:
 
     def __init__(self, root: Path) -> None:
         self.root = root
+        self.result_store = HeadlessResultStore()
         self.session_timestamp = "20260806_101112"
         self.auto_save_state = {"quicksave_dir": "", "quicksave_folder": "date"}
 

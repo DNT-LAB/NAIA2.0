@@ -220,6 +220,18 @@ def register_install_manager_routes(
 
     session_context.character_pack_complete_notify = notify_character_pack_complete
 
+    @app.post("/api/install-manager/character-pack/auto-start")
+    async def api_install_manager_character_pack_auto_start(req: Request):
+        # 화면이 다 뜬 뒤 한 번(app.js) - 프로세스당 한 번만 시작하고, 기다리지 않는다(받기는 뒤에서).
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.auto_start_character_pack)
+            return {"ok": True}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Character pack auto start failed: {exc}"}, status_code=500)
+
     @app.post("/api/install-manager/character-pack/download")
     async def api_install_manager_character_pack_download(req: Request):
         if not _is_local_request(req):
@@ -249,6 +261,11 @@ def register_install_manager_routes(
             return await run_in_thread(runtime_install_manager(session_context).initialize)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Install manager initialize failed: {exc}"}, status_code=500)
+        finally:
+            # 첫 initialize 가 답을 받았다 - 미뤄 둔 무거운 색인 예열을 이제 시작한다(headless_lifespan).
+            gate = getattr(session_context, "headless_startup_gate", None)
+            if gate is not None:
+                gate.set()
 
     @app.post("/api/install-manager/tag-archive/download")
     async def api_install_manager_tag_archive_download(req: Request):

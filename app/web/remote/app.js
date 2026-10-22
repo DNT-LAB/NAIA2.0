@@ -2028,7 +2028,7 @@ const queuePanelReady = import('./js/features/queuePanel.mjs?v=20261021-qstart2'
   .catch(error => {
     console.error('Failed to initialize queue panel module', error);
   });
-// 공용 다운로드 띠(사용자 지시 2026-10-22) - 서버가 앱을 켤 때 스스로 받기 시작한다. 이 띠는 보이기와 [재시도]만.
+// 공용 다운로드 띠(사용자 지시 2026-10-22) - 이 띠는 보이기와 [재시도]만. 캐릭터 확장 팩은 화면이 뜬 뒤 아래에서 한 번 요청한다.
 let downloadDock = null;
 import('./js/features/downloadDock.mjs?v=20261022-dock1')
   .then(({createDownloadDock}) => {
@@ -2037,6 +2037,13 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
       // 캐릭터 확장 팩을 다 받았다 - 열려 있는 Characters 목록이 이니셜 타일 대신 그림을 청하게 다시 읽는다.
       onDone: key => { if (key === 'character_pack') characterViewerControl?.reload?.(); },
     });
+    // 캐릭터 확장 팩은 앱이 다 뜬 **뒤에** 받는다(사용자 지시 2026-10-22 - 시작 경로에서 받으면 initialize 가 막혔다).
+    // 한 번만 부른다 - 서버도 프로세스당 한 번만 시작하고, 이미 있으면 아무것도 안 한다.
+    setTimeout(() => {
+      fetch('/api/install-manager/character-pack/auto-start', {method: 'POST'})
+        .then(() => downloadDock?.refresh?.())
+        .catch(() => {});
+    }, 15000);
   })
   .catch(error => console.error('Failed to initialize download dock module', error));
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapsave1')

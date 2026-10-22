@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from typing import Any, Awaitable, Callable
 
@@ -70,21 +71,22 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         task = getattr(context, "headless_random_warmup_task", None)
         if task is None or task.done():
             context.headless_random_warmup_task = asyncio.create_task(_run_random_warmup(context, run_in_thread))
+        # ⚠️ 무거운 색인 예열 둘(태그 자동완성 20만 · 캐릭터 검색)은 **Electron 의 첫 initialize 응답 뒤에** 시작한다
+        #    (2026-10-22 포터블 시작 실패: 둘이 시작 직후 CPU 를 붙잡아 10초 제한의 initialize 가 시간 초과).
+        #    initialize 가 안 오는 경우(브라우저만)에는 NAIA_STARTUP_WARMUP_DELAY 초(기본 8) 뒤에 시작한다.
+        gate = asyncio.Event()
+        context.headless_startup_gate = gate
         tag_task = getattr(context, "headless_tag_index_warmup_task", None)
         if tag_task is None or tag_task.done():
-            context.headless_tag_index_warmup_task = asyncio.create_task(_run_tag_index_warmup(context, run_in_thread))
+            context.headless_tag_index_warmup_task = asyncio.create_task(
+                _after_startup_gate(gate, _run_tag_index_warmup, context, run_in_thread))
         character_task = getattr(context, "headless_character_index_warmup_task", None)
         if character_task is None or character_task.done():
             context.headless_character_index_warmup_task = asyncio.create_task(
-                _run_character_index_warmup(context, run_in_thread))
-        # One startup request, never a poll/retry loop. The manager queues it behind
-        # an active tag/corpus download and returns without waiting for the network.
-        try:
-            from app.backend.server.install_manager_routes import runtime_install_manager
-
-            await run_in_thread(runtime_install_manager(context).auto_start_character_pack)
-        except Exception as exc:
-            print(f"Headless Remote: character pack startup skipped - {ascii(str(exc))}", flush=True)
+                _after_startup_gate(gate, _run_character_index_warmup, context, run_in_thread))
+        # ⚠️ 캐릭터 확장 팩은 여기서 받지 않는다(사용자 지시 2026-10-22) - 시작 경로에서 받기를 걸었더니 포터블의
+        #    install-manager/initialize 가 시간 초과로 죽었다. 화면이 다 뜬 뒤 app.js 가 한 번 요청한다
+        #    (POST /api/install-manager/character-pack/auto-start).
         try:
             yield
         finally:
@@ -161,6 +163,20 @@ async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunIn
         _warm_korean_async(context)
     except Exception as exc:
         print(f"Headless Remote: assist korean warmup failed - {exc}", flush=True)
+
+
+async def _after_startup_gate(gate: asyncio.Event, warmup, context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    """첫 initialize 응답(또는 지연 시간)을 기다렸다가 예열을 돈다 - 위 lifespan 주석 참조."""
+    try:
+        delay = max(0.0, float(os.environ.get("NAIA_STARTUP_WARMUP_DELAY", "8") or 0))
+    except ValueError:
+        delay = 8.0
+    if delay > 0:
+        try:
+            await asyncio.wait_for(gate.wait(), timeout=delay)
+        except asyncio.TimeoutError:
+            pass
+    await warmup(context, run_in_thread)
 
 
 async def _run_character_index_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:

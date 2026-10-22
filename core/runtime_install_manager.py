@@ -366,31 +366,42 @@ class RuntimeInstallManager:
             return 0
         return len([path for path in target.glob(spec.count_glob) if path.is_file()])
 
-    def _archive_ready(self, spec: ArchiveSpec, count: int | None = None) -> bool:
+    def _character_pack_ready_locked(self, spec: ArchiveSpec) -> bool:
+        try:
+            target = self._archive_dir(spec)
+            if (target / "character_pack.corrupt").exists():
+                self._character_pack_ready_cache = None
+                return False
+            if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
+                self._character_pack_ready_cache = None
+                return False
+            path = target / spec.raw_name
+            fingerprint = character_pack_fingerprint(path)
+            stat = path.stat()
+            generation = (fingerprint, stat.st_size, stat.st_mtime_ns, spec.url)
+            if fingerprint is not None and self._character_pack_ready_cache == generation:
+                return True
+            self._character_pack_manifest(path, source_fingerprint=fingerprint)
+            self._character_pack_ready_cache = generation if fingerprint is not None else None
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            self._character_pack_ready_cache = None
+            return False
+
+    def _archive_ready(self, spec: ArchiveSpec, count: int | None = None, *, wait: bool = False) -> bool:
         if spec.key == "character_pack":
             # Same pure lock as service reads and installation; never invalidate
             # the service simply because a snapshot asks whether the pack is ready.
-            with self._character_pack_lock():
-                try:
-                    target = self._archive_dir(spec)
-                    if (target / "character_pack.corrupt").exists():
-                        self._character_pack_ready_cache = None
-                        return False
-                    if (target / "character_pack.source").read_text(encoding="utf-8").strip() != spec.url:
-                        self._character_pack_ready_cache = None
-                        return False
-                    path = target / spec.raw_name
-                    fingerprint = character_pack_fingerprint(path)
-                    stat = path.stat()
-                    generation = (fingerprint, stat.st_size, stat.st_mtime_ns, spec.url)
-                    if fingerprint is not None and self._character_pack_ready_cache == generation:
-                        return True
-                    self._character_pack_manifest(path, source_fingerprint=fingerprint)
-                    self._character_pack_ready_cache = generation if fingerprint is not None else None
-                    return True
-                except (OSError, ValueError, KeyError, TypeError):
-                    self._character_pack_ready_cache = None
-                    return False
+            # ⚠️ 상태 조회(snapshot · initialize)는 이 잠금을 **기다리지 않는다**(2026-10-22 포터블 시작 시간 초과).
+            #    서비스가 색인을 만드는 동안 쥐고 있으면 몇 초씩 걸려 화면의 initialize 가 시간 초과로 죽었다.
+            #    바쁘면 마지막으로 확인한 값을 돌려준다. 받기 · 설치처럼 정확해야 하는 쪽만 wait=True(잠금 밖 일꾼 스레드).
+            lock = self._character_pack_lock()
+            if not lock.acquire(blocking=wait):
+                return self._character_pack_ready_cache is not None
+            try:
+                return self._character_pack_ready_locked(spec)
+            finally:
+                lock.release()
         found = self._archive_file_count(spec) if count is None else count
         target = self._archive_dir(spec)
         for name in spec.required_names:
@@ -544,17 +555,19 @@ class RuntimeInstallManager:
         return self.start_archive_download("event_map", blocking=blocking)
 
     def auto_start_character_pack(self) -> dict[str, Any]:
-        """Startup calls this once. Polling never starts or retries a download."""
+        """화면이 다 뜬 뒤 한 번 부른다(사용자 지시 2026-10-22 - 앱 시작 경로에서 받지 않는다). 폴링이 다시 부르지 않는다."""
         with self._lock:
             if self._character_pack_auto_requested or self._downloads.get("character_pack", {}).get("state") == "error":
                 return dict(self._download_state)
             self._character_pack_auto_requested = True
-            return self.start_character_pack_download()
+        return self.start_character_pack_download()
 
     def start_character_pack_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        spec = self._spec("character_pack")
+        # 준비 판정은 관리자 잠금 **밖에서** 기다린다 - 안에서 기다리면 그동안 상태 조회 · initialize 가 막힌다.
+        ready = (not spec.url) or self._archive_ready(spec, wait=True)
         with self._lock:
-            spec = self._spec("character_pack")
-            if not spec.url or self._archive_ready(spec):
+            if ready:
                 self._character_pack_queued = False
                 if self._downloads.get(spec.key, {}).get("state") == "queued":
                     self._downloads.pop(spec.key, None)
@@ -565,7 +578,8 @@ class RuntimeInstallManager:
                     self._download_entry(spec, "queued")
                 return dict(self._download_state)
             self._character_pack_queued = False
-            return self.start_archive_chain((spec.key,), blocking=blocking)
+        # 체인 시작(initialize · 준비 판정 포함)은 관리자 잠금 밖에서 - 체인이 제 잠금으로 '이미 받는 중' 을 다시 거른다.
+        return self.start_archive_chain((spec.key,), blocking=blocking)
 
     def start_archive_download(self, key: str, *, blocking: bool = False) -> dict[str, Any]:
         """아카이브 **하나**를 받는다. 여러 개를 이어 받으려면 `start_archive_chain`."""
@@ -745,7 +759,7 @@ class RuntimeInstallManager:
                 )
             # 압축 해제 직후 실제 준비 상태를 다시 검증한다. 멤버 수만 세면 필수 파일
             # (코퍼스의 metadata.tgpm)이 빠진 아카이브도 성공으로 보고된다.
-            if not self._archive_ready(spec):
+            if not self._archive_ready(spec, wait=True):
                 missing = [
                     name for name in spec.required_names
                     if not (target / name).is_file()

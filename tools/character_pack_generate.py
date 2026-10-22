@@ -446,6 +446,15 @@ def _v5_usage(client, token: str):
         return None
 
 
+def _v5_extra(client, token: str):
+    """추가 사용량(Extra Usage · 구독 응답 `usage.purchasedPercent`) - 기본이 0% 가 된 뒤 쓰인다(Anlas 아님)."""
+    try:
+        raw = client.fetch_subscription(token).get("raw") or {}
+        return int(((raw.get("usage") or {}).get("purchasedPercent")) or 0)
+    except Exception:
+        return None
+
+
 def _claim(out_dir: Path, rank: int):
     """이 장을 잡는다(원자적 생성). 남이 잡았으면 None - 오래된 표시는 죽은 프로세스의 것이라 가져간다."""
     claim = out_dir / f"{rank:05d}.claim"
@@ -541,8 +550,9 @@ def run_account(client, label: str, items: list[dict], logf, v5: bool = False, p
             print(f"[{label}] done {done} anlas={now}", flush=True)
             if v5:
                 usage = _v5_usage(client, token)
-                _log(logf, ev="v5_usage", account=label, done=done, percent=usage)
-                print(f"[{label}] v5 usage {usage}%", flush=True)
+                extra = _v5_extra(client, token)
+                _log(logf, ev="v5_usage", account=label, done=done, percent=usage, purchased_percent=extra)
+                print(f"[{label}] v5 usage {usage}%" + (f" (+추가 {extra}%)" if extra else ""), flush=True)
                 if V5_USAGE_FLOOR is not None and usage is not None and usage <= V5_USAGE_FLOOR:
                     print(f"[{label}] V5 usage {usage}% <= {V5_USAGE_FLOOR}% - stopping this account", flush=True)
                     return "usage_low"

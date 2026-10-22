@@ -2614,7 +2614,7 @@ const setupControllerReady = import('./js/features/setupController.mjs?v=2026092
     });
     window.__naiaSetupControllerReady = true;
     // 계정 패널은 설정 대화상자를 열 수 있어야 해서 setupController 뒤에 만든다.
-    return import('./js/features/naiAccountPanel.mjs?v=20260927-ended')
+    return import('./js/features/naiAccountPanel.mjs?v=20261022-extra1')
       .then(({createNaiAccountPanel}) => {
         naiAccountPanel = createNaiAccountPanel({
           document,
@@ -11191,6 +11191,13 @@ function onNaiUsageUpdate(m) {
     return;
   }
   value.textContent = onV5 ? `${pct}%` : String(Number(m.session_generations) || 0);
+  // 추가 사용량(Extra Usage · 충전분) - 기본 뒤에 노랗게 '+n'. 기본을 다 쓴 뒤 쓰인다(사용자 결정 2026-10-22).
+  const extraEl = $('naiUsageExtra');
+  const extra = onV5 && !m.is_negative ? Math.max(0, Math.round(Number(m.purchased_percent) || 0)) : 0;
+  if (extraEl) {
+    extraEl.textContent = extra ? `+${extra}` : '';
+    extraEl.classList.toggle('hidden', !extra);
+  }
   // 소진 표시는 V5 를 고른 동안에만 뜻이 있다(V4.5 는 이 무료 풀을 안 쓴다).
   pill.classList.toggle('is-out', !!m.is_negative && onV5);
   pill.classList.toggle('is-multi', multi);
@@ -11207,7 +11214,8 @@ function onNaiUsageUpdate(m) {
     : m.is_negative
       ? 'V5 무료 사용량 소진 — 이후 생성은 Anlas 를 씁니다'
       : `NovelAI Diffusion V5 Opus 사용량${rate ? ` · ${rate}` : ''}`;
-  pill.title = `${base}\n${multi ? `계정 ${accounts.length}개 · ` : ''}눌러서 계정 관리`;
+  const extraNote = extra ? `\n추가 사용량 ${extra}% - 기본을 다 쓴 뒤 사용합니다(Anlas 아님)` : '';
+  pill.title = `${base}${extraNote}\n${multi ? `계정 ${accounts.length}개 · ` : ''}눌러서 계정 관리`;
   pill.classList.remove('hidden');
 }
 

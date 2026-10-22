@@ -63,6 +63,14 @@ function formatImages(percent) {
   return imageCount(percent).toLocaleString();
 }
 
+// 추가 사용량(Extra Usage · 구독 응답 `purchasedPercent`, 사용자가 충전한 몫 · 2026-10-22 실측).
+// 기본(매일 회복) 풀이 바닥난 뒤에 쓰인다 - Anlas 는 줄지 않는다. 부하 분산도 기본을 먼저 다 쓰고
+// 추가를 맨 마지막에 쓴다(사용자 결정 2026-10-22). 화면은 기본과 **따로** 적는다(노란색).
+function extraPercent(row) {
+  const value = Number(row && row.purchased_percent);
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+}
+
 export function createNaiAccountPanel({
   document,
   getWs,
@@ -246,6 +254,7 @@ export function createNaiAccountPanel({
       usageRows = only ? [{
         id: only.id, label: only.label, token_preview: only.token_preview,
         available: true, percent: totalPercent || 0, is_negative: !!message.is_negative,
+        purchased_percent: Number(message.purchased_percent) || 0,
       }] : [];
     }
     if (message.policy) state.policy = message.policy;
@@ -287,9 +296,12 @@ export function createNaiAccountPanel({
     else openPopover();
   }
 
-  function barHtml(percent, isOut) {
+  function barHtml(percent, isOut, extra = 0) {
     const width = Math.max(0, Math.min(100, Number(percent) || 0));
-    return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i></span>`;
+    // 추가분은 기본 뒤에 노란 칸으로 잇는다 - 막대 끝(100%)을 넘지 않게 자른다.
+    const more = Math.max(0, Math.min(100 - width, Number(extra) || 0));
+    return `<span class="nai-acct-bar${isOut ? ' is-out' : ''}"><i style="width:${width}%"></i>`
+      + (more > 0 ? `<b style="width:${more}%"></b>` : '') + '</span>';
   }
 
   /** 지금 묶음의 진행 게이지(연노랑). 사용자 요청 2026-08-21. */
@@ -378,6 +390,7 @@ export function createNaiAccountPanel({
       const remain = known && !row.is_negative
         ? `~${formatImages(row.percent)}`
         : (row.is_negative ? '소진' : '—');
+      const extra = known && !row.is_negative ? extraPercent(row) : 0;
       // ⚠️ **사용량 게이지와 퍼센트는 V5 에서만 그린다**(사용자 지시 2026-08-21).
       // V4.5 이하는 이 무료 풀을 쓰지 않으므로 퍼센트를 띄우면 거짓말이 된다 -
       // 그 자리에는 지금 묶음의 진행 게이지(연노랑)를 그린다.
@@ -409,8 +422,8 @@ export function createNaiAccountPanel({
             Number.isFinite(row.anlas) && row.anlas <= 0)
             + `<span class="nai-acct-pct">${esc(anlas)}</span>`
           : session.onV5
-            ? barHtml(known ? row.percent : 0, known && row.is_negative)
-              + `<span class="nai-acct-pct">${esc(pct)}</span>`
+            ? barHtml(known ? row.percent : 0, known && row.is_negative, extra)
+              + `<span class="nai-acct-pct">${esc(pct)}${extra ? ` <em>+${extra}%</em>` : ''}</span>`
             : (showBlock
               ? blockBarHtml()
                 + `<span class="nai-acct-pct">${rotation.current}/${rotation.target}</span>`
@@ -426,7 +439,8 @@ export function createNaiAccountPanel({
         + (onAnlasBasis()
           ? ''
           : session.onV5
-            ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}</span>`
+            ? `<i>|</i><span>NAID5 Remain : ${esc(remain)}`
+              + `${extra ? ` <em class="nai-acct-extra">+ 추가 ~${formatImages(extra)}</em>` : ''}</span>`
             : `<i>|</i><span>${esc(rotationText(row))}</span>`)
         // 재결제까지 남은 일수(사용자 요청 2026-09-03). 줄 오른쪽 빈자리에 붙는다.
         // 백엔드가 **내림**한 정수를 주므로 시간 단위로 남으면 "0일" 이다 - 정확한
@@ -501,6 +515,7 @@ export function createNaiAccountPanel({
     const rows = accountUsageRows();
     const live = rows.filter(r => r.available && !r.is_negative);
     const sumImages = live.reduce((s, r) => s + imageCount(r.percent), 0);
+    const sumExtra = live.reduce((s, r) => s + extraPercent(r), 0);
     const sumAnlas = rows.reduce((s, r) => s + (Number.isFinite(r.anlas) ? r.anlas : 0), 0);
     const total = totalPercent == null ? '—' : `${totalPercent}%`;
     el.innerHTML = ''
@@ -516,7 +531,8 @@ export function createNaiAccountPanel({
       + (onAnlasBasis()
         ? `<span class="nai-acct-total is-anlas">Anlas ${sumAnlas.toLocaleString()}</span>`
         : session.onV5
-          ? `<span class="nai-acct-total">통합 ${esc(total)}</span>`
+          ? `<span class="nai-acct-total">통합 ${esc(total)}`
+            + `${sumExtra ? `<em class="nai-acct-extra"> + 추가 ${sumExtra}%</em>` : ''}</span>`
           : `<span class="nai-acct-total">무료 ${session.free.toLocaleString()}`
             + `<i> / ${session.total.toLocaleString()}장</i></span>`)
       + '</div>'
@@ -535,7 +551,8 @@ export function createNaiAccountPanel({
             ? `<span>무료 ~${sumImages.toLocaleString()}장 남음</span>`
               + '<em>지금 설정은 Anlas 를 씁니다</em>'
             : session.onV5
-              ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}</span>`
+              ? `<i>|</i><span>NAID5 Remain : ~${sumImages.toLocaleString()}`
+                + `${sumExtra ? ` <em class="nai-acct-extra">+ 추가 ~${imageCount(sumExtra).toLocaleString()}</em>` : ''}</span>`
                 + `<em>${esc(IMAGE_BASIS_NOTE)}</em>`
               : '')
           + '</div>'

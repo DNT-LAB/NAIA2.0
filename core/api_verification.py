@@ -246,6 +246,14 @@ def fetch_nai_anlas(token: str) -> Optional[int]:
         return None
 
 
+def _nai_purchased_percent(usage: dict) -> int:
+    """⚠️ 추가분 형식이 잘못돼도 기본 사용량까지 버리면 안 된다."""
+    try:
+        return int(usage.get("purchasedPercent", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 def fetch_nai_subscription_summary(token: str) -> dict:
     """Anlas 와 V5 사용량 한도를 **한 번의 요청**으로 함께 가져온다.
 
@@ -301,6 +309,7 @@ def fetch_nai_subscription_summary(token: str) -> dict:
         try:
             out["usage"] = {
                 "percent": int(usage.get("percent", 0) or 0),
+                "purchased_percent": _nai_purchased_percent(usage),
                 "is_negative": bool(usage.get("isNegative", False)),
                 "seconds_until_next_percent": int(usage.get("timeUntilNextPercent", 0) or 0),
             }
@@ -351,6 +360,7 @@ def fetch_nai_usage_limit(token: str) -> Optional[dict]:
             return None
         return {
             "percent": int(usage.get("percent", 0) or 0),
+            "purchased_percent": _nai_purchased_percent(usage),
             "is_negative": bool(usage.get("isNegative", False)),
             "seconds_until_next_percent": int(usage.get("timeUntilNextPercent", 0) or 0),
         }

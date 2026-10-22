@@ -103,7 +103,7 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
       "is_negative":bool,"seconds_until_next_percent":int,"fetched_at":str}`
     """
     unavailable = {
-        "type": "nai_usage_update", "available": False, "percent": 0,
+        "type": "nai_usage_update", "available": False, "percent": 0, "purchased_percent": 0,
         "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
     }
     mode = str(context.get_api_mode() or "").upper()
@@ -126,6 +126,7 @@ def build_nai_usage_payload(context: Any) -> dict[str, Any]:
         "type": "nai_usage_update",
         "available": True,
         "percent": int(usage.get("percent", 0)),
+        "purchased_percent": int(usage.get("purchased_percent", 0) or 0),
         "is_negative": bool(usage.get("is_negative", False)),
         "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
         "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -190,6 +191,7 @@ def _fetch_extra_account_usage(rows: list[tuple[str, str]]) -> dict[str, Any]:
                 usage = usage or {}
                 out[account_id] = {
                     "percent": int(usage.get("percent", 0)),
+                    "purchased_percent": int(usage.get("purchased_percent", 0) or 0),
                     "is_negative": bool(usage.get("is_negative", False)),
                     "anlas": summary.get("anlas"),
                     "expires_at": summary.get("expires_at"),
@@ -258,6 +260,7 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
             "token_preview": row["token_preview"],
             "available": known,
             "percent": int(usage.get("percent", 0)) if known else 0,
+            "purchased_percent": int(usage.get("purchased_percent", 0) or 0) if known else 0,
             "is_negative": bool(usage.get("is_negative")) if known else False,
             "anlas": int(anlas) if isinstance(anlas, int) else None,
             # 재결제까지 남은 **일수**(사용자 요청 2026-09-03). 시간 단위로 남았으면 0 -
@@ -276,7 +279,7 @@ def _account_rows(context: Any, usage_by_id: dict[str, Any],
 
 
 def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> dict[str, Any]:
-    """활성 계정 전체의 `{id: {percent, is_negative, anlas}}` 를 만들어 캐시한다.
+    """활성 계정 전체의 `{id: {percent, purchased_percent, is_negative, anlas}}` 를 만들어 캐시한다.
 
     **V5 와 무관하다.** 예전에는 이 조회가 사용량 배지(V5 전용) 안에만 있어서,
     V4.5 에서는 계정이 둘이어도 Anlas 가 메인 것만 나왔다 - 모델을 바꾸면 좌상단
@@ -309,14 +312,30 @@ def refresh_account_pool(context: Any, main_summary: dict[str, Any] | None) -> d
 
         usage_by_id: dict[str, Any] = {}
         if main_summary is not None and any(a == MAIN_ACCOUNT_ID for a, _ in active):
-            main_usage = main_summary.get("usage") or {}
-            usage_by_id[MAIN_ACCOUNT_ID] = {
-                "percent": int(main_usage.get("percent", 0)),
-                "is_negative": bool(main_usage.get("is_negative", False)),
-                "anlas": main_summary.get("anlas"),
-                "expires_at": main_summary.get("expires_at"),
-                "subscription_active": main_summary.get("subscription_active"),
-            }
+            main_usage = main_summary.get("usage")
+            if isinstance(main_usage, dict) or main_summary.get("subscription_active") is False:
+                main_usage = main_usage if isinstance(main_usage, dict) else {}
+                usage_by_id[MAIN_ACCOUNT_ID] = {
+                    "percent": int(main_usage.get("percent", 0)),
+                    "purchased_percent": int(main_usage.get("purchased_percent", 0) or 0),
+                    "is_negative": bool(main_usage.get("is_negative", False)),
+                    "anlas": main_summary.get("anlas"),
+                    "expires_at": main_summary.get("expires_at"),
+                    "subscription_active": main_summary.get("subscription_active"),
+                }
+            else:
+                # ⚠️ 사용량 조회만 실패했으면(구독 종료가 확정된 것도 아닌데 usage 가 없다) **0 으로 확정하지 않는다** -
+                #    0 으로 적으면 남아 있던 기본 · 추가분이 사라져 부하 분산이 Anlas 계정으로 옮긴다(Codex 리뷰 P1).
+                #    사용량은 지난 값을 잇고, 이번에 받은 Anlas · 갱신일은 새 값으로(재리뷰 P2 - 잔액 0 을 놓치지 않게).
+                #    지난 값도 없으면 '모름' 으로 남는다.
+                prev = cached_account_usage(context).get(MAIN_ACCOUNT_ID)
+                if isinstance(prev, dict):
+                    row = dict(prev)
+                    for key in ("anlas", "expires_at", "subscription_active"):
+                        if main_summary.get(key) is not None:
+                            row[key] = main_summary.get(key)
+                    usage_by_id[MAIN_ACCOUNT_ID] = row
+
         extras = [(a, t) for a, t in active if a != MAIN_ACCOUNT_ID]
         usage_by_id.update(_fetch_extra_account_usage(_narrow_targets(context, extras)))
         # 좁혀 물었으면 안 물어본 계정은 캐시 값을 그대로 이어 쓴다.
@@ -403,6 +422,7 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
         "available": True,
         "uses_usage_limit": _current_model_uses_usage_limit(context),
         "percent": int(usage.get("percent", 0)),
+        "purchased_percent": int(usage.get("purchased_percent", 0) or 0),
         "is_negative": bool(usage.get("is_negative", False)),
         "seconds_until_next_percent": int(usage.get("seconds_until_next_percent", 0)),
         "fetched_at": now,
@@ -417,8 +437,8 @@ def _build_both_payloads(context: Any) -> list[dict[str, Any]]:
 def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
     """다중 계정이면 계정별 사용량을 붙이고 배지 값을 **평균**으로 바꾼다.
 
-    계정이 하나뿐이면 아무것도 하지 않는다 - 요청도 안 나가고, 배지는 지금까지와
-    똑같이 그 계정의 값을 보여 준다.
+    추가분은 계정 수와 무관하게 합산한다. 단일 계정에는 행을 붙이지 않고,
+    기본 배지는 지금까지와 똑같이 그 계정의 값을 보여 준다.
     """
     from core.nai_account_balancer import average_percent, select_account
 
@@ -433,11 +453,29 @@ def _attach_accounts(context: Any, usage_payload: dict[str, Any]) -> None:
     try:
         service = NaiAccountService(context)
         active = service.active_accounts()
+        # ⚠️ 기본 배지는 평균, 추가분은 활성 계정의 알려진 잔량 합이다.
+        usage_by_id = dict(cached_account_usage(context))
+        known = [usage_by_id[a] for a, _ in active if isinstance(usage_by_id.get(a), dict)]
+        # ⚠️ 음수 계정의 추가분은 쓸 수 없다 - 패널 · has_extra 와 같은 잣대(Codex 리뷰 P2).
+        if known:
+            usage_payload["purchased_percent"] = sum(
+                int(row.get("purchased_percent", 0) or 0) for row in known if not row.get("is_negative"))
+        elif not any(a == MAIN_ACCOUNT_ID for a, _ in active):
+            usage_payload["purchased_percent"] = 0      # 위의 값은 꺼진 메인의 것이다 - 활성 계정은 모름(재리뷰 P2)
         if len(active) < 2:
+            # 계정 하나 - 배지는 **그 계정**의 값이다. 메인을 끄고 다른 계정 하나만 켰으면 위의 값(메인 응답)은
+            # 남의 것이다(Codex 리뷰 P2). 캐시에 그 계정이 있으면 셋을 함께 그 값으로, 없으면 추가분은 '모름' = 0.
+            if active:
+                only_id = active[0][0]
+                row = usage_by_id.get(only_id)
+                if isinstance(row, dict):
+                    usage_payload["percent"] = int(row.get("percent", 0) or 0)
+                    usage_payload["is_negative"] = bool(row.get("is_negative", False))
+                elif only_id != MAIN_ACCOUNT_ID:
+                    usage_payload["purchased_percent"] = 0
             return
         # 조회·캐시는 공용 함수가 한다(V5 밖에서도 같은 걸 쓴다). 이미 받아 둔
         # 계정별 값을 그대로 읽는다 - 여기서 다시 물으면 요청이 두 배가 된다.
-        usage_by_id = dict(cached_account_usage(context))
         if not usage_by_id:
             return
 
@@ -573,7 +611,7 @@ def _usage_hidden_payload() -> dict[str, Any]:
     # 옛 계정 행을 그대로 들고 있으면 안 된다.
     # (NAI 모드가 아니거나 토큰이 없을 때만 쓰인다 - 모델 때문에 숨지는 않는다.)
     return {
-        "type": "nai_usage_update", "available": False, "percent": 0,
+        "type": "nai_usage_update", "available": False, "percent": 0, "purchased_percent": 0,
         "is_negative": False, "seconds_until_next_percent": 0, "fetched_at": "",
         "accounts": [], "balancing_effective": False, "uses_usage_limit": False,
         "free_generations": 0, "session_generations": 0, "elapsed_seconds": 0,

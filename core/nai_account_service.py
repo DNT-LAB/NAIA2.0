@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from core.nai_account_balancer import DEFAULT_POLICY, normalize_policy
+from core.nai_account_balancer import DEFAULT_POLICY, has_extra, normalize_policy
 
 ACCOUNTS_FILENAME = "nai_accounts.json"
 MAIN_ACCOUNT_ID = "nai_token"
@@ -140,9 +140,9 @@ def cached_account_usage(context: Any) -> dict[str, Any]:
 
 
 def generation_quota_exhausted(context: Any) -> bool:
-    """**이번 생성이 쓸 계정들**이 전부 무료 사용량 0% 에 닿았는가.
+    """**이번 생성이 쓸 계정들**의 기본·추가 사용량이 모두 소진됐는가.
 
-    ⚠️ '완전히 0' 이 아니다(사용자 정정). Anlas 는 남아 있어도 이 풀이 마르면 그
+    ⚠️ '완전히 0' 이 아니다(사용자 정정). Anlas 는 남아 있어도 두 풀이 모두 마르면 그
        다음 장부터 유료다 - 밤새 도는 Auto Gen 이 그 선을 조용히 넘는 것을 막자는
        판정이다. **하나라도 남아 있으면 False** 다(부하 분산이 남은 계정으로 옮겨
        계속 무료로 생성한다).
@@ -179,6 +179,8 @@ def generation_quota_exhausted(context: Any) -> bool:
         row = usage.get(account_id)
         if not isinstance(row, dict):
             return False                        # 값을 모르는 계정이 있다
+        if has_extra(row):
+            return False                        # ⚠️ 추가분이 남았으면 Anlas 가 아니다
         if row.get("is_negative"):
             continue                            # 음수 = 이미 넘겨 썼다
         percent = row.get("percent")

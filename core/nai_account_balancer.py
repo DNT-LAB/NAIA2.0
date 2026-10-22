@@ -1,5 +1,7 @@
 """다중 계정 부하 분산 정책 (Multi Token).
 
+⚠️ V5 무료 경로는 기본 → 추가(Extra Usage) → Anlas 순으로 쓴다.
+
 사용자 명세(2026-08-21). **정책 목록은 모델 계열마다 다르다**:
 
     V5 계열(무료 사용량 % 가 있다)
@@ -161,7 +163,7 @@ def rotation_block(policy: str, counter: int, seed: int = 0) -> tuple[int, int]:
 
 
 def is_exhausted(usage: Any) -> bool:
-    """이 계정의 V5 무료 사용량이 바닥났는가.
+    """이 계정의 V5 기본 사용량이 바닥났는가(추가분은 별도).
 
     `usage` 는 `{"percent": int, "is_negative": bool}` 또는 None(모름).
     **모르면 False** - 위 주석의 이유로, 조회 실패가 계정을 빼앗으면 안 된다.
@@ -179,6 +181,21 @@ def is_exhausted(usage: Any) -> bool:
         return int(percent) <= 0
     except (TypeError, ValueError):
         return False
+
+
+def _extra_percent(usage: Any) -> int:
+    """추가 사용량 잔량. 모르면 0 으로 본다."""
+    if not isinstance(usage, dict):
+        return 0
+    try:
+        return int(usage.get("purchased_percent", 0) or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def has_extra(usage: Any) -> bool:
+    """⚠️ 기본 풀 소진과 별개다. 음수가 아니고 추가분이 남아 있어야 한다."""
+    return isinstance(usage, dict) and not usage.get("is_negative") and _extra_percent(usage) > 0
 
 
 def _percent(usage: Any) -> int:
@@ -269,8 +286,9 @@ def select_account(
     usage_by_id = usage_by_id or {}
     policy = normalize_policy(policy)
 
-    # 1) 소진된 계정을 뺀다. 다 소진됐으면 **아무도 빼지 않는다** - 그때는 Anlas 로
-    #    계속 생성할 수 있으므로, 후보를 비워 생성을 막는 편이 더 나쁘다.
+    # 1) 기본 → 추가 → Anlas 순으로 고른다. 두 풀이 모두 소진됐을 때만
+    #    Anlas 잔액을 보고, 전부 결제 불가여도 후보를 비워 생성을 막지는 않는다.
+    use_extra = False
     #
     # ⚠️ **유료 모드에서는 걸러 내지 않는다.** 이 판정은 V5 **무료 사용량**이 말랐는가를
     #    보는 것인데, 지금 나가는 돈은 Anlas 다 - 사용량이 0% 인 계정도 Anlas 가 있으면
@@ -287,14 +305,16 @@ def select_account(
         if live:
             pool = live
         else:
-            # **전부 소진**이면 지금부터는 무료 대역도 Anlas 로 나간다
-            # (`is_free_generation` 주석이 말하는 바로 그 경우 - `quota_exhausted`).
-            # 그런데 잣대는 여전히 무료 사용량이라 전부 0 으로 동률이 되어,
-            # 100 Anlas 인 계정과 10,000 인 계정을 구분하지 못했다(Codex BLOCK 2).
-            # 깎이는 것이 바뀌었으면 재는 자도 바꾼다.
-            prefer_anlas = True
-            payable = [a for a in ids if not _cannot_pay(usage_by_id.get(a))]
-            pool = payable if payable else list(ids)
+            extra = [a for a in ids if has_extra(usage_by_id.get(a))]
+            if extra:
+                # ⚠️ 추가분은 Anlas 가 아니다. 기본이 전부 마른 뒤에만 쓴다.
+                pool = extra
+                use_extra = True
+            else:
+                # 두 풀을 모두 썼으면 무료 대역도 Anlas 로 나간다.
+                prefer_anlas = True
+                payable = [a for a in ids if not _cannot_pay(usage_by_id.get(a))]
+                pool = payable if payable else list(ids)
 
     if len(pool) == 1:
         return pool[0]
@@ -309,7 +329,7 @@ def select_account(
         #    V5 무료 사용량 % 를 보면 **그 값이 안 움직인다** - 깎이는 것은 Anlas 다.
         #    그러면 선두가 영영 그대로여서 한 계정만 계속 쓰게 된다
         #    (사용자 제보: "유료 모드에서 Load Balancing 정책이 적용되지 않는다").
-        metric = _anlas if prefer_anlas else _percent
+        metric = _anlas if prefer_anlas else (_extra_percent if use_extra else _percent)
         top = max(metric(usage_by_id.get(a)) for a in pool)
         leaders = [a for a in pool if metric(usage_by_id.get(a)) == top]
         if len(leaders) < len(pool):

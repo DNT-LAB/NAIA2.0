@@ -2452,7 +2452,11 @@ export function createCharacterQuickPanel({
     const gen = event.target.closest('[data-cqf-gen]');
     if (gen) {
       const row = gen.closest('[data-cqf-char]');
-      if (row) void generateFindThumb(row.dataset.cqfGroup || '', row.dataset.cqfChar || '');
+      if (row) {
+        // 고른 캐릭터는 생성 설정 창의 가상 슬롯에도 담긴다(사용자 결정 2026-10-22).
+        try { window.dispatchEvent(new CustomEvent('naia:character-picked', {detail: {group: row.dataset.cqfGroup || '', character: row.dataset.cqfChar || ''}})); } catch (_) {}
+        void generateFindThumb(row.dataset.cqfGroup || '', row.dataset.cqfChar || '');
+      }
       return;
     }
     const tab = event.target.closest('[data-cqf-tab]');
@@ -2500,7 +2504,7 @@ export function createCharacterQuickPanel({
     return entry;
   }
 
-  async function generateFindThumb(group, character) {
+  async function generateFindThumb(group, character, extraBody = null) {
     const key = `${group}\u0000${character}`;
     if (!group || !character || findGenWaiting(key)) return;
     const placeholder = `pending-${Date.now()}`;
@@ -2511,7 +2515,8 @@ export function createCharacterQuickPanel({
       const res = await fetch('/api/character-viewer/quick-generate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({group, character}),
+        // 가상 슬롯에서 고친 줄 · 네거티브(생성 설정 창 [생성])가 있으면 함께 - 서버가 그것을 쓴다.
+        body: JSON.stringify({group, character, ...(extraBody && typeof extraBody === 'object' ? extraBody : {})}),
       });
       const data = await res.json().catch(() => ({}));
       clearFindGen(placeholder);
@@ -3497,7 +3502,7 @@ export function createCharacterQuickPanel({
       await loadPool();                                          // 지금 풀 키(그사이 바뀌었을 수 있다)
       await togglePool(group, character, 'add', poolActive() ? poolInfo.key : '');
     },
-    generateThumb: (group, character) => generateFindThumb(group, character),
+    generateThumb: (group, character, body = null) => generateFindThumb(group, character, body),
     openGenSettings: () => (typeof openGenSettings === 'function' ? openGenSettings() : null),
     openPoolWindow: () => openPoolWindow(),
   };

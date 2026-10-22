@@ -30881,6 +30881,36 @@ body.dragpanel-dragging iframe { pointer-events: none; }
   background: rgba(250,199,117,0.12); color: rgb(242,201,126); font-size: 11px; line-height: 1.4;
 }
 .dragpanel.cqgen .cqgen-warn[hidden] { display: none; }
+/* 가상 캐릭터 슬롯 1개(2026-10-22) - prefix 와 postfix 사이 · 메인 슬롯과 따로. */
+.dragpanel.cqgen .cqgen-slot {
+  flex: none; display: flex; flex-direction: column; gap: 4px; margin: 4px 6px; padding: 6px 7px; border-radius: 7px;
+  border: 1px solid rgba(124,106,239,0.55); background: rgba(124,106,239,0.07);
+}
+.dragpanel.cqgen .cqgen-slot-top { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; }
+.dragpanel.cqgen .cqgen-pill { flex: none; padding: 0 6px; border-radius: 999px; background: rgba(124,106,239,0.3); color: var(--text-primary); font-size: 9.5px; }
+.dragpanel.cqgen .cqgen-slotname { flex: 1; min-width: 0; display: flex; gap: 6px; align-items: baseline; overflow: hidden; white-space: nowrap; }
+.dragpanel.cqgen .cqgen-slotname b { color: var(--text-primary); font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.dragpanel.cqgen .cqgen-slotname span { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.dragpanel.cqgen .cqgen-hint { color: var(--text-dim); font-size: 10.5px; white-space: normal; }
+.dragpanel.cqgen .cqgen-clear { flex: none; padding: 0 6px; height: 18px; border-radius: 4px; cursor: pointer; border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary); font-size: 10px; }
+.dragpanel.cqgen .cqgen-clear[hidden] { display: none; }
+.dragpanel.cqgen .cqgen-ta {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 24px; padding: 4px 6px; border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.3); color: var(--text-primary);
+  font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
+}
+.dragpanel.cqgen .cqgen-ta.is-extra { border-color: rgba(107,195,140,0.4); }
+.dragpanel.cqgen .cqgen-ta.is-neg { border-color: rgba(240,120,120,0.35); }
+.dragpanel.cqgen .cqgen-gen-row { display: flex; align-items: center; gap: 8px; }
+.dragpanel.cqgen .cqgen-meta { flex: 1; min-width: 0; font-size: 9.5px; color: var(--text-dim); }
+.dragpanel.cqgen .cqgen-gen {
+  flex: none; padding: 4px 14px; border-radius: 6px; cursor: pointer; border: 0; background: #d9823b; color: #1b1206;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+}
+.dragpanel.cqgen .cqgen-gen:disabled { opacity: 0.45; cursor: default; }
+.dragpanel.cqgen .cqgen-lab { font-size: 10px; color: var(--text-secondary); margin-top: 2px; }
+.dragpanel.cqgen .cqgen-lab i { font-style: normal; color: var(--text-dim); }
+.dragpanel.cqgen .cqgen-ta[readonly] { opacity: 0.6; }
 /* 생성 설정 창의 옵션 체크(Characters 탭 Detail 에서 옮김 · 2026-10-22). */
 .dragpanel.cqgen .cqgen-opts { flex: none; display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 6px 10px 4px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: var(--text-secondary); }
 .dragpanel.cqgen .cqgen-opts label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

@@ -330,6 +330,8 @@ export function createCharacterWindow({
 
   async function select(item) {
     selected = {group: item.group, character: item.character, count: item.count, favorite: !!item.favorite};
+    // 고르기만 해도 생성 설정 창의 가상 슬롯에 담긴다(사용자 결정 2026-10-22).
+    try { win.dispatchEvent(new CustomEvent('naia:character-picked', {detail: {group: item.group, character: item.character}})); } catch (_) {}
     selectedLine = '';
     paintSel();
     paintGrid();
@@ -364,7 +366,9 @@ export function createCharacterWindow({
     try {
       if (kind === 'slot') await actions.addToSlot?.(s.group, s.character);
       else if (kind === 'pool') await actions.poolAdd?.(s.group, s.character);
-      else if (kind === 'gen') await actions.generateThumb?.(s.group, s.character);
+      // [생성] = 가상 슬롯으로(그 슬롯에서 고친 줄 · 추가 프롬프트 · 네거티브가 함께 나간다).
+      else if (kind === 'gen') await (actions.generateVirtual ? actions.generateVirtual(s.group, s.character)
+        : actions.generateThumb?.(s.group, s.character));
       else if (kind === 'fav' || kind === 'hide') {
         const fav = kind === 'fav';
         const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {

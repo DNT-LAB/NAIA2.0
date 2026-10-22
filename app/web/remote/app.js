@@ -2934,7 +2934,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-chw2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261022-vslot1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -2974,8 +2974,16 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
 let characterGenSettings = null;
 let characterGenSettingsReady = null;
 function openCharacterGenSettings() {
+  return ensureCharacterGenSettings().then(control => control?.toggle());
+}
+// 고른 캐릭터 = 생성 설정 창의 가상 슬롯(사용자 결정 2026-10-22). 창이 닫혀 있어도 담아 둔다 - 열면 보인다.
+window.addEventListener('naia:character-picked', event => {
+  const {group, character} = event.detail || {};
+  if (group && character) void ensureCharacterGenSettings().then(control => control?.setCharacter(group, character));
+});
+function ensureCharacterGenSettings() {
   if (!characterGenSettingsReady) {
-    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-chw3')
+    characterGenSettingsReady = import('./js/features/characterGenSettingsWindow.mjs?v=20261022-vslot2')
       .then(({createCharacterGenSettingsWindow}) => {
         characterGenSettings = createCharacterGenSettingsWindow({
           document, window, escHtml, showToast,
@@ -2991,6 +2999,7 @@ function openCharacterGenSettings() {
             switchRightTab('characters');
             void characterViewerReady.then(() => characterViewerControl?.openCharacter?.('vocaloid', 'hatsune miku'));
           },
+          getActions: () => characterQuickPanel?.characterActions || characterActionsWhenReady,
         });
         return characterGenSettings;
       })
@@ -3001,7 +3010,7 @@ function openCharacterGenSettings() {
         return null;
       });
   }
-  return characterGenSettingsReady.then(control => control?.toggle());
+  return characterGenSettingsReady;
 }
 // 조건부 프롬프트 창(사용자 지정 2026-09-26: 새 플로팅 스타일 + 컴팩트). Search 창과 같은 방식으로
 // 두 모듈에 **같은 요소**를 넘긴다 - 창은 품고, 패널은 그 안에 그린다. 프리셋은 동반 창 요소.
@@ -7674,14 +7683,23 @@ const characterActionsWhenReady = new Proxy({}, {
     return fn(...args);
   },
 });
+// Characters 창의 손잡이 = 퀵 패널 손잡이 + 가상 슬롯 [생성](생성 설정 창).
+const characterWindowActions = new Proxy({}, {
+  get: (_target, name) => {
+    if (name === 'generateVirtual') {
+      return async (group, character) => (await ensureCharacterGenSettings())?.generateFor(group, character);
+    }
+    return (characterQuickPanel?.characterActions || characterActionsWhenReady)[name];
+  },
+});
 function ensureCharacterWindow() {
   if (!characterWindowReady) {
-    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-chw3')
+    characterWindowReady = import('./js/features/characterWindow.mjs?v=20261022-vslot1')
       .then(({createCharacterWindow}) => {
         characterWindow = createCharacterWindow({
           document, window, escHtml, showToast,
           storage: localStorage,
-          getActions: () => characterQuickPanel?.characterActions || characterActionsWhenReady,
+          getActions: () => characterWindowActions,
           openCharacterPage: (group, character) => {
             switchRightTab('characters');
             void characterViewerReady.then(() => characterViewerControl?.openCharacter?.(group, character));

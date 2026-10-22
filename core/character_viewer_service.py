@@ -351,6 +351,8 @@ class CharacterViewerService:
             "no_save": bool(data.get("no_save", False)),
             "thumb_first": bool(data.get("thumb_first", data.get("empty_thumb_only", True))),
             "empty_thumb_only": bool(data.get("empty_thumb_only", True)),
+            # 가상 캐릭터 슬롯의 **추가 프롬프트**(사용자 결정 2026-10-22) - 캐릭터를 바꿔도 남는다 · 캐릭터 줄 뒤에 붙는다.
+            "character_extra": str(data.get("character_extra", "")),
         }
 
     def save_options(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -370,6 +372,7 @@ class CharacterViewerService:
             "no_save",
             "thumb_first",
             "empty_thumb_only",
+            "character_extra",
         ):
             if key in payload:
                 current[key] = payload[key]

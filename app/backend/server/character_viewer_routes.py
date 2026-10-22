@@ -1438,20 +1438,31 @@ def register_character_viewer_routes(
         service = character_viewer_service(session_context)
         api_mode = session_context.get_api_mode()
 
+        # 가상 캐릭터 슬롯(생성 설정 창 · 사용자 결정 2026-10-22)에서 고친 줄 · 네거티브가 오면 그것을 쓴다(없으면 지금처럼 만든다).
+        # 추가 프롬프트(옵션 `character_extra`)는 어느 쪽이든 캐릭터 줄 뒤에 붙는다 - Find [생성] 도 같다.
+        edited_prompt = payload.get("character_prompt")
+        edited_uc = payload.get("character_uc")
+
         def build() -> tuple[dict[str, Any], dict[str, Any]]:
             options = service.load_options()
             prompt = service.build_prompt(group_key, name, "", options, api_mode)
             excluded = prompt.get("cosplay_excluded_pc")
+            base = (str(edited_prompt).strip() if isinstance(edited_prompt, str) and edited_prompt.strip()
+                    else str(prompt.get("character_prompt") or ""))
+            extra = str(options.get("character_extra") or "").strip()
+            character_prompt = ", ".join(part for part in (base.strip().rstrip(","), extra) if part)
+            character_uc = (str(edited_uc) if isinstance(edited_uc, str)
+                            else ", ".join(excluded) if isinstance(excluded, list) else "")
             request = {
                 **options,
                 "request_id": f"character-quick-{_uuid.uuid4().hex[:16]}",
                 "group": group_key,
                 "character": name,
                 "variant": "",
-                "character_prompt": str(prompt.get("character_prompt") or ""),
+                "character_prompt": character_prompt,
                 "prefix": str(prompt.get("prefix") or ""),
                 "postfix": str(prompt.get("postfix") or ""),
-                "character_uc": ", ".join(excluded) if isinstance(excluded, list) else "",
+                "character_uc": character_uc,
             }
             return request, service.build_generation_overrides(request, api_mode)
 

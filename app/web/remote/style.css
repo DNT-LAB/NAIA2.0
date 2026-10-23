@@ -32937,8 +32937,9 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .peq-item:hover .peq-rm { opacity: 1; }
 .peq-rm:hover { border-color: #e5736b; background: rgba(229,115,107,0.12); }
 .peq-thumb {
-  position: absolute; left: calc(100% + 6px); bottom: 0; width: 132px; padding: 4px;
+  position: fixed; left: 0; top: 0; z-index: var(--z-floating-select-open); width: 160px; padding: 4px;
   background: rgba(18,18,28,0.98); border: 1px solid var(--border-glow); border-radius: 8px; pointer-events: none;
+  box-shadow: 0 12px 28px rgba(0,0,0,0.42);
 }
 .peq-thumb[hidden] { display: none; }
 .peq-thumb img { display: block; width: 100%; height: auto; border-radius: 5px; }

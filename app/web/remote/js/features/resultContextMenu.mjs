@@ -25,6 +25,8 @@ const ACTION_SAVE_CHAR_ASSET = 'save_character_asset'; // 결과 이미지를 �
 // 이 그림으로 스냅샷을 담는다. 바로 담지 않고 **저장 창**(snapshotSaveWindow)을 거친다 - 카테고리와 담을
 // 항목을 거기서 정한다(사용자 지정 2026-10-04). app.js 가 `onSaveSnapshot` 으로 그 창을 연다.
 const ACTION_SAVE_SNAPSHOT = 'save_snapshot';
+// 이 그림을 지금 PE 프리셋의 썸네일로 올린다(사용자 지시 2026-10-23 - [NAI] 스냅샷 저장 바로 위). app.js 의 `onSetPresetThumbnail`.
+const ACTION_SET_PRESET_THUMB = 'set_preset_thumbnail';
 
 const DEFAULT_CAPABILITIES = {
   load_prompt: false,
@@ -129,6 +131,7 @@ const MAIN_IMAGE_MENU = [
     ],
   },
   {type: 'separator'},
+  {label: '프리셋 썸네일로 등록', action: ACTION_SET_PRESET_THUMB},
   {label: '[NAI] 스냅샷 저장', action: ACTION_SAVE_SNAPSHOT},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
@@ -188,6 +191,7 @@ const THUMBNAIL_MENU = [
     ],
   },
   {type: 'separator'},
+  {label: '프리셋 썸네일로 등록', action: ACTION_SET_PRESET_THUMB},
   {label: '[NAI] 스냅샷 저장', action: ACTION_SAVE_SNAPSHOT},
   {label: '리모트에 이벤트 저장'},
   {type: 'separator'},
@@ -266,6 +270,7 @@ export function createResultContextMenu({
   onSetVibeTransfer = null,
   onSaveCharacterAsset = null,
   onSaveSnapshot = null,
+  onSetPresetThumbnail = null,
   onDelete = null,
   getWildcardFreezeState = () => ({}),
   setWildcardFreezeState = null,
@@ -450,6 +455,10 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_SAVE_CHAR_ASSET) {
       return typeof onSaveCharacterAsset === 'function' && Boolean(context?.hasImage);
+    }
+    if (item.action === ACTION_SET_PRESET_THUMB) {
+      // 랜덤 칸 · 스냅샷처럼 파일 프리셋이 아니면 app.js 가 알리고 거절한다 - 여기서는 그림만 본다.
+      return typeof onSetPresetThumbnail === 'function' && Boolean(context?.hasImage) && Boolean(context?.imageSrc || context?.path);
     }
     if (item.action === ACTION_SAVE_SNAPSHOT) {
       // 다른 모드에서도 보이되 켜지는 것은 NAI 에서만이다(이름의 [NAI]). 붙여 넣은 입력 그림은 결과가 아니라 뺀다.
@@ -725,6 +734,8 @@ export function createResultContextMenu({
           if (typeof onSetVibeTransfer === 'function') onSetVibeTransfer(context);
         } else if (action === ACTION_SAVE_CHAR_ASSET) {
           if (typeof onSaveCharacterAsset === 'function') onSaveCharacterAsset(context);
+        } else if (action === ACTION_SET_PRESET_THUMB) {
+          if (typeof onSetPresetThumbnail === 'function') onSetPresetThumbnail(context);
         } else if (action === ACTION_SAVE_SNAPSHOT) {
           if (typeof onSaveSnapshot === 'function') onSaveSnapshot(context);
         } else if (action === ACTION_DELETE_RESULT) {

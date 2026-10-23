@@ -2064,7 +2064,7 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
     }, 15000);
   })
   .catch(error => console.error('Failed to initialize download dock module', error));
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261004-snapsave1')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261023-peq5')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -2098,6 +2098,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onSetCharacterReference: context => callResultImageAction('requestContextImageAction', context, 'character_reference'),
       onSetVibeTransfer: context => callResultImageAction('requestContextImageAction', context, 'vibe'),
       onSaveSnapshot: context => openSnapshotSaveWindow(context),
+      onSetPresetThumbnail: context => setResultAsPresetThumbnail(context),
       onSaveCharacterAsset: context => {
         if (!characterAssetControl) {
           showToast('Character Asset tab is not ready', 'error');
@@ -13302,6 +13303,41 @@ function onModuleState(m) {
 function onPromptEngineeringPresetThumbnailUpdated(m) {
   document.dispatchEvent(new CustomEvent('prompt-engineering-thumbnail-updated', { detail: m || {} }));
   if (m?.message) showToast(m.message, 'success');
+  // 메인 [Quick] 의 미니 썸네일도 PE 상태(quick_favorites.thumbnail_url)에서 온다 - 다시 받아 둔다.
+  try { requestModuleState('prompt_engineering'); } catch (_) {}
+}
+
+// 결과 그림 우클릭 > [프리셋 썸네일로 등록](사용자 지시 2026-10-23). 지금 PE 프리셋의 썸네일을 이 그림으로 바꾼다 -
+// PE 콤보 미리보기의 [썸네일 업로드] 와 같은 라우트(저장 뒤 서버가 prompt_engineering_preset_thumbnail_updated 를 쏜다).
+async function setResultAsPresetThumbnail(context) {
+  const s = lastPromptEngineeringState || {};
+  const name = String(s.preset || '');
+  if (!name || name.startsWith('*')) {
+    showToast('랜덤 칸 · 스냅샷에는 썸네일을 둘 수 없습니다 - 파일 프리셋을 고른 뒤 다시 하세요', 'error');
+    return;
+  }
+  const path = String(context?.path || '');
+  const src = String(context?.imageSrc || '') || (path ? '/api/viewer/image/' + encodeURI(path) : '');
+  if (!src) {
+    showToast('썸네일로 쓸 그림을 찾지 못했습니다', 'error');
+    return;
+  }
+  try {
+    const image = await fetch(src, {cache: 'no-store'});
+    if (!image.ok) throw new Error(`그림을 읽지 못했습니다 (HTTP ${image.status})`);
+    const blob = await image.blob();
+    const params = new URLSearchParams({name, mode: String(s.api_mode || '')});
+    const response = await fetch(`/api/prompt-engineering/preset-thumbnail/upload?${params}`, {
+      method: 'POST',
+      headers: {'Content-Type': blob.type || 'application/octet-stream'},
+      body: blob,
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
+    showToast(`'${name}' 프리셋 썸네일로 등록했습니다`, 'success');
+  } catch (error) {
+    showToast(`프리셋 썸네일 등록 실패: ${error.message || error}`, 'error');
+  }
 }
 
 function renderModuleState(m) {
@@ -15547,7 +15583,7 @@ function togglePromptPresetQuick(name) {
     showToast('연결이 끊겨 Quick 을 바꾸지 못했습니다', 'error');
   }
 }
-import('./js/features/peQuickSwitch.mjs?v=20261023-peq4')
+import('./js/features/peQuickSwitch.mjs?v=20261023-peq5')
   .then(({createPeQuickSwitch}) => {
     peQuickSwitch = createPeQuickSwitch({
       document, escHtml,

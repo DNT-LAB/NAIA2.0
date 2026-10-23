@@ -90,10 +90,9 @@ export function createPeQuickSwitch({
       : `<div class="peq-cats">${groups.map(([key, list]) => `<button type="button" class="peq-cat${key === category ? ' is-sel' : ''}"`
           + ` data-peq-cat="${escHtml(key)}">${escHtml(key)}<span class="peq-n">${list.length}</span></button>`).join('')}</div>`
         + `<div class="peq-items">${items.map(f => `<div class="peq-item${f.name === current ? ' is-cur' : ''}" data-peq-name="${escHtml(f.name)}"`
-          + ` data-peq-thumb="${escHtml(f.thumbnail_url || '')}" title="${escHtml(f.name)}">`
+          + ` data-peq-thumb="${escHtml(f.thumbnail_url || '')}">`
           + `<span class="peq-name">${escHtml(f.name)}</span>`
-          + `<button type="button" class="peq-rm" data-peq-rm="${escHtml(f.name)}" title="Quick 에서 빼기" aria-label="Quick 에서 빼기">−</button></div>`).join('')}</div>`
-        + '<div class="peq-thumb" hidden><img alt=""></div>';
+          + `<button type="button" class="peq-rm" data-peq-rm="${escHtml(f.name)}" aria-label="Quick 에서 빼기">−</button></div>`).join('')}</div>`;
     if (pop._html !== html) { pop._html = html; pop.innerHTML = html; }
     placePop(host);
     paintButton(s);
@@ -117,17 +116,42 @@ export function createPeQuickSwitch({
   function close() {
     open = false;
     if (pop) { pop.remove(); pop = null; }
+    showThumb(null);
     paintButton(state());
   }
 
+  // 미니 썸네일은 판 **밖**, body 에 fixed 로 띄운다(사용자 제보 2026-10-23 CRITICAL). 판 안에 absolute 로 두었더니
+  // (1) 왼쪽 칸의 쌓임 맥락에 갇혀 Result 칸 아래로 깔리고 (2) 칸 밖으로 삐져나와 스크롤 막대가 생겼다 사라졌다 하며
+  // 마우스 아래 항목이 밀려 썸네일이 켜졌다 꺼졌다 = 화면 떨림. 보기 전용이라 pointer-events 도 없다.
+  let thumb = null;
+  function placeThumb() {
+    if (!thumb || thumb.hidden || !pop) return;
+    const p = pop.getBoundingClientRect();
+    const t = thumb.getBoundingClientRect();
+    const vw = doc.documentElement.clientWidth;
+    const vh = doc.documentElement.clientHeight;
+    let left = p.right + 6;
+    if (left + t.width > vw - 6) left = Math.max(6, p.left - 6 - t.width);
+    const top = Math.max(6, Math.min(p.bottom - t.height, vh - 6 - t.height));
+    thumb.style.left = `${Math.round(left)}px`;
+    thumb.style.top = `${Math.round(top)}px`;
+  }
+
   function showThumb(item) {
-    const box = pop?.querySelector('.peq-thumb');
-    if (!box) return;
     const url = item?.dataset.peqThumb || '';
-    if (!url) { box.hidden = true; return; }
-    const img = box.querySelector('img');
+    if (!url) { if (thumb) thumb.hidden = true; return; }
+    if (!thumb) {
+      thumb = doc.createElement('div');
+      thumb.className = 'peq-thumb';
+      thumb.setAttribute('aria-hidden', 'true');
+      thumb.innerHTML = '<img alt="">';
+      thumb.querySelector('img').addEventListener('load', placeThumb);
+      doc.body.appendChild(thumb);
+    }
+    const img = thumb.querySelector('img');
     if (img.getAttribute('src') !== url) img.setAttribute('src', url);
-    box.hidden = false;
+    thumb.hidden = false;
+    placeThumb();
   }
 
   function onClick(event) {

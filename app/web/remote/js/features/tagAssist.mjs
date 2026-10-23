@@ -508,16 +508,15 @@ export function createTagAssistController({
     tagTooltip.classList.toggle('left-side', !!inModule || inQuickPanel);
   }
 
-  // 캐릭터 퀵 패널이 펼쳐져 있으면 그 오른쪽 끝 - **Find · 필터 단추까지** 넣는다. 상자(.cq-box)만 재면 카드가 그 단추들
-  // 위에 얹혔다(사용자 제보 2026-10-23). 접혀 있거나 없으면 null.
+  // 캐릭터 퀵 패널이 펼쳐져 있으면 그 상자(.cq-box)의 오른쪽 끝. Find · 필터 단추는 카드가 덮어도 된다(사용자 지정
+  // 2026-10-23) - 지킬 것은 치고 있는 칸뿐이다. 접혀 있거나 없으면 null.
   const TAG_CARD_SIDE_GAP = 22;
   const TAG_CARD_MIN_WIDTH = 320;
   const TAG_CARD_SAFE_GAP = 10;
   function quickPanelRight() {
     const box = document.querySelector('.cq-float.open .cq-box.is-open')?.getBoundingClientRect();
     if (!box || box.width <= 0 || box.height <= 0) return null;
-    const bar = document.querySelector('.cq-float.open .cq-find-bar')?.getBoundingClientRect();
-    return Math.max(box.right, bar && bar.width > 0 ? bar.right : 0);
+    return box.right;
   }
 
   function quickPanelHasRoomBeside() {
@@ -658,6 +657,11 @@ export function createTagAssistController({
       return;
     }
     clearAutocompletePositionStyles();
+    // 캐릭터 퀵 패널 칸이면 **놓을 때마다** 좌우를 다시 정한다 - 카드를 연 채 창을 줄이면 오른쪽 자리가 사라져 패널 위로
+    // 떨어지고, 넓히면 쓸데없이 왼쪽에 남았다(Codex 리뷰 2026-10-23). syncTooltipSide 와 같은 판정.
+    if (tagTooltip && acTarget?.closest?.('.cq-float') && window.innerWidth >= 768) {
+      tagTooltip.classList.toggle('left-side', !quickPanelHasRoomBeside());
+    }
     if (!tagTooltip || window.innerWidth < 768) {
       tagTooltip?.style.removeProperty('--tag-tooltip-top');
       tagTooltip?.style.removeProperty('--tag-tooltip-left');
@@ -771,7 +775,6 @@ export function createTagAssistController({
     //
     //    **펼쳐진 때만** 비켜선다(`.cq-box.is-open`). 접혀 있으면 머리줄 한 칸이라
     //    가릴 슬롯이 없다 - 그때까지 밀면 원래 자리를 괜히 잃는다.
-    // 오른쪽 끝은 Find · 필터 단추까지 잰다(quickPanelRight) - 상자만 재면 카드가 그 단추들을 덮었다(2026-10-23).
     const quickRight = quickPanelRight();
     if (quickRight !== null) {
       const beside = quickRight + sideGap;

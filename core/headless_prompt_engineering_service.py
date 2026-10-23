@@ -12,6 +12,15 @@ from core.nai_model_contract import NAI_PRESET_FILTER_GROUPS, nai_model_badge
 HIRES_OVERLAY_DISALLOWED_NAMES = {"", "*randomized", "*snapshot", "(프리셋 없음)"}
 
 
+QUICK_CATEGORIES = ("NAI5F", "NAI5M", "NAI5C", "NAI4.5F", "NAI4.5C", "ETC")
+_QUICK_CATEGORY_BY_BADGE = {
+    ("v5", "full"): "NAI5F",
+    ("v5", "medium"): "NAI5M",
+    ("v5", "curated"): "NAI5C",
+    ("v4.5", "full"): "NAI4.5F",
+    ("v4.5", "curated"): "NAI4.5C",
+}
+
 # 어느 프리셋을 보고 친 글인지 표식을 함께 받는 키들(위 `_text_and_preset_stamp`).
 _STAMPED_TEXT_KEYS = frozenset({"pre_prompt", "post_prompt", "auto_hide"})
 # 랜덤 프리셋(`*randomized` · `*randomized:이름`)을 고른 동안 받지 않는 글 - 굴림이 채우는 칸이다.
@@ -386,11 +395,29 @@ class HeadlessPromptEngineeringService:
         # 랜덤 칸이 여럿이다(사용자 지정 2026-10-04). 풀 · Inject 는 **지금 보는 칸**의 것을 싣는다 - 랜덤 칸을
         # 고른 채로만 관리 화면이 열리므로 화면이 본 칸과 같다(고르지 않았으면 기본 칸).
         randomized = store.randomized_view()
+        summaries = [preset_summary(name, thumbnails=current_thumbs) for name in preset_options]
+        quick_favorites = []
+        if current_mode_key == "NAI":
+            by_name = {summary["name"]: summary for summary in summaries}
+            for name in store.quick_favorite_names():
+                summary = by_name.get(name)
+                if summary is None:
+                    continue
+                quick_favorites.append({
+                    "name": name,
+                    "category": _QUICK_CATEGORY_BY_BADGE.get(
+                        (summary.get("model_family"), summary.get("model_variant")), "ETC"
+                    ),
+                    "model_label": summary["model_label"],
+                    "thumbnail_url": summary["thumbnail_url"],
+                })
         payload = {
             "api_mode": current_mode_key,
             "preset": state["current_preset"],
             "preset_options": preset_options,
-            "preset_summaries": [preset_summary(name, thumbnails=current_thumbs) for name in preset_options],
+            "preset_summaries": summaries,
+            "quick_favorites": quick_favorites,
+            "quick_categories": list(QUICK_CATEGORIES),
             # Quick Preset 위 필터 바의 갈래. 프론트가 이름을 박지 않도록 계약에서 준다.
             # NAI 모드에서만 의미가 있으므로 다른 모드에서는 빈 목록을 보낸다.
             "preset_filter_groups": (
@@ -579,6 +606,19 @@ class HeadlessPromptEngineeringService:
             ok, message = store.delete_preset(text_value or store.state()["current_preset"])
             if not ok:
                 return context._toast(message, level="error")
+        elif key in {"preset_quick_toggle", "preset_quick_remove"}:
+            if key == "preset_quick_toggle" and self._preset_mode() != "NAI":
+                return [context._toast("Quick 은 NAI 모드에서만 씁니다", level="error"), self.state()]
+            try:
+                if key == "preset_quick_toggle":
+                    ok, message = store.toggle_quick_favorite(text_value)
+                    if not ok:
+                        return [context._toast(message, level="error"), self.state()]
+                else:
+                    store.remove_quick_favorite(text_value)
+            except OSError:
+                return [context._toast("Quick 목록을 저장하지 못했습니다.", level="error"), self.state()]
+            return self.state()
         elif key == "preset_rename":
             # 값 = {"from": 옛 이름, "to": 새 이름}(사용자 요청 2026-10-17 - Manage Preset 의 [이름 바꾸기]).
             try:

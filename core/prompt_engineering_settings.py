@@ -918,6 +918,81 @@ class PromptEngineeringHeadlessStore:
             "randomized_needs_roll": needs_roll,
         }
 
+    @property
+    def quick_favorites_path(self) -> Path:
+        # Keep this alongside last_used_preset.json and randomized_pool.json.
+        return self._save_root / "presets" / "pe_quick_favorites.json"
+
+    def _read_quick_favorites(self) -> tuple[dict[str, Any], bool]:
+        """Read fresh; never cache external changes or rewrite on a payload read."""
+        try:
+            data = json.loads(self.quick_favorites_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}, False
+        except (OSError, ValueError):
+            return {}, True
+        if not isinstance(data, dict):
+            return {}, True
+        names = data.get("NAI", [])
+        if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+            return {**data, "NAI": []}, True
+        return {**data, "NAI": list(dict.fromkeys(names))}, False
+
+    def _write_quick_favorites(self, data: dict[str, Any], *, broken: bool) -> None:
+        import shutil
+        import tempfile
+
+        path = self.quick_favorites_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if broken:
+            backup = path.with_name(path.name + ".broken")
+            if path.exists() and not backup.exists():
+                # If the backup fails, leave the original untouched.
+                shutil.copy2(path, backup)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent,
+                prefix=path.name + ".", suffix=".tmp", delete=False,
+            ) as handle:
+                temp_path = Path(handle.name)
+                json.dump(data, handle, ensure_ascii=False, indent=2)
+            os.replace(temp_path, path)
+        finally:
+            if temp_path is not None:
+                temp_path.unlink(missing_ok=True)
+
+    def quick_favorite_names(self) -> list[str]:
+        data, _broken = self._read_quick_favorites()
+        eligible = set(self.list_preset_names("NAI"))
+        return [name for name in data.get("NAI", [])
+                if name in eligible and name != "default" and not is_synthetic_preset_name(name)]
+
+    def toggle_quick_favorite(self, name: str) -> tuple[bool, str]:
+        if (not name or name == "default" or is_synthetic_preset_name(name)
+                or name not in self.list_preset_names("NAI")):
+            return False, "Quick 에는 저장된 NAI 프리셋만 올릴 수 있습니다(랜덤 칸 · 스냅샷 · default 제외)."
+        data, broken = self._read_quick_favorites()
+        names = data.get("NAI", [])
+        data["NAI"] = ([item for item in names if item != name]
+                       if name in names else [*names, name])
+        self._write_quick_favorites(data, broken=broken)
+        return True, name
+
+    def _replace_quick_favorite(self, old: str, new: str | None = None) -> None:
+        # Read the raw list: after rename/delete, old is no longer on disk.
+        data, broken = self._read_quick_favorites()
+        names = data.get("NAI", [])
+        if old not in names:
+            return
+        data["NAI"] = list(dict.fromkeys(
+            new if name == old else name for name in names if name != old or new is not None
+        ))
+        self._write_quick_favorites(data, broken=broken)
+
+    def remove_quick_favorite(self, name: str) -> None:
+        self._replace_quick_favorite(name)
+
     def list_preset_names(self, mode: str | None = None) -> list[str]:
         return list_preset_names(mode, save_root=self._save_root)
 
@@ -1339,6 +1414,8 @@ class PromptEngineeringHeadlessStore:
         path.unlink()
         # 지운 프리셋의 정상본 사본도 치운다 - 같은 이름으로 새로 만들면 남의 옛 내용이 되살아날 수 있다
         backup_path(path).unlink(missing_ok=True)
+        if mode_key == "NAI":
+            self.remove_quick_favorite(name)
         self.refresh(mode_key)
         return True, name
 
@@ -1451,6 +1528,8 @@ class PromptEngineeringHeadlessStore:
         state = self.state(mode_key)
         if state.get("current_preset") == old:
             self.save_last_used_preset(mode_key, new)
+        if mode_key == "NAI":
+            self._replace_quick_favorite(old, new)
         self.refresh(mode_key)
         return True, new
 

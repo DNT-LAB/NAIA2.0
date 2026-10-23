@@ -526,8 +526,11 @@ export function createModuleLauncher({
 
   function render() {
     if (!root) return;
+    // [Quick] = 즐겨찾기한 PE 프리셋으로 바로 바꾸는 판(peQuickSwitch.mjs - 사용자 지시 2026-10-23). 보임은 body[data-pe-quick-state].
+    const peQuick = `<button type="button" class="module-btn pe-quick-btn" data-pe-quick aria-haspopup="dialog" aria-expanded="false"`
+      + ` aria-label="Quick PE" data-module-tooltip="Quick — 즐겨찾기한 PE 프리셋으로 바로 바꾸기">Quick</button>`;
     root.innerHTML = [
-      renderModuleButton('prompt_engineering', 'module-primary-btn'),
+      `<div class="module-pe-wrap">${renderModuleButton('prompt_engineering', 'module-primary-btn')}${peQuick}</div>`,
       ...CATEGORY_REGISTRY.map(renderCategory),
     ].join('');
   }

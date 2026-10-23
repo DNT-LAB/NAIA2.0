@@ -635,6 +635,19 @@ export function createPromptEngineeringPanel({
     const rolledNote = rolled ? '<span class="pe-rolled-note">뽑힌 프리셋의 것 · 읽기 전용</span>' : '';
     const rolledAttrs = rolled ? ' readonly aria-readonly="true" title="랜덤 프리셋에서는 고칠 수 없습니다 — 풀의 프리셋을 고치세요"' : '';
 
+    // [NAI] Quick 즐겨찾기(사용자 지시 2026-10-23) - 지금 프리셋을 메인 [Quick] 판에 올리고 내린다. NAI 모드에서만.
+    // 랜덤 칸 · 스냅샷 · default 는 서버가 거절한다 - 단추를 흐리게 두고 이유를 툴팁으로.
+    const currentPreset = String(m.preset || '');
+    const quickNames = new Set((Array.isArray(m.quick_favorites) ? m.quick_favorites : []).map(f => String(f?.name || '')));
+    const quickBlocked = !currentPreset || currentPreset === 'default' || currentPreset.startsWith('*');
+    const quickOn = quickNames.has(currentPreset);
+    const quickFavoriteHtml = String(m.api_mode || '').toUpperCase() !== 'NAI' ? '' : (
+      `<button type="button" class="pe-quick-fav${quickOn ? ' is-on' : ''}" data-pe-quick-fav`
+      + `${quickBlocked ? ' disabled title="랜덤 칸 · 스냅샷 · default 는 Quick 에 올릴 수 없습니다"'
+        : ` title="${quickOn ? '메인 [Quick] 에서 내리기' : '메인 [Quick] 에 올리기 - 빠르게 이 프리셋으로 바꿉니다'}"`}`
+      + ` onclick="togglePromptPresetQuick(${escHtml(JSON.stringify(currentPreset))})">${quickOn ? '★ Quick 해제' : '☆ Quick 등록'}</button>`
+    );
+
     moduleBody.innerHTML = `
     <div class="pe-layout"><div class="pe-cols">
     <div class="pe-col pe-col-main">
@@ -642,7 +655,7 @@ export function createPromptEngineeringPanel({
     ${rolledHtml}
     <div class="pe-prompt-stack">
       <div class="pe-prompt-field pe-prompt-field--tall">
-        <div class="mod-section-label has-actions"><span>Prefix Prompt${rolledNote}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
+        <div class="mod-section-label has-actions"><span>Prefix Prompt${rolledNote}${quickFavoriteHtml}</span><span class="mod-head-actions"><button type="button" class="header-guide-btn" data-naia-guide="${escHtml(PE_PREFIX_GUIDE)}">ⓘ 가이드</button></span></div>
         <div class="pe-hl-box"><div class="pe-hl" aria-hidden="true"></div>
         <textarea class="mod-textarea pe-textarea" id="modPrePrompt" data-preset="${escHtml(m.preset || '')}" placeholder="prefix tags..."${rolledAttrs} oninput="onModTextEdit('prompt_engineering','pre_prompt',this.value,this.dataset.preset)">${escHtml(m.pre_prompt)}</textarea></div>
       </div>

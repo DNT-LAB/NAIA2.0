@@ -883,7 +883,18 @@
     {
       "id": "websocket_shared_state",
       "name": "WebSocket shared Remote Web state and generation commands",
+      "prompt_engineering_quick_favorites": {
+        "module": "prompt_engineering",
+        "option_keys": ["preset_quick_toggle", "preset_quick_remove"],
+        "state_payload_keys": ["quick_favorites", "quick_categories"],
+        "favorite_fields": ["name", "category", "model_label", "thumbnail_url"],
+        "quick_categories": ["NAI5F", "NAI5M", "NAI5C", "NAI4.5F", "NAI4.5C", "ETC"],
+        "storage": "<save_root>/presets/pe_quick_favorites.json",
+        "behavior": "NAI saved presets only; registration order; category from saved model badge; non-NAI payload empty; remove allowed in any mode; NAI rename/delete propagation; external deletions filtered without writes; atomic replace and one-time .broken backup; preserve unknown keys."
+      },
       "source_files": [
+        "core/headless_prompt_engineering_service.py",
+        "core/prompt_engineering_settings.py",
         "core/web_session_app.py",
         "app/backend/server/websocket_session.py",
         "core/web_session_context.py",

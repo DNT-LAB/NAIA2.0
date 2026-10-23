@@ -5094,6 +5094,10 @@ function onInitComplete() {
   if (currentModuleId !== 'wildcard') requestModuleState('wildcard');
   // Extensions 퀵 버튼(Tools/Fn)은 탭을 열지 않아도 부팅 직후 나타나야 한다.
   requestModuleState('extensions');
+  // 메인 [Quick](즐겨찾기 PE)도 PE 창을 안 열어도 떠야 한다 - 목록이 PE 상태에 실려 온다(사용자 지시 2026-10-23).
+  if (currentModuleId !== 'prompt_engineering' && !(promptEngineeringWindow && promptEngineeringWindow.isOpen())) {
+    requestModuleState('prompt_engineering');
+  }
   // 다중 계정 명부. 패널 생성 시점에는 소켓이 아직 안 열려 있을 수 있어(모듈은
   // 비동기 import 라) 여기서 한 번 더 청한다 - 안 그러면 설정 화면의 계정 목록이
   // '불러오는 중' 에서 영영 안 벗어난다.
@@ -11964,7 +11968,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261016-vpc1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261023-peq2')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -12093,7 +12097,7 @@ const promptEngineeringWindowReady = peUsesWindow
       console.error('Failed to initialize prompt engineering window', error);
     })
   : Promise.resolve();
-const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261017-pehl1')
+const promptEngineeringPanelReady = import('./js/features/promptEngineeringPanel.mjs?v=20261023-peq1')
   .then(({createPromptEngineeringPanel}) => {
     promptEngineeringPanelControl = createPromptEngineeringPanel({
       document,
@@ -13203,6 +13207,7 @@ function onModuleState(m) {
     try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
     // 메인 칸의 [prefix] [postfix] 창도 같은 값을 비춘다.
     try { mainPeQuick?.sync(); } catch (_) {}
+    try { peQuickSwitch?.sync(); } catch (_) {}
     refreshHiresPresetSwapOptions(m);
   }
   if (m.module_id === 'chunk' && isChunkOpen()) {
@@ -15533,6 +15538,31 @@ promptEdit.addEventListener('compositionend', () => { onPromptAuthoredEdit(); })
 promptEdit.addEventListener('input', () => { onPromptAuthoredEdit(); });
 applyPromptHighlightState();
 updatePromptTokenEstimate();
+
+// ---- [NAI] Quick PE (사용자 지시 2026-10-23) ----
+// 메인 [프롬프트 엔지니어링] 옆 [Quick] - 즐겨찾기한 PE 프리셋으로 바로 바꾼다. 등록은 PE 창 Prefix 옆 ☆.
+let peQuickSwitch = null;
+function togglePromptPresetQuick(name) {
+  if (!setModuleParam('prompt_engineering', 'preset_quick_toggle', String(name || ''))) {
+    showToast('연결이 끊겨 Quick 을 바꾸지 못했습니다', 'error');
+  }
+}
+import('./js/features/peQuickSwitch.mjs?v=20261023-peq2')
+  .then(({createPeQuickSwitch}) => {
+    peQuickSwitch = createPeQuickSwitch({
+      document, escHtml,
+      getState: () => lastPromptEngineeringState,
+      // Quick Preset 콤보와 같은 길 - PE 창을 한 번도 안 열었으면 액션 모듈이 아직 없을 수 있다.
+      selectPreset: name => {
+        if (promptEngineeringActions) promptEngineeringActions.onPresetChange(name);
+        else setModuleParam('prompt_engineering', 'preset', name);
+      },
+      removeFavorite: name => setModuleParam('prompt_engineering', 'preset_quick_remove', String(name || '')),
+    });
+    peQuickSwitch.sync();
+    if (!lastPromptEngineeringState) { try { requestModuleState('prompt_engineering'); } catch (_) {} }
+  })
+  .catch(error => console.error('Failed to initialize Quick PE', error));
 
 // ---- 메인 칸의 [prefix] [postfix] 꼬리표 (사용자 지시 2026-10-10) ----
 // 프롬프트 엔지니어링 모듈을 열지 않고 그 두 칸을 **작은 떠 있는 창 둘**로 고친다 - 결과 그림을 보면서.

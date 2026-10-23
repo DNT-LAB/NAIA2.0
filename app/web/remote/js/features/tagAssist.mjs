@@ -500,10 +500,31 @@ export function createTagAssistController({
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;
-    // 캐릭터 퀵 패널(Result 위 C1 · C2 …)의 프롬프트 칸도 왼쪽 프롬프트 자리에 그린다(사용자 제보 · 결정 2026-10-23).
-    // 기본 자리(뷰어 왼쪽 위)가 바로 그 패널이라, 창을 세로로 좁히면 카드가 치고 있는 칸을 덮었다.
-    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup, .cq-float');
-    tagTooltip.classList.toggle('left-side', !!inModule);
+    // 캐릭터 퀵 패널(Result 위 C1 · C2 …)의 프롬프트 칸: 카드는 보통 패널 + Find/필터 오른쪽에 뜬다. 거기 자리가
+    // 모자랄 때만 왼쪽 프롬프트 자리로 보낸다(사용자 제보 · 결정 2026-10-23) - 그대로 두면 기본 자리(뷰어 왼쪽 위 = 그 패널)로
+    // 떨어져 치고 있는 칸을 덮었다.
+    const inQuickPanel = !!acTarget?.closest?.('.cq-float') && !quickPanelHasRoomBeside();
+    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
+    tagTooltip.classList.toggle('left-side', !!inModule || inQuickPanel);
+  }
+
+  // 캐릭터 퀵 패널이 펼쳐져 있으면 그 오른쪽 끝 - **Find · 필터 단추까지** 넣는다. 상자(.cq-box)만 재면 카드가 그 단추들
+  // 위에 얹혔다(사용자 제보 2026-10-23). 접혀 있거나 없으면 null.
+  const TAG_CARD_SIDE_GAP = 22;
+  const TAG_CARD_MIN_WIDTH = 320;
+  const TAG_CARD_SAFE_GAP = 10;
+  function quickPanelRight() {
+    const box = document.querySelector('.cq-float.open .cq-box.is-open')?.getBoundingClientRect();
+    if (!box || box.width <= 0 || box.height <= 0) return null;
+    const bar = document.querySelector('.cq-float.open .cq-find-bar')?.getBoundingClientRect();
+    return Math.max(box.right, bar && bar.width > 0 ? bar.right : 0);
+  }
+
+  function quickPanelHasRoomBeside() {
+    const right = quickPanelRight();
+    if (right === null) return true;
+    const viewportWidth = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+    return right + TAG_CARD_SIDE_GAP + TAG_CARD_MIN_WIDTH + TAG_CARD_SAFE_GAP <= viewportWidth;
   }
 
   function clearAutocompletePositionStyles() {
@@ -750,10 +771,10 @@ export function createTagAssistController({
     //
     //    **펼쳐진 때만** 비켜선다(`.cq-box.is-open`). 접혀 있으면 머리줄 한 칸이라
     //    가릴 슬롯이 없다 - 그때까지 밀면 원래 자리를 괜히 잃는다.
-    const quickPanel = document.querySelector('.cq-float.open .cq-box.is-open');
-    const quickRect = quickPanel?.getBoundingClientRect();
-    if (quickRect && quickRect.width > 0 && quickRect.height > 0) {
-      const beside = quickRect.right + sideGap;
+    // 오른쪽 끝은 Find · 필터 단추까지 잰다(quickPanelRight) - 상자만 재면 카드가 그 단추들을 덮었다(2026-10-23).
+    const quickRight = quickPanelRight();
+    if (quickRight !== null) {
+      const beside = quickRight + sideGap;
       if (beside + 320 + safeGap <= viewportWidth) left = Math.max(left, beside);
     }
     const availableWidth = viewerRect

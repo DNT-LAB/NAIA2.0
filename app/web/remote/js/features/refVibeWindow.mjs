@@ -640,6 +640,7 @@ export function createRefVibeWindow({
     if (state.loading && !reset) return;
     if (!reset && state.items.length >= state.total && state.loaded) return;
     const seq = ++state.seq;
+    const startedAt = crMutationClock;     // 이 요청이 떠난 뒤 고친 캐릭터 프롬프트는 응답보다 새것이다
     state.loading = true;
     state.error = '';
     if (reset) renderStore();
@@ -647,6 +648,7 @@ export function createRefVibeWindow({
       const data = await api(libraryUrl(state, reset ? 0 : state.items.length));
       if (seq !== state.seq) return;
       const items = Array.isArray(data.items) ? data.items : [];
+      if (kind === 'cr') keepNewerCharacterPrompts(items, startedAt);
       state.items = reset ? items : state.items.concat(items);
       state.total = Number(data.total || 0);
       takeMeta(state, data);
@@ -1325,9 +1327,55 @@ export function createRefVibeWindow({
     return String(item.display_name || item.name || item.file_hash || '');
   }
 
+  // 고친 캐릭터 프롬프트의 기록 - 그보다 먼저 떠난 목록 요청의 답이 옛 글로 덮지 않게(Codex 리뷰 2026-10-23).
+  let crMutationClock = 0;
+  const crMutations = new Map();   // file_hash -> {at, character_prompt, character_uc}
+  function keepNewerCharacterPrompts(items, startedAt) {
+    items.forEach(item => {
+      const m = crMutations.get(String(item.file_hash));
+      if (m && m.at > startedAt) Object.assign(item, {character_prompt: m.character_prompt, character_uc: m.character_uc});
+    });
+  }
+
+  /** 캐릭터 슬롯이 '같은 캐릭터' 인가 - 서버의 add_character 중복 판정(_set_mark)과 Character Find 와 같은 잣대. */
+  function promptMark(prompt, uc) {
+    const norm = text => String(text || '').split(',').map(part => part.trim()).filter(Boolean).join(', ');
+    const parts = String(prompt || '').split(',').map(part => part.trim()).filter(Boolean);
+    if (parts.length && ['girl', 'boy', 'other'].includes(parts[0].toLowerCase())) parts.shift();
+    const p = parts.join(', ');
+    const u = norm(uc);
+    return (p || u) ? `${p}\u0000${u}` : '';
+  }
+
+  function activeCharacterSlots() {
+    return (getModuleState('character')?.characters || [])
+      .map((character, index) => ({character, index}))
+      .filter(slot => slot.character && slot.character.active);
+  }
+
+  function matchingCharacterSlots(item) {
+    const mark = promptMark(item.character_prompt, item.character_uc);
+    if (!mark) return [];
+    return activeCharacterSlots().filter(({character}) => promptMark(character.prompt, character.uc) === mark);
+  }
+
+  /** 이 그림의 캐릭터 프롬프트와 꼭 같은 슬롯을 걷는다(뒤 번호부터 - 앞을 지우면 뒤 번호가 당겨진다). */
+  function releaseCharacterPrompt(item) {
+    const slots = matchingCharacterSlots(item).sort((a, b) => b.index - a.index);
+    let sent = 0;
+    slots.forEach(({character, index}) => {
+      if (setModuleParam('character', `remove_character_${index}`, 'true', {slotUuid: character.slot_uuid}) !== false) sent += 1;
+    });
+    if (slots.length && sent < slots.length) showToast('연결이 끊겨 캐릭터 슬롯을 다 걷지 못했습니다', 'error');
+    else if (sent) showToast(`${itemName(item)} 의 캐릭터 슬롯도 걷었습니다`, 'info');
+  }
+
   /** 서버가 돌려준 항목으로 CR 목록을 고친다 - 저장하는 사이 탭을 바꿨어도 CR 쪽을 고친다. */
   function replaceCrItem(next) {
     if (!next || !next.file_hash) return;
+    crMutationClock += 1;
+    crMutations.set(String(next.file_hash), {at: crMutationClock,
+      character_prompt: String(next.character_prompt || ''), character_uc: String(next.character_uc || '')});
     const items = lib.cr.items;
     const at = items.findIndex(item => String(item.file_hash) === String(next.file_hash));
     if (at >= 0) items[at] = {...items[at], ...next};
@@ -1336,11 +1384,25 @@ export function createRefVibeWindow({
 
   function applyCharacterPrompt(item) {
     const prompt = String(item.character_prompt || '').trim();
-    if (!prompt) return;
-    setModuleParam('character', 'add_character', JSON.stringify({
+    if (!prompt) return false;
+    // Character Find 와 같은 확인(사용자 지시 · Codex 리뷰 2026-10-23): 같은 것이 있으면 서버가 그 슬롯을 켠다 - 자리를 안 먹는다.
+    // 없고 슬롯이 다 찼으면 서버가 조용히 안 넣으므로 여기서 알린다.
+    const duplicate = matchingCharacterSlots(item)[0];
+    const max = Number(getModuleState('character')?.max_slots) || 0;
+    if (!duplicate && max && activeCharacterSlots().length >= max) {
+      showToast(`활성 캐릭터 슬롯은 최대 ${max}개입니다 - 하나를 비운 뒤 다시 하세요`, 'info');
+      return false;
+    }
+    const sent = setModuleParam('character', 'add_character', JSON.stringify({
       prompt, uc: String(item.character_uc || '').trim(), custom_name: itemName(item),
     }));
-    showToast(`${itemName(item)} 의 캐릭터 프롬프트를 슬롯 맨 아래에 담았습니다`, 'info');
+    if (sent === false) {
+      showToast('연결이 끊겨 캐릭터 프롬프트를 넣지 못했습니다', 'error');
+      return false;
+    }
+    showToast(duplicate ? `${itemName(item)} 의 캐릭터 프롬프트는 이미 슬롯에 있습니다 - 그 슬롯을 켭니다`
+      : `${itemName(item)} 의 캐릭터 프롬프트를 슬롯 맨 아래에 담았습니다`, 'info');
+    return true;
   }
 
   async function saveCharacterPrompt(fileHash, prompt, uc) {
@@ -1513,9 +1575,14 @@ export function createRefVibeWindow({
           : `<div class="rvw-menu-h">클러스터가 없습니다</div>`)
       : '';
     const applied = activeSlots(item.file_hash);
+    const hasPrompt = tab === 'cr' && !!String(item.character_prompt || '').trim();
+    const pairedSlots = hasPrompt ? matchingCharacterSlots(item) : [];
     openMenu(point, (applied.length
       ? `<button type="button" class="rvw-menu-i" data-rvw-menu="release"><span class="rvw-menu-mark">■</span>해제 (${slotLabel(applied)})</button>`
-      : `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`)
+        // 같은 캐릭터 프롬프트(글 + 네거티브가 꼭 같은 것)가 슬롯에 있으면 함께 걷는다(사용자 지시 2026-10-23).
+        + (pairedSlots.length ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:release"><span class="rvw-menu-mark">■</span>REF+프롬프트 해제</button>` : '')
+      : `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`
+        + (hasPrompt ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:both"><span class="rvw-menu-mark">▶</span>REF+프롬프트 적용</button>` : ''))
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
@@ -1524,6 +1591,8 @@ export function createRefVibeWindow({
       + `<div class="rvw-menu-sep"></div>`
       + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete"><span class="rvw-menu-mark"></span>보관함에서 삭제</button>`, async op => {
       if (op === 'cp:apply') { applyCharacterPrompt(item); return; }
+      if (op === 'cp:both') { applySelected(); applyCharacterPrompt(item); return; }
+      if (op === 'cp:release') { releaseSelected(); releaseCharacterPrompt(item); return; }
       if (op === 'cp:edit') { openCharacterPrompt(item); return; }
       if (op === 'cp:delete') { deleteCharacterPrompt(item); return; }
       if (op === 'apply') applySelected();

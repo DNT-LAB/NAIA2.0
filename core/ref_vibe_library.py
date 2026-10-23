@@ -249,7 +249,7 @@ class RefVibeLibrary:
             for path in sorted(folder.glob("*.png")):
                 if path.stem in items:
                     continue
-                meta = self._json(folder.parent / "metadata" / (path.stem + ".json"))
+                meta = self._json(self._character_meta_path(path.stem, folder.parent))
                 items[path.stem] = {"file_hash": path.stem, "file_name": path.name, "mtime": path.stat().st_mtime,
                                     "character_name": str(meta.get("character_name") or ""),
                                     "character_prompt": str(meta.get("character_prompt") or ""),
@@ -489,6 +489,20 @@ class RefVibeLibrary:
                 return root, target
         raise LibraryError("Storage item not found", 404)
 
+    def _character_meta_path(self, file_hash, image_root):
+        """Metadata for this image: its own root first, then any other Character Reference root.
+
+        Turning on a reference stored in a legacy root copies only the image into the primary root, so the legacy
+        metadata (name / prompt) stays behind - look it up there too (Codex review 2026-10-23). Missing everywhere ->
+        the image root's own path (writes go there).
+        """
+        roots = [image_root] + [r for r in self._roots("character_reference") if r != image_root]
+        for root in roots:
+            candidate = root / "metadata" / (file_hash + ".json")
+            if candidate.is_file():
+                return candidate
+        return image_root / "metadata" / (file_hash + ".json")
+
     def set_character_prompt(self, file_hash, prompt, uc=""):
         file_hash = safe_component(file_hash)
         for name, value in (("prompt", prompt), ("uc", uc)):
@@ -501,20 +515,22 @@ class RefVibeLibrary:
             if root.resolve() not in path.resolve().parents:
                 raise LibraryError("Storage path escapes its root")
             defaults = {"file_name": image.name, "file_hash": file_hash}
+            # Read from wherever the metadata lives (maybe a legacy root), write next to the image - keys carried over.
+            source = self._character_meta_path(file_hash, root)
             try:
-                metadata = json.loads(path.read_text(encoding="utf-8"))
+                metadata = json.loads(source.read_text(encoding="utf-8"))
                 if not isinstance(metadata, dict):
                     raise ValueError("Invalid character metadata")
             except FileNotFoundError:
-                metadata = defaults
+                metadata = dict(defaults)
             except (ValueError, UnicodeError):
-                backup = path.with_name(path.name + ".broken")
-                if root.resolve() not in backup.resolve().parents:
-                    raise LibraryError("Storage path escapes its root")
-                if not backup.exists():
-                    # Preserve the first corrupt file, even if the atomic write fails.
-                    shutil.copy2(path, backup)
-                metadata = defaults
+                # Keep EVERY corrupt version: a second corruption gets its own name instead of being dropped
+                # (Codex review 2026-10-23 - it held recoverable legacy names and prompts).
+                backup = source.with_name(source.name + ".broken")
+                if backup.exists():
+                    backup = source.with_name(f"{source.name}.broken-{time.time():.9f}")
+                shutil.copy2(source, backup)
+                metadata = dict(defaults)
             if prompt or uc:
                 metadata.update(character_prompt=prompt, character_uc=uc)
             else:

@@ -250,7 +250,8 @@ export function createCharacterWindow({
     const img = item.thumbnail_url
       ? `<img loading="lazy" decoding="async" alt="" src="${escAttr(item.thumbnail_url)}">`
       : `<span class="chw-ini">${escHtml(String(item.character || '?').charAt(0).toUpperCase())}</span>`;
-    return `<button type="button" class="chw-cell${on ? ' is-on' : ''}" style="${style}" data-chw-i="${i}"`
+    // 즐겨찾기 칸은 테두리도 ★ 색(사용자 지시 2026-10-23) - 고른 칸(보라)과 겹치면 보라 테가 바깥에 더 둘린다.
+    return `<button type="button" class="chw-cell${on ? ' is-on' : ''}${item.favorite ? ' is-fav' : ''}" style="${style}" data-chw-i="${i}"`
       // 툴팁은 달지 않는다 - 칸 아래 이름 · 작품과 같은 말이다(사용자 지시 2026-10-22). 화면 읽기용 이름만.
       + ` aria-label="${escAttr(`${item.character} · ${groupLabel(item.group)}`)}">`
       + `<div class="chw-im" style="height:${geo.cellW}px">${img}${item.favorite ? '<span class="chw-star">★</span>' : ''}</div>`
@@ -498,6 +499,8 @@ export function createCharacterWindow({
         if (fav) {
           s.favorite = !!data.favorite;
           showToast(s.favorite ? `${s.character} - 즐겨찾기에 넣었습니다` : `${s.character} - 즐겨찾기에서 뺐습니다`, 'info');
+          // 자리를 지키며 새로(softRefresh - 이 창도 이 소식을 듣는다) · Find 도 같은 소식으로 갱신.
+          try { win.dispatchEvent(new CustomEvent('naia:character-favorite-changed')); } catch (_) {}
         } else {
           showToast(`${s.character} - 숨겼습니다. Find [제외] 에서 되돌립니다`, 'info');
           selected = null;
@@ -506,7 +509,8 @@ export function createCharacterWindow({
           if (drawerMode === 'detail') void loadDetail();    // 선택이 없다 - 빈 상세(앞선 요청은 번호로 무른다)
           try { win.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (_) {}
         }
-        resetResults();
+        // resetResults() 를 부르지 않는다 - 그것은 격자를 맨 위로 올린다(사용자 제보 2026-10-23: 즐겨찾기를 누르면 스크롤이 최상단으로).
+        // 위 소식으로 softRefresh 가 자리를 지키며 덩어리만 다시 받는다.
       } else if (kind === 'delthumb') {
         const res = await fetch('/api/character-viewer/thumbnail/delete', {
           method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -516,7 +520,8 @@ export function createCharacterWindow({
         if (!res.ok) throw new Error(data.error || '지우지 못했습니다.');
         showToast(data.removed ? `${s.character} - 생성된 썸네일을 지웠습니다(기본 썸네일로 돌아갑니다)`
           : `${s.character} - 지울 생성 썸네일이 없습니다`, 'info');
-        resetResults();
+        // 자리를 지키며 새로(위와 같은 까닭) - Find 도 같은 소식으로 그 줄 썸네일을 바꾼다.
+        try { win.dispatchEvent(new CustomEvent('naia:character-thumb-changed', {detail: {group: s.group, character: s.character}})); } catch (_) {}
         if (drawerMode === 'detail') void loadDetail();
       }
     } catch (error) {

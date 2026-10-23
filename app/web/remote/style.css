@@ -32652,3 +32652,148 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-cut-one.is-freq .ecw-cut-handle { border-color: #4f9fd1; }
 .ecw-cut-one.is-freq .ecw-cut-handle:focus-visible { outline-color: #7fc0e8; }
 .ecw-t-off { color: #6c6c78; }
+
+/* ── REF & VIBE (사용자 지시 2026-10-23) ─────────────────────────────────────────
+   알약 = 캐릭터 퀵 슬롯(.cq-box) 접힘과 같은 옷 · 그 바로 아래(app.js 가 잰다).
+   창 = .dragpanel.rvw - 위 활성 줄(퀵 슬롯 문법) · 아래 STORAGE. */
+.rvp { position: absolute; left: 12px; top: 40px; z-index: 8; width: min(197px, calc(100% - 24px)); display: none; }
+.rvp.open { display: block; }
+.rvp-box {
+  width: 100%; display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,.10); border-radius: 8px; background: rgba(20,20,28,.5);
+  color: var(--text-secondary); font: 500 10px var(--font-mono); letter-spacing: .08em;
+  opacity: .5; cursor: pointer; transition: opacity .12s;
+}
+.rvp-box:hover { opacity: .9; }
+.rvp.is-live .rvp-box, .rvp.is-win .rvp-box { opacity: 1; border-color: rgba(124,106,239,.45); background: rgba(18,18,26,.72); color: var(--text-primary); }
+.rvp-caret { display: inline-block; font-size: 9px; transition: transform .12s; }
+.rvp.is-win .rvp-caret { transform: rotate(90deg); }
+.rvp-title { white-space: nowrap; }
+.rvp-note { color: var(--text-dim); letter-spacing: 0; }
+.rvp-note[hidden], .rvp-count[hidden] { display: none !important; }
+.rvp-count { margin-left: auto; padding: 0 6px; border-radius: 9px; background: rgba(124,106,239,.25); color: #cfc8ff; letter-spacing: 0; }
+.rvp.is-unsupported .rvp-box { opacity: .35; cursor: default; }
+
+.dragpanel.rvw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
+.rvw-tabs { display: inline-flex; gap: 2px; }
+.rvw-tab {
+  border: 1px solid transparent; background: transparent; color: var(--text-dim);
+  font: 500 11px var(--font-mono); padding: 2px 8px; border-radius: 6px; cursor: pointer;
+}
+.rvw-tab:hover { color: var(--text-primary); }
+.rvw-tab.on { border-color: rgba(124,106,239,.55); background: rgba(124,106,239,.16); color: var(--text-primary); }
+.rvw-tab.is-off { opacity: .45; }
+.rvw-model { margin-left: auto; font: 10px var(--font-mono); color: var(--text-dim); border: 1px solid var(--border-glow); border-radius: 6px; padding: 0 6px; }
+.rvw-model[hidden] { display: none !important; }
+
+.rvw { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; font: 11px var(--font-mono); color: var(--text-primary); }
+/* ⚠️ 줄어들면(flex-shrink) 목록이 넘쳐 아래 STORAGE 머리줄을 덮는다 - 내용만큼 서되 48% 에서 멈추고 목록이 굴러간다. */
+.rvw-active { flex: 0 0 auto; max-height: 48%; min-height: 0; display: flex; flex-direction: column; border-bottom: 1px solid rgba(255,255,255,.08); }
+.rvw-store { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.rvw-sec {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+  background: rgba(255,255,255,.02); border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.rvw-sec-t { color: var(--text-dim); letter-spacing: .08em; font-size: 10px; }
+.rvw-sec-n { color: var(--text-dim); font-size: 10px; }
+.rvw-sec-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.rvw-btn {
+  border: 1px solid var(--border-glow); background: transparent; color: var(--text-muted);
+  font: 10.5px var(--font-mono); padding: 1px 7px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+}
+.rvw-btn:hover { color: var(--text-primary); border-color: rgba(124,106,239,.6); }
+.rvw-btn.is-accent { border-color: var(--accent); background: rgba(124,106,239,.28); color: #fff; }
+.rvw-btn.is-on { color: #f5c542; border-color: rgba(245,197,66,.5); }
+.rvw-btn.is-danger:hover { color: #ff8f8f; border-color: rgba(255,120,120,.5); }
+.rvw-btn.is-hidden { display: none; }
+.rvw-btn:disabled { opacity: .5; cursor: default; }
+.rvw-check { display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font-size: 10.5px; cursor: pointer; }
+.rvw-check input { margin: 0; }
+.rvw-notice { padding: 6px 10px; color: var(--text-dim); line-height: 1.5; }
+.rvw-notice.is-warn { color: #e8c37a; padding: 3px 10px; font-size: 10.5px; }
+.rvw-empty { padding: 10px; color: var(--text-dim); line-height: 1.5; }
+.rvw-rows { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+
+.rvw-row { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.rvw-row.is-live { background: rgba(124,106,239,.16); box-shadow: inset 2px 0 0 rgb(124,106,239); }
+.rvw-row.is-off .rvw-name { opacity: .42; text-decoration: line-through; }
+.rvw-row.is-busy { opacity: .7; }
+.rvw-en, .rvw-x {
+  flex: 0 0 auto; width: 20px; height: 20px; border: none; border-radius: 4px; background: transparent;
+  color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0;
+}
+.rvw-en:hover, .rvw-x:hover { background: rgba(255,255,255,.07); color: var(--text-primary); }
+.rvw-th { flex: 0 0 auto; width: 28px; height: 35px; border-radius: 4px; object-fit: cover; background: #1a1a26; }
+.rvw-th.is-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 9px; border: 1px dashed var(--border-glow); }
+.rvw-name {
+  flex: 1 1 auto; min-width: 0; text-align: left; border: none; background: transparent; color: var(--text-primary);
+  font: inherit; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rvw-k { color: var(--text-dim); font-size: 10px; flex: 0 0 auto; }
+.rvw-v { flex: 0 0 auto; width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+.rvw-range { flex: 0 0 auto; width: 72px; accent-color: var(--accent); }
+.rvw-range.is-wide { flex: 1 1 auto; width: auto; min-width: 80px; }
+.rvw-ie, .rvw-sf {
+  flex: 0 0 auto; border: 1px solid #7c6aef; background: rgba(124,106,239,.22); color: #e8e4ff;
+  font: 10px var(--font-mono); padding: 1px 6px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+}
+.rvw-ie.is-pending { border-style: dashed; background: transparent; color: #e8c37a; border-color: rgba(232,195,122,.6); }
+.rvw-sf { border-color: var(--border-glow); background: transparent; color: var(--text-muted); }
+.rvw-sel {
+  flex: 0 0 auto; height: 22px; background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 5px; font: 10.5px var(--font-mono);
+}
+.rvw-num { width: 58px; height: 22px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-dim); border-radius: 5px; font: 10.5px var(--font-mono); padding: 0 4px; }
+.rvw-detail { padding: 4px 8px 6px 36px; background: rgba(124,106,239,.05); border-bottom: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
+.rvw-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rvw-hint { color: var(--text-dim); font-size: 10.5px; }
+
+.rvw-chips { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+.rvw-chip {
+  border: 1px solid var(--border-glow); background: transparent; color: var(--text-muted);
+  font: 10.5px var(--font-mono); padding: 1px 7px; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.rvw-chip b { font-weight: 400; color: var(--text-dim); margin-left: 2px; }
+.rvw-chip:hover { color: var(--text-primary); }
+.rvw-chip.on { border-color: var(--accent); background: rgba(124,106,239,.3); color: #fff; }
+.rvw-chip.on b { color: #d9d2ff; }
+.rvw-chip.is-new { border-style: dashed; color: var(--text-dim); }
+.rvw-q {
+  width: 130px; height: 22px; background: var(--bg-surface); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 5px; font: 10.5px var(--font-mono); padding: 0 6px;
+}
+.rvw-grid {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 8px 8px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; align-content: start;
+}
+.rvw-grid > .rvw-empty, .rvw-more { grid-column: 1 / -1; }
+.rvw-more { text-align: center; color: var(--text-dim); font-size: 10px; padding: 4px; }
+.rvw-card {
+  position: relative; display: flex; flex-direction: column; padding: 0; border: 1px solid var(--border-dim);
+  border-radius: 6px; background: var(--bg-card); overflow: hidden; cursor: pointer; text-align: left; color: inherit; font: inherit;
+}
+.rvw-card:hover { border-color: rgba(124,106,239,.6); }
+.rvw-card.is-sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.rvw-card-im { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: #14141c; display: block; }
+.rvw-card-im.is-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; }
+.rvw-card-lb { padding: 2px 4px; font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rvw-card-star { position: absolute; top: 2px; right: 4px; color: #f5c542; font-size: 11px; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
+.rvw-card-ie { position: absolute; top: 3px; left: 3px; padding: 0 4px; border-radius: 4px; background: rgba(10,10,15,.78); color: #cfc8ff; font-size: 9.5px; }
+.rvw-pick {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  margin: 0 8px 8px; padding: 6px; border: 1px solid var(--accent); border-radius: 8px; background: var(--bg-card);
+}
+.rvw-pick-n { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
+.rvw-pick-tools { margin-left: auto; display: flex; gap: 4px; flex-wrap: wrap; }
+.rvw-menu {
+  position: fixed; z-index: 10300; min-width: 160px; display: flex; flex-direction: column; padding: 4px;
+  background: var(--bg-elevated); border: 1px solid var(--border-glow); border-radius: 8px; box-shadow: 0 10px 28px rgba(0,0,0,.5);
+}
+.rvw-menu-i {
+  border: none; background: transparent; color: var(--text-primary); text-align: left; padding: 4px 8px;
+  font: 11px var(--font-mono); border-radius: 5px; cursor: pointer;
+}
+.rvw-menu-i:hover { background: rgba(124,106,239,.2); }
+.rvw-menu-i.is-new { color: var(--text-dim); }
+.rvw-menu-i.is-danger:hover { color: #ff8f8f; }
+.rvw-menu-h { padding: 4px 8px; color: var(--text-dim); }

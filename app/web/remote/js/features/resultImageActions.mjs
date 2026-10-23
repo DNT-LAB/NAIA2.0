@@ -192,10 +192,10 @@ export function createResultImageActions({
           showToast(data.message || `${action === 'inpaint' ? 'Inpaint' : 'Img2Img'} session ready`, 'success');
         }
       } else if (action === 'vibe' && currentMode() === 'NAI') {
-        openModule('vibe_transfer');
+        openModule('vibe_transfer', {forceOpen: true});
         showToast(data.message || 'Vibe Transfer image added', 'success');
       } else if (action === 'character_reference' && currentMode() === 'NAI') {
-        openModule('character_reference');
+        openModule('character_reference', {forceOpen: true});
         showToast(data.message || 'Character Reference image added', 'success');
       }
     } catch (error) {

@@ -213,19 +213,21 @@ export function createImageModulePanels({
     return new FileCtor([blob], filename, {type: blob.type || 'image/png'});
   }
 
-  async function pasteImage(moduleId) {
+  async function pasteImage(moduleId, options = {}) {
     try {
       const blob = await readClipboardImageBlob();
-      uploadImage(moduleId, fileFromClipboardBlob(blob, 'clipboard.png'));
+      uploadImage(moduleId, fileFromClipboardBlob(blob, 'clipboard.png'), options);
     } catch (error) {
       console.error('Image clipboard paste failed', error);
       showToast(error.message || 'Clipboard access denied', 'error');
     }
   }
 
-  function uploadImage(moduleId, file) {
+  // `quiet` = 모듈 팝업 밖(REF & VIBE 창)에서 부른다 - 'Uploading...' 표시를 팝업 본문에 붙이지 않는다
+  //  (닫힌 팝업에 붙으면 다음에 그 본문을 다시 그릴 때까지 쌓인다).
+  function uploadImage(moduleId, file, options = {}) {
     if (!file || !file.type.startsWith('image/')) return;
-    const body = document.getElementById('modulePopupBody') || moduleBody;
+    const body = options.quiet ? null : (document.getElementById('modulePopupBody') || moduleBody);
     if (body) {
       const indicator = document.createElement('div');
       indicator.className = 'mod-upload-indicator';

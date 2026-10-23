@@ -539,6 +539,8 @@ let wildcardManagerPanel = null;
 let instantWildcardPanel = null;
 let e621EventPanel = null;
 let imageModulePanels = null;
+// REF & VIBE 창(CR · VT). 만들어지기 전에 불리는 함수(인셋 배지 자리 등)가 있어 맨 위에 둔다.
+let refVibeWindow = null;
 let img2imgPanel = null;
 let lastAutoHiddenImg2ImgSubmission = '';
 let refinePanelControl = null;
@@ -1405,22 +1407,29 @@ function positionReferenceInsetBadge() {
   const viewer = document.getElementById('resultViewer');
   const panel = document.querySelector('.cq-float.open');
   const panelBox = panel ? panel.getBoundingClientRect() : null;
-  if (!viewer || !panelBox || panelBox.height <= 0) {
+  // 퀵 패널 -> REF & VIBE 알약 -> 인셋 배지 순으로 쌓는다(사용자 지시 2026-10-23). 알약은 DOM 으로만 읽는다 -
+  // 알약이 퀵 패널 크기를 스스로 따라가고(refVibeWindow 의 ResizeObserver), 옮긴 뒤 이 함수를 다시 부른다.
+  const pill = document.querySelector('.rvp.open');
+  const pillBox = pill ? pill.getBoundingClientRect() : null;
+  const anchorBox = pillBox && pillBox.height > 0 ? pillBox : null;
+  if (!viewer || (!anchorBox && (!panelBox || panelBox.height <= 0))) {
     badge.style.top = '';
     badge.style.left = '';
     badge.style.width = '';
     return;
   }
   // 접힌 퀵 슬롯과 같은 너비로(사용자 지정 2026-10-10). 패널이 없을 때의 너비는 CSS 가 같은 식으로 정한다.
-  badge.style.width = `${Math.round(panelBox.width * CQ_COLLAPSED_RATIO)}px`;
+  if (panelBox && panelBox.height > 0) badge.style.width = `${Math.round(panelBox.width * CQ_COLLAPSED_RATIO)}px`;
+  else badge.style.width = `${Math.round(anchorBox.width)}px`;
   const viewerBox = viewer.getBoundingClientRect();
   const gap = 6;
-  let top = panelBox.bottom - viewerBox.top + gap;
+  const above = anchorBox || panelBox;
+  let top = above.bottom - viewerBox.top + gap;
   // 패널이 아주 길면 배지가 뷰어 밖으로 나간다 - 바닥 안쪽으로 물린다.
   const room = viewerBox.height - badge.offsetHeight - gap;
   if (room > 0) top = Math.min(top, room);
   badge.style.top = `${Math.round(Math.max(gap, top))}px`;
-  badge.style.left = `${Math.round(panelBox.left - viewerBox.left)}px`;
+  badge.style.left = `${Math.round(above.left - viewerBox.left)}px`;
 }
 
 /** 퀵 패널의 높이가 바뀌면 배지를 다시 앉힌다.
@@ -1730,7 +1739,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20260829-resize')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261023-rv1')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -2453,6 +2462,7 @@ let interactiveStateRestored = false;
 /** 빠른 캐릭터 패널을 보일지. NAI 모드이면서 Interactive 가 꺼져 있을 때만 쓴다.
  *  캐릭터 프롬프트는 NAID4+ 전용이라 WEBUI/ComfyUI 에서는 자리만 차지한다. */
 function syncCharacterQuickPanelVisibility(interactiveActive) {
+  syncRefVibePillVisibility();
   if (!characterQuickPanel) return;
   const active = interactiveActive === undefined
     ? !!interactivePanel?.isActive?.()
@@ -2469,6 +2479,14 @@ function syncCharacterQuickPanelVisibility(interactiveActive) {
   watchQuickPanelForInsetBadge();
   positionReferenceInsetBadge();
   renderCharacterQuickPanel();
+}
+
+/** REF & VIBE 알약 - NAI 모드 · Result 탭 · 분리 창이 아닐 때. 모델이 못 쓰면 알약이 흐리게 '지원 안 함' 을 보인다. */
+function syncRefVibePillVisibility() {
+  if (!refVibeWindow) return;
+  const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
+  const rightTab = document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
+  refVibeWindow.setVisible(mode === 'NAI' && !isDetachedShell && rightTab === 'result');
 }
 
 function applyInteractiveModeGate(isActive) {
@@ -2986,6 +3004,36 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   .catch(error => {
     console.error('Failed to initialize character quick panel module', error);
   });
+// REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
+// 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-rv5')
+  .then(({createRefVibeWindow}) => {
+    refVibeWindow = createRefVibeWindow({
+      document, window, escHtml, setModuleParam,
+      getModuleState: moduleId => moduleStateCache.get(moduleId),
+      requestModuleState,
+      loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
+        .then(module => module.createDraggablePanel),
+      uploadImage: (moduleId, file, options) => imageModulePanelsReady
+        .then(() => imageModulePanels?.uploadImage(moduleId, file, options)),
+      pasteImage: (moduleId, options) => imageModulePanelsReady
+        .then(() => imageModulePanels?.pasteImage(moduleId, options)),
+      importVibeFile,
+      // 모델 판단은 능력값 한 곳(`naiModelToolUnsupported`)으로 - V5 를 켤 때 화면은 그대로 둔다.
+      isToolUnsupported: moduleId => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
+        || naiModelBlocksReference() || naiModelToolUnsupported(moduleId),
+      isInteractive: () => !!interactivePanel?.isActive?.(),
+      showToast,
+      confirmDialog: showConfirmDialog,
+      promptDialog: showPromptDialog,
+      fetchFn: window.fetch.bind(window),
+      onLayout: () => positionReferenceInsetBadge(),
+    });
+    syncRefVibePillVisibility();
+  })
+  .catch(error => {
+    console.error('Failed to initialize REF & VIBE window', error);
+  });
 // Character 생성 설정 창 - Find ⚙ 가 연다. 값은 Characters 탭의 Prefix · Postfix 와 같다(서로 맞춘다).
 let characterGenSettings = null;
 let characterGenSettingsReady = null;
@@ -3231,7 +3279,7 @@ const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mj
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20260805-cra5')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20261023-rv1')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -6742,6 +6790,7 @@ function setParam(key, value) {
     }
     // 못 쓰는 도구가 열려 있으면 먼저 닫는다(순수 프런트 판단이라 왕복이 필요 없다).
     naiCloseUnsupportedTool();
+    refVibeWindow?.refresh();
     if (img2imgPanel) img2imgPanel.refresh();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -10610,6 +10659,8 @@ function syncMode(mode) {
   // 재계산한다. updateModeState()는 요약(Activated:)만 갱신하고 런처 버튼은 안 건드렸다 —
   // 이것이 사용자가 본 "요약은 맞는데 버튼은 비활성"의 경로 분리다(Bug 1, ComfyUI→NAI 재현).
   if (moduleLauncherControl) moduleLauncherControl.updateState();
+  syncRefVibePillVisibility();
+  refVibeWindow?.refresh();
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();
@@ -12502,6 +12553,15 @@ function openModule(moduleId, options = {}) {
     showToast('모바일에서는 캐릭터 프롬프트 모듈을 열 수 없습니다 (화면이 좁습니다)', 'error');
     return;
   }
+  // CR · VT 는 모듈 팝업이 아니라 REF & VIBE 창이다(사용자 지시 2026-10-23). 위의 모드 · 모델 가드를 지난 뒤에 돌린다.
+  // forceOpen 이 아니면 같은 탭으로 열려 있을 때 닫는다(런처 단추를 다시 누르는 손버릇).
+  if (moduleId === 'character_reference' || moduleId === 'vibe_transfer') {
+    if (currentModuleId === moduleId && modulePopup.classList.contains('open')) closeModule();
+    refVibeWindowReady.then(() => {
+      refVibeWindow?.show({tab: moduleId === 'vibe_transfer' ? 'vibe' : 'cr', toggle: !options.forceOpen});
+    });
+    return;
+  }
   if (imageModulePanels && moduleId !== 'vibe_transfer') {
     imageModulePanels.closeAllVibeClusterPanels();
   }
@@ -13070,6 +13130,7 @@ function onModuleState(m) {
   }
   else if (m.module_id === 'character_reference') {
     updateCharRefBadge(m);
+    refVibeWindow?.render('character_reference');
     syncReferenceInsetWithCharRef(m);
     // Interactive 캐릭터 헤더의 [Reference] 배지도 이 상태를 쓴다.
     if (interactivePanel && typeof interactivePanel.refreshCharReference === 'function') {
@@ -13095,7 +13156,10 @@ function onModuleState(m) {
     // 창이 닫혀 있어도 목록은 받아 둔다 - 다음에 열 때 곧바로 보인다.
     if (memoPopup) memoPopup.onState(m);
   }
-  else if (m.module_id === 'vibe_transfer') updateVibeBadge(m);
+  else if (m.module_id === 'vibe_transfer') {
+    updateVibeBadge(m);
+    refVibeWindow?.render('vibe_transfer');
+  }
   else if (m.module_id === 'save_directory') {
     if (saveDirectoryPanel) saveDirectoryPanel.setState(m);
     // 뷰어 설정 판의 '저장 경로' 한 줄도 이 값을 쓴다. renderModuleState 쪽에

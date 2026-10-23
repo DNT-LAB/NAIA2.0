@@ -154,6 +154,11 @@ class WebSessionContext:
     def _character_asset_service(self):
         return self._lazy_service("character_asset")
 
+    def _ref_vibe_library(self):
+        from core.ref_vibe_library import get_ref_vibe_library
+
+        return get_ref_vibe_library(self)
+
     def _vibe_transfer_service(self):
         return self._lazy_service("vibe_transfer")
 

@@ -477,13 +477,13 @@ class HeadlessVibeTransferService:
                 else:
                     frame["information_extracted"] = ie  # the freshly-encoded IE becomes current
                     encodings = frame.get("vibe_encodings")
-                    if not isinstance(encodings, dict):
+                    if frame.get("source_model") != model_key or not isinstance(encodings, dict):
                         encodings = {}
                     encodings[f"{ie:.2f}"] = encoding
                     frame["vibe_encodings"] = encodings
-                    frame["source_model"] = frame.get("source_model") or model_key
+                    frame["source_model"] = model_key
                     self._persist()
-                    self._save_encoding_to_storage(frame, source_bytes, model_key)
+                    self._save_encoding_to_storage(frame, source_bytes, model_key, ie_key=f"{ie:.2f}", encoding=encoding)
                     toast = context._toast(f"Vibe 인코딩 완료 — IE {ie:.2f} (2 Anlas 소모)", level="success")
         except Exception as exc:
             toast = context._toast(f"Vibe 인코딩 실패: {exc}", level="error")
@@ -491,7 +491,10 @@ class HeadlessVibeTransferService:
             frame["encoding_in_progress"] = False
         return [toast, self.module_state()] if toast else [self.module_state()]
 
-    def _save_encoding_to_storage(self, frame: dict[str, Any], source_bytes: bytes, model_key: str) -> None:
+    def _save_encoding_to_storage(
+        self, frame: dict[str, Any], source_bytes: bytes, model_key: str,
+        *, ie_key: str | None = None, encoding: str | None = None,
+    ) -> None:
         context = self.context
         file_hash = str(frame.get("file_hash") or "")
         if not file_hash or not model_key:
@@ -508,7 +511,14 @@ class HeadlessVibeTransferService:
                 except Exception:
                     existing = {}
             enc = existing.get("encodings") if isinstance(existing.get("encodings"), dict) else {}
-            enc.update({str(k): str(v) for k, v in (frame.get("vibe_encodings") or {}).items() if v})
+            # The worker passes the exact result, even if the live frame changes.
+            # Keep direct callers compatible by selecting only the current IE.
+            if ie_key is None:
+                ie_key = f"{_as_float(frame.get('information_extracted'), 1.0):.2f}"
+            if encoding is None:
+                encoding = (frame.get("vibe_encodings") or {}).get(ie_key)
+            if encoding:
+                enc[ie_key] = str(encoding)
             existing.update({
                 "file_hash": file_hash,
                 "file_name": str(frame.get("file_name") or f"{file_hash}.png"),
@@ -779,6 +789,9 @@ class HeadlessVibeTransferService:
             except Exception as exc:
                 print(f"[ERROR] Vibe storage delete failed: {exc}")
         self._session_imported.discard(f"{model}|{file_hash}")
+        from core.ref_vibe_library import get_ref_vibe_library
+
+        get_ref_vibe_library(context).cleanup_vibe(model, file_hash)
         if not removed:
             return [context._toast("이미 삭제된 항목입니다.", level="info"), self.scan_storage()]
         return [context._toast("Vibe를 Storage에서 삭제했어요.", level="success"), self.scan_storage()]
@@ -814,6 +827,13 @@ class HeadlessVibeTransferService:
         context = self.context
         self._ensure_loaded()
         runtime_can_encode = self._runtime_can_encode()
+        # Encoding writes storage before returning module_state. Record creation
+        # here so the encoding implementation can stay independent of the index.
+        from core.ref_vibe_library import get_ref_vibe_library
+
+        library = get_ref_vibe_library(context)
+        library.record_stored_vibes(context.vibe_transfer_frames)
+        display_names = library.display_names("vibe", [f.get("file_hash", "") for f in context.vibe_transfer_frames])
         frames = []
         enabled_count = 0
         strength_total = 0.0
@@ -836,6 +856,7 @@ class HeadlessVibeTransferService:
                 "index": index,
                 "file_hash": frame.get("file_hash", ""),
                 "file_name": frame.get("file_name", ""),
+                "display_name": display_names.get(frame.get("file_hash", ""), ""),
                 "is_enabled": bool(frame.get("is_enabled")),
                 "is_no_image": bool(frame.get("is_no_image")),
                 "no_source": bool(frame.get("no_source")),  # 번들 placeholder(재인코딩 불가) → 프런트 IE 잠금
@@ -926,6 +947,8 @@ class HeadlessVibeTransferService:
             applied = self.apply_storage(str(value or ""))
             if isinstance(applied, dict):
                 return applied
+        elif key == "apply_group":
+            return self.apply_group(str(value or ""))
         elif key == "cluster_list":
             return self.scan_clusters()
         elif key == "cluster_load":
@@ -985,23 +1008,71 @@ class HeadlessVibeTransferService:
             "current_model": context._current_model_key(),
         }
 
+    def apply_group(self, value: str) -> Any:
+        from core.ref_vibe_library import get_ref_vibe_library
+
+        context = self.context
+        self._ensure_loaded()
+        try:
+            request = json.loads(value)
+            if not isinstance(request, dict) or request.get("mode", "clean") not in {"clean", "append"}:
+                raise ValueError("Invalid group request")
+            group = get_ref_vibe_library(context).group(request.get("group_id"))
+        except (ValueError, TypeError) as exc:
+            return context._toast(str(exc), level="error")
+        if request.get("mode", "clean") == "clean":
+            context.vibe_transfer_frames.clear()
+        context.vibe_transfer_normalize = bool(group.get("normalize"))
+        added = skipped = 0
+        model = context._current_model_key()
+        for member in group.get("members", []):
+            if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+                break
+            if member.get("model") != model:
+                skipped += 1
+                continue
+            result = self.apply_storage(json.dumps({"model": model, "file_hash": member["file_hash"],
+                                                   "ie": member.get("ie", 1.0), "rs": member.get("rs", 0.6)}))
+            if result is not None:
+                skipped += 1
+                continue
+            context.vibe_transfer_frames[-1]["is_enabled"] = bool(member.get("enabled", True))
+            added += 1
+        self._persist()
+        return [context._toast(f"{added}개 적용 · {skipped}개 건너뜀(다른 모델/없음)"), self.module_state()]
+
     def apply_storage(self, value: str) -> dict[str, Any] | None:
         context = self.context
         if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
             return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
-        parts = str(value or "").split("|")
-        if len(parts) < 3:
+        from core.ref_vibe_library import clean_encodings, finite, get_ref_vibe_library, safe_component
+
+        try:
+            if str(value or "").lstrip().startswith("{"):
+                request = json.loads(value)
+            else:
+                parts = str(value or "").split("|")
+                request = {"model": parts[0], "file_hash": parts[1], "ie": parts[2]}
+            model = safe_component(request.get("model"))
+            file_hash = safe_component(request.get("file_hash"))
+            ie_text = finite(request.get("ie"))
+            if ie_text is None:
+                raise ValueError("Invalid IE")
+        except (ValueError, TypeError, IndexError, AttributeError):
             return context._toast("Invalid Vibe storage request", level="error")
-        model, file_hash, ie_text = parts[0], Path(parts[1]).name, parts[2]
+        library = get_ref_vibe_library(context)
+        meta = library.metadata("vibe", file_hash)
         json_path = context._existing_save_path("vibe_transfer", model, f"{file_hash}.json")
         if not json_path.exists():
             return context._toast("Vibe storage item not found", level="error")
         try:
             data = json.loads(json_path.read_text(encoding="utf-8"))
-            raw_encodings = data.get("encodings") if isinstance(data.get("encodings"), dict) else {}
-            encodings = {str(k): str(v) for k, v in raw_encodings.items() if v}
+            encodings = clean_encodings(data.get("encodings"))
             if not encodings:
                 return context._toast("Stored Vibe encoding not found", level="error")
+            # RS: 요청 -> 지난번 쓴 값 -> 보관 파일의 값(번들 가져오기가 적는다) -> 0.6
+            strength = max(-1.0, min(1.0, finite(request.get("rs"), finite(meta.get("last_rs"),
+                                                 finite(data.get("reference_strength"), 0.6)))))
             selected_ie = float(ie_text)
             closest_ie = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - selected_ie))
             image_path = context._existing_save_path("vibe_transfer", model, "images", f"{file_hash}.png")
@@ -1028,15 +1099,17 @@ class HeadlessVibeTransferService:
                 "image_data": image_data,
                 "thumbnail": thumb,
                 "is_enabled": True,
-                "is_no_image": bool(data.get("is_no_image")) or data.get("storage_type") == "metadata_vibe",
+                "is_no_image": bool(data.get("is_no_image")) or not image_bytes or data.get("storage_type") == "metadata_vibe",
                 "is_naid3": "NAID3" in model,
-                "reference_strength": float(data.get("reference_strength", 0.6) or 0.6),
+                "reference_strength": strength,
                 "information_extracted": closest_ie,
                 "vibe_encodings": encodings,
                 "storage_type": str(data.get("storage_type") or ""),
-                "no_source": bool(data.get("no_source")),  # 원본 이미지 없음(번들 placeholder) → IE 잠금
+                "no_source": bool(data.get("no_source")) or not image_bytes or bool(data.get("is_no_image")),
                 "source_model": model,
             }
+            library.record("vibe", file_hash, used=True, ie=closest_ie, rs=strength,
+                           created_at=json_path.stat().st_mtime)
             context.vibe_transfer_frames.append(frame)
             context._disable_all_character_reference_frames()
             return None

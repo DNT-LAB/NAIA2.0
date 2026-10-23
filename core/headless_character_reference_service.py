@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote
 
 from core.headless_image_utils import data_url_payload, image_hash, image_to_png_bytes, thumbnail_b64
+from core.ref_vibe_library import get_ref_vibe_library, reference_settings, safe_component
 
 
 def _as_float(value: Any, default: float) -> float:
@@ -192,6 +193,13 @@ class HeadlessCharacterReferenceService:
         target.parent.mkdir(parents=True, exist_ok=True)
         if not target.exists():
             target.write_bytes(raw)
+        get_ref_vibe_library(self.context).record("character_reference", file_hash,
+                                                 created_at=target.stat().st_mtime)
+
+    def _save_library_settings(self, frame):
+        file_hash = str(frame.get("file_hash") or "")
+        if file_hash and self.context._existing_save_path("character_reference", "images", f"{file_hash}.png").is_file():
+            get_ref_vibe_library(self.context).record("character_reference", file_hash, settings=frame)
 
     def frame_from_bytes(
         self,
@@ -222,12 +230,16 @@ class HeadlessCharacterReferenceService:
 
     def module_state(self) -> dict[str, Any]:
         self._ensure_loaded()
+        display_names = get_ref_vibe_library(self.context).display_names(
+            "character_reference", [f.get("file_hash", "") for f in self.context.character_reference_frames]
+        )
         frames = []
         for index, frame in enumerate(self.context.character_reference_frames):
             frames.append({
                 "index": index,
                 "file_hash": frame.get("file_hash", ""),
                 "file_name": frame.get("file_name", ""),
+                "display_name": display_names.get(frame.get("file_hash", ""), ""),
                 "is_enabled": bool(frame.get("is_enabled")),
                 "reference_type": frame.get("reference_type", "character&style"),
                 "strength": _as_float(frame.get("strength"), 1.0),
@@ -244,9 +256,9 @@ class HeadlessCharacterReferenceService:
         self._ensure_loaded()
         if key == "upload_image":
             image_bytes = base64.b64decode(data_url_payload(str(value or "")))
-            context.character_reference_frames.append(
-                self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
-            )
+            frame = self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
+            self.save_storage(frame)
+            context.character_reference_frames.append(frame)
         elif key.startswith("remove_frame_"):
             index = context._index_from_key(key, "remove_frame_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
@@ -261,24 +273,36 @@ class HeadlessCharacterReferenceService:
                 context.character_reference_frames[index]["is_enabled"] = enabling
                 if enabling:
                     self.save_storage(context.character_reference_frames[index])
+                    self._save_library_settings(context.character_reference_frames[index])
                     context._disable_all_vibe_frames()
         elif key.startswith("strength_"):
             index = context._index_from_key(key, "strength_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
                 context.character_reference_frames[index]["strength"] = max(0.0, min(1.0, float(value)))
+                self._save_library_settings(context.character_reference_frames[index])
         elif key.startswith("fidelity_"):
             index = context._index_from_key(key, "fidelity_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
                 context.character_reference_frames[index]["fidelity"] = max(0.0, min(1.0, float(value)))
+                self._save_library_settings(context.character_reference_frames[index])
         elif key.startswith("ref_type_"):
             index = context._index_from_key(key, "ref_type_")
             ref_type = str(value or "").strip()
             if index is not None and 0 <= index < len(context.character_reference_frames) and ref_type in {"character&style", "character", "style"}:
                 context.character_reference_frames[index]["reference_type"] = ref_type
+                self._save_library_settings(context.character_reference_frames[index])
         elif key == "get_storage":
             return self.scan_storage()
         elif key == "apply_storage":
-            file_hash = Path(str(value or "")).name
+            try:
+                request = json.loads(value) if str(value or "").lstrip().startswith("{") else {"file_hash": value}
+                file_hash = safe_component(request.get("file_hash"))
+            except (ValueError, TypeError, AttributeError):
+                return context._toast("Invalid Character Reference storage request", level="error")
+            library = get_ref_vibe_library(context)
+            settings = reference_settings(library.metadata("character_reference", file_hash).get("settings"))
+            if isinstance(request.get("settings"), dict):
+                settings = reference_settings({**settings, **request["settings"]})
             image_path = context._existing_save_path("character_reference", "images", f"{file_hash}.png")
             if not image_path.exists():
                 return context._toast("Character reference storage item not found", level="error")
@@ -290,6 +314,9 @@ class HeadlessCharacterReferenceService:
                 enabled=True,
             )
             frame["file_hash"] = file_hash
+            frame.update(settings)
+            library.record("character_reference", file_hash, used=True, settings=settings,
+                           created_at=image_path.stat().st_mtime)
             context.character_reference_frames.append(frame)
             context._disable_all_vibe_frames()
         else:

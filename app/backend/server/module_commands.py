@@ -369,6 +369,13 @@ async def handle_module_command(
             task.add_done_callback(_E621_TRANSLATION_TASKS.discard)
         return True
 
+    module_id = str(command.get("module_id") or "").strip()
+    other_module_id = {"vibe_transfer": "character_reference", "character_reference": "vibe_transfer"}.get(module_id)
+    other_enabled_before = (
+        sum(bool(frame.get("is_enabled")) for frame in getattr(context, other_module_id + "_frames", []))
+        if other_module_id else 0
+    )
+
     if _snapshot_moves_a_dataset(command):
         # ⚠️ 데이터셋 사본을 쓰거나 읽는 스냅샷 명령은 **이벤트 루프 밖에서** 돌린다. 풀이 수백 MB 일 수
         #    있어(실측: 사용자 custom_tags 가 150 ~ 330MB) 여기서 동기로 돌리면 그동안 모든 창의 소켓이
@@ -392,6 +399,12 @@ async def handle_module_command(
             command.get("value"),
             client_host=client_host,
         )
+    other_module_state = None
+    if other_module_id and other_enabled_before != sum(
+        bool(frame.get("is_enabled")) for frame in getattr(context, other_module_id + "_frames", [])
+    ):
+        other_module_state = context.module_state_payload(other_module_id, client_host)
+
     if module_state is None:
         await _send_json(ws, {
             "type": "toast",
@@ -408,12 +421,21 @@ async def handle_module_command(
         negative_append = ""
         for item in module_state:
             if isinstance(item, dict):
-                await _send_json(ws, item)
+                if other_module_id and item.get("type") == "module_state":
+                    from app.backend.server.websocket_broadcast import broadcast_json
+
+                    await broadcast_json(clients, item)
+                else:
+                    await _send_json(ws, item)
                 if item.get("type") == "prompt_generated" and item.get("source") == "e621_event":
                     generated_prompt = str(item.get("prompt") or "")
                     generated_source = "E621"
                     e621_use_main_pipeline = item.get("use_main_pipeline", True) is not False
                     negative_append = str(item.get("negative_append") or "")
+        if other_module_state is not None:
+            from app.backend.server.websocket_broadcast import broadcast_json
+
+            await broadcast_json(clients, other_module_state)
         if generated_prompt:
             await enqueue_prompt_from_module(
                 ws,
@@ -437,17 +459,19 @@ async def handle_module_command(
             extra_messages = [item for item in raw_messages if isinstance(item, dict)]
     for message in extra_messages:
         await _send_json(ws, message)
-    # ⚠️ 캐릭터 모듈만은 **모두에게** 보낸다(Codex BLOCK 3).
-    #
+    # ⚠️ 캐릭터 모듈은 **모두에게** 보낸다(Codex BLOCK 3).
     #    이 모듈의 편집 명령은 전부 배열 **인덱스**로 주소를 매긴다(`char_prompt_3`).
     #    탭이 둘 열려 있는데 A 가 순서를 바꾸면 B 의 화면은 옛 배열 그대로다 - B 가
     #    화면상 C2 를 고치면 서버에서는 새 인덱스 1 의 **다른 캐릭터**를 덮는다.
     #    프롬프트에는 되돌리기가 없어 그대로 유실이다.
     #
-    #    ⚠️ 다른 모듈까지 넓히지 않는다 - 각자 에코를 받고 무엇을 하는지 안 봤다.
-    #       캐릭터는 이미 에셋 REST 경로가 같은 페이로드를 방송하고 있어
-    #       (`character_asset_routes`), 화면이 받을 준비가 되어 있는 것이 확인된다.
-    if _is_inpaint_canvas_edit(command):
+    #    VT/CR 도 모두에게 보낸다(REF & VIBE 2026-10-23) - 같은 인덱스 주소(`enable_3`)이고, 서로를 끄므로
+    #    상대 모듈의 상태도 함께 보낸다. storage_list · toast 는 보낸 소켓에만.
+    if other_module_id and isinstance(module_state, dict) and module_state.get("type") == "module_state":
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        await broadcast_json(clients, module_state)
+    elif _is_inpaint_canvas_edit(command):
         from app.backend.server.websocket_broadcast import broadcast_json
 
         await broadcast_json(clients, module_state)
@@ -457,6 +481,10 @@ async def handle_module_command(
         await broadcast_json(clients, module_state)
     else:
         await _send_json(ws, module_state)
+    if other_module_state is not None:
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        await broadcast_json(clients, other_module_state)
     if str(command.get("module_id") or "").strip() == "snapshot" and str(command.get("key") or "").strip() == "apply":
         await _show_applied_snapshot_image(context, clients, module_state)
     if str(command.get("module_id") or "") == "automation":

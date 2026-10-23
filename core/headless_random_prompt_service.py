@@ -331,6 +331,9 @@ class HeadlessRandomPromptService:
                 rating_counts=self._rating_counts(),
             )
 
+        from core.event_compress import check_event_compress
+        check_event_compress(self.context)
+
         # source_row_override(외부 주입 = 프리페치 오버랩이 예약해 둔 행)가 있으면 story/
         # tag-filter 산정과 풀 pop을 건너뛴다 — 프리페치는 일반 Auto Gen 한정이라 story/
         # tag-filter가 없는 경우에만 호출된다. 그 외 모든 부작용(random_prompt_triggered·
@@ -607,6 +610,8 @@ class HeadlessRandomPromptService:
             sr = getattr(self.context, "search_results", None)
             if sr is None:
                 return None
+            from core.event_compress import check_event_compress
+            check_event_compress(self.context)
             return sr.pop_random_row(self._normalize_ratings(active_ratings))
         except Exception:
             return None

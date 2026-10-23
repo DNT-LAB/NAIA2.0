@@ -252,6 +252,19 @@ def _random_pool_has_hidden_rows(context: WebSessionContext) -> bool:
 
 
 def _restore_tag_filter_snapshot(context: WebSessionContext) -> dict[str, Any] | None:
+    from app.backend.server.search_runtime import search_pool_state_guard
+    from core.event_compress import enabled, ensure_event_compress
+
+    with search_pool_state_guard(context):
+        state = _restore_tag_filter_snapshot_locked(context)
+    if state is not None and enabled(context):
+        # Already called off the event loop. Finish before the recovery draw.
+        ensure_event_compress(context).refresh()
+        state = context.search_state_payload()
+    return state
+
+
+def _restore_tag_filter_snapshot_locked(context: WebSessionContext) -> dict[str, Any] | None:
     """소모돼 빈 풀을 **검색이 적용된 순간의 스냅샷으로 되돌린다**.
 
     사용자 지정 2026-08-31. 예전에는 등급을 전체로 열고 태그 필터를 해제했는데,
@@ -281,7 +294,10 @@ def _restore_tag_filter_snapshot(context: WebSessionContext) -> dict[str, Any] |
     # 경로에 따라 다른 모양을 받는다.
     from app.backend.server.search_runtime import apply_search_runtime_filters
 
-    return apply_search_runtime_filters(context)
+    state = apply_search_runtime_filters(context)
+    from core.event_compress import request_event_compress
+    request_event_compress(context)
+    return state
 
 
 def _reset_random_pool_to_gsqe(context: WebSessionContext) -> dict[str, Any]:

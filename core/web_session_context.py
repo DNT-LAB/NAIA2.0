@@ -277,6 +277,8 @@ class WebSessionContext:
         """
         with self._search_pool_state_lock:
             self._search_pool_generation = self.search_pool_generation() + 1
+            from core.event_compress import request_event_compress
+            request_event_compress(self)
             return self._search_pool_generation
 
     def tag_filter_revision(self) -> int:

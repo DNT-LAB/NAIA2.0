@@ -79,6 +79,8 @@ def mark_search_pool_replaced(context: WebSessionContext) -> int:
         return int(marker() or 0)
     value = current_search_pool_generation(context) + 1
     setattr(context, "_search_pool_generation", value)
+    from core.event_compress import request_event_compress
+    request_event_compress(context)
     return value
 
 
@@ -451,6 +453,9 @@ def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
         context.search_results.set_dataframe(pd.DataFrame())
     else:
         context.search_results.set_dataframe(filtered)
+    from core.event_compress import request_event_compress
+
+    request_event_compress(context)
     return search_state_with_runner_save(context)
 
 

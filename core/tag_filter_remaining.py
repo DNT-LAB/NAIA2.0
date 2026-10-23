@@ -83,7 +83,7 @@ def _remove(*paths: Path) -> None:
         _invalidate(path)
 
 
-def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any]] | None:
+def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any], set[Any]] | None:
     """남은 id · 조건 · 적용 순간의 전체 id 를 **한 잠금 안에서** 뜬다(셋이 한 풀의 것이어야 한다). 대상이 아니면 None."""
     from contextlib import nullcontext
 
@@ -100,7 +100,9 @@ def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any]] | None
         full = snapshot.get("ids") if isinstance(snapshot, dict) else None
         if not isinstance(full, set) or not full:
             return None
-        return list(tag_filter["ids"]), _condition(tag_filter.get("tags"), tag_filter.get("branches")), list(full)
+        service = getattr(context, "_event_compress", None)
+        dropped = service.persisted_dropped() if service is not None else set()
+        return list(tag_filter["ids"]), _condition(tag_filter.get("tags"), tag_filter.get("branches")), list(full), dropped
 
 
 def save_remaining(context: Any) -> str:
@@ -110,9 +112,10 @@ def save_remaining(context: Any) -> str:
         captured = _capture(context)
         if captured is None:
             return "skip"
-        ids, condition, full = captured
-        if not ids or len(ids) >= REMAINING_MAX:
-            _remove(meta_path, parquet_path)
+        ids, condition, full, dropped = captured
+        dropped_path = parquet_path.with_name("naia_tag_filter_dropped.parquet")
+        if (not ids and not dropped) or len(ids) >= REMAINING_MAX:
+            _remove(meta_path, parquet_path, dropped_path)
             return "removed"
         import pandas as pd
 
@@ -125,8 +128,13 @@ def save_remaining(context: Any) -> str:
         tmp = parquet_path.with_suffix(".parquet.tmp")
         pd.DataFrame({"id": [_norm_id(i) for i in ids]}).to_parquet(tmp, index=False)
         tmp.replace(parquet_path)
+        tmp_dropped = dropped_path.with_suffix(".parquet.tmp")
+        pd.DataFrame({"id": [_norm_id(i) for i in dropped]}).to_parquet(tmp_dropped, index=False)
+        tmp_dropped.replace(dropped_path)
         meta = {"version": FORMAT_VERSION, "condition": condition, "matched": matched,
-                "matched_count": len(full), "count": len(ids)}
+                "matched_count": len(full), "count": len(ids),
+                "dropped_count": len(dropped), "dropped_fingerprint": fingerprint(dropped),
+                "remaining_fingerprint": fingerprint(ids)}
         tmp_meta = meta_path.with_suffix(".json.tmp")
         tmp_meta.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         tmp_meta.replace(meta_path)
@@ -152,9 +160,24 @@ def load_remaining(context: Any, tags: Any, branches: Any, matched_ids: Any) -> 
             frame = pd.read_parquet(parquet_path)
         except Exception:
             return None
-        if "id" not in frame.columns or frame.empty or len(frame) != int(meta.get("count") or -1):
+        if "id" not in frame.columns or len(frame) != int(meta.get("count", -1)):
+            return None
+        if "remaining_fingerprint" in meta and fingerprint(frame["id"].tolist()) != meta["remaining_fingerprint"]:
+            return None
+        dropped = set()
+        if meta.get("dropped_count"):
+            try:
+                drop_frame = pd.read_parquet(parquet_path.with_name("naia_tag_filter_dropped.parquet"))
+                dropped = set(drop_frame["id"].tolist())
+                if len(dropped) != meta["dropped_count"] or fingerprint(dropped) != meta["dropped_fingerprint"]:
+                    return None
+            except (OSError, ValueError, KeyError):
+                return None
+        if frame.empty and not dropped:
             return None          # 명함과 다른 id 파일(중간에 끊긴 쓰기) - 쓰지 않는다
-        return {str(v) for v in frame["id"].tolist()}
+        # Reconstruct from unconsumed rows, then recompress under CURRENT PE.
+        # A disabled session also gets the saved dropped rows back.
+        return {str(v) for v in frame["id"].tolist()} | {str(v) for v in dropped}
 
 
 def apply_remaining(context: Any, result: dict[str, Any], ids: set[Any]) -> tuple[set[Any], dict[str, int] | None]:

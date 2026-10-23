@@ -255,7 +255,7 @@ _REVERSED_TAG_CONVERSION_MAP = {v: k for k, v in _ORIGINAL_TAG_CONVERSION_MAP.it
 
 
 def _process_auto_hide(main_tags: List[str], removed_tags: List[str],
-                        auto_hide: List[str]):
+                        auto_hide: List[str], *, quiet: bool = False):
     """
     Auto Hide 처리: 직접 매칭 + 패턴 매칭으로 main_tags에서 태그 제거.
     main_tags, removed_tags를 in-place 수정.
@@ -310,7 +310,8 @@ def _process_auto_hide(main_tags: List[str], removed_tags: List[str],
             if protected_item in to_remove:
                 to_remove.remove(protected_item)
 
-        print(f"보호된 키워드: {', '.join(protected_to_keep) if protected_to_keep else '없음'}")
+        if not quiet:
+            print(f"보호된 키워드: {', '.join(protected_to_keep) if protected_to_keep else '없음'}")
 
     # 조건에 맞는 키워드를 main_tags에서 제거
     for keyword in to_remove:
@@ -318,7 +319,8 @@ def _process_auto_hide(main_tags: List[str], removed_tags: List[str],
             main_tags.remove(keyword)
             removed_tags.append(keyword)
 
-    print(f"Auto Hide로 제거된 태그: {', '.join(removed_tags) if removed_tags else '없음'}")
+    if not quiet:
+        print(f"Auto Hide로 제거된 태그: {', '.join(removed_tags) if removed_tags else '없음'}")
 
 
 def apply_tag_filters(
@@ -329,6 +331,9 @@ def apply_tag_filters(
     filter_manager,
     track_clothing_regions: bool = False,
     category_overrides: Optional[Dict[str, Any]] = None,
+    *,
+    only_rounds: Optional[set[str]] = None,
+    quiet: bool = False,
 ) -> Dict[str, Any]:
     """
     공통 태그 필터링 로직. main_tags, removed_tags를 in-place 수정.
@@ -366,7 +371,8 @@ def apply_tag_filters(
 
     # 1. Auto Hide
     before_len = len(removed_tags)
-    _process_auto_hide(main_tags, removed_tags, auto_hide)
+    if only_rounds is None or "auto_hide" in only_rounds:
+        _process_auto_hide(main_tags, removed_tags, auto_hide, quiet=quiet)
     filter_log.append({
         'name': 'Auto Hide',
         'key': 'auto_hide',
@@ -376,7 +382,8 @@ def apply_tag_filters(
 
     # 1.5 개별 숨김 - filter_manager 가 없어도 돈다(사전이 필요 없는 정확일치 목록).
     before_len = len(removed_tags)
-    _apply_category_hide(main_tags, removed_tags, category_overrides)
+    if only_rounds is None or "category_hide" in only_rounds:
+        _apply_category_hide(main_tags, removed_tags, category_overrides)
     if len(removed_tags) > before_len:
         filter_log.append({
             'name': '개별 숨김',
@@ -390,7 +397,7 @@ def apply_tag_filters(
         return result
 
     # 2. remove_character_features
-    enabled = checkbox_options.get("remove_character_features", False)
+    enabled = checkbox_options.get("remove_character_features", False) and (only_rounds is None or "remove_character_features" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_character_features")
@@ -408,7 +415,7 @@ def apply_tag_filters(
     })
 
     # 3. remove_clothes (+ optional region 추적)
-    enabled = checkbox_options.get("remove_clothes", False)
+    enabled = checkbox_options.get("remove_clothes", False) and (only_rounds is None or "remove_clothes" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_clothes")
@@ -434,7 +441,7 @@ def apply_tag_filters(
     })
 
     # 3.5 remove_clothing_event (의상 이벤트: 상태/동작)
-    enabled = checkbox_options.get("remove_clothing_event", False)
+    enabled = checkbox_options.get("remove_clothing_event", False) and (only_rounds is None or "remove_clothing_event" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_clothing_event")
@@ -460,7 +467,7 @@ def apply_tag_filters(
     })
 
     # 4. remove_color
-    enabled = checkbox_options.get("remove_color", False)
+    enabled = checkbox_options.get("remove_color", False) and (only_rounds is None or "remove_color" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude, include = _override_sets(category_overrides, "remove_color")
@@ -486,7 +493,7 @@ def apply_tag_filters(
     })
 
     # 5. remove_location_and_background_color
-    enabled = checkbox_options.get("remove_location_and_background_color", False)
+    enabled = checkbox_options.get("remove_location_and_background_color", False) and (only_rounds is None or "remove_location_and_background_color" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_location_and_background_color")
@@ -504,7 +511,7 @@ def apply_tag_filters(
     })
 
     # 6. remove_expression (NEW)
-    enabled = checkbox_options.get("remove_expression", False)
+    enabled = checkbox_options.get("remove_expression", False) and (only_rounds is None or "remove_expression" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_expression")
@@ -522,7 +529,7 @@ def apply_tag_filters(
     })
 
     # 7. remove_pose_action (NEW)
-    enabled = checkbox_options.get("remove_pose_action", False)
+    enabled = checkbox_options.get("remove_pose_action", False) and (only_rounds is None or "remove_pose_action" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_pose_action")
@@ -540,7 +547,7 @@ def apply_tag_filters(
     })
 
     # 8. remove_meta_tags (메타 태그 제거)
-    enabled = checkbox_options.get("remove_meta_tags", True)
+    enabled = checkbox_options.get("remove_meta_tags", True) and (only_rounds is None or "remove_meta_tags" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_meta_tags")
@@ -558,7 +565,7 @@ def apply_tag_filters(
     })
 
     # 9. remove_object_tags (사물 태그 제거)
-    enabled = checkbox_options.get("remove_object_tags", False)
+    enabled = checkbox_options.get("remove_object_tags", False) and (only_rounds is None or "remove_object_tags" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude_set, include_set = _override_sets(category_overrides, "remove_object_tags")
@@ -576,7 +583,7 @@ def apply_tag_filters(
     })
 
     # 10. remove_noise_tags (저빈도 태그 제거)
-    enabled = checkbox_options.get("remove_noise_tags", False)
+    enabled = checkbox_options.get("remove_noise_tags", False) and (only_rounds is None or "remove_noise_tags" in only_rounds)
     before_len = len(removed_tags)
     if enabled:
         exclude, include = _override_sets(category_overrides, "remove_noise_tags")

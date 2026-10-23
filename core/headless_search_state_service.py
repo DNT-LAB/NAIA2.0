@@ -75,6 +75,7 @@ class HeadlessSearchStateService:
     def default_search_filter_state() -> dict[str, Any]:
         return {
             "version": 1,
+            "event_compress": False,
             "query": "",
             "exclude": "",
             # 영구 제외(사용자 지정 2026-09-24) - Search 창의 붉은 줄. 모든 [검색]에 제외어로 덧붙는다.
@@ -180,6 +181,7 @@ class HeadlessSearchStateService:
     def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
         state = self.default_search_filter_state()
         if isinstance(raw, dict):
+            state["event_compress"] = bool(raw.get("event_compress", False))
             state["query"] = str(raw.get("query", state["query"]) or "")
             state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
             state["exclude_permanent"] = str(raw.get("exclude_permanent", state["exclude_permanent"]) or "")
@@ -239,6 +241,8 @@ class HeadlessSearchStateService:
             getattr(context, "search_filter_state", None)
             or self.default_search_filter_state()
         )
+        if updates.get("event_compress") is not None:
+            state["event_compress"] = bool(updates["event_compress"])
         for key in ("query", "exclude", "exclude_permanent"):
             if key in updates and updates[key] is not None:
                 state[key] = str(updates[key] or "")
@@ -604,6 +608,8 @@ class HeadlessSearchStateService:
                 rating: int(tag_filter_rating_counts.get(rating, 0) or 0)
                 for rating in SUPPORTED_RATINGS
             }
+        elif filter_preferences.get("event_compress"):
+            rating_counts = context.search_results.get_count_by_rating()
         elif snapshot is not None and not getattr(snapshot, "empty", True) and "rating" in snapshot.columns:
             rating_counts = {
                 rating: int((snapshot["rating"] == rating).sum())

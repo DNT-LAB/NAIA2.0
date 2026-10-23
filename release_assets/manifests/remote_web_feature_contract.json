@@ -15,6 +15,7 @@
     "app/backend/server/comfyui_server_log_routes.py",
     "app/backend/server/data_migration_routes.py",
     "app/backend/server/danbooru_routes.py",
+    "app/backend/server/event_compress_routes.py",
     "app/backend/server/event_map_routes.py",
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/fast_search_routes.py",
@@ -250,6 +251,19 @@
       "routes": [
         {"method": "GET", "path": "/api/fast-search", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/fast-search/event-neighbors", "smoke": "non_destructive"}
+      ]
+    },
+    {
+      "id": "event_compress",
+      "name": "Live pool event compression under current Prompt Engineering filters",
+      "source_files": ["core/event_compress.py", "app/backend/server/event_compress_routes.py"],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/event-compress/state", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-compress/toggle", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/event-compress/events", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/event-compress/random", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/event-compress/generate", "smoke": "external_live"}
       ]
     },
     {

@@ -1,4 +1,6 @@
 import random
+from contextlib import nullcontext
+from functools import wraps
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -6,6 +8,21 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+
+
+def _pool_locked(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with getattr(self, "_event_compress_guard", None) or nullcontext():
+            result = method(self, *args, **kwargs)
+            if method.__name__.startswith("pop_") and result is not None:
+                self._event_compress_consumption = getattr(self, "_event_compress_consumption", 0) + 1
+            if method.__name__ in {"append_dataframe", "set_dataframe"}:
+                changed = getattr(self, "_event_compress_on_change", None)
+                if changed is not None:
+                    changed()
+            return result
+    return call
 
 
 def _has_prompt_text(value) -> bool:
@@ -93,6 +110,16 @@ class _SearchResultBucket:
     bucket_id: int
     df: pd.DataFrame
     consumed_indices: set[int] = field(default_factory=set)
+    dropped_indices: set[int] = field(default_factory=set)
+
+    @property
+    def excluded_indices(self):
+        if not self.dropped_indices:
+            return self.consumed_indices
+        if not self.consumed_indices:
+            return self.dropped_indices
+        return self.consumed_indices | self.dropped_indices
+
     valid_prompt_mask_cache: Optional[pd.Series] = None
     random_pools_by_rating: Optional[dict[Optional[str], list[int]]] = None
     rating_counts_cache: Optional[dict[str, int]] = None
@@ -107,31 +134,35 @@ class _SearchResultBucket:
 
     def reset_consumed(self):
         self.consumed_indices.clear()
+        self.dropped_indices.clear()
 
     def append_dataframe(self, new_df: pd.DataFrame):
         if new_df is None or new_df.empty:
             return
-        base_df = self.remaining_dataframe()
+        if self.dropped_indices:
+            base_df = self.df
+        else:
+            base_df = self.remaining_dataframe()
+            self.reset_consumed()
         self.df = pd.concat([base_df, new_df.reset_index(drop=True)], ignore_index=True)
-        self.reset_consumed()
         self.invalidate_caches()
 
     def has_rating_column(self) -> bool:
         return "rating" in self.df.columns
 
     def remaining_count(self) -> int:
-        if not self.consumed_indices:
+        if not self.excluded_indices:
             return len(self.df)
-        consumed_present = sum(1 for index in self.consumed_indices if index in self.df.index)
+        consumed_present = sum(1 for index in self.excluded_indices if index in self.df.index)
         return max(0, len(self.df) - consumed_present)
 
     def is_empty(self) -> bool:
         return self.remaining_count() <= 0
 
     def remaining_dataframe(self) -> pd.DataFrame:
-        if not self.consumed_indices:
+        if not self.excluded_indices:
             return self.df
-        return self.df.drop(index=list(self.consumed_indices), errors="ignore")
+        return self.df.drop(index=list(self.excluded_indices), errors="ignore")
 
     def valid_prompt_mask(self) -> pd.Series:
         if self.valid_prompt_mask_cache is not None:
@@ -156,8 +187,8 @@ class _SearchResultBucket:
             return
 
         mask = self.valid_prompt_mask()
-        if self.consumed_indices:
-            mask = mask & ~self.df.index.isin(self.consumed_indices)
+        if self.excluded_indices:
+            mask = mask & ~self.df.index.isin(self.excluded_indices)
         if not bool(mask.any()):
             return
 
@@ -170,7 +201,7 @@ class _SearchResultBucket:
             self.random_pools_by_rating[str(rating)] = list(indices)
 
     def row_matches_random_filter(self, index: int, active_rating_keys: Optional[set[str]]) -> bool:
-        if index in self.consumed_indices:
+        if index in self.consumed_indices or index in self.dropped_indices:
             return False
         if index not in self.df.index:
             return False
@@ -301,7 +332,7 @@ class _SearchResultBucket:
         return None
 
     def pop_row_at_index(self, index: int) -> Optional[pd.Series]:
-        if index in self.consumed_indices or index not in self.df.index:
+        if index in self.consumed_indices or index in self.dropped_indices or index not in self.df.index:
             return None
         popped_row = self.df.loc[index].copy()
         self.consumed_indices.add(index)
@@ -319,6 +350,7 @@ class SearchResultModel:
     _bucket_starts_array_cache: Optional[np.ndarray] = None
 
     def __init__(self, dataframe: Optional[pd.DataFrame] = None, *, lazy_bucketize: bool = False):
+        self._event_compress_version = 0
         self._buckets: dict[int, _SearchResultBucket] = {}
         self._bucket_order: list[int] = []
         self._rating_counts_cache: Optional[dict[str, int]] = None
@@ -475,7 +507,7 @@ class SearchResultModel:
             return
         if len(self._buckets) == 1:
             bucket = self._buckets[self._bucket_order[0]]
-            if not bucket.consumed_indices:
+            if not bucket.excluded_indices:
                 self.df = bucket.df
                 self._materialized_current = True
                 return
@@ -547,11 +579,13 @@ class SearchResultModel:
             self._add_bucketed_dataframe(pending)
         self._refresh_legacy_df_pointer()
 
+    @_pool_locked
     def append_dataframe(self, new_df: pd.DataFrame):
         """기존 결과에 새로운 데이터프레임을 추가합니다."""
         if new_df is None or new_df.empty:
             return
         if self._pending_dataframe is not None:
+            self._event_compress_version += 1
             self._pending_dataframe = pd.concat(
                 [self._pending_dataframe, new_df.reset_index(drop=True)],
                 ignore_index=True,
@@ -559,20 +593,25 @@ class SearchResultModel:
             self._rating_counts_cache = None
             self._refresh_legacy_df_pointer()
             return
+        self._event_compress_version += 1
         self._add_bucketed_dataframe(new_df)
         self._rating_counts_cache = None
         self._refresh_legacy_df_pointer()
 
+    @_pool_locked
     def set_dataframe(self, new_df: pd.DataFrame, *, lazy_bucketize: bool = False):
         """기존 데이터프레임을 안전하게 제거하고 새로운 데이터프레임으로 교체합니다."""
         import gc
+
+        self._event_compress_version += 1
 
         if new_df is self.df or new_df is self._pending_dataframe:
             new_df = new_df.copy()
 
         if hasattr(self, "df") and self.df is not None:
             try:
-                self.df.drop(self.df.index, inplace=True)
+                if not getattr(self, "_event_compress_in_flight", lambda: False)():
+                    self.df.drop(self.df.index, inplace=True)
             except Exception:
                 pass
             del self.df
@@ -664,6 +703,7 @@ class SearchResultModel:
         return int(sum(bucket.get_filtered_count(active_rating_keys) for bucket in self._buckets.values()))
 
     # [신규] 무작위 행을 추출하고 제거하는 메서드
+    @_pool_locked
     def pop_random_row(self, active_ratings: set = None) -> Optional[pd.Series]:
         """
         데이터프레임에서 무작위로 행 하나를 선택하여 반환하고, 원본에서는 제거합니다.
@@ -724,6 +764,7 @@ class SearchResultModel:
 
         return None
 
+    @_pool_locked
     def pop_random_row_matching(
         self,
         active_ratings: set = None,
@@ -855,6 +896,7 @@ class SearchResultModel:
             mask &= ~general.str.contains(pattern, regex=True, na=False)
         return mask
 
+    @_pool_locked
     def pop_random_row_matching_tags(
         self,
         active_ratings: set = None,
@@ -953,6 +995,7 @@ class SearchResultModel:
             total += int(mask.sum())
         return total
 
+    @_pool_locked
     def pop_random_row_with_id_filter(
         self,
         active_ratings: set = None,
@@ -1020,6 +1063,7 @@ class SearchResultModel:
         self._invalidate_caches()
         return None
 
+    @_pool_locked
     def deduplicate(self, subset: Optional[List[str]] = None):
         """데이터프레임의 중복된 행을 제거합니다."""
         if self.is_empty():
@@ -1031,3 +1075,24 @@ class SearchResultModel:
         df = self.get_dataframe()
         df = df.drop_duplicates(subset=subset, keep="first").reset_index(drop=True)
         self.set_dataframe(df)
+
+    @_pool_locked
+    def event_compress_snapshot(self):
+        """Immutable frame references and copied consumption masks; no string work."""
+        self._ensure_bucketized()
+        return [(key, self._buckets[key].df,
+                 set(self._buckets[key].consumed_indices),
+                 set(self._buckets[key].dropped_indices)) for key in self._bucket_order]
+
+    @_pool_locked
+    def set_event_compress_dropped(self, dropped):
+        """Apply a separate exclusion mask, preserving consumed rows and frames."""
+        self._ensure_bucketized()
+        by_bucket = {}
+        for key, index in dropped:
+            by_bucket.setdefault(key, set()).add(index)
+        for key, bucket in self._buckets.items():
+            bucket.dropped_indices = by_bucket.get(key, set()) - bucket.consumed_indices
+            bucket.invalidate_caches()
+        self._mark_bucket_data_changed()
+        self._refresh_legacy_df_pointer()

@@ -3335,7 +3335,7 @@ function paintEventCompressButton(state) {
   if (button) button.classList.toggle('is-on', !!(state && state.enabled));
 }
 function openEventCompressWindow() {
-  import('./js/features/eventCompressWindow.mjs?v=20261023-evc9').then(({createEventCompressWindow}) => {
+  import('./js/features/eventCompressWindow.mjs?v=20261023-evc12').then(({createEventCompressWindow}) => {
     if (!eventCompressWindow) {
       eventCompressWindow = createEventCompressWindow({
         document, window, escHtml, showToast,
@@ -3346,6 +3346,14 @@ function openEventCompressWindow() {
         onStateChange: paintEventCompressButton,
         // 처음 뜰 자리 = Search 창 오른쪽(사용자 지정 2026-10-23 - Search 창 안에는 자리가 없다).
         anchorRect: () => document.getElementById('tagFilterEventCompressBtn')?.closest('.dragpanel')?.getBoundingClientRect() || null,
+        // 커밋 되돌리기 = Tag Filter [재적용] 그대로(사용자 지시 2026-10-23 - Quick Filter 의 재적용과 같게).
+        canReapply: () => !!document.getElementById('tagFilterReapplyBtn') && !document.getElementById('tagFilterReapplyBtn').hidden,
+        reapplyTagFilter: () => {
+          const button = document.getElementById('tagFilterReapplyBtn');
+          if (!button || button.hidden) return false;
+          button.click();
+          return true;
+        },
       });
     }
     eventCompressWindow.toggleOpen();
@@ -5376,7 +5384,8 @@ const wsMessageHandlers = {
   autocomplete_result: m => (m && m.source === 'e621' ? (e621EventPanel && e621EventPanel.onSuggest(m)) : onAutocompleteResult(m)),
   translation_result: onTranslationResult,
   tag_filter_result: onTagFilterResult,
-  tag_filter_assigned: onTagFilterAssigned,
+  // 할당이 바뀌면(재적용 · 커밋 · 새 칩) 열린 이벤트 압축 창도 다시 묻는다.
+  tag_filter_assigned: m => { onTagFilterAssigned(m); eventCompressWindow?.refresh(); },
   tag_filter_stale: onTagFilterStale,
   tag_filter_update: onTagFilterUpdate,
   event_compress_state: m => { if (eventCompressWindow) eventCompressWindow.onState(m); else paintEventCompressButton(m); },

@@ -48,6 +48,8 @@ export function createEventCompressWindow({
   activeRatings = () => [],        // 지금 켜진 등급 ['g', 's', ...]
   onStateChange = null,            // (state) - Search 창 단추의 노란 테
   anchorRect = () => null,         // 처음 뜰 자리 = 이 사각형(Search 창)의 오른쪽 - 사용자 지정 2026-10-23
+  reapplyTagFilter = () => false,  // Tag Filter [재적용] 과 같은 일 - 칩 조건으로 다시 걸어 원래 풀로(커밋 되돌리기)
+  canReapply = () => false,        // 그 단추가 지금 쓸 수 있나(걸 조건이 있나)
 } = {}) {
   let panel = null;
   let state = null;                // GET /state
@@ -71,8 +73,11 @@ export function createEventCompressWindow({
   let waiting = false;             // 다시 세는 동안 창을 막는다
   let waitTimer = 0;
   let listSig = '';                // 목록을 다시 받을지 가르는 서명(풀 · 이벤트 수 · 켬)
+  let commitRows = 0;              // 지금 컷 · 찾기로 커밋하면 Tag Filter 에 남을 행 수(서버가 센다)
+  let eventsSig = '';              // 그 수를 센 분석의 서명 - 커밋 때 함께 보내 그사이 풀이 바뀌었으면 서버가 거절한다
   let sizedThisLaunch = false;     // 앱을 켠 뒤 처음 열 때 한 번 - 최소 폭으로 접는다(사용자 지시)
   let drag = null;
+  let refreshTimer = 0;
 
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
   const fmt = n => (Number(n) || 0).toLocaleString();
@@ -94,8 +99,11 @@ export function createEventCompressWindow({
   /** 서버에 보낼 컷 - 전체 범위와 같으면 보내지 않는다(분포가 바뀌어도 '끝까지' 가 유지되게). */
   function cutParams() {
     const p = {};
-    if (cut.min != null && cut.min > histMin) p.min_tags = String(cut.min);
-    if (cut.max != null && cut.max < histMax) p.max_tags = String(cut.max);
+    // 기억한 컷은 그대로 보낸다 - '끝까지' 는 손잡이를 끝에 놓을 때 null 로 저장된다(commitCut).
+    // 지금 분포의 끝값과 비교해 빼면 안 된다: 막 연 창(분포 모름)이나, 커밋 직후(풀이 24–45 뿐이라 끝값 = 컷)
+    // 다음 목록이 컷 없이 세어 [커밋 n행] 이 실제와 달랐다(실측 196 vs 184 · 468 vs 256).
+    if (cut.min != null) p.min_tags = String(cut.min);
+    if (cut.max != null) p.max_tags = String(cut.max);
     return p;
   }
 
@@ -130,7 +138,8 @@ export function createEventCompressWindow({
       + `<div class="ecw-tools"><span class="ecw-sortbox"><select class="mod-select-sm" data-ecw-sort aria-label="정렬">`
       + `<option value="desc">큰 묶음 먼저</option><option value="asc">작은 묶음 먼저</option></select></span>`
       + `<span class="ecw-qbox"><input type="search" class="ecw-q" data-ecw-q placeholder="태그로 찾기" autocomplete="off" spellcheck="false">`
-      + `<div class="ecw-ac" data-ecw-ac hidden></div></span></div>`
+      + `<div class="ecw-ac" data-ecw-ac hidden></div></span>`
+      + `<span class="ecw-cmt" data-ecw-cmt></span></div>`
       + `<div class="ecw-list" data-ecw-list></div>`
       + `<div class="ecw-pe" data-ecw-pe></div>`
       + `<div class="ecw-wait" data-ecw-wait hidden><span>이벤트를 다시 세는 중…</span></div></div>`;
@@ -160,7 +169,8 @@ export function createEventCompressWindow({
     else {
       count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> `
         + `<b class="ecw-events">${fmt(s.events)}</b> <span class="ecw-dim">이벤트</span>`
-        + (on ? '' : ' <span class="ecw-dim">(미적용)</span>');
+        // 꺼져 있으면 세어 보여 주기만 한다 - 풀(Random 이 뽑는 행)은 그대로다(사용자 질문 2026-10-23: '미적용' 이 무슨 뜻).
+        + (on ? '' : ' <span class="ecw-dim" title="압축이 꺼져 있습니다 - 이벤트 수는 세어 보여 주기만 하고 풀은 줄이지 않았습니다">(세기만 · 풀 그대로)</span>');
     }
     const html = `<button type="button" class="ecw-toggle${on ? ' is-on' : ''}" data-ecw-toggle${busy === 'toggle' ? ' disabled' : ''}`
       + ` title="켜면 이벤트마다 1행만 풀에 남깁니다 · 끄면 뺀 행을 되돌립니다(Random 이 이미 쓴 행은 그대로)">`
@@ -254,6 +264,23 @@ export function createEventCompressWindow({
     }
   }
 
+  /** [커밋 · n행] = 걸러진 이벤트로 Tag Filter 를 좁힌다(새 검색처럼) · [재적용] = 칩 조건으로 다시 걸어 되돌린다(사용자 지시 2026-10-23). */
+  function renderCommit() {
+    const el = panel?.body.querySelector('[data-ecw-cmt]');
+    if (!el) return;
+    const scopeOk = !!state && state.scope === 'tag_filter' && !state.error;
+    const ready = scopeOk && !state.computing && !state.stale && commitRows > 0 && !busy;
+    const on = !!(state && state.enabled);
+    const title = !scopeOk
+      ? 'Tag Filter 가 걸려 있을 때만 커밋합니다'
+      : `걸러진 이벤트(태그 수 컷 · 찾기)로 Tag Filter 를 좁힙니다 - ${on ? '이벤트마다 1행' : '이벤트의 행 전부'}. 다 쓰면 이 행들로 다시 채웁니다. [재적용] 으로 원래 풀로 돌아갑니다`;
+    const html = `<button type="button" class="ecw-commit" data-ecw-commit${ready ? '' : ' disabled'} title="${escAttr(title)}">`
+      + `커밋 · ${fmt(commitRows)}행</button>`
+      + `<button type="button" class="ecw-reapply" data-ecw-reapply${canReapply() && !busy ? '' : ' disabled'}`
+      + ` title="Tag Filter [재적용] 과 같습니다 - 칩 조건으로 다시 걸어 원래 풀로 돌아갑니다(커밋 되돌리기)">↻ 재적용</button>`;
+    if (el._html !== html) { el._html = html; el.innerHTML = html; }
+  }
+
   function renderPe() {
     const el = panel?.body.querySelector('[data-ecw-pe]');
     if (!el) return;
@@ -289,6 +316,7 @@ export function createEventCompressWindow({
     renderTop();
     renderCut();
     renderList();
+    renderCommit();
     renderPe();
     renderWait();
   }
@@ -365,6 +393,10 @@ export function createEventCompressWindow({
       const got = Array.isArray(body.items) ? body.items : [];
       items = more ? items.concat(got) : got;
       total = Number(body.total) || items.length;
+      if (!more) {
+        commitRows = Number(body.commit_rows) || 0;
+        eventsSig = String(body.events_signature || '');
+      }
       if (body.tag_count_hist && typeof body.tag_count_hist === 'object') {
         hist = body.tag_count_hist;
         histMin = Number(body.tag_count_min) || 0;
@@ -383,6 +415,7 @@ export function createEventCompressWindow({
     }
     renderCut();
     renderList();
+    renderCommit();
   }
 
   async function loadAc() {
@@ -430,6 +463,37 @@ export function createEventCompressWindow({
     }
   }
 
+  async function commit() {
+    if (busy || waiting || !commitRows) return;
+    busy = 'commit';
+    startWaiting();
+    renderCommit();
+    const cutNow = cutParams();
+    try {
+      const body = await postJson('/api/event-compress/commit', {
+        min_tags: cutNow.min_tags != null ? Number(cutNow.min_tags) : null,
+        max_tags: cutNow.max_tags != null ? Number(cutNow.max_tags) : null,
+        q: query, events_signature: eventsSig,
+      });
+      showToast(`${fmt(body.committed)}행으로 Tag Filter 를 좁혔습니다 - [재적용] 으로 원래 풀로 돌아갑니다`, 'info');
+      if (body.state) applyState(body.state); else void refreshState();
+    } catch (error) {
+      stopWaiting();
+      showToast(error.message || String(error), 'error');
+      void loadList(false);          // 풀이 바뀌어 거절됐으면(stale) 새 목록 · 새 수로
+    } finally {
+      busy = '';
+      renderCommit();
+    }
+  }
+
+  function reapply() {
+    if (busy || waiting || !canReapply()) return;
+    if (!reapplyTagFilter()) { showToast('다시 걸 Tag Filter 조건이 없습니다', 'error'); return; }
+    // 다시 걸린 풀은 tag_filter_assigned 로 알려진다(app.js 가 refresh 를 부른다) - 그때까지 막는다.
+    startWaiting();
+  }
+
   async function act(kind) {
     if (busy || waiting || !open) return;
     const item = items.find(it => it.key === open);
@@ -450,6 +514,8 @@ export function createEventCompressWindow({
   function onClick(event) {
     if (waiting) return;
     if (event.target.closest('[data-ecw-toggle]')) { void toggle(); return; }
+    if (event.target.closest('[data-ecw-commit]')) { void commit(); return; }
+    if (event.target.closest('[data-ecw-reapply]')) { reapply(); return; }
     const acItem = event.target.closest('[data-ecw-ac-i]');
     if (acItem) { pickAc(Number(acItem.dataset.ecwAcI)); return; }
     const rating = event.target.closest('[data-ecw-rating]');
@@ -604,8 +670,12 @@ export function createEventCompressWindow({
       stateSeq += 1;                   // 도는 GET 의 늦은 답이 이것을 덮지 않게
       applyState(next);
     },
-    /** PE 설정 · 등급이 다른 곳에서 바뀌었다 - 열려 있으면 다시 묻는다. */
-    refresh() { void refreshState(); },
+    /** PE 설정 · 등급 · Tag Filter 할당이 다른 곳에서 바뀌었다 - 열려 있으면 다시 묻는다(몰려 오면 한 번). */
+    refresh() {
+      if (!panel || !panel.isOpen()) return;
+      clearTimeout(refreshTimer);
+      refreshTimer = win.setTimeout(() => { refreshTimer = 0; renderCommit(); void refreshState(); }, 250);
+    },
     isOpen: () => !!(panel && panel.isOpen()),
   };
 }

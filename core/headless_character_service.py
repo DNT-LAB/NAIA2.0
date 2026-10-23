@@ -258,6 +258,29 @@ def _active_duplicate(frames: Any, prompt: Any, uc: Any) -> tuple[int, dict[str,
     return None
 
 
+def _remove_if_match(value: Any) -> dict[str, Any] | None:
+    """`remove_character_N` 의 조건 값 `{"if_match": {"prompt", "uc"}}` - 그 슬롯이 **지금도** 이 캐릭터일 때만 지운다.
+
+    REF & VIBE [REF+프롬프트 해제](사용자 지시 2026-10-23)가 보낸다. 화면이 맞춰 본 뒤 번호로 지우면, 그사이 고친
+    슬롯(`alice` -> `alice, new outfit`)까지 지워진다(Codex 리뷰) - 그래서 서버가 지금의 내용으로 다시 본다.
+    """
+    if isinstance(value, str) and value.strip().startswith("{"):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(value, dict) and isinstance(value.get("if_match"), dict):
+        return value["if_match"]
+    return None
+
+
+def _same_active_character(frame: Any, expected: dict[str, Any]) -> bool:
+    if not isinstance(frame, dict) or _state_of(frame) != "active":
+        return False
+    mark = _set_mark(frame.get("prompt"), frame.get("uc"))
+    return mark is not None and mark == _set_mark(expected.get("prompt"), expected.get("uc"))
+
+
 _SESSION_TOKEN = re.compile(r"__\d{8}_\d{6}_cw__")
 
 
@@ -1042,8 +1065,14 @@ class HeadlessCharacterService:
             #    조건 없는 삭제(퀵 패널의 − · 히스토리의 ✕ · 옛 화면의 `true`)는 그대로다.
             if str(value or "").strip().lower() == "if_empty" and not _slot_is_untouched(_target):
                 return self.state()
+            # `{"if_match": {prompt, uc}}` = 지금도 그 캐릭터인 활성 슬롯일 때만 지운다. 사용자가 '이 캐릭터를 걷어라' 고
+            # 짚은 것이라 마지막 하나여도 지운다(캐릭터 0 은 유효한 상태 - 아래 주석).
+            expected = _remove_if_match(value)
+            if expected is not None and not _same_active_character(_target, expected):
+                return self.state()
             # 세션 와일드카드 슬롯은 마지막 하나여도 뺀다 - 이 세션에만 있는 임시 칸이다(사용자 지시 2026-10-19).
-            if _target is not None and (len(frames) > 1 or _stored or bool(_target.get("session_wildcard"))):
+            if _target is not None and (len(frames) > 1 or _stored or bool(_target.get("session_wildcard"))
+                                        or expected is not None):
                 # 삭제로 활성이 0이 될 수 있다. 승격시키지 않는다 - 캐릭터 0은
                 # 유효한 상태이고(모듈을 끄거나 Cold 로 비우는 경로가 이미 그렇다)
                 # 사용자가 지우려던 것을 되살리는 쪽이 더 놀랍다.

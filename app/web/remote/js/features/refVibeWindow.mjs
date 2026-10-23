@@ -1359,15 +1359,24 @@ export function createRefVibeWindow({
     return activeCharacterSlots().filter(({character}) => promptMark(character.prompt, character.uc) === mark);
   }
 
-  /** 이 그림의 캐릭터 프롬프트와 꼭 같은 슬롯을 걷는다(뒤 번호부터 - 앞을 지우면 뒤 번호가 당겨진다). */
+  /** 이 그림의 캐릭터 프롬프트와 꼭 같은 슬롯을 걷는다(뒤 번호부터 - 앞을 지우면 뒤 번호가 당겨진다).
+   *  지우는 조건은 서버가 **지금의 내용**으로 다시 본다(`if_match`) - 그사이 고친 슬롯은 안 지운다(Codex 리뷰 2026-10-23).
+   *  끝났는지는 다음 상태로 확인해 알린다 - 보냈다고 지워진 것이 아니다. */
   function releaseCharacterPrompt(item) {
     const slots = matchingCharacterSlots(item).sort((a, b) => b.index - a.index);
+    if (!slots.length) return;
+    const condition = JSON.stringify({if_match: {prompt: String(item.character_prompt || ''), uc: String(item.character_uc || '')}});
     let sent = 0;
     slots.forEach(({character, index}) => {
-      if (setModuleParam('character', `remove_character_${index}`, 'true', {slotUuid: character.slot_uuid}) !== false) sent += 1;
+      if (setModuleParam('character', `remove_character_${index}`, condition, {slotUuid: character.slot_uuid}) !== false) sent += 1;
     });
-    if (slots.length && sent < slots.length) showToast('연결이 끊겨 캐릭터 슬롯을 다 걷지 못했습니다', 'error');
-    else if (sent) showToast(`${itemName(item)} 의 캐릭터 슬롯도 걷었습니다`, 'info');
+    if (sent < slots.length) { showToast('연결이 끊겨 캐릭터 슬롯을 다 걷지 못했습니다', 'error'); return; }
+    const name = itemName(item);
+    win.setTimeout(() => {
+      const left = matchingCharacterSlots(item).length;
+      showToast(left ? `${name} 의 캐릭터 슬롯 ${left}개를 걷지 못했습니다 - 슬롯에서 직접 지워 주세요`
+        : `${name} 의 캐릭터 슬롯도 걷었습니다`, left ? 'error' : 'info');
+    }, 1200);
   }
 
   /** 서버가 돌려준 항목으로 CR 목록을 고친다 - 저장하는 사이 탭을 바꿨어도 CR 쪽을 고친다. */
@@ -1426,6 +1435,7 @@ export function createRefVibeWindow({
   let cpBox = null;            // 열린 추가 · 편집 창 {el, hash, extracted, extracting}
   function closeCharacterPrompt() {
     if (!cpBox) return;
+    cpBox.endDrag?.();                 // 끌던 중에 Esc 로 닫아도 문서의 pointermove/up 이 남지 않게(Codex 리뷰 2026-10-23)
     cpBox.el.remove();
     doc.removeEventListener('keydown', onCharacterPromptKey, true);
     cpBox = null;
@@ -1485,12 +1495,15 @@ export function createRefVibeWindow({
         el.style.left = `${Math.round(left)}px`;
         el.style.top = `${Math.round(top)}px`;
       };
+      const box = cpBox;
       const up = () => {
         el.classList.remove('is-drag');
         doc.removeEventListener('pointermove', move);
         doc.removeEventListener('pointerup', up);
         doc.removeEventListener('pointercancel', up);
+        if (box && box.endDrag === up) box.endDrag = null;
       };
+      if (box) box.endDrag = up;
       doc.addEventListener('pointermove', move);
       doc.addEventListener('pointerup', up);
       doc.addEventListener('pointercancel', up);

@@ -32888,3 +32888,13 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 /* 썸네일 확대 - Character Find 의 .cq-find-zoom 옷 그대로 · 정사각 그림이라 폭만 조금 넓힌다. */
 .cq-find-zoom.rvw-zoom { width: 300px; z-index: var(--z-floating-select-open); }
 .cq-find-zoom.rvw-zoom img { object-fit: contain; }   /* 그림 제 비율 - 정사각으로 두면 가로 그림에 검은 띠가 컸다 */
+
+/* 활성 칸 표시(사용자 지시 2026-10-23 - 위치를 기억하고 해제) - 썸네일 왼쪽 아래 V3 · 고른 줄 이름 옆에도. */
+.rvw-card.is-applied { border-color: rgba(124,106,239,.75); }
+.rvw-card-slot {
+  position: absolute; left: 3px; bottom: 19px; padding: 0 5px; border-radius: 4px;
+  background: rgba(124,106,239,.92); color: #fff; font: 600 9.5px var(--font-mono); line-height: 15px;
+}
+.rvw-card-slot.is-inline { position: static; flex: 0 0 auto; }
+.rvw-btn.is-release { border-color: rgba(232,195,122,.6); color: #f0d49a; }
+.rvw-btn.is-release:hover { background: rgba(232,195,122,.14); border-color: #e8c37a; color: #fff; }

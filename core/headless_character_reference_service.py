@@ -303,6 +303,18 @@ class HeadlessCharacterReferenceService:
             settings = reference_settings(library.metadata("character_reference", file_hash).get("settings"))
             if isinstance(request.get("settings"), dict):
                 settings = reference_settings({**settings, **request["settings"]})
+            # 이미 활성에 있으면 새 칸을 만들지 않고 그 칸을 켠다(사용자 제보 2026-10-23 - [적용] 을 누를 때마다 쌓였다).
+            existing = next((f for f in context.character_reference_frames if str(f.get("file_hash") or "") == file_hash), None)
+            if existing is not None:
+                existing["is_enabled"] = True
+                if isinstance(request.get("settings"), dict):
+                    existing.update(settings)
+                    library.record("character_reference", file_hash, used=True, settings=settings)
+                else:
+                    library.record("character_reference", file_hash, used=True)
+                context._disable_all_vibe_frames()
+                self._persist()
+                return self.module_state()
             image_path = context._existing_save_path("character_reference", "images", f"{file_hash}.png")
             if not image_path.exists():
                 return context._toast("Character reference storage item not found", level="error")

@@ -1006,8 +1006,6 @@ class HeadlessVibeTransferService:
 
     def apply_storage(self, value: str) -> dict[str, Any] | None:
         context = self.context
-        if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
-            return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
         from core.ref_vibe_library import clean_encodings, finite, get_ref_vibe_library, safe_component
 
         try:
@@ -1038,6 +1036,20 @@ class HeadlessVibeTransferService:
                                                  finite(data.get("reference_strength"), 0.6)))))
             selected_ie = float(ie_text)
             closest_ie = min((float(key) for key in encodings.keys()), key=lambda key: abs(key - selected_ie))
+            # 이미 활성에 있으면 새 칸을 만들지 않고 **그 칸**을 고친다(사용자 제보 2026-10-23: [적용] 을 누를 때마다 같은 Vibe 가
+            # V8 ~ V13 으로 쌓였다). 같은 모델이면 인코딩을 합치고, 다른 모델 폴더에서 왔으면 갈아 끼운다(모델끼리 섞지 않는다).
+            existing = next((f for f in context.vibe_transfer_frames if str(f.get("file_hash") or "") == file_hash), None)
+            if existing is not None:
+                merged = dict(existing.get("vibe_encodings") or {}) if existing.get("source_model") == model else {}
+                merged.update(encodings)
+                existing.update(vibe_encodings=merged, information_extracted=closest_ie, is_enabled=True, source_model=model)
+                if request.get("rs") is not None:
+                    existing["reference_strength"] = strength
+                library.record("vibe", file_hash, used=True, ie=closest_ie, rs=existing.get("reference_strength"))
+                context._disable_all_character_reference_frames()
+                return None
+            if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+                return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
             image_path = context._existing_save_path("vibe_transfer", model, "images", f"{file_hash}.png")
             thumb = ""
             image_bytes = b""

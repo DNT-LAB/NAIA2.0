@@ -507,6 +507,22 @@ export function createRefVibeWindow({
       + (state.items.length && state.items.length < state.total ? `<div class="rvw-more">${state.items.length} / ${state.total}</div>` : '');
   }
 
+  /** 이 보관 항목이 활성 몇 번 칸에 있나(0 부터). 같은 것이 여러 칸이면 전부 - 예전 [적용] 이 쌓아 둔 것까지 [해제] 가 걷는다. */
+  function activeSlots(hash, kind = tab) {
+    return (getModuleState(KINDS[kind])?.frames || [])
+      .map((frame, index) => (String(frame.file_hash || '') === String(hash) ? index : -1))
+      .filter(index => index >= 0);
+  }
+
+  function slotLabel(slots) {
+    const letter = tab === 'vibe' ? 'V' : 'R';
+    return slots.length > 1 ? `${letter}${slots[0] + 1}+${slots.length - 1}` : `${letter}${slots[0] + 1}`;
+  }
+
+  function appliedSig() {
+    return (getModuleState(KINDS[tab])?.frames || []).map(f => f.file_hash).join('|');
+  }
+
   function storeCard(item) {
     const hash = String(item.file_hash || '');
     const name = String(item.display_name || item.name || item.file_name || hash);
@@ -515,7 +531,9 @@ export function createRefVibeWindow({
       ? `<span class="rvw-card-im is-empty">enc</span>`
       : `<img class="rvw-card-im" loading="lazy" draggable="false" src="${escHtml(item.thumbnail_url)}" alt="">`;
     const ieCount = tab === 'vibe' ? `<span class="rvw-card-ie">${(item.encoding_keys || []).length}</span>` : '';
-    return `<button type="button" class="rvw-card${selected}" draggable="true" data-rvw-card="${escHtml(hash)}">${img}`
+    const slots = activeSlots(hash);
+    return `<button type="button" class="rvw-card${selected}${slots.length ? ' is-applied' : ''}" draggable="true" data-rvw-card="${escHtml(hash)}">${img}`
+      + (slots.length ? `<span class="rvw-card-slot" data-naia-title="활성 ${slotLabel(slots)} 칸에 있습니다">${slotLabel(slots)}</span>` : '')
       + (item.favorite ? `<span class="rvw-card-star">★</span>` : '')
       + ieCount + `<span class="rvw-card-lb">${escHtml(name)}</span></button>`;
   }
@@ -539,18 +557,24 @@ export function createRefVibeWindow({
     if (!item) return '';
     const state = lib[tab];
     const name = escHtml(String(item.display_name || item.name || item.file_hash));
+    const slots = activeSlots(item.file_hash);
     let middle = '';
     if (tab === 'vibe') {
       const keys = (item.encoding_keys || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
-      const pick = state.ie ?? defaultIe(item);
+      const frame = slots.length ? (getModuleState(KINDS.vibe)?.frames || [])[slots[0]] : null;
+      const pick = frame ? Number(frame.information_extracted) : (state.ie ?? defaultIe(item));
       middle = `<span class="rvw-k">IE</span>` + keys.map(k => `<button type="button" class="rvw-chip${Math.abs(k - pick) < 1e-6 ? ' on' : ''}" data-rvw-pickie="${fmt(k)}">${fmt(k)}</button>`).join('');
     } else {
       const s = item.settings || {};
       middle = `<span class="rvw-hint">${escHtml(String(s.reference_type || 'character&style'))} · S ${fmt(s.strength ?? 1)} · F ${fmt(s.fidelity ?? 0.8)}</span>`;
     }
-    return `<div class="rvw-pick"><span class="rvw-pick-n">${name}</span>${middle}`
+    return `<div class="rvw-pick"><span class="rvw-pick-n">${name}</span>`
+      + (slots.length ? `<span class="rvw-card-slot is-inline">${slotLabel(slots)}</span>` : '')
+      + middle
       + `<span class="rvw-pick-tools">`
-      + `<button type="button" class="rvw-btn is-accent" data-rvw-act="apply">적용</button>`
+      + (slots.length
+        ? `<button type="button" class="rvw-btn is-release" data-rvw-act="release" data-naia-title="활성 ${slotLabel(slots)} 칸에서 뺍니다">해제</button>`
+        : `<button type="button" class="rvw-btn is-accent" data-rvw-act="apply">적용</button>`)
       + `<button type="button" class="rvw-btn" data-rvw-act="rename">이름</button>`
       + `<button type="button" class="rvw-btn${item.favorite ? ' is-on' : ''}" data-rvw-act="fav">★</button>`
       + `<button type="button" class="rvw-btn" data-rvw-act="catmenu" data-naia-title="카테고리로 옮깁니다 - 썸네일을 왼쪽 카테고리에 끌어 놓아도 됩니다">카테고리 ▾</button>`
@@ -655,10 +679,20 @@ export function createRefVibeWindow({
   }
 
   // ── 보관 항목 동작 ────────────────────────────────────────────────────────
+  function releaseSelected() {
+    const item = selectedItem();
+    if (!item) return;
+    activeSlots(item.file_hash).sort((a, b) => b - a).forEach(index => {
+      openRows.delete(`${tab}:${index}`);
+      setModuleParam(KINDS[tab], `remove_frame_${index}`, '');
+    });
+  }
+
   function applySelected() {
     const item = selectedItem();
     if (!item) return;
     const state = lib[tab];
+    if (activeSlots(item.file_hash).length) return;      // 이미 활성 - 두 번 누르면 쌓이던 결함(사용자 제보 2026-10-23)
     if (tab === 'vibe') {
       const ie = state.ie ?? defaultIe(item);
       setModuleParam(KINDS.vibe, 'apply_storage', JSON.stringify({model: state.model, file_hash: item.file_hash, ie}));
@@ -1205,6 +1239,10 @@ export function createRefVibeWindow({
       return;
     }
     if ((el = t.closest('[data-rvw-pickie]'))) {
+      const item = selectedItem();
+      const slots = item ? activeSlots(item.file_hash) : [];
+      // 이미 활성이면 그 칸의 IE 를 바꾼다(칸을 더 만들지 않는다).
+      if (slots.length) slots.forEach(index => setModuleParam(KINDS.vibe, `info_extracted_${index}`, el.dataset.rvwPickie));
       lib.vibe.ie = Number(el.dataset.rvwPickie);
       renderStore();
       return;
@@ -1215,6 +1253,7 @@ export function createRefVibeWindow({
       else if (act === 'paste') pasteImage(moduleId, {quiet: true});
       else if (act === 'import') openImportMenu(el);
       else if (act === 'apply') applySelected();
+      else if (act === 'release') releaseSelected();
       else if (act === 'rename') renameSelected();
       else if (act === 'fav') { const item = selectedItem(); if (item) setFavorite(item.file_hash, !item.favorite); }
       else if (act === 'catmenu') openCategoryMenu(el);
@@ -1270,7 +1309,10 @@ export function createRefVibeWindow({
             + `<span class="rvw-menu-mark">◆</span>${escHtml(c.name)}</button>`).join('')
           : `<div class="rvw-menu-h">클러스터가 없습니다</div>`)
       : '';
-    openMenu(point, `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`
+    const applied = activeSlots(item.file_hash);
+    openMenu(point, (applied.length
+      ? `<button type="button" class="rvw-menu-i" data-rvw-menu="release"><span class="rvw-menu-mark">■</span>해제 (${slotLabel(applied)})</button>`
+      : `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`)
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
@@ -1278,6 +1320,7 @@ export function createRefVibeWindow({
       + `<div class="rvw-menu-sep"></div>`
       + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete"><span class="rvw-menu-mark"></span>보관함에서 삭제</button>`, async op => {
       if (op === 'apply') applySelected();
+      else if (op === 'release') releaseSelected();
       else if (op === 'rename') renameSelected();
       else if (op === 'fav') setFavorite(item.file_hash, !item.favorite);
       else if (op === 'delete') deleteSelected();
@@ -1327,8 +1370,18 @@ export function createRefVibeWindow({
       previewKey = source.key;
       previewEl.innerHTML = `<img alt="" decoding="async" src="${escHtml(source.src)}">`
         + `<div class="cq-find-zoom-cap"><b>${escHtml(source.title)}</b><span>${escHtml(source.note)}</span></div>`;
+      // ⚠️ 처음 올렸을 때는 큰 그림이 아직 안 받아져 카드 높이가 글줄뿐이다 - 그 높이로 자리를 잡으면 그림이 들어온 뒤
+      //    화면 아래로 삐져나갔다(사용자 제보 2026-10-23: 두 번째부터는 캐시라 맞았다). 그림이 들어오면 다시 앉힌다.
+      const img = previewEl.querySelector('img');
+      const key = source.key;
+      if (img && !img.complete) img.addEventListener('load', () => { if (previewKey === key && !previewEl.hidden) placePreview(source); }, {once: true});
     }
     previewEl.hidden = false;
+    placePreview(source);
+  }
+
+  function placePreview(source) {
+    if (!source.anchor.isConnected) return;
     const margin = 8;
     const winBox = panel.el.getBoundingClientRect();
     const row = source.anchor.getBoundingClientRect();
@@ -1336,7 +1389,7 @@ export function createRefVibeWindow({
     const height = previewEl.offsetHeight;
     let left = winBox.left - width - margin;
     if (left < margin) left = Math.min(win.innerWidth - width - margin, winBox.right + margin);
-    const top = Math.min(Math.max(margin, row.top + row.height / 2 - height / 2), win.innerHeight - height - margin);
+    const top = Math.max(margin, Math.min(row.top + row.height / 2 - height / 2, win.innerHeight - height - margin));
     previewEl.style.left = `${Math.round(left)}px`;
     previewEl.style.top = `${Math.round(top)}px`;
   }
@@ -1437,10 +1490,13 @@ export function createRefVibeWindow({
       const sig = frameSig(getModuleState(moduleId));
       lastFrameSig[moduleId] = sig;
       renderActive();
+      const applied = appliedSig();
+      if (applied !== lastAppliedSig[tab] && !inClusters()) { lastAppliedSig[tab] = applied; renderStore(); }
       if (before !== undefined && before !== sig && tab === 'vibe' && !inClusters()) loadLibrary(true);
     }
   }
   const lastFrameSig = {};
+  const lastAppliedSig = {};
   function frameSig(state) {
     return (state?.frames || []).map(f => `${f.file_hash}:${(f.encoding_keys || []).length}`).join('|');
   }

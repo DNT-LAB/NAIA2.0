@@ -48,7 +48,10 @@ export function createCharacterWindow({
   const readGender = () => { try { return storage?.getItem(GENDER_KEY) || 'girl'; } catch (_) { return 'girl'; } };
 
   // 검색 상태 - 바뀌면 결과(덩어리 캐시)를 처음부터.
-  const state = {query: '', group: '__ALL__', gender: readGender(), fav: false, inc: [], exc: []};
+  // hid = [제외] 보기 - 숨긴 캐릭터만(사용자 지시 2026-10-23: Characters 창에 제외가 없었다).
+  const state = {query: '', group: '__ALL__', gender: readGender(), fav: false, hid: false, inc: [], exc: []};
+  let hiddenAll = null;                 // [제외] 보기의 목록(/api/character-viewer/hidden) - 숨김이 바뀌면 버린다
+  let lastHidden = null;                // 마지막으로 숨긴 1명 {group, character, thumbnail_url} - 세션 동안만(새로고침하면 없다)
   let total = 0;
   let genderCounts = null;
   let seq = 0;                          // 조건이 바뀔 때마다 올린다 - 옛 응답은 버린다
@@ -56,7 +59,7 @@ export function createCharacterWindow({
   let stale = new Map();                // 바깥 갱신(softRefresh) 동안 보여 줄 옛 덩어리 - 새 것이 오면 그 덩어리만 바뀐다
   let aborts = new Map();
   let queryTimer = 0;
-  let selected = null;                  // {group, character, count, favorite}
+  let selected = null;                  // {group, character, count, favorite, hidden, thumbnail_url}
   let selectedLine = '';
   let selVariant = '';                  // 상세보기에서 고른 변형('' = Default) - 슬롯 · [생성] 이 그 변형으로 간다
   let busy = '';
@@ -91,7 +94,8 @@ export function createCharacterWindow({
       + `<div class="chw-tools"><input class="chw-q" type="search" data-chw-q spellcheck="false" autocomplete="off"`
       + ` placeholder="이름 · 한글 · 초성 · work:작품">`
       + `<span class="chw-seg" data-chw-seg></span>`
-      + `<button type="button" class="chw-tb" data-chw-fav title="즐겨찾기만">★</button></div>`
+      + `<button type="button" class="chw-tb" data-chw-fav title="즐겨찾기만">★</button>`
+      + `<button type="button" class="chw-tb is-hid" data-chw-hid title="제외 - 숨긴 캐릭터만 봅니다(고르면 [숨김 해제])">제외</button></div>`
       + `<div class="chw-feat" data-chw-feat></div>`
       + `<div class="chw-chips" data-chw-chips hidden></div>`
       + `<div class="chw-main"><div class="chw-groups"><input class="chw-gq" type="search" data-chw-gq placeholder="그룹 검색" spellcheck="false">`
@@ -163,6 +167,10 @@ export function createCharacterWindow({
     blocks.set(index, 'loading');
     if (ctrl) aborts.set(index, ctrl);
     try {
+      if (state.hid) {
+        await loadHiddenBlock(index, mine, ctrl);
+        return;
+      }
       const p = listParams();
       p.set('offset', String(index * BLOCK));
       p.set('limit', String(BLOCK));
@@ -188,6 +196,35 @@ export function createCharacterWindow({
       aborts.delete(index);
     }
     if (mine === seq) { paintTools(); layoutGrid(); }
+  }
+
+  /** [제외] 보기 - 숨긴 목록은 길지 않다. 한 번 받아 이름 검색 · 그룹으로 거르고 덩어리로 자른다(성별 · 필터는 보지 않는다). */
+  async function loadHiddenBlock(index, mine, ctrl) {
+    try {
+      if (!hiddenAll) {
+        const res = await fetch('/api/character-viewer/hidden', {cache: 'no-store', signal: ctrl?.signal});
+        const data = await res.json().catch(() => ({}));
+        if (mine !== seq) return;
+        if (!res.ok) throw new Error(data.error || '제외 목록을 불러오지 못했습니다.');
+        hiddenAll = (Array.isArray(data.items) ? data.items : []).map(it => ({
+          group: it.group, character: it.character, count: Number(it.danbooru_posts) || 0,
+          thumbnail_url: it.thumbnail_url || '', hidden: true,
+        }));
+      }
+      const q = state.query.trim().toLowerCase();
+      const shown = hiddenAll.filter(it => (!q || String(it.character).toLowerCase().includes(q))
+        && (state.group === '__ALL__' || state.group === GROUP_ETC || it.group === state.group));
+      total = shown.length;
+      blocks.set(index, shown.slice(index * BLOCK, (index + 1) * BLOCK));
+      stale.delete(index);
+    } catch (error) {
+      if (mine !== seq || error?.name === 'AbortError') return;
+      blocks.set(index, 'error');
+      if (failedSeq !== seq) { failedSeq = seq; showToast(error.message || String(error), 'error'); }
+    } finally {
+      aborts.delete(index);
+      if (mine === seq) { paintTools(); layoutGrid(); }
+    }
   }
 
   let groupSeq = 0;
@@ -251,7 +288,7 @@ export function createCharacterWindow({
       ? `<img loading="lazy" decoding="async" alt="" src="${escAttr(item.thumbnail_url)}">`
       : `<span class="chw-ini">${escHtml(String(item.character || '?').charAt(0).toUpperCase())}</span>`;
     // 즐겨찾기 칸은 테두리도 ★ 색(사용자 지시 2026-10-23) - 고른 칸(보라)과 겹치면 보라 테가 바깥에 더 둘린다.
-    return `<button type="button" class="chw-cell${on ? ' is-on' : ''}${item.favorite ? ' is-fav' : ''}" style="${style}" data-chw-i="${i}"`
+    return `<button type="button" class="chw-cell${on ? ' is-on' : ''}${item.favorite ? ' is-fav' : ''}${item.hidden ? ' is-hid' : ''}" style="${style}" data-chw-i="${i}"`
       // 툴팁은 달지 않는다 - 칸 아래 이름 · 작품과 같은 말이다(사용자 지시 2026-10-22). 화면 읽기용 이름만.
       + ` aria-label="${escAttr(`${item.character} · ${groupLabel(item.group)}`)}">`
       + `<div class="chw-im" style="height:${geo.cellW}px">${img}${item.favorite ? '<span class="chw-star">★</span>' : ''}</div>`
@@ -281,7 +318,9 @@ export function createCharacterWindow({
     }
     const count = el('[data-chw-count]');
     const label = blocks.get(0) === 'error' && !total ? '불러오지 못했습니다 - 검색을 바꾸거나 창을 다시 여세요'
-      : blocks.get(0) === 'loading' && !total ? '불러오는 중…' : total ? `${total.toLocaleString()}명` : '맞는 캐릭터가 없습니다';
+      : blocks.get(0) === 'loading' && !total ? '불러오는 중…'
+        : state.hid ? (total ? `제외 ${total.toLocaleString()}명` : '숨긴 캐릭터가 없습니다')
+          : total ? `${total.toLocaleString()}명` : '맞는 캐릭터가 없습니다';
     if (count.textContent !== label) count.textContent = label;
   }
 
@@ -322,6 +361,7 @@ export function createCharacterWindow({
     }).join('');
     if (seg._html !== html) { seg._html = html; seg.innerHTML = html; }
     el('[data-chw-fav]').classList.toggle('is-on', state.fav);
+    el('[data-chw-hid]').classList.toggle('is-on', state.hid);
     const chips = el('[data-chw-chips]');
     const chipHtml = [...state.inc.map(t => ['inc', t]), ...state.exc.map(t => ['exc', t])].map(([line, t]) =>
       `<button type="button" class="chw-chip is-${t.kind === 'work' ? 'work' : line}" data-chw-unchip="${line}"`
@@ -405,7 +445,7 @@ export function createCharacterWindow({
       + `${label} ${drawerMode === mode ? '▾' : '▴'}</button>`;
     const gopt = tog('gen', '생성 옵션', 'Prefix · 캐릭터 슬롯 · Postfix · 옵션')
       + tog('detail', '캐릭터 상세보기', '썸네일 · Variations · 색 · 특징 · 의상 · 프롬프트');
-    if (!selected) { box.innerHTML = `${gopt}<div class="chw-empty">캐릭터를 누르면 여기서 슬롯 · 풀 · 생성을 합니다.</div>`; return; }
+    if (!selected) { box.innerHTML = `${gopt}<div class="chw-empty">캐릭터를 누르면 여기서 슬롯 · 풀 · 생성을 합니다.</div>${undoHideHtml()}`; return; }
     const s = selected;
     const off = busy ? ' disabled' : '';
     box.innerHTML = `${gopt}<div class="chw-st"><b>${escHtml(s.character)}</b>`
@@ -420,15 +460,33 @@ export function createCharacterWindow({
       + `<button type="button" class="chw-act is-main" data-chw-act="genrandom"${off} title="메인 Random 으로 프롬프트를 새로 뽑고 이 캐릭터를 임시 C1 로 한 장">랜덤+생성</button>`
       + `<button type="button" class="chw-act${s.favorite ? ' is-on' : ''}" data-chw-act="fav"${off} title="즐겨찾기">★</button>`
       + `<button type="button" class="chw-act" data-chw-act="copy"${off} title="프롬프트 줄 복사">복사</button>`
-      + `<button type="button" class="chw-act is-hide" data-chw-act="hide"${off} title="숨김(검색 · 랜덤에서 빠진다 · Find [제외] 에서 되돌린다)">숨김</button>`
+      + (s.hidden
+        ? `<button type="button" class="chw-act is-hide" data-chw-act="unhide"${off} title="숨김을 풉니다 - 다시 검색 · 랜덤에 나옵니다">숨김 해제</button>`
+        : `<button type="button" class="chw-act is-hide" data-chw-act="hide"${off} title="숨김(검색 · 랜덤에서 빠진다 · [제외] 에서 되돌린다)">숨김</button>`)
       + `<button type="button" class="chw-act" data-chw-act="more"${off} title="썸네일 삭제 · Characters 탭에서 열기">⋯</button></div>`
       + `<div class="chw-more" data-chw-more hidden>`
       + `<button type="button" data-chw-act="delthumb">내 썸네일 삭제</button>`
-      + `<button type="button" data-chw-act="tab">Characters 탭에서 열기(연속 생성 등)</button></div>`;
+      + `<button type="button" data-chw-act="tab">Characters 탭에서 열기(연속 생성 등)</button></div>`
+      + undoHideHtml();
+  }
+
+  /** 아래 줄 오른쪽 끝 [↶ 마지막 숨김 취소] - 이 창에서 숨긴 적이 있을 때만 · 1명만 기억 · 세션 동안만(사용자 지시 2026-10-23).
+   *  올리면 숨긴 캐릭터의 썸네일이 툴팁처럼 뜬다. */
+  function undoHideHtml() {
+    if (!lastHidden) return '';
+    const h = lastHidden;
+    const img = h.thumbnail_url
+      ? `<img alt="" src="${escAttr(h.thumbnail_url)}">`
+      : `<span class="chw-ini">${escHtml(String(h.character || '?').charAt(0).toUpperCase())}</span>`;
+    return `<button type="button" class="chw-undohide" data-chw-undohide${busy ? ' disabled' : ''}>↶ 마지막 숨김 취소`
+      + `<span class="chw-undohide-tip" aria-hidden="true"><span class="chw-undohide-im">${img}</span>`
+      + `<span class="chw-undohide-nm">${escHtml(h.character)}</span>`
+      + `<span class="chw-undohide-gr">${escHtml(groupLabel(h.group))}</span></span></button>`;
   }
 
   async function select(item) {
-    selected = {group: item.group, character: item.character, count: item.count, favorite: !!item.favorite};
+    selected = {group: item.group, character: item.character, count: item.count, favorite: !!item.favorite,
+                hidden: !!item.hidden, thumbnail_url: item.thumbnail_url || ''};
     selVariant = '';
     // 고르기만 해도 생성 설정 창의 가상 슬롯에 담긴다(사용자 결정 2026-10-22).
     try { win.dispatchEvent(new CustomEvent('naia:character-picked', {detail: {group: item.group, character: item.character}})); } catch (_) {}
@@ -487,6 +545,15 @@ export function createCharacterWindow({
         if (!res.ok || data.ok === false) throw new Error(data.error || data.message || '생성 요청을 보내지 못했습니다.');
         showToast(random ? `${s.character} - 랜덤 프롬프트로 한 장 생성합니다` : `${s.character} - 메인 프롬프트로 한 장 생성합니다`, 'info');
       }
+      else if (kind === 'unhide') {
+        await setHidden(s.group, s.character, false);
+        showToast(`${s.character} - 숨김을 풀었습니다. 다시 검색 · 랜덤에 나옵니다`, 'info');
+        if (lastHidden && lastHidden.group === s.group && lastHidden.character === s.character) lastHidden = null;
+        selected = null;
+        selVariant = '';
+        selectedLine = '';
+        if (drawerMode === 'detail') void loadDetail();
+      }
       else if (kind === 'fav' || kind === 'hide') {
         const fav = kind === 'fav';
         const res = await fetch(fav ? '/api/character-viewer/favorite' : '/api/character-viewer/hidden', {
@@ -502,7 +569,8 @@ export function createCharacterWindow({
           // 자리를 지키며 새로(softRefresh - 이 창도 이 소식을 듣는다) · Find 도 같은 소식으로 갱신.
           try { win.dispatchEvent(new CustomEvent('naia:character-favorite-changed')); } catch (_) {}
         } else {
-          showToast(`${s.character} - 숨겼습니다. Find [제외] 에서 되돌립니다`, 'info');
+          showToast(`${s.character} - 숨겼습니다. [제외] 또는 아래 [마지막 숨김 취소] 로 되돌립니다`, 'info');
+          lastHidden = {group: s.group, character: s.character, thumbnail_url: s.thumbnail_url || ''};
           selected = null;
           selVariant = '';
           selectedLine = '';
@@ -533,7 +601,38 @@ export function createCharacterWindow({
   }
 
   // 바깥에서 목록이 바뀌었다 - 썸네일 저장(생성 완료) · 숨김/되돌림 · 즐겨찾기(Find 쪽에서도). 자리는 지키고 덩어리만 새로.
+  /** 숨김을 켜고 끈다 - 이 창 · Find · Characters 탭이 같은 소식(naia:character-hidden-changed)으로 새로 받는다. */
+  async function setHidden(group, character, hidden) {
+    const res = await fetch('/api/character-viewer/hidden', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({group, character, hidden}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || '처리하지 못했습니다.');
+    try { win.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (_) {}
+    return data;
+  }
+
+  /** [↶ 마지막 숨김 취소] - 기억한 1명의 숨김을 푼다. */
+  async function undoLastHide() {
+    if (!lastHidden || busy) return;
+    const h = lastHidden;
+    busy = 'undohide';
+    paintSel();
+    try {
+      await setHidden(h.group, h.character, false);
+      lastHidden = null;
+      showToast(`${h.character} - 숨김을 취소했습니다`, 'info');
+    } catch (error) {
+      showToast(error.message || String(error), 'error');
+    } finally {
+      busy = '';
+      paintSel();
+    }
+  }
+
   function softRefresh() {
+    hiddenAll = null;                                                  // [제외] 보기 목록도 새로(숨김이 바뀌었을 수 있다)
     if (!panel || !panel.isOpen()) { blocks = new Map(); return; }    // 닫혀 있으면 열 때 새로 받는다
     seq += 1;
     aborts.forEach(ctrl => { try { ctrl.abort(); } catch (_) {} });
@@ -805,7 +904,14 @@ export function createCharacterWindow({
       try { storage?.setItem(GENDER_KEY, state.gender); } catch (_) {}
       paintTools(); resetResults(); void loadGroups(); return;
     }
-    if (t.closest('[data-chw-fav]')) { state.fav = !state.fav; paintTools(); resetResults(); return; }
+    if (t.closest('[data-chw-fav]')) { state.fav = !state.fav; if (state.fav) state.hid = false; paintTools(); resetResults(); return; }
+    if (t.closest('[data-chw-hid]')) {
+      state.hid = !state.hid;
+      if (state.hid) state.fav = false;
+      hiddenAll = null;
+      paintTools(); resetResults(); return;
+    }
+    if (t.closest('[data-chw-undohide]')) { void undoLastHide(); return; }
     const lb = t.closest('[data-chw-lang]');
     if (lb) {
       lang = lb.dataset.chwLang === 'en' ? 'en' : 'ko';

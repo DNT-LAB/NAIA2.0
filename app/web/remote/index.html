@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261023-fav1">
+<link rel="stylesheet" href="style.css?v=20261023-evc1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -471,6 +471,8 @@
       <span class="tag-filter-count" id="tagFilterCount" title="현재 필터에 매칭되는 행 수"></span>
       <button type="button" class="tag-filter-reapply" id="tagFilterReapplyBtn" hidden
               data-naia-guide="같은 조건으로 다시 걸어 처음 수로 채웁니다 - 이미 쓴 행도 다시 뽑힐 수 있습니다.&#10;&#10;필터가 풀렸을 때(Search [Restore] · 검색) 는 수 자리에 '풀림' 이 뜨고 이 단추가 파랗게 바뀝니다 - 누르면 칩 조건을 다시 겁니다.">↻ 재적용</button>
+      <button type="button" class="tag-filter-reapply tag-filter-evc" id="tagFilterEventCompressBtn" onclick="openEventCompressWindow()"
+              data-naia-guide="이벤트 압축 창을 엽니다.&#10;&#10;이벤트 = 지금 PE 전처리(캐릭터 특징 · 색상 등 제거)를 건 뒤 남는 태그. 문자열은 달라도 전처리 뒤 같은 프롬프트가 되는 행들을 한 이벤트로 묶어 크기순으로 보여 주고, 압축을 켜면 이벤트마다 1행만 풀에 남깁니다.&#10;&#10;압축이 켜져 있으면 이 단추에 노란 테가 둘립니다.">⇊ 이벤트</button>
       <div class="module-rating-bar">
         <button class="rating-btn active" data-r="g" onclick="toggleRating('g')">G</button>
         <button class="rating-btn active" data-r="s" onclick="toggleRating('s')">S</button>
@@ -1571,6 +1573,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261023-findsync1"></script>
+<script src="app.js?v=20261023-evc3"></script>
 </body>
 </html>

@@ -32498,3 +32498,65 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
   .state-veil-spinner, .state-veil-bar-fill { animation: none; }
   .state-veil { transition: none; }
 }
+
+/* ── 이벤트 압축 창(사용자 지시 2026-10-23 · eventCompressWindow.mjs) ──────────────────────────────────────
+   Search 창 Tag Filter 의 [⇊ 이벤트] 가 연다. 켜짐 = 노란 테(Characters 창 [생성(메인)] 과 같은 색).
+   아래 '특징 제거' 칸은 PE 창의 .pe-opt-* 를 그대로 쓰고 칸 폭만 5열 최소 폭으로 바꾼다(사용자 지시 - 5x2). */
+.tag-filter-evc.is-on, .ecw-toggle.is-on { border-color: #a8742e; background: rgba(168,116,46,0.22); color: #ffd9a3; }
+.tag-filter-evc.is-on:hover, .ecw-toggle.is-on:hover:not(:disabled) { border-color: #d39a45; color: #ffe9c7; }
+.ecw-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.ecw-top {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px; flex: none;
+  border-bottom: 1px solid rgba(255,255,255,0.06); font-family: var(--font-mono); font-size: 11px;
+}
+.ecw-toggle {
+  flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--border-dim); border-radius: 6px;
+  background: var(--bg-elevated); color: var(--text-main); font-family: var(--font-mono); font-size: 11px; cursor: pointer; white-space: nowrap;
+}
+.ecw-toggle:hover:not(:disabled) { border-color: var(--accent-blue); }
+.ecw-toggle:disabled { opacity: 0.6; cursor: progress; }
+.ecw-count { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-primary); }
+.ecw-events { color: #ffd9a3; font-size: 14px; font-weight: 600; }
+.ecw-dim { color: var(--text-dim); }
+.ecw-ratings { display: flex; gap: 3px; flex: none; }
+.ecw-ratings .rating-btn { width: 22px; height: 22px; padding: 0; font-size: 10px; }
+.ecw-tools { display: flex; gap: 5px; align-items: center; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); flex: none; }
+.ecw-sort, .ecw-q {
+  height: 26px; padding: 0 8px; border-radius: 5px; background: rgba(0,0,0,0.34);
+  border: 1px solid var(--border-dim); color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
+}
+.ecw-q { flex: 1 1 auto; min-width: 0; }
+.ecw-q:focus, .ecw-sort:focus { outline: none; border-color: rgba(168,116,46,0.7); }
+.ecw-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.ecw-row { border-bottom: 1px solid rgba(255,255,255,0.04); }
+.ecw-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; }
+.ecw-head:hover { background: rgba(168,116,46,0.08); }
+.ecw-row.is-open .ecw-head { background: rgba(168,116,46,0.12); box-shadow: inset 2px 0 0 #a8742e; }
+.ecw-row.is-used .ecw-tags, .ecw-row.is-used .ecw-size { opacity: 0.45; }
+.ecw-tags { min-width: 0; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45; color: var(--text-primary); overflow-wrap: anywhere; }
+.ecw-r {
+  display: inline-block; min-width: 14px; margin-right: 6px; padding: 0 3px; border-radius: 3px; text-align: center;
+  font-size: 9.5px; color: #fff; background: rgba(255,255,255,0.18);
+}
+.ecw-r-g { background: #2e7d32; }
+.ecw-r-s { background: #1565C0; }
+.ecw-r-q { background: #e65100; }
+.ecw-r-e { background: #c62828; }
+.ecw-bar { height: 3px; margin-top: 3px; border-radius: 2px; background: rgba(168,116,46,0.75); }
+.ecw-size { font-family: var(--font-mono); font-size: 11px; color: #ffd9a3; white-space: nowrap; }
+.ecw-acts { display: flex; gap: 5px; padding: 0 10px 6px; background: rgba(168,116,46,0.12); }
+.ecw-act {
+  flex: 0 0 auto; min-width: 64px; padding: 3px 10px; border-radius: 5px; cursor: pointer; white-space: nowrap;
+  border: 1px solid rgba(124,106,239,0.55); background: rgba(124,106,239,0.1);
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
+}
+.ecw-act:hover:not(:disabled) { background: rgba(124,106,239,0.26); }
+.ecw-act.is-gen { border-color: #a8742e; background: rgba(168,116,46,0.18); color: #ffd9a3; }
+.ecw-act.is-gen:hover:not(:disabled) { border-color: #d39a45; color: #ffe9c7; }
+.ecw-act:disabled { opacity: 0.55; cursor: progress; }
+.ecw-empty, .ecw-more { padding: 14px 10px; color: var(--text-dim); font-family: var(--font-mono); font-size: 10.5px; text-align: center; }
+.ecw-more { padding: 8px 10px; }
+.ecw-pe { flex: none; padding: 6px 10px 9px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18); }
+.ecw-pe-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 5px; font-size: 10.5px; color: var(--text-dim); }
+.ecw-pe-head span { font-size: 9.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ecw-pe .pe-opt-list { grid-template-columns: repeat(5, max-content); gap: 3px 4px; }

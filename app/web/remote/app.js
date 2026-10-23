@@ -3328,6 +3328,29 @@ searchHost.className = 'search-host';
 // Custom Parquets 카드 그리드 - 검색 창 옆 동반 창에 붙는다(searchQuickWindow). 두 모듈에 같은 요소를 넘긴다.
 const parquetLibraryHost = document.createElement('div');
 let searchQuickWindow = null;
+// 이벤트 압축 창(사용자 지시 2026-10-23) - Tag Filter [⇊ 이벤트] 가 연다. 처음 열 때 만든다.
+let eventCompressWindow = null;
+function paintEventCompressButton(state) {
+  const button = document.getElementById('tagFilterEventCompressBtn');
+  if (button) button.classList.toggle('is-on', !!(state && state.enabled));
+}
+function openEventCompressWindow() {
+  import('./js/features/eventCompressWindow.mjs?v=20261023-evc2').then(({createEventCompressWindow}) => {
+    if (!eventCompressWindow) {
+      eventCompressWindow = createEventCompressWindow({
+        document, window, escHtml, showToast,
+        setPeOption: (key, checked) => setPromptEngineeringOption(key, checked),
+        toggleRating: r => toggleRating(r),
+        activeRatings: () => [...document.querySelectorAll('.tag-filter-rating-row .rating-btn.active')]
+          .map(button => button.dataset.r).filter(Boolean),
+        onStateChange: paintEventCompressButton,
+        // 처음 뜰 자리 = Search 창 오른쪽(사용자 지정 2026-10-23 - Search 창 안에는 자리가 없다).
+        anchorRect: () => document.getElementById('tagFilterEventCompressBtn')?.closest('.dragpanel')?.getBoundingClientRect() || null,
+      });
+    }
+    eventCompressWindow.toggleOpen();
+  }).catch(error => showToast(`이벤트 압축 창을 열지 못했습니다: ${error.message || error}`, 'error'));
+}
 let temporarySearchPreview = null;
 let temporarySearchLoading = false;
 let temporarySearchWorkspace = 'normal';
@@ -5356,6 +5379,7 @@ const wsMessageHandlers = {
   tag_filter_assigned: onTagFilterAssigned,
   tag_filter_stale: onTagFilterStale,
   tag_filter_update: onTagFilterUpdate,
+  event_compress_state: m => { if (eventCompressWindow) eventCompressWindow.onState(m); else paintEventCompressButton(m); },
   tag_filter_ac_result: onTagFilterAcResult,
   event_corpus_status_result: m => eventCorpusHandlers?.onStatus(m),
   event_corpus_query_result: m => eventCorpusHandlers?.onQuery(m),
@@ -6023,6 +6047,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     || source === 'auto_generate'
     || source === 'result_reroll'
     || source === 'event_map'     // Ctrl+E 실제 조합 [적용] - Random 과 같은 파이프라인 산출물
+    || source === 'event_compress' // 이벤트 압축 창 [랜덤](/api/event-compress/random) - 같은 파이프라인 산출물
     || source === 'assist'        // Assist [프롬프트에 넣기] · [부스트 넣기](/api/assist/apply) - 같은 파이프라인 산출물
     || source === 'storyteller'   // RC-3: 스토리텔러 자동생성 프롬프트도 좌측 패널에 반영
     || source === 'automation'    // RC-3: 자동화 프롬프트도 좌측 패널에 반영
@@ -13603,6 +13628,8 @@ function discardPendingModuleEdit(moduleId = null) {
 
 function setPromptEngineeringOption(key, checked) {
   if (promptEngineeringActions) promptEngineeringActions.setOption(key, checked);
+  // 이벤트 압축의 같음 기준이 바뀐다 - 열린 이벤트 창이 다시 묻는다(서버가 바꾼 뒤).
+  if (eventCompressWindow && eventCompressWindow.isOpen()) setTimeout(() => eventCompressWindow.refresh(), 400);
 }
 
 function setPromptEngineeringOllamaAutoBoost(checked) {

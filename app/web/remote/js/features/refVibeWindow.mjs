@@ -752,9 +752,11 @@ export function createRefVibeWindow({
     const mine = new Set(item.groups || []);
     const groups = lib[tab].groups;
     const rows = groups.length
-      ? groups.map(g => `<button type="button" class="rvw-menu-i" data-rvw-menu="${escHtml(g.id)}">${mine.has(g.id) ? '☑' : '☐'} ${escHtml(g.name)}</button>`).join('')
+      ? groups.map(g => `<button type="button" class="rvw-menu-i${mine.has(g.id) ? ' is-selected' : ''}" data-rvw-menu="${escHtml(g.id)}">`
+        + `<span class="rvw-menu-mark">${mine.has(g.id) ? '✓' : ''}</span>${escHtml(g.name)}</button>`).join('')
       : `<div class="rvw-menu-h">그룹이 없습니다</div>`;
-    openMenu(anchor, rows + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="__new">+ 새 그룹</button>`, id => {
+    openMenu(anchor, rows + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="__new"><span class="rvw-menu-mark">+</span>새 그룹</button>`, id => {
       if (id === '__new') { newGroup(); return; }
       setMembership(id, !mine.has(id));
     });
@@ -765,7 +767,9 @@ export function createRefVibeWindow({
       ? `<button type="button" class="rvw-menu-i" data-rvw-menu="apply-clean">이 그룹으로 바꾸기</button>`
         + `<button type="button" class="rvw-menu-i" data-rvw-menu="apply-append">이 그룹 더하기</button>`
       : '')
+      + (tab === 'vibe' ? `<div class="rvw-menu-sep"></div>` : '')
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename">이름 바꾸기</button>`
+      + `<div class="rvw-menu-sep"></div>`
       + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete">그룹 지우기</button>`;
     openMenu(anchor, rows, op => { groupOp(groupId, op); });
   }

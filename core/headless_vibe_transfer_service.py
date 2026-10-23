@@ -855,6 +855,9 @@ class HeadlessVibeTransferService:
             frames.append({
                 "index": index,
                 "file_hash": frame.get("file_hash", ""),
+                # 어느 모델 폴더의 인코딩인가 - 창이 '이미 활성' 을 해시 + 모델로 가른다(같은 그림의 V4 인코딩이 V4.5 항목을
+                # 활성으로 보이게 해 [적용] 을 막던 결함 - Codex 릴리즈 리뷰 2026-10-23).
+                "source_model": str(frame.get("source_model") or ""),
                 "file_name": frame.get("file_name", ""),
                 "display_name": display_names.get(frame.get("file_hash", ""), ""),
                 "is_enabled": bool(frame.get("is_enabled")),

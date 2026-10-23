@@ -509,8 +509,13 @@ export function createRefVibeWindow({
 
   /** 이 보관 항목이 활성 몇 번 칸에 있나(0 부터). 같은 것이 여러 칸이면 전부 - 예전 [적용] 이 쌓아 둔 것까지 [해제] 가 걷는다. */
   function activeSlots(hash, kind = tab) {
+    // Vibe 는 모델마다 인코딩이 다르다 - 같은 그림이라도 다른 모델 폴더에서 온 칸이면 '활성' 이 아니다. 그래야 [적용] 이
+    // apply_storage 를 보내 서버가 그 칸의 인코딩을 지금 모델 것으로 갈아 끼운다(Codex 릴리즈 리뷰 2026-10-23).
+    // 모델을 모르는 칸(옛 서버 · 옛 저장)은 예전처럼 해시만 본다.
+    const model = kind === 'vibe' ? String(lib.vibe?.model || '') : '';
     return (getModuleState(KINDS[kind])?.frames || [])
-      .map((frame, index) => (String(frame.file_hash || '') === String(hash) ? index : -1))
+      .map((frame, index) => (String(frame.file_hash || '') === String(hash)
+        && (!model || !frame.source_model || String(frame.source_model) === model) ? index : -1))
       .filter(index => index >= 0);
   }
 
@@ -520,7 +525,7 @@ export function createRefVibeWindow({
   }
 
   function appliedSig() {
-    return (getModuleState(KINDS[tab])?.frames || []).map(f => f.file_hash).join('|');
+    return (getModuleState(KINDS[tab])?.frames || []).map(f => `${f.file_hash}@${f.source_model || ''}`).join('|');
   }
 
   function storeCard(item) {

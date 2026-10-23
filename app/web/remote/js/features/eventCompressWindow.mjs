@@ -2,8 +2,8 @@
  * 이벤트 압축 창(사용자 지시 2026-10-23) - Search 창 Tag Filter 의 [⇊ 압축] 단추가 연다.
  *
  *   풀 6,158행 → 2,340 이벤트                                     G S Q E
- *   태그 수  ▁▃▇▅▃▂▁▁                                   3 – 24 · 812 이벤트
- *            ──●━━━━━━━━━━━━━━━●──                       <- 이벤트의 태그 개수 최소 · 최대 컷(목록만 거른다)
+ *   태그 수  ▁▃▇▅▃▂   6 – 11      빈도  ▁▂▃▅▇   ×14 – ×2     <- 반씩 나란히(사용자 지시 2026-10-23)
+ *            ●━━━━━●                    ●━━━━●              태그 수 = 이벤트의 태그 개수 · 빈도 = 묶인 행 수(왼쪽 흔함 · 오른쪽 희귀)
  *   [ 큰 묶음 먼저 ▾ ] [ 태그로 찾기 ]                    <- 찾기 칸 자동완성 = 지금 이벤트에 든 태그만
  *   1girl, breasts, navel, solo, thighs                                 ×60   <- 보기만. 누르면 [랜덤] [생성]
  *   ...
@@ -38,6 +38,7 @@ const PE_KEYS = [
 ];
 const PAGE = 60;
 const CUT_KEY = 'naia.ecw.tagcut';
+const SIZE_CUT_KEY = 'naia.ecw.sizecut';
 const BUSY_CAP_MS = 60000;           // 서버가 답을 못 주면 막은 창을 이만큼 뒤에 푼다
 
 export function createEventCompressWindow({
@@ -60,7 +61,10 @@ export function createEventCompressWindow({
   let hist = {};                   // {태그 수: 이벤트 수} - 컷 · 찾기와 무관한 전체
   let histMin = 0;
   let histMax = 0;
-  let cut = readCut();             // {min, max} - null = 끝까지
+  let cut = readCut(CUT_KEY);      // 태그 수 {min, max} - null = 끝까지
+  let sizeHist = {};               // {묶인 행 수: 이벤트 수} - 컷 · 찾기와 무관한 전체
+  let sizeVals = [];               // 있는 묶음 크기 - 큰 것(흔함)부터 작은 것(희귀)까지. 눈금 = 이 값들(×373 하나에 쏠리지 않게)
+  let cutSize = readCut(SIZE_CUT_KEY);  // 빈도 {min, max}(묶인 행 수) - null = 끝까지
   let listSeq = 0;
   let stateSeq = 0;
   let acSeq = 0;
@@ -84,9 +88,9 @@ export function createEventCompressWindow({
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
   const fmt = n => (Number(n) || 0).toLocaleString();
 
-  function readCut() {
+  function readCut(key) {
     try {
-      const raw = JSON.parse(win.localStorage.getItem(CUT_KEY) || 'null');
+      const raw = JSON.parse(win.localStorage.getItem(key) || 'null');
       if (raw && typeof raw === 'object') {
         return {min: Number.isFinite(raw.min) ? raw.min : null, max: Number.isFinite(raw.max) ? raw.max : null};
       }
@@ -95,7 +99,10 @@ export function createEventCompressWindow({
   }
 
   function saveCut() {
-    try { win.localStorage.setItem(CUT_KEY, JSON.stringify(cut)); } catch (_) { /* 이번 창에서만 */ }
+    try {
+      win.localStorage.setItem(CUT_KEY, JSON.stringify(cut));
+      win.localStorage.setItem(SIZE_CUT_KEY, JSON.stringify(cutSize));
+    } catch (_) { /* 이번 창에서만 */ }
   }
 
   /** 서버에 보낼 컷 - 전체 범위와 같으면 보내지 않는다(분포가 바뀌어도 '끝까지' 가 유지되게). */
@@ -106,6 +113,8 @@ export function createEventCompressWindow({
     // 다음 목록이 컷 없이 세어 [커밋 n행] 이 실제와 달랐다(실측 196 vs 184 · 468 vs 256).
     if (cut.min != null) p.min_tags = String(cut.min);
     if (cut.max != null) p.max_tags = String(cut.max);
+    if (cutSize.min != null) p.min_size = String(cutSize.min);
+    if (cutSize.max != null) p.max_size = String(cutSize.max);
     return p;
   }
 
@@ -177,44 +186,90 @@ export function createEventCompressWindow({
     if (el._html !== html) { el._html = html; el.innerHTML = html; }
   }
 
-  /** 태그 수 컷 - Search [기간 컷오프] 와 같은 두 손잡이 트랙. 위 막대 = 태그 수마다 이벤트 수(긴 꼬리라 제곱근). */
+  // ── 컷 슬라이더 둘(사용자 지시 2026-10-23) - Search [기간 컷오프] 와 같은 두 손잡이 트랙. 눈금 = 값 목록의 번호.
+  //    태그 수: 값 = 최소 … 최대 태그 수(작은 것 → 큰 것). 왼쪽 손잡이 = min_tags · 오른쪽 = max_tags.
+  //    빈도:    값 = 있는 묶음 크기(큰 것 = 흔함 → 작은 것 = 희귀). 왼쪽 손잡이 = max_size · 오른쪽 = min_size.
+  //    손잡이를 끝에 두면 null(끝까지) 로 기억한다 - 풀이 바뀌어 끝값이 달라져도 '끝까지' 가 유지된다.
+  function sliderVals(kind) {
+    if (kind === 'size') return sizeVals;
+    const vals = [];
+    for (let n = histMin; n <= histMax && histMax > 0; n += 1) vals.push(n);
+    return vals;
+  }
+
+  function edgeIndex(kind, edge) {
+    const vals = sliderVals(kind);
+    const last = vals.length - 1;
+    if (last < 0) return 0;
+    if (kind === 'tags') {
+      if (edge === 'lo') { const i = cut.min == null ? 0 : vals.findIndex(v => v >= cut.min); return i < 0 ? last : i; }
+      if (cut.max == null) return last;
+      let i = last;
+      while (i > 0 && vals[i] > cut.max) i -= 1;
+      return i;
+    }
+    if (edge === 'lo') { const i = cutSize.max == null ? 0 : vals.findIndex(v => v <= cutSize.max); return i < 0 ? last : i; }
+    if (cutSize.min == null) return last;
+    let i = last;
+    while (i > 0 && vals[i] < cutSize.min) i -= 1;
+    return i;
+  }
+
+  function setEdgeIndex(kind, edge, index) {
+    const vals = sliderVals(kind);
+    const last = vals.length - 1;
+    if (last < 0) return;
+    let i = Math.max(0, Math.min(last, Math.round(index)));
+    if (edge === 'lo') i = Math.min(i, edgeIndex(kind, 'hi'));
+    else i = Math.max(i, edgeIndex(kind, 'lo'));
+    const v = vals[i];
+    if (kind === 'tags') {
+      if (edge === 'lo') cut.min = i === 0 ? null : v; else cut.max = i === last ? null : v;
+    } else if (edge === 'lo') cutSize.max = i === 0 ? null : v;
+    else cutSize.min = i === last ? null : v;
+  }
+
+  function sliderHtml(kind) {
+    const vals = sliderVals(kind);
+    const head = kind === 'size' ? '빈도' : '태그 수';
+    if (vals.length < 2) return `<div class="ecw-cut-one"><div class="ecw-cut-head"><span>${head}</span><span class="ecw-dim">—</span></div></div>`;
+    const counts = kind === 'size' ? sizeHist : hist;
+    const last = vals.length - 1;
+    const lo = edgeIndex(kind, 'lo');
+    const hi = edgeIndex(kind, 'hi');
+    const pct = i => (i / last) * 100;
+    const label = v => (kind === 'size' ? `×${fmt(v)}` : String(v));
+    let top = 1;
+    vals.forEach(v => { top = Math.max(top, Number(counts[v]) || 0); });
+    const bars = vals.map((v, i) => {
+      const c = Number(counts[v]) || 0;
+      const tip = kind === 'size' ? `${fmt(v)}행 묶음 · ${fmt(c)} 이벤트` : `태그 ${v}개 · ${fmt(c)} 이벤트`;
+      return `<span class="${i >= lo && i <= hi ? 'is-in' : ''}" style="height:${c ? Math.max(6, Math.round(Math.sqrt(c / top) * 100)) : 0}%"`
+        + ` title="${tip}"></span>`;
+    }).join('');
+    const ends = kind === 'size'
+      ? `<span>흔함 ${label(vals[0])}</span><span>희귀 ${label(vals[last])}</span>`
+      : `<span>${vals[0]}</span><span>${vals[last]}</span>`;
+    return `<div class="ecw-cut-one"><div class="ecw-cut-head"><span>${head}</span>`
+      + `<span class="ecw-cut-range">${label(vals[lo])} – ${label(vals[hi])}</span></div>`
+      + `<div class="ecw-cut-bars">${bars}</div>`
+      + `<div class="ecw-cut-track" data-ecw-track="${kind}"><div class="ecw-cut-fill" style="left:${pct(lo)}%;right:${100 - pct(hi)}%"></div>`
+      + `<div class="ecw-cut-handle" data-ecw-slider="${kind}" data-ecw-edge="lo" tabindex="0" style="left:${pct(lo)}%"></div>`
+      + `<div class="ecw-cut-handle" data-ecw-slider="${kind}" data-ecw-edge="hi" tabindex="0" style="left:${pct(hi)}%"></div></div>`
+      + `<div class="ecw-cut-ends">${ends}</div></div>`;
+  }
+
   function renderCut() {
     const el = panel?.body.querySelector('[data-ecw-cut]');
     if (!el) return;
-    if (!(histMax > histMin)) { if (el._html !== '') { el._html = ''; el.innerHTML = ''; } return; }
-    const lo = clampCut(cut.min ?? histMin);
-    const hi = clampCut(cut.max ?? histMax);
-    const span = histMax - histMin;
-    const pct = v => ((v - histMin) / span) * 100;
-    let top = 1;
-    for (let n = histMin; n <= histMax; n += 1) top = Math.max(top, Number(hist[n]) || 0);
-    let inside = 0;
-    let bars = '';
-    for (let n = histMin; n <= histMax; n += 1) {
-      const c = Number(hist[n]) || 0;
-      const isIn = n >= lo && n <= hi;
-      if (isIn) inside += c;
-      bars += `<span class="${isIn ? 'is-in' : ''}" style="height:${c ? Math.max(6, Math.round(Math.sqrt(c / top) * 100)) : 0}%"`
-        + ` title="태그 ${n}개 · ${fmt(c)} 이벤트"></span>`;
-    }
-    const html = `<div class="ecw-cut-head"><span>태그 수</span><span class="ecw-cut-range">${lo} – ${hi}`
-      + ` <span class="ecw-dim">· ${fmt(inside)} 이벤트</span></span></div>`
-      + `<div class="ecw-cut-bars">${bars}</div>`
-      + `<div class="ecw-cut-track" data-ecw-track><div class="ecw-cut-fill" style="left:${pct(lo)}%;right:${100 - pct(hi)}%"></div>`
-      + `<div class="ecw-cut-handle" data-ecw-edge="min" tabindex="0" style="left:${pct(lo)}%"><span>${lo}</span></div>`
-      + `<div class="ecw-cut-handle" data-ecw-edge="max" tabindex="0" style="left:${pct(hi)}%"><span>${hi}</span></div></div>`
-      + `<div class="ecw-cut-ends"><span>${histMin}</span><span>${histMax}</span></div>`;
+    const html = histMax > histMin || sizeVals.length > 1 ? sliderHtml('tags') + sliderHtml('size') : '';
     if (el._html !== html) {
       // 다시 그리면 손잡이가 새 요소다 - 키보드로 옮기던 손잡이의 초점을 되돌린다(안 하면 한 칸 뒤 끊긴다).
-      const focused = el.contains(doc.activeElement) ? doc.activeElement.dataset?.ecwEdge : '';
+      const a = el.contains(doc.activeElement) ? doc.activeElement.dataset : null;
       el._html = html;
       el.innerHTML = html;
-      if (focused) el.querySelector(`[data-ecw-edge="${focused}"]`)?.focus();
+      if (a && a.ecwSlider) el.querySelector(`[data-ecw-slider="${a.ecwSlider}"][data-ecw-edge="${a.ecwEdge}"]`)?.focus();
     }
-  }
-
-  function clampCut(v) {
-    return Math.max(histMin, Math.min(histMax, Math.round(Number(v))));
   }
 
   /** 'b, a, 1girl' 을 abc 차례로(사용자 지시 - 1boy, 1girl, apron …). 서버도 같은 차례로 주지만 옛 서버를 위해 한 번 더. */
@@ -228,7 +283,10 @@ export function createEventCompressWindow({
     let html;
     if (!state || (state.computing && !items.length)) html = '<div class="ecw-empty">이벤트를 세는 중…</div>';
     else if (state.error && !items.length) html = `<div class="ecw-empty">${escHtml(state.error)}</div>`;
-    else if (!items.length) html = `<div class="ecw-empty">${query || cut.min != null || cut.max != null ? '맞는 이벤트가 없습니다.' : '이벤트가 없습니다.'}</div>`;
+    else if (!items.length) {
+      const filtered = query || cut.min != null || cut.max != null || cutSize.min != null || cutSize.max != null;
+      html = `<div class="ecw-empty">${filtered ? '맞는 이벤트가 없습니다.' : '이벤트가 없습니다.'}</div>`;
+    }
     else {
       const top = Math.max(1, ...items.map(it => Number(it.size) || 0));
       html = items.map(it => {
@@ -397,6 +455,10 @@ export function createEventCompressWindow({
         histMin = Number(body.tag_count_min) || 0;
         histMax = Number(body.tag_count_max) || 0;
       }
+      if (body.size_hist && typeof body.size_hist === 'object') {
+        sizeHist = body.size_hist;
+        sizeVals = Object.keys(sizeHist).map(Number).filter(Number.isFinite).sort((a, b) => b - a);
+      }
       if (!more && open && !items.some(it => it.key === open)) open = '';
       // 목록을 청해서 서버가 다시 셌다 - 윗줄의 수도 새것으로(꺼져 있을 때는 WS 가 안 올 수 있다).
       if (!more && state && state.stale) void refreshState();
@@ -452,6 +514,8 @@ export function createEventCompressWindow({
       const body = await postJson('/api/event-compress/commit', {
         min_tags: cutNow.min_tags != null ? Number(cutNow.min_tags) : null,
         max_tags: cutNow.max_tags != null ? Number(cutNow.max_tags) : null,
+        min_size: cutNow.min_size != null ? Number(cutNow.min_size) : null,
+        max_size: cutNow.max_size != null ? Number(cutNow.max_size) : null,
         q: query, events_signature: eventsSig,
       });
       showToast(`${fmt(body.committed)}행으로 Tag Filter 를 좁혔습니다 - [재적용] 으로 원래 풀로 돌아갑니다`, 'info');
@@ -551,8 +615,10 @@ export function createEventCompressWindow({
     const handle = event.target.closest('[data-ecw-edge]');
     if (handle && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       event.preventDefault();
-      moveEdge(handle.dataset.ecwEdge, (handle.dataset.ecwEdge === 'min' ? (cut.min ?? histMin) : (cut.max ?? histMax))
-        + (event.key === 'ArrowRight' ? 1 : -1));
+      const kind = handle.dataset.ecwSlider;
+      const edge = handle.dataset.ecwEdge;
+      setEdgeIndex(kind, edge, edgeIndex(kind, edge) + (event.key === 'ArrowRight' ? 1 : -1));
+      renderCut();
       commitCut();
     }
   }
@@ -563,25 +629,18 @@ export function createEventCompressWindow({
     win.setTimeout(() => { if (doc.activeElement !== event.target) { ac.open = false; renderAc(); } }, 150);
   }
 
-  function moveEdge(edge, value) {
-    const v = clampCut(value);
-    if (edge === 'min') cut.min = Math.min(v, cut.max ?? histMax);
-    else cut.max = Math.max(v, cut.min ?? histMin);
-    renderCut();
-  }
-
   function commitCut() {
-    if (cut.min != null && cut.min <= histMin) cut.min = null;
-    if (cut.max != null && cut.max >= histMax) cut.max = null;
     saveCut();
     void loadList(false);
   }
 
-  function valueAt(clientX) {
-    const track = panel.body.querySelector('[data-ecw-track]');
+  /** 트랙 위 x -> 눈금 번호. */
+  function indexAt(kind, clientX) {
+    const track = panel.body.querySelector(`[data-ecw-track="${kind}"]`);
+    if (!track) return 0;
     const rect = track.getBoundingClientRect();
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
-    return histMin + f * (histMax - histMin);
+    return f * Math.max(0, sliderVals(kind).length - 1);
   }
 
   function onPointerDown(event) {
@@ -589,9 +648,9 @@ export function createEventCompressWindow({
     if (!handle || waiting) return;
     event.preventDefault();
     handle.focus();                  // preventDefault 가 초점을 막는다 - 이어서 ← → 로 한 칸씩 옮길 수 있게
-    drag = {edge: handle.dataset.ecwEdge};
+    drag = {kind: handle.dataset.ecwSlider, edge: handle.dataset.ecwEdge};
     handle.classList.add('is-drag');
-    const move = e => { if (drag) moveEdge(drag.edge, valueAt(e.clientX)); };
+    const move = e => { if (drag) { setEdgeIndex(drag.kind, drag.edge, indexAt(drag.kind, e.clientX)); renderCut(); } };
     const up = () => {
       doc.removeEventListener('pointermove', move);
       doc.removeEventListener('pointerup', up);

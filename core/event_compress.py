@@ -136,6 +136,9 @@ class EventCompress:
         self.tag_count_hist = {}
         self.tag_count_min = 0
         self.tag_count_max = 0
+        self.size_hist = {}
+        self.size_min = 0
+        self.size_max = 0
         self.dropped = set()
         self.token_cache = {}
         self.cache_generation = None
@@ -386,6 +389,10 @@ class EventCompress:
                 tag_count_hist = {str(n): histogram[n] for n in sorted(histogram)}
                 tag_count_min = min(histogram, default=0)
                 tag_count_max = max(histogram, default=0)
+                size_histogram = Counter(group["size"] for group in groups.values())
+                size_hist = {str(n): size_histogram[n] for n in sorted(size_histogram)}
+                size_min = min(size_histogram, default=0)
+                size_max = max(size_histogram, default=0)
                 with self.guard():
                     current = (self._identity(), self._revision(),
                                pe_settings(self.context)[0], self.sequence)
@@ -401,6 +408,9 @@ class EventCompress:
                     self.tag_count_hist = tag_count_hist
                     self.tag_count_min = tag_count_min
                     self.tag_count_max = tag_count_max
+                    self.size_hist = size_hist
+                    self.size_min = size_min
+                    self.size_max = size_max
                     self.identity, self.signature = stamp[0], settings[0]
                     self.per_row_rounds = special
                     if enabled(self.context):
@@ -463,6 +473,11 @@ class EventCompress:
     def _passes_tag_cut(count, min_tags, max_tags):
         return (min_tags is None or count >= min_tags) and (max_tags is None or count <= max_tags)
 
+    def _passes_cuts(self, group, min_tags, max_tags, min_size, max_size):
+        return (self._passes_tag_cut(group["tag_count"], min_tags, max_tags)
+                and (min_size is None or group["size"] >= min_size)
+                and (max_size is None or group["size"] <= max_size))
+
     def _events_signature(self):
         # Pool identity (generation/assignment), PE signature and the toggle - NOT consumption.
         # Random using rows (Auto Gen) must not make every commit stale: commit only ever takes
@@ -471,10 +486,10 @@ class EventCompress:
             self._identity(), self.signature, enabled(self.context),
         ], ensure_ascii=True).encode()).hexdigest()
 
-    def _matching_groups(self, sort, q, min_tags, max_tags):
+    def _matching_groups(self, sort, q, min_tags, max_tags, min_size, max_size):
         words = q.lower().split()
         return [g for g in self.sorted_groups[sort]
-                if self._passes_tag_cut(g["tag_count"], min_tags, max_tags)
+                if self._passes_cuts(g, min_tags, max_tags, min_size, max_size)
                 and all(word in g["tags"].lower() for word in words)]
 
     def _commit_ids(self, groups):
@@ -492,7 +507,8 @@ class EventCompress:
                     break
         return ids
 
-    def commit(self, events_signature, min_tags=None, max_tags=None, q=""):
+    def commit(self, events_signature, min_tags=None, max_tags=None, q="",
+               min_size=None, max_size=None):
         from core.tag_filter_remaining import save_committed
 
         with self.guard():
@@ -500,7 +516,7 @@ class EventCompress:
                 raise CommitError("no_tag_filter", "An active non-empty Tag Filter is required", 409)
             if self.computing or self.is_stale() or events_signature != self._events_signature():
                 raise CommitError("stale", "Event analysis changed; reload the event list", 409)
-            groups = self._matching_groups("desc", q, min_tags, max_tags)
+            groups = self._matching_groups("desc", q, min_tags, max_tags, min_size, max_size)
             ids = self._commit_ids(groups)
             if not ids:
                 raise CommitError("empty", "No live rows match the event selection", 400)
@@ -526,14 +542,15 @@ class EventCompress:
             self._notify(pool_changed=True)
             return {"ok": True, "committed": len(ids), "state": self.state()}
 
-    def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None):
+    def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None,
+               min_size=None, max_size=None):
         while True:
             self.refresh()
             with self.guard():
                 if self.is_stale():
                     continue
                 live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
-                groups = self._matching_groups(sort, q, min_tags, max_tags)
+                groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size)
                 items = [{**{k: g[k] for k in ("key", "rating", "tags", "tag_count", "size")},
                           "remaining": sum(ref in live for ref in g["members"])}
                          for g in groups[offset:offset + limit]]
@@ -541,9 +558,11 @@ class EventCompress:
                         "commit_rows": len(self._commit_ids(groups)),
                         "events_signature": self._events_signature(),
                         "tag_count_hist": dict(self.tag_count_hist),
-                        "tag_count_min": self.tag_count_min, "tag_count_max": self.tag_count_max}
+                        "tag_count_min": self.tag_count_min, "tag_count_max": self.tag_count_max,
+                        "size_hist": dict(self.size_hist),
+                        "size_min": self.size_min, "size_max": self.size_max}
 
-    def tags(self, q="", min_tags=None, max_tags=None, limit=20):
+    def tags(self, q="", min_tags=None, max_tags=None, limit=20, min_size=None, max_size=None):
         query = q.lower().replace("_", " ")
         while True:
             self.refresh()
@@ -555,8 +574,9 @@ class EventCompress:
                     normalized = tag.lower().replace("_", " ")
                     if query not in normalized:
                         continue
-                    count = len(keys) if min_tags is None and max_tags is None else sum(
-                        self._passes_tag_cut(self.group_tag_counts[key], min_tags, max_tags)
+                    unbounded = min_tags is None and max_tags is None and min_size is None and max_size is None
+                    count = len(keys) if unbounded else sum(
+                        self._passes_cuts(self.groups[key], min_tags, max_tags, min_size, max_size)
                         for key in keys)
                     if count:
                         items.append({"tag": tag, "events": count})

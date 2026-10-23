@@ -63,18 +63,32 @@ def register_event_compress_routes(
             raise ValueError("min_tags must not exceed max_tags")
         return lower, upper
 
+    def size_cut(min_size, max_size):
+        try:
+            lower = None if min_size is None else int(min_size)
+            upper = None if max_size is None else int(max_size)
+        except ValueError:
+            raise ValueError("min_size and max_size must be integers")
+        if (lower is not None and lower < 0) or (upper is not None and upper < 0):
+            raise ValueError("min_size and max_size must be non-negative")
+        if lower is not None and upper is not None and lower > upper:
+            raise ValueError("min_size must not exceed max_size")
+        return lower, upper
+
     @app.get("/api/event-compress/events")
     async def event_compress_events(sort: str = "desc", q: str = "", offset: int = 0, limit: int = 60,
-                                    min_tags: str | None = None, max_tags: str | None = None):
+                                    min_tags: str | None = None, max_tags: str | None = None,
+                                    min_size: str | None = None, max_size: str | None = None):
         if sort not in ("asc", "desc") or offset < 0 or limit < 1:
             return error("bad_request", "Invalid sort, offset or limit")
         try:
             lower, upper = tag_cut(min_tags, max_tags)
+            size_lower, size_upper = size_cut(min_size, max_size)
         except ValueError as exc:
             return error("bad_request", str(exc))
         try:
             result = await run_in_thread(ensure_event_compress(session_context).events,
-                                         sort, q, offset, limit, lower, upper)
+                                         sort, q, offset, limit, lower, upper, size_lower, size_upper)
         except RuntimeError as exc:
             return error("internal_error", str(exc), 500)
         return response(result)
@@ -87,6 +101,10 @@ def register_event_compress_routes(
                 if payload.get(key) is not None and type(payload[key]) is not int:
                     raise ValueError("min_tags and max_tags must be integers or null")
             lower, upper = tag_cut(payload.get("min_tags"), payload.get("max_tags"))
+            for key in ("min_size", "max_size"):
+                if payload.get(key) is not None and type(payload[key]) is not int:
+                    raise ValueError("min_size and max_size must be integers or null")
+            size_lower, size_upper = size_cut(payload.get("min_size"), payload.get("max_size"))
             q = payload.get("q", "")
             signature = payload.get("events_signature")
             if not isinstance(q, str) or not isinstance(signature, str) or not signature:
@@ -95,7 +113,7 @@ def register_event_compress_routes(
             return error("bad_request", str(exc))
         try:
             result = await run_in_thread(ensure_event_compress(session_context).commit,
-                                         signature, lower, upper, q)
+                                         signature, lower, upper, q, size_lower, size_upper)
         except CommitError as exc:
             return error(exc.code, str(exc), exc.status)
         except (OSError, RuntimeError) as exc:
@@ -104,9 +122,11 @@ def register_event_compress_routes(
 
     @app.get("/api/event-compress/tags")
     async def event_compress_tags(q: str = "", min_tags: str | None = None,
-                                 max_tags: str | None = None, limit: str = "20"):
+                                 max_tags: str | None = None, limit: str = "20",
+                                 min_size: str | None = None, max_size: str | None = None):
         try:
             lower, upper = tag_cut(min_tags, max_tags)
+            size_lower, size_upper = size_cut(min_size, max_size)
             count = int(limit)
             if not 1 <= count <= 100:
                 raise ValueError("limit must be between 1 and 100")
@@ -114,7 +134,7 @@ def register_event_compress_routes(
             return error("bad_request", str(exc))
         try:
             result = await run_in_thread(ensure_event_compress(session_context).tags,
-                                         q, lower, upper, count)
+                                         q, lower, upper, count, size_lower, size_upper)
         except RuntimeError as exc:
             return error("internal_error", str(exc), 500)
         return response(result)

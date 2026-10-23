@@ -32640,3 +32640,8 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .chw-undohide-im img { width: 100%; height: 100%; object-fit: cover; }
 .chw-undohide-nm { font-size: 11px; color: var(--text-primary); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .chw-undohide-gr { font-size: 10px; color: var(--text-dim); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* 컷 슬라이더 둘 - 태그 수 | 빈도 를 반씩 나란히(사용자 지시 2026-10-23). */
+.ecw-cut { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
+.ecw-cut-one { min-width: 0; }
+.ecw-cut-ends span { white-space: nowrap; }

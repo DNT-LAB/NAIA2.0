@@ -3335,7 +3335,7 @@ function paintEventCompressButton(state) {
   if (button) button.classList.toggle('is-on', !!(state && state.enabled));
 }
 function openEventCompressWindow() {
-  import('./js/features/eventCompressWindow.mjs?v=20261023-evc18').then(({createEventCompressWindow}) => {
+  import('./js/features/eventCompressWindow.mjs?v=20261023-evc19').then(({createEventCompressWindow}) => {
     if (!eventCompressWindow) {
       eventCompressWindow = createEventCompressWindow({
         document, window, escHtml, showToast,
@@ -3354,6 +3354,8 @@ function openEventCompressWindow() {
           button.click();
           return true;
         },
+        // [랜덤] [생성] 이 메인 Random · Generate 와 같은 파라미터를 싣게(해상도 · Rnd Res · Auto Res 포함).
+        generationParams: () => _collectCurrentParams(),
       });
     }
     eventCompressWindow.toggleOpen();

@@ -166,6 +166,12 @@ def register_event_compress_routes(
             raise ValueError("key is required")
         return await run_in_thread(ensure_event_compress(session_context).source_row, key)
 
+    def overrides_of(payload):
+        # 창이 누른 순간의 화면 파라미터(해상도 · 스텝 …)를 싣는다 - 메인 Random · Generate 와 같게.
+        # 안 실으면 서버에 남은 옛 해상도로 나갔다(사용자 제보 2026-10-23).
+        value = payload.get("overrides")
+        return dict(value) if isinstance(value, dict) else {}
+
     @app.post("/api/event-compress/random")
     async def event_compress_random(req: Request):
         try:
@@ -183,6 +189,7 @@ def register_event_compress_routes(
         try:
             result = await run_in_thread(
                 random_service(session_context).generate_from_source_row, source_row,
+                overrides=overrides_of(payload) or None,
                 random_request_id=request_id, source="event_compress", update_context=True)
         except Exception as exc:
             return error("internal_error", str(exc), 500)
@@ -214,17 +221,18 @@ def register_event_compress_routes(
             _generate_event_preset_prompt, _generation_service, _preset_source_to_generation_command,
         )
         request_id = str(payload.get("requestId") or uuid.uuid4().hex)
+        overrides = overrides_of(payload)
         try:
             processed = await run_in_thread(
                 _generate_event_preset_prompt, session_context, source_row,
-                overrides={}, request_id=request_id, source="event_compress")
+                overrides=dict(overrides), request_id=request_id, source="event_compress")
             if not processed.success:
                 return error("pipeline_failed", processed.error or "Prompt processing failed")
             command = _preset_source_to_generation_command(
                 session_context,
                 {"requestId": request_id, "sourceRow": source_row,
                  "sourceName": f"event_compress:{request_id}"},
-                source="preset", overrides={}, prompt_override=processed.prompt,
+                source="preset", overrides=dict(overrides), prompt_override=processed.prompt,
                 prompt_run_id_override=processed.prompt_run_id)
             command["overrides"]["_remote_queue_label"] = "event_compress"
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)

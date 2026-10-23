@@ -56,6 +56,7 @@ export function createEventCompressWindow({
   anchorRect = () => null,         // 처음 뜰 자리 = 이 사각형(Search 창)의 오른쪽 - 사용자 지정 2026-10-23
   reapplyTagFilter = () => false,  // Tag Filter [재적용] 과 같은 일 - 칩 조건으로 다시 걸어 원래 풀로(커밋 되돌리기)
   canReapply = () => false,        // 그 단추가 지금 쓸 수 있나(걸 조건이 있나)
+  generationParams = () => ({}),   // 메인 Random · Generate 가 싣는 지금 화면의 파라미터(해상도 · 스텝 …)
 } = {}) {
   let panel = null;
   let state = null;                // GET /state
@@ -586,7 +587,10 @@ export function createEventCompressWindow({
     busy = `${kind}:${open}`;
     renderList();
     try {
-      await postJson(`/api/event-compress/${kind}`, {key: item.key, requestId: `ecw-${Date.now().toString(36)}`});
+      // 누른 순간의 해상도 · 스텝 등을 싣는다(사용자 제보 2026-10-23 - 안 실으면 서버에 남은 옛 해상도로 나갔다).
+      let overrides = {};
+      try { overrides = generationParams() || {}; } catch (_) { /* 못 읽으면 서버 값 */ }
+      await postJson(`/api/event-compress/${kind}`, {key: item.key, requestId: `ecw-${Date.now().toString(36)}`, overrides});
       showToast(kind === 'random' ? '이 이벤트로 메인 프롬프트를 채웠습니다' : '이 이벤트로 생성을 요청했습니다', 'info');
     } catch (error) {
       showToast(error.message || String(error), 'error');

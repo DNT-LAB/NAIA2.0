@@ -947,14 +947,10 @@ class HeadlessVibeTransferService:
             applied = self.apply_storage(str(value or ""))
             if isinstance(applied, dict):
                 return applied
-        elif key == "apply_group":
-            return self.apply_group(str(value or ""))
         elif key == "cluster_list":
             return self.scan_clusters()
         elif key == "cluster_load":
-            loaded = self.load_cluster(str(value or ""))
-            if isinstance(loaded, dict):
-                return loaded
+            return self.load_cluster(str(value or ""))
         elif key == "restore_metadata":
             return self.restore_metadata(str(value or ""))
         elif key in {"cluster_save", "cluster_delete", "cluster_rename", "cluster_thumbnail"}:
@@ -1007,39 +1003,6 @@ class HeadlessVibeTransferService:
             "models": models,
             "current_model": context._current_model_key(),
         }
-
-    def apply_group(self, value: str) -> Any:
-        from core.ref_vibe_library import get_ref_vibe_library
-
-        context = self.context
-        self._ensure_loaded()
-        try:
-            request = json.loads(value)
-            if not isinstance(request, dict) or request.get("mode", "clean") not in {"clean", "append"}:
-                raise ValueError("Invalid group request")
-            group = get_ref_vibe_library(context).group(request.get("group_id"))
-        except (ValueError, TypeError) as exc:
-            return context._toast(str(exc), level="error")
-        if request.get("mode", "clean") == "clean":
-            context.vibe_transfer_frames.clear()
-        context.vibe_transfer_normalize = bool(group.get("normalize"))
-        added = skipped = 0
-        model = context._current_model_key()
-        for member in group.get("members", []):
-            if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
-                break
-            if member.get("model") != model:
-                skipped += 1
-                continue
-            result = self.apply_storage(json.dumps({"model": model, "file_hash": member["file_hash"],
-                                                   "ie": member.get("ie", 1.0), "rs": member.get("rs", 0.6)}))
-            if result is not None:
-                skipped += 1
-                continue
-            context.vibe_transfer_frames[-1]["is_enabled"] = bool(member.get("enabled", True))
-            added += 1
-        self._persist()
-        return [context._toast(f"{added}개 적용 · {skipped}개 건너뜀(다른 모델/없음)"), self.module_state()]
 
     def apply_storage(self, value: str) -> dict[str, Any] | None:
         context = self.context
@@ -1239,53 +1202,65 @@ class HeadlessVibeTransferService:
             "max_frames": MAX_NAI_VIBE_REFERENCES,
         }
 
-    def load_cluster(self, value: str) -> dict[str, Any] | None:
-        from core.vibe_cluster_resolver import resolve_vibe_cluster
+    def load_cluster(self, value: str) -> Any:
+        from core.ref_vibe_clusters import get_ref_vibe_clusters
+        from core.ref_vibe_library import clean_encodings, finite
+        from PIL import Image
 
         context = self.context
+        self._ensure_loaded()
         try:
             payload = json.loads(value or "{}")
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        cluster_id = str(payload.get("id") or "")
-        mode = str(payload.get("mode") or "append")
-        root = context._existing_save_path("vibe_transfer_clusters")
-        try:
-            data = resolve_vibe_cluster(cluster_id, root)
-        except Exception as exc:
+            if not isinstance(payload, dict) or payload.get("mode", "append") not in {"clean", "append"}:
+                raise ValueError("Invalid cluster request")
+            data = get_ref_vibe_clusters(context).load(payload.get("id"))
+        except (ValueError, TypeError) as exc:
             return context._toast(str(exc), level="error")
-        if mode == "clean":
-            context.vibe_transfer_frames.clear()
-        frames = data.get("frames") if isinstance(data.get("frames"), list) else []
-        for frame_data in frames:
-            if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
+        mode = payload.get("mode", "append")
+        available = MAX_NAI_VIBE_REFERENCES - (0 if mode == "clean" else len(context.vibe_transfer_frames))
+        frames = []
+        for frame_data in data["frames"]:
+            if len(frames) >= available:
                 break
-            encodings = frame_data.get("encodings") if isinstance(frame_data.get("encodings"), dict) else {}
+            encodings = clean_encodings(frame_data.get("encodings"))
             if not encodings:
                 continue
-            context.vibe_transfer_frames.append({
-                "file_hash": str(
-                    frame_data.get("file_hash")
-                    or hashlib.sha256(json.dumps(frame_data, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-                ),
+            frame = {
+                "file_hash": str(frame_data.get("file_hash") or frame_data["_fallback_hash"]),
                 "file_name": str(frame_data.get("file_name") or "cluster_vibe"),
-                "file_path": str(frame_data.get("file_path") or ""),
+                "file_path": "",
                 "image_bytes": b"",
                 "image_data": "",
                 "thumbnail": "",
                 "is_enabled": bool(frame_data.get("is_enabled", True)),
                 "is_no_image": True,
+                "no_source": True,
                 "is_naid3": context._is_naid3_model(),
-                "reference_strength": float(frame_data.get("reference_strength", 0.6) or 0.6),
-                "information_extracted": float(frame_data.get("information_extracted", 1.0) or 1.0),
-                "vibe_encodings": {str(k): str(v) for k, v in encodings.items() if v},
+                "reference_strength": finite(frame_data.get("reference_strength"), 0.6),
+                "information_extracted": finite(frame_data.get("information_extracted"), 1.0),
+                "vibe_encodings": encodings,
                 "storage_type": "cluster_vibe",
-                "source_model": str(data.get("model") or ""),
-            })
+                "source_model": str(frame_data.get("target_model") or data.get("model") or ""),
+            }
+            image_path = frame_data.get("_image_path")
+            if image_path is not None:
+                try:
+                    image_bytes = image_path.read_bytes()
+                    with Image.open(io.BytesIO(image_bytes)) as image:
+                        thumbnail = thumbnail_b64(image)
+                    frame.update(image_bytes=image_bytes, image_data=base64.b64encode(image_bytes).decode("ascii"),
+                                 thumbnail=thumbnail, is_no_image=False, file_path=str(image_path))
+                except (OSError, ValueError):
+                    pass
+            frames.append(frame)
+        if mode == "clean":
+            context.vibe_transfer_frames.clear()
+        context.vibe_transfer_frames.extend(frames)
+        if mode == "clean":
+            context.vibe_transfer_normalize = bool(data.get("normalize_strength", False))
         context._disable_all_character_reference_frames()
-        return None
+        self._persist()
+        return [context._toast(f"{len(frames)}개 적용"), self.module_state()]
 
     def active_params(self) -> dict[str, Any]:
         context = self.context

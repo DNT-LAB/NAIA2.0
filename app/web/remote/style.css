@@ -32817,3 +32817,68 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .custom-select.custom-rvw-sel .custom-select-button:hover { border-color: rgba(124,106,239,.6); color: var(--text-primary); }
 .custom-select.custom-rvw-sel.is-open .custom-select-button { border-color: var(--accent); }
 .custom-select-menu.custom-rvw-sel .custom-select-option { padding: 6px 8px; font-size: 10.5px; }
+
+/* STORAGE 두 칸(사용자 지시 2026-10-23 · Snapshot 창처럼) - 왼쪽 카테고리 · 오른쪽 썸네일.
+   카테고리 줄 = 놓을 자리(data-rvw-drop) · 끌어 순서 바꾸기(data-rvw-catdrag). ◆ 클러스터 = 클러스터 목록 → 멤버 편집. */
+.rvw-split { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 128px minmax(0, 1fr); }
+.rvw-cats {
+  min-height: 0; overflow-y: auto; padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  border-right: 1px solid rgba(255,255,255,.06);
+}
+.rvw-cats.is-dropzone { background: rgba(124,106,239,.04); }
+.rvw-cat {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid transparent;
+  border-radius: 5px; background: transparent; color: var(--text-muted); font: 10.5px var(--font-mono);
+  text-align: left; cursor: pointer; position: relative;
+}
+.rvw-cat:hover { background: rgba(255,255,255,.05); color: var(--text-primary); }
+.rvw-cat.on { background: rgba(124,106,239,.22); color: #fff; }
+.rvw-cat b { margin-left: auto; font-weight: 400; color: var(--text-dim); }
+.rvw-cat.on b { color: #d9d2ff; }
+.rvw-cat-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rvw-cat[draggable="true"] { cursor: grab; }
+.rvw-cat.is-add { justify-content: center; color: var(--text-dim); border: 1px dashed var(--border-glow); margin-top: 2px; }
+.rvw-cat.is-cluster { color: #e6d9ff; }
+.rvw-cat.is-drop { border: 1px dashed var(--accent); background: rgba(124,106,239,.16); }
+.rvw-cat.is-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.rvw-cat.is-drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.rvw-cat.is-dragging, .rvw-card.is-dragging { opacity: .4; }
+.rvw-cat-sep { flex: 0 0 auto; height: 1px; margin: 3px 2px; background: var(--border-dim); }
+.rvw-card { cursor: grab; }
+.rvw-grid.is-list { display: flex; flex-direction: column; gap: 5px; }
+
+.rvw-cl {
+  display: flex; align-items: center; gap: 8px; padding: 5px 6px; border: 1px solid var(--border-dim);
+  border-radius: 7px; background: var(--bg-card); cursor: pointer;
+}
+.rvw-cl:hover { border-color: rgba(124,106,239,.6); }
+.rvw-cl-stack { flex: 0 0 auto; display: flex; }
+.rvw-cl-stack > img, .rvw-cl-stack > span {
+  width: 24px; height: 30px; border-radius: 3px; object-fit: cover; background: #14141c;
+  border: 1px solid var(--bg-elevated); margin-left: -8px;
+}
+.rvw-cl-stack > :first-child { margin-left: 0; }
+.rvw-cl-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.rvw-cl-n { color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rvw-cl-m { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.rvw-cl-m em { font-style: normal; color: #e8c37a; }
+.rvw-cl-new {
+  flex: 0 0 auto; padding: 6px; border: 1px dashed var(--border-glow); border-radius: 7px; background: transparent;
+  color: var(--text-dim); font: 10.5px var(--font-mono); cursor: pointer;
+}
+.rvw-cl-new:hover { color: var(--text-primary); border-color: rgba(124,106,239,.6); }
+.rvw-cl-head { flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding-bottom: 2px; }
+.rvw-cl-desc { padding: 0 2px 2px; }
+.rvw-mrow {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid var(--border-dim);
+  border-radius: 6px; background: var(--bg-card);
+}
+.rvw-mrow.is-live { box-shadow: inset 2px 0 0 rgb(124,106,239); }
+.rvw-mrow.is-off .rvw-name { opacity: .42; text-decoration: line-through; }
+.rvw-mrow .rvw-name { cursor: default; }
+.rvw-mrow-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rvw-mrow-top, .rvw-mrow-sub { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.rvw-mrow-top .rvw-name { flex: 1 1 auto; }
+.rvw-mchips { display: flex; gap: 3px; flex-wrap: wrap; }
+.rvw-menu-i.is-off { opacity: .45; cursor: default; }
+.rvw-menu-i.is-off:hover { background: transparent; color: var(--text-muted); }

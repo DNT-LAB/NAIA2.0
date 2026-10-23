@@ -1,12 +1,11 @@
 """Shared, atomic metadata index for stored Vibe and Character References.
 
 Storage files remain authoritative for availability; the index owns annotations
-and group membership. All public operations serialize through one instance lock.
+and single category membership. All public operations serialize through one instance lock.
 """
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 import math
 import os
@@ -75,14 +74,15 @@ class RefVibeLibrary:
     def __init__(self, context):
         self.context = context
         self._lock = threading.Lock()
+        self._index_cache = None
+        self._index_signature = None
         self._names_cache: dict[str, dict[str, str]] | None = None
         # Per-path compact summaries only: never keep base64 encoding bodies.
         self._cache: dict[str, tuple[tuple[int, int], dict | None]] = {}
 
     @staticmethod
     def _empty():
-        return {"version": 1, "migrated_clusters": [],
-                **{kind: {"items": {}, "groups": []} for kind in KINDS}}
+        return {"version": 2, **{kind: {"items": {}, "categories": []} for kind in KINDS}}
 
     @staticmethod
     def _kind(kind):
@@ -110,16 +110,52 @@ class RefVibeLibrary:
         finally:
             temp.unlink(missing_ok=True)
 
-    def _write(self, data):
-        self._atomic_write(self.context._save_path("ref_vibe_library.json"), data)
+    @staticmethod
+    def _signature(path):
+        try:
+            stat = path.stat()
+            return (str(path), stat.st_mtime_ns, stat.st_size)
+        except FileNotFoundError:
+            return (str(path), None, None)
+
+    def _cache_index(self, path, data):
+        self._index_cache = copy.deepcopy(data)
+        self._index_signature = self._signature(path)
         self._names_cache = None
+
+    def _write(self, data):
+        path = self.context._save_path("ref_vibe_library.json")
+        self._atomic_write(path, data)
+        self._cache_index(path, data)
 
     def _existing_path(self, *parts):
         getter = getattr(self.context, "_existing_save_path", self.context._save_path)
         return getter(*parts)
 
+    @staticmethod
+    def _convert_v1(data):
+        result = RefVibeLibrary._empty()
+        for kind in KINDS:
+            mapping = {}
+            for group in sorted(data[kind]["groups"], key=lambda g: g.get("order", 0)):
+                if "source_cluster" in group:
+                    continue
+                category_id = "c_" + uuid.uuid4().hex[:12]
+                mapping[group["id"]] = category_id
+                categories = result[kind]["categories"]
+                categories.append({"id": category_id, "name": group["name"], "order": len(categories)})
+            for file_hash, item in data[kind]["items"].items():
+                item = copy.deepcopy(item)
+                memberships = item.pop("groups", [])
+                item["category"] = next((mapping[g] for g in memberships if g in mapping), "")
+                result[kind]["items"][file_hash] = item
+        return result
+
     def _read(self):
         path = self._existing_path("ref_vibe_library.json")
+        if self._index_cache is not None and self._index_signature == self._signature(path):
+            # A failed write must not mutate the last successfully cached index.
+            return copy.deepcopy(self._index_cache)
         data = self._empty()
         if path.exists():
             try:
@@ -127,22 +163,26 @@ class RefVibeLibrary:
                     raise ValueError("Non-finite JSON value: " + value)
 
                 data = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
-                if not isinstance(data, dict) or any(
+                version = data.get("version", 1) if isinstance(data, dict) else None
+                collection = "groups" if version == 1 else "categories"
+                if version not in (1, 2) or any(
                     not isinstance(data.get(k), dict)
                     or not isinstance(data[k].get("items"), dict)
-                    or not isinstance(data[k].get("groups"), list) for k in KINDS
+                    or not all(isinstance(v, dict) for v in data[k]["items"].values())
+                    or not isinstance(data[k].get(collection), list) for k in KINDS
                 ):
                     raise ValueError("Invalid library structure")
-                if not isinstance(data.get("migrated_clusters", []), list):
-                    raise ValueError("Invalid migration record")
-                data.setdefault("migrated_clusters", [])
-            except (ValueError, UnicodeError):
+                if version == 1:
+                    data = self._convert_v1(data)
+                    self._write(data)
+                    return copy.deepcopy(data)
+            except (ValueError, UnicodeError, KeyError, TypeError, AttributeError):
                 os.replace(path, path.with_name(path.name + f".broken-{time.time():.9f}"))
                 data = self._empty()
                 self._write(data)
-        if self._migrate(data):
-            self._write(data)
-        return data
+                return copy.deepcopy(data)
+        self._cache_index(path, data)
+        return copy.deepcopy(data)
 
     def snapshot(self):
         with self._lock:
@@ -165,73 +205,6 @@ class RefVibeLibrary:
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
             return {}
-
-    def _migrate(self, data):
-        changed = False
-        indexes = {}
-        for root in self._roots("vibe_transfer_clusters"):
-            for path in sorted(root.glob("*.json")):
-                # Cluster IDs are normally the file stem. Already migrated
-                # clusters must not reparse their large encoding bodies.
-                if path.stem in data["migrated_clusters"]:
-                    continue
-                cluster = self._json(path)
-                if not cluster or not isinstance(cluster.get("frames"), list):
-                    continue
-                cluster_id = str(cluster.get("id") or path.stem)
-                if cluster_id in data["migrated_clusters"]:
-                    continue
-                try:
-                    model = safe_component(cluster.get("model"))
-                except LibraryError:
-                    continue
-                if model not in indexes:
-                    index = indexes[model] = {}
-                    for folder in self._roots("vibe_transfer", model):
-                        for stored in sorted(folder.glob("*.json")):
-                            raw = self._json(stored)
-                            if raw.get("volatile") or raw.get("storage_type") == "metadata_vibe":
-                                continue
-                            for key, encoding in clean_encodings(raw.get("encodings")).items():
-                                index.setdefault(encoding, (stored.stem, float(key)))
-                index = indexes[model]
-                groups = data["vibe"]["groups"]
-                name = str(cluster.get("name") or path.stem)
-                group = next((g for g in groups if g["name"] == name), None)
-                if group is None:
-                    group = {"id": "g_" + uuid.uuid4().hex[:12], "name": name, "order": len(groups),
-                             "members": [], "normalize": bool(cluster.get("normalize_strength")),
-                             "source_cluster": cluster_id}
-                    groups.append(group)
-                for n, frame in enumerate(cluster["frames"], 1):
-                    if not isinstance(frame, dict):
-                        continue
-                    encodings = clean_encodings(frame.get("encodings"))
-                    if not encodings:
-                        continue
-                    match = next((index[e] for e in encodings.values() if e in index), None)
-                    if match:
-                        file_hash = match[0]
-                    else:
-                        file_hash = hashlib.sha256(json.dumps(encodings, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-                        target = self.context._save_path("vibe_transfer", model, file_hash + ".json")
-                        if not target.exists():
-                            self._atomic_write(target, {"file_hash": file_hash,
-                                "file_name": f"cluster_{name}_{n}", "encodings": encodings,
-                                "no_source": True, "is_no_image": True})
-                        for key, encoding in encodings.items():
-                            index.setdefault(encoding, (file_hash, float(key)))
-                    member = {"file_hash": file_hash, "model": model,
-                              "ie": finite(frame.get("information_extracted"), max(map(float, encodings))),
-                              "rs": finite(frame.get("reference_strength"), 0.6),
-                              "enabled": bool(frame.get("is_enabled", True))}
-                    group.setdefault("members", []).append(member)
-                    item = data["vibe"]["items"].setdefault(file_hash, {})
-                    if group["id"] not in item.setdefault("groups", []):
-                        item["groups"].append(group["id"])
-                data["migrated_clusters"].append(cluster_id)
-                changed = True
-        return changed
 
     def _vibes(self):
         models = {}
@@ -279,9 +252,9 @@ class RefVibeLibrary:
                                     "character_name": str(meta.get("character_name") or ""), "has_image": True}
         return items
 
-    def _listing(self, data, kind, model="", filter="all", group_id="", q="", sort="recent", offset=0, limit=60, _file_hash=""):
+    def _listing(self, data, kind, model="", filter="all", category_id="", q="", sort="recent", offset=0, limit=60, _file_hash=""):
         self._kind(kind)
-        if filter not in {"all", "favorite", "ungrouped", "group"} or sort not in {"recent", "name", "used"}:
+        if filter not in {"all", "favorite", "uncategorized", "category"} or sort not in {"recent", "name", "used"}:
             raise LibraryError("Invalid filter or sort")
         try:
             offset, limit = max(0, int(offset)), max(1, min(200, int(limit)))
@@ -291,18 +264,19 @@ class RefVibeLibrary:
         model = safe_component(model or current) if kind == "vibe" else ""
         models = self._vibes() if kind == "vibe" else {}
         storage = models.get(model, {}) if kind == "vibe" else self._characters()
-        groups = sorted(data[kind]["groups"], key=lambda g: g.get("order", 0))
-        counts = {"all": len(storage), "favorite": 0, "ungrouped": 0, "groups": {g["id"]: 0 for g in groups}}
+        categories = sorted(data[kind]["categories"], key=lambda g: g.get("order", 0))
+        counts = {"all": len(storage), "favorite": 0, "uncategorized": 0, "categories": {g["id"]: 0 for g in categories}}
         items = []
         service = getattr(self.context, "_service_cache", {}).get("vibe_transfer")
         session_new = getattr(service, "_session_imported", set())
         for file_hash, stored in storage.items():
             meta = data[kind]["items"].get(file_hash, {})
-            memberships = [g for g in meta.get("groups", []) if g in counts["groups"]]
+            category = meta.get("category", "")
+            category = category if category in counts["categories"] else ""
             name = str(meta.get("name") or "")
             item = {"file_hash": file_hash, "file_name": stored["file_name"], "name": name,
                     "display_name": name or stored.get("character_name") or Path(stored["file_name"]).stem,
-                    "favorite": bool(meta.get("favorite")), "groups": memberships,
+                    "favorite": bool(meta.get("favorite")), "category": category,
                     "created_at": finite(meta.get("created_at"), stored["mtime"]),
                     "last_used_at": finite(meta.get("last_used_at"), 0.0), "has_image": stored["has_image"]}
             if kind == "vibe":
@@ -315,14 +289,14 @@ class RefVibeLibrary:
                 url = "/api/module-storage/character-reference/thumb?" + urlencode({"file_hash": file_hash})
             item["thumbnail_url"] = url if item["has_image"] else ""
             counts["favorite"] += item["favorite"]
-            counts["ungrouped"] += not memberships
-            for gid in memberships:
-                counts["groups"][gid] += 1
+            counts["uncategorized"] += not category
+            if category:
+                counts["categories"][category] += 1
             if _file_hash and file_hash != _file_hash:
                 continue
-            if filter == "favorite" and not item["favorite"] or filter == "ungrouped" and memberships:
+            if filter == "favorite" and not item["favorite"] or filter == "uncategorized" and category:
                 continue
-            if filter == "group" and group_id not in memberships:
+            if filter == "category" and category_id != category:
                 continue
             if q and not any(str(q).casefold() in item[k].casefold() for k in ("name", "display_name", "file_name", "file_hash")):
                 continue
@@ -340,8 +314,8 @@ class RefVibeLibrary:
         return {"kind": kind, "model": model, "current_model": current,
                 "models": [{"key": k, "count": len(v)} for k, v in sorted(models.items())],
                 "model_supported": supported, "total": len(items), "offset": offset, "limit": limit,
-                "counts": counts, "groups": [{"id": g["id"], "name": g["name"], "order": g.get("order", 0),
-                    "count": counts["groups"][g["id"]]} for g in groups], "items": items[offset:offset + limit]}
+                "counts": counts, "categories": [{"id": g["id"], "name": g["name"], "order": g.get("order", 0),
+                    "count": counts["categories"][g["id"]]} for g in categories], "items": items[offset:offset + limit]}
 
     def list_items(self, kind, **query):
         with self._lock:
@@ -367,86 +341,71 @@ class RefVibeLibrary:
         with self._lock:
             data = self._read()
             old = self._item(data, kind, file_hash, model)
-            meta = data[kind]["items"].setdefault(file_hash, {"created_at": old["created_at"]})
+            meta = data[kind]["items"].setdefault(file_hash, {"created_at": old["created_at"], "category": ""})
             meta.update({k: updates[k] for k in ("name", "favorite") if k in updates})
             self._write(data)
             return self._item(data, kind, file_hash, model)
 
-    def change_group(self, kind, op, group_id="", name="", order=None, model=""):
+    def change_category(self, kind, op, category_id="", name="", order=None, model=""):
         self._kind(kind)
         if op not in ("create", "rename", "delete", "reorder"):
-            raise LibraryError("Invalid group operation")
+            raise LibraryError("Invalid category operation")
         with self._lock:
             data = self._read()
-            groups = data[kind]["groups"]
-            group = next((g for g in groups if g["id"] == group_id), None) if op != "create" else None
-            if op in {"rename", "delete"} and group is None:
-                raise LibraryError("Group not found", 404)
+            categories = data[kind]["categories"]
+            category = next((g for g in categories if g["id"] == category_id), None) if op != "create" else None
+            if op in {"rename", "delete"} and category is None:
+                raise LibraryError("Category not found", 404)
             if op in {"create", "rename"}:
                 if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40:
-                    raise LibraryError("Group name must be 1 to 40 characters")
+                    raise LibraryError("Category name must be 1 to 40 characters")
                 name = name.strip()
-                if any(g["name"] == name and g is not group for g in groups):
-                    raise LibraryError("Group name already exists", 409)
+                if any(g["name"] == name and g is not category for g in categories):
+                    raise LibraryError("Category name already exists", 409)
                 if op == "create":
-                    group = {"id": "g_" + uuid.uuid4().hex[:12], "order": len(groups), "name": name}
-                    if kind == "vibe":
-                        group.update(members=[], normalize=False)
-                    groups.append(group)
+                    category = {"id": "c_" + uuid.uuid4().hex[:12], "order": len(categories), "name": name}
+                    categories.append(category)
                 else:
-                    group["name"] = name
+                    category["name"] = name
             elif op == "delete":
-                groups.remove(group)
+                categories.remove(category)
                 for item in data[kind]["items"].values():
-                    item["groups"] = [g for g in item.get("groups", []) if g != group_id]
+                    if item.get("category") == category_id:
+                        item["category"] = ""
             else:
                 if (not isinstance(order, list) or not all(isinstance(g, str) for g in order)
-                        or len(order) != len(groups) or set(order) != {g["id"] for g in groups}):
-                    raise LibraryError("order must contain each group exactly once")
-                groups.sort(key=lambda g: order.index(g["id"]))
-            for n, g in enumerate(groups):
+                        or len(order) != len(categories) or set(order) != {g["id"] for g in categories}):
+                    raise LibraryError("order must contain each category exactly once")
+                categories.sort(key=lambda g: order.index(g["id"]))
+            for n, g in enumerate(categories):
                 g["order"] = n
             self._write(data)
             result = self._listing(data, kind, model=model)
-            return {k: result[k] for k in ("groups", "counts")}
+            return {k: result[k] for k in ("categories", "counts")}
 
-    def change_members(self, kind, group_id, op, file_hashes, model=""):
+    def move_items(self, kind, file_hashes, category_id="", model=""):
         self._kind(kind)
-        if op not in ("add", "remove") or not isinstance(file_hashes, list):
-            raise LibraryError("Invalid membership operation")
-        if kind == "vibe" and op == "add":
-            model = safe_component(model)
+        if not isinstance(file_hashes, list) or not isinstance(category_id, str):
+            raise LibraryError("Invalid category move")
         hashes = list(dict.fromkeys(safe_component(h) for h in file_hashes))
         with self._lock:
             data = self._read()
-            group = next((g for g in data[kind]["groups"] if g["id"] == group_id), None)
-            if group is None:
-                raise LibraryError("Group not found", 404)
+            if category_id and not any(c["id"] == category_id for c in data[kind]["categories"]):
+                raise LibraryError("Category not found", 404)
             items = [self._item(data, kind, h, model) for h in hashes]
             for item in items:
-                h = item["file_hash"]
-                meta = data[kind]["items"].setdefault(h, {"created_at": item["created_at"]})
-                memberships = meta.setdefault("groups", [])
-                if op == "add":
-                    if group_id not in memberships:
-                        memberships.append(group_id)
-                    if kind == "vibe" and not any(m["file_hash"] == h and m["model"] == model for m in group["members"]):
-                        group["members"].append({"file_hash": h, "model": model,
-                            "ie": item["last_ie"] if item["last_ie"] is not None else max(item["encoding_keys"]),
-                            "rs": item["last_rs"] if item["last_rs"] is not None else 0.6, "enabled": True})
-                else:
-                    meta["groups"] = [g for g in memberships if g != group_id]
-                    if kind == "vibe":
-                        group["members"] = [m for m in group["members"] if m["file_hash"] != h]
+                meta = data[kind]["items"].setdefault(item["file_hash"], {"created_at": item["created_at"]})
+                meta["category"] = category_id
             self._write(data)
             return {"items": [self._item(data, kind, h, model) for h in hashes],
                     "counts": self._listing(data, kind, model=model)["counts"]}
 
     def display_names(self, kind, file_hashes):
-        """Batch frame labels from the shared index, cached until a successful write."""
+        """Batch frame labels from the shared index, cached until a write or external file change."""
         self._kind(kind)
         with self._lock:
-            if self._names_cache is None:
+            if (self._names_cache is None
+                    or self._index_signature != self._signature(self._existing_path("ref_vibe_library.json"))):
                 data = self._read()
                 self._names_cache = {
                     k: {h: str(meta.get("name") or "") for h, meta in data[k]["items"].items()}
@@ -478,7 +437,7 @@ class RefVibeLibrary:
                 for key in dict.fromkeys((model, source)):
                     path = self._existing_path("vibe_transfer", key, file_hash + ".json")
                     if path.is_file():
-                        meta = data["vibe"]["items"].setdefault(file_hash, {})
+                        meta = data["vibe"]["items"].setdefault(file_hash, {"category": ""})
                         if "created_at" not in meta:
                             meta["created_at"] = path.stat().st_mtime
                             changed = True
@@ -490,7 +449,7 @@ class RefVibeLibrary:
         file_hash = safe_component(file_hash)
         with self._lock:
             data = self._read()
-            item = data[kind]["items"].setdefault(file_hash, {})
+            item = data[kind]["items"].setdefault(file_hash, {"category": ""})
             before = dict(item)
             if created_at is not None:
                 item.setdefault("created_at", finite(created_at, time.time()))
@@ -505,25 +464,11 @@ class RefVibeLibrary:
             if before != item:
                 self._write(data)
 
-    def group(self, group_id):
-        with self._lock:
-            data = self._read()
-            group = next((g for g in data["vibe"]["groups"] if g["id"] == group_id), None)
-            if group is None:
-                raise LibraryError("Group not found", 404)
-            result = copy.deepcopy(group)
-            result["members"] = [m for m in result.get("members", [])
-                if group_id in data["vibe"]["items"].get(m["file_hash"], {}).get("groups", [])]
-            return result
-
     def cleanup_vibe(self, model, file_hash):
         with self._lock:
             data = self._read()
             remaining = {folder.name for root in self._roots("vibe_transfer")
                          for folder in root.iterdir() if folder.is_dir() and (folder / (file_hash + ".json")).exists()}
-            for group in data["vibe"]["groups"]:
-                group["members"] = [m for m in group.get("members", []) if m["file_hash"] != file_hash
-                    or (remaining and (m["model"] != model or model in remaining))]
             if not remaining:
                 data["vibe"]["items"].pop(file_hash, None)
             self._write(data)

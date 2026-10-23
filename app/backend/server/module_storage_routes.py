@@ -89,9 +89,9 @@ def register_module_storage_routes(
             return JSONResponse({"error": str(exc)}, status_code=exc.status)
 
     @app.get("/api/ref-vibe/library")
-    async def api_ref_vibe_library(kind: str, model: str = "", filter: str = "all", group_id: str = "",
+    async def api_ref_vibe_library(kind: str, model: str = "", filter: str = "all", category_id: str = "",
                                    q: str = "", sort: str = "recent", offset: int = 0, limit: int = 60):
-        return await library_call("list_items", kind, model=model, filter=filter, group_id=group_id,
+        return await library_call("list_items", kind, model=model, filter=filter, category_id=category_id,
                                   q=q, sort=sort, offset=offset, limit=limit)
 
     @app.post("/api/ref-vibe/library/item")
@@ -100,16 +100,37 @@ def register_module_storage_routes(
                                   model=body.get("model", ""),
                                   **{k: body[k] for k in ("name", "favorite") if k in body})
 
-    @app.post("/api/ref-vibe/library/group")
-    async def api_ref_vibe_group(body: dict, model: str = ""):
-        return await library_call("change_group", body.get("kind"), body.get("op"),
-                                  group_id=body.get("group_id", ""), name=body.get("name", ""),
-                                  order=body.get("order"), model=model or body.get("model", ""))
+    @app.post("/api/ref-vibe/library/category")
+    async def api_ref_vibe_category(body: dict):
+        return await library_call("change_category", body.get("kind"), body.get("op"),
+                                  category_id=body.get("category_id", ""), name=body.get("name", ""),
+                                  order=body.get("order"), model=body.get("model", ""))
 
-    @app.post("/api/ref-vibe/library/group-members")
-    async def api_ref_vibe_members(body: dict):
-        return await library_call("change_members", body.get("kind"), body.get("group_id"),
-                                  body.get("op"), body.get("file_hashes"), model=body.get("model", ""))
+    @app.post("/api/ref-vibe/library/move")
+    async def api_ref_vibe_move(body: dict):
+        return await library_call("move_items", body.get("kind"), body.get("file_hashes"),
+                                  category_id=body.get("category_id", ""), model=body.get("model", ""))
+
+    async def clusters_call(method, *args):
+        from core.ref_vibe_clusters import get_ref_vibe_clusters
+
+        def work():
+            return getattr(get_ref_vibe_clusters(session_context), method)(*args)
+
+        try:
+            return JSONResponse(await run_in_thread(work))
+        except LibraryError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+
+    @app.get("/api/ref-vibe/clusters")
+    async def api_ref_vibe_clusters():
+        return await clusters_call("list_clusters")
+
+    @app.post("/api/ref-vibe/clusters")
+    async def api_ref_vibe_change_cluster(request: Request, body: dict):
+        if body.get("op") == "delete" and not is_loopback_host(request.client.host if request.client else ""):
+            return JSONResponse({"error": "Cluster deletion is loopback only"}, status_code=403)
+        return await clusters_call("change_cluster", body)
 
     @app.post("/api/ref-vibe/library/delete")
     async def api_ref_vibe_delete(request: Request, body: dict):

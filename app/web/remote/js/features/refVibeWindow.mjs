@@ -55,8 +55,8 @@ export function createRefVibeWindow({
   let menu = null;
 
   function freshLib() {
-    return {model: '', filter: 'all', groupId: '', q: '', sort: 'recent', items: [], total: 0, offset: 0,
-      loading: false, seq: 0, groups: [], counts: {}, models: [], currentModel: '', supported: true,
+    return {model: '', filter: 'all', categoryId: '', q: '', sort: 'recent', items: [], total: 0, offset: 0,
+      loading: false, seq: 0, categories: [], counts: {}, models: [], currentModel: '', supported: true,
       selected: '', ie: null, loaded: false, error: ''};
   }
 
@@ -165,7 +165,7 @@ export function createRefVibeWindow({
         title: 'REF & VIBE',
         variant: 'rvw',
         storageKey: 'ref-vibe-window',
-        width: 520, height: 620, minWidth: 380, minHeight: 300, maxWidth: 1100,
+        width: 600, height: 640, minWidth: 440, minHeight: 320, maxWidth: 1200,
         resizable: true, collapsible: true,
         initial: {x: 520, y: 90},
         escHtml,
@@ -192,6 +192,11 @@ export function createRefVibeWindow({
       body.addEventListener('change', onChange);
       body.addEventListener('keydown', onKey);
       body.addEventListener('contextmenu', onContextMenu);
+      body.addEventListener('dragstart', onDragStart);
+      body.addEventListener('dragend', onDragEnd);
+      body.addEventListener('dragover', onDragOver);
+      body.addEventListener('dragleave', onDragLeave);
+      body.addEventListener('drop', onDrop);
       body.addEventListener('pointerdown', event => { if (event.target.closest('input[type=range]')) pointerHeld = true; });
       doc.addEventListener('pointerup', () => {
         if (!pointerHeld) return;
@@ -413,54 +418,87 @@ export function createRefVibeWindow({
   }
 
   // ── STORAGE ───────────────────────────────────────────────────────────────
+  // 왼쪽 = 카테고리 칸(전체 · ★ · 카테고리들 · 미분류 · ◆ 클러스터) · 오른쪽 = 썸네일 격자(사용자 지시 2026-10-23 · Snapshot 창처럼).
+  //  - 카테고리 = 정리용 폴더. 한 항목은 한 카테고리. 썸네일을 끌어 놓으면 **옮긴다** · 카테고리끼리 끌어 순서를 바꾼다.
+  //  - 클러스터 = Vibe 묶음(번들 · 멤버마다 IE · RS · 켜짐). 카테고리 칸엔 `◆ 클러스터` 한 줄만 - 많아져도 칸이 안 길어진다.
+  //    고르면 오른쪽이 클러스터 목록 → 누르면 멤버 편집. Vibe 전용.
+  const DND_ITEM = 'application/x-naia-refvibe-item';
+  const DND_CAT = 'application/x-naia-refvibe-category';
+  const CLUSTER_NAME = /^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+$/;   // `vibe:이름` 트리거에 쓰인다(vibe_cluster_resolver 와 같은 규칙)
+  const clusters = {list: [], loading: false, loaded: false, error: '', openId: '', seq: 0};
+  let drag = null;                       // {type: 'item'|'cat', hash?, id?}
+
+  function inClusters() { return tab === 'vibe' && lib.vibe.filter === 'clusters'; }
+
   function renderStore() {
     if (!panel) return;
     const host = panel.body.querySelector('[data-rvw-store]');
     const state = lib[tab];
-    const grid = host.querySelector('[data-rvw-grid]');
-    const gridTop = grid ? grid.scrollTop : 0;
-    const counts = state.counts || {};
-    const groupCounts = counts.groups || {};
-    const models = tab === 'vibe' && state.models.length > 1
-      ? `<select class="rvw-sel" data-rvw-libmodel>${state.models.map(m => `<option value="${escHtml(m.key)}"${m.key === state.model ? ' selected' : ''}>${escHtml(m.key)} ${m.count}</option>`).join('')}</select>`
-      : (state.model ? `<span class="rvw-sec-n">${escHtml(state.model)}</span>` : '');
-    const chip = (filter, groupId, label, count) => {
-      const on = state.filter === filter && (filter !== 'group' || state.groupId === groupId);
-      return `<button type="button" class="rvw-chip${on ? ' on' : ''}" data-rvw-filter="${filter}" data-group="${escHtml(groupId)}">${escHtml(label)} <b>${count ?? 0}</b></button>`;
-    };
-    const chips = chip('all', '', '전체', counts.all)
-      + chip('favorite', '', '★', counts.favorite)
-      + state.groups.map(g => chip('group', g.id, g.name, groupCounts[g.id] ?? g.count)).join('')
-      + chip('ungrouped', '', '미분류', counts.ungrouped)
-      + `<button type="button" class="rvw-chip is-new" data-rvw-act="newgroup">+ 그룹</button>`;
-    const cards = state.items.map(item => storeCard(item)).join('');
-    const empty = state.loading ? '불러오는 중…'
-      : (state.error ? escHtml(state.error)
-        : (state.q || state.filter !== 'all' ? '맞는 항목이 없습니다.' : '보관된 항목이 없습니다. 위에서 올리고 인코딩하면 여기에 쌓입니다.'));
-    // 틀(머리줄 · 검색칸)은 탭이 바뀔 때만 새로 짓는다. 치는 중에 목록이 오면 검색칸이 통째로 갈려
-    // 초점을 잃었다 - 칩 · 격자 · 고른 항목 줄만 갈아 끼운다.
+    // 틀(머리줄 · 검색칸 · 두 칸)은 탭이 바뀔 때만 새로 짓는다. 치는 중에 목록이 오면 검색칸이 통째로 갈려
+    // 초점을 잃었다 - 칸 안쪽만 갈아 끼운다.
     if (host.dataset.tab !== tab || !host.querySelector('[data-rvw-grid]')) {
       host.dataset.tab = tab;
       host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">STORAGE</span><span class="rvw-sec-m" data-rvw-models></span>`
         + `<span class="rvw-sec-tools"><input type="search" class="rvw-q" placeholder="이름 검색" spellcheck="false" autocomplete="off" data-rvw-q>`
-        + `<select class="rvw-sel" data-rvw-sort>`
+        + `<span data-rvw-sortwrap><select class="rvw-sel" data-rvw-sort>`
         + [['recent', '최근순'], ['used', '사용순'], ['name', '이름순']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')
-        + `</select></span></div>`
-        + `<div class="rvw-chips" data-rvw-chips></div>`
-        + `<div class="rvw-grid" data-rvw-grid></div>`
+        + `</select></span></span></div>`
+        + `<div class="rvw-split"><div class="rvw-cats" data-rvw-cats></div>`
+        + `<div class="rvw-grid" data-rvw-grid></div></div>`
         + `<div data-rvw-pickhost></div>`;
       host.querySelector('[data-rvw-grid]').addEventListener('scroll', onGridScroll, {passive: true});
     }
+    const models = tab === 'vibe' && state.models.length > 1 && !inClusters()
+      ? `<select class="rvw-sel" data-rvw-libmodel>${state.models.map(m => `<option value="${escHtml(m.key)}"${m.key === state.model ? ' selected' : ''}>${escHtml(m.key)} ${m.count}</option>`).join('')}</select>`
+      : (state.model && !inClusters() ? `<span class="rvw-sec-n">${escHtml(state.model)}</span>` : '');
     host.querySelector('[data-rvw-models]').innerHTML = models;
     const input = host.querySelector('[data-rvw-q]');
-    if (doc.activeElement !== input && input.value !== state.q) input.value = state.q;
+    input.placeholder = inClusters() ? '클러스터 이름' : '이름 검색';
+    const q = inClusters() ? (clusters.q || '') : state.q;
+    if (doc.activeElement !== input && input.value !== q) input.value = q;
+    host.querySelector('[data-rvw-sortwrap]').hidden = inClusters();
     host.querySelector('[data-rvw-sort]').value = state.sort;
-    host.querySelector('[data-rvw-chips]').innerHTML = chips;
-    const nextGrid = host.querySelector('[data-rvw-grid]');
-    nextGrid.innerHTML = (cards || `<div class="rvw-empty">${empty}</div>`)
+    host.querySelector('[data-rvw-cats]').innerHTML = categoriesHtml();
+    const grid = host.querySelector('[data-rvw-grid]');
+    const gridTop = grid.scrollTop;
+    grid.classList.toggle('is-list', inClusters());
+    grid.innerHTML = inClusters() ? clustersHtml() : gridHtml();
+    grid.scrollTop = gridTop;
+    host.querySelector('[data-rvw-pickhost]').innerHTML = inClusters() ? '' : selectionBar();
+  }
+
+  function categoriesHtml() {
+    const state = lib[tab];
+    const counts = state.counts || {};
+    const catCounts = counts.categories || {};
+    const row = (filter, id, label, count, {drop = null, draggable = false, cls = ''} = {}) => {
+      const on = state.filter === filter && (filter !== 'category' || state.categoryId === id);
+      return `<button type="button" class="rvw-cat${on ? ' on' : ''}${cls}" data-rvw-filter="${filter}" data-cat="${escHtml(id)}"`
+        + (drop !== null ? ` data-rvw-drop="${escHtml(drop)}"` : '')
+        + (draggable ? ` draggable="true" data-rvw-catdrag="${escHtml(id)}"` : '')
+        + `><span class="rvw-cat-t">${escHtml(label)}</span><b>${count ?? ''}</b></button>`;
+    };
+    let html = row('all', '', '전체', counts.all)
+      + row('favorite', '', '★ 즐겨찾기', counts.favorite, {drop: '__fav'})
+      + `<div class="rvw-cat-sep"></div>`
+      + state.categories.map(c => row('category', c.id, c.name, catCounts[c.id] ?? c.count, {drop: c.id, draggable: true})).join('')
+      + row('uncategorized', '', '미분류', counts.uncategorized, {drop: ''})
+      + `<button type="button" class="rvw-cat is-add" data-rvw-act="newcat">+ 카테고리</button>`;
+    if (tab === 'vibe') {
+      html += `<div class="rvw-cat-sep"></div>`
+        + row('clusters', '', '◆ 클러스터', clusters.loaded ? clusters.list.length : '', {drop: '__cluster', cls: ' is-cluster'});
+    }
+    return html;
+  }
+
+  function gridHtml() {
+    const state = lib[tab];
+    const cards = state.items.map(item => storeCard(item)).join('');
+    const empty = state.loading ? '불러오는 중…'
+      : (state.error ? escHtml(state.error)
+        : (state.q || state.filter !== 'all' ? '맞는 항목이 없습니다.' : '보관된 항목이 없습니다. 위에서 올리고 인코딩하면 여기에 쌓입니다.'));
+    return (cards || `<div class="rvw-empty">${empty}</div>`)
       + (state.items.length && state.items.length < state.total ? `<div class="rvw-more">${state.items.length} / ${state.total}</div>` : '');
-    nextGrid.scrollTop = gridTop;
-    host.querySelector('[data-rvw-pickhost]').innerHTML = selectionBar();
   }
 
   function storeCard(item) {
@@ -469,9 +507,9 @@ export function createRefVibeWindow({
     const selected = lib[tab].selected === hash ? ' is-sel' : '';
     const img = item.has_image === false || !item.thumbnail_url
       ? `<span class="rvw-card-im is-empty">enc</span>`
-      : `<img class="rvw-card-im" loading="lazy" src="${escHtml(item.thumbnail_url)}" alt="">`;
+      : `<img class="rvw-card-im" loading="lazy" draggable="false" src="${escHtml(item.thumbnail_url)}" alt="">`;
     const ieCount = tab === 'vibe' ? `<span class="rvw-card-ie">${(item.encoding_keys || []).length}</span>` : '';
-    return `<button type="button" class="rvw-card${selected}" data-rvw-card="${escHtml(hash)}">${img}`
+    return `<button type="button" class="rvw-card${selected}" draggable="true" data-rvw-card="${escHtml(hash)}">${img}`
       + (item.favorite ? `<span class="rvw-card-star">★</span>` : '')
       + ieCount + `<span class="rvw-card-lb">${escHtml(name)}</span></button>`;
   }
@@ -509,7 +547,8 @@ export function createRefVibeWindow({
       + `<button type="button" class="rvw-btn is-accent" data-rvw-act="apply">적용</button>`
       + `<button type="button" class="rvw-btn" data-rvw-act="rename">이름</button>`
       + `<button type="button" class="rvw-btn${item.favorite ? ' is-on' : ''}" data-rvw-act="fav">★</button>`
-      + `<button type="button" class="rvw-btn" data-rvw-act="groups">그룹 ▾</button>`
+      + `<button type="button" class="rvw-btn" data-rvw-act="catmenu" data-naia-title="카테고리로 옮깁니다 - 썸네일을 왼쪽 카테고리에 끌어 놓아도 됩니다">카테고리 ▾</button>`
+      + (tab === 'vibe' ? `<button type="button" class="rvw-btn" data-rvw-act="clustermenu" data-naia-title="클러스터에 넣습니다 - 고른 IE 로">클러스터 ▾</button>` : '')
       + `<button type="button" class="rvw-btn is-danger" data-rvw-act="delete" data-naia-title="보관함에서 지웁니다(이 PC 에서만)">삭제</button>`
       + `</span></div>`;
   }
@@ -526,20 +565,35 @@ export function createRefVibeWindow({
     return data;
   }
 
-  function libraryUrl(state, offset) {
-    const params = new URLSearchParams({kind: API_KIND[tab], sort: state.sort, offset: String(offset), limit: String(PAGE)});
+  function libraryUrl(state, offset, limit = PAGE) {
+    const params = new URLSearchParams({kind: API_KIND[tab], sort: state.sort, offset: String(offset), limit: String(limit)});
     if (tab === 'vibe' && state.model) params.set('model', state.model);
-    params.set('filter', state.filter);
-    if (state.filter === 'group' && state.groupId) params.set('group_id', state.groupId);
-    if (state.q.trim()) params.set('q', state.q.trim());
+    const filter = state.filter === 'clusters' ? 'all' : state.filter;
+    params.set('filter', filter);
+    if (filter === 'category' && state.categoryId) params.set('category_id', state.categoryId);
+    if (state.q.trim() && state.filter !== 'clusters') params.set('q', state.q.trim());
     return `/api/ref-vibe/library?${params}`;
   }
 
-  /** 목록 받기. `reset` 이면 처음부터, 아니면 이어서(끝까지 굴렸을 때). */
+  function takeMeta(state, data) {
+    state.categories = Array.isArray(data.categories) ? data.categories : [];
+    state.counts = data.counts || {};
+    state.models = Array.isArray(data.models) ? data.models : [];
+    state.currentModel = String(data.current_model || '');
+    if (!state.model && data.model) state.model = String(data.model);
+    state.supported = data.model_supported !== false;
+  }
+
+  /** 목록 받기. `reset` 이면 처음부터, 아니면 이어서(끝까지 굴렸을 때). 클러스터 보기면 수만 받고 클러스터를 받는다. */
   async function loadLibrary(reset = false) {
     if (!panel || !panel.isOpen()) return;
     const kind = tab;
     const state = lib[kind];
+    if (kind === 'vibe' && (state.filter === 'clusters' || !clusters.loaded)) loadClusters();
+    if (state.filter === 'clusters') {
+      if (reset) refreshCounts();
+      return;
+    }
     if (state.loading && !reset) return;
     if (!reset && state.items.length >= state.total && state.loaded) return;
     const seq = ++state.seq;
@@ -552,12 +606,7 @@ export function createRefVibeWindow({
       const items = Array.isArray(data.items) ? data.items : [];
       state.items = reset ? items : state.items.concat(items);
       state.total = Number(data.total || 0);
-      state.groups = Array.isArray(data.groups) ? data.groups : [];
-      state.counts = data.counts || {};
-      state.models = Array.isArray(data.models) ? data.models : [];
-      state.currentModel = String(data.current_model || '');
-      if (!state.model && data.model) state.model = String(data.model);
-      state.supported = data.model_supported !== false;
+      takeMeta(state, data);
       state.loaded = true;
       items.forEach(item => { if (item.name) nameCache.set(String(item.file_hash), String(item.name)); });
       if (state.selected && !state.items.some(item => String(item.file_hash) === state.selected) && reset) state.selected = '';
@@ -574,6 +623,7 @@ export function createRefVibeWindow({
   }
 
   function onGridScroll(event) {
+    if (inClusters()) return;
     const grid = event.currentTarget;
     if (grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 120) loadLibrary(false);
   }
@@ -588,7 +638,17 @@ export function createRefVibeWindow({
     });
   }
 
-  // ── 동작 ──────────────────────────────────────────────────────────────────
+  async function refreshCounts() {
+    // 카테고리 · ★ 수는 목록 응답에 실려 온다 - 수만 다시 받는다(항목은 그대로 둔다).
+    const state = lib[tab];
+    try {
+      const data = await api(libraryUrl(state, 0, 1));
+      takeMeta(state, data);
+      renderStore();
+    } catch (_) { /* 수는 다음 목록에서 맞춰진다 */ }
+  }
+
+  // ── 보관 항목 동작 ────────────────────────────────────────────────────────
   function applySelected() {
     const item = selectedItem();
     if (!item) return;
@@ -617,12 +677,10 @@ export function createRefVibeWindow({
     }
   }
 
-  async function toggleFavorite() {
-    const item = selectedItem();
-    if (!item) return;
+  async function setFavorite(hash, favorite) {
     try {
       const data = await api('/api/ref-vibe/library/item', {method: 'POST',
-        body: {kind: API_KIND[tab], file_hash: item.file_hash, favorite: !item.favorite, model: lib[tab].model}});
+        body: {kind: API_KIND[tab], file_hash: hash, favorite, model: lib[tab].model}});
       replaceItems(data.item || data);
       if (lib[tab].filter === 'favorite') loadLibrary(true);
       else { refreshCounts(); renderStore(); }
@@ -652,67 +710,277 @@ export function createRefVibeWindow({
     }
   }
 
-  async function refreshCounts() {
-    // 그룹 · ★ 수는 목록 응답에 실려 온다 - 지금 쪽만 다시 받는다(항목은 그대로 둔다).
+  // ── 카테고리 ──────────────────────────────────────────────────────────────
+  function categoryName(id) {
+    return lib[tab].categories.find(c => c.id === id)?.name || '';
+  }
+
+  async function moveTo(hashes, categoryId) {
     const state = lib[tab];
     try {
-      const data = await api(libraryUrl(state, 0).replace(`limit=${PAGE}`, 'limit=1'));
-      state.counts = data.counts || state.counts;
-      state.groups = Array.isArray(data.groups) ? data.groups : state.groups;
-      renderStore();
-    } catch (_) { /* 수는 다음 목록에서 맞춰진다 */ }
-  }
-
-  async function newGroup() {
-    const name = await promptDialog('그룹 이름', {title: '새 그룹', placeholder: 'semireal'});
-    if (!name || !String(name).trim()) return;
-    try {
-      await api('/api/ref-vibe/library/group', {method: 'POST', body: {kind: API_KIND[tab], op: 'create', name: String(name).trim(), model: lib[tab].model}});
-      refreshCounts();
-    } catch (error) {
-      showToast(`그룹을 못 만들었습니다: ${error.message || error}`, 'error');
-    }
-  }
-
-  async function setMembership(groupId, add) {
-    const item = selectedItem();
-    if (!item) return;
-    try {
-      const data = await api('/api/ref-vibe/library/group-members', {method: 'POST',
-        body: {kind: API_KIND[tab], group_id: groupId, op: add ? 'add' : 'remove', file_hashes: [item.file_hash], model: lib[tab].model}});
+      const data = await api('/api/ref-vibe/library/move', {method: 'POST',
+        body: {kind: API_KIND[tab], file_hashes: hashes, category_id: categoryId, model: state.model}});
       replaceItems(data.items || []);
-      if (data.counts) lib[tab].counts = data.counts;
-      if (lib[tab].filter === 'group' || lib[tab].filter === 'ungrouped') loadLibrary(true);
+      if (data.counts) state.counts = data.counts;
+      const first = state.items.find(item => String(item.file_hash) === hashes[0]);
+      const label = String(first?.display_name || first?.name || hashes[0]);
+      showToast(categoryId ? `${label} → ${categoryName(categoryId)}` : `${label} → 미분류`, 'info');
+      // 보고 있는 칸에서 빠졌으면 목록을 다시 받는다.
+      if (state.filter === 'category' || state.filter === 'uncategorized') loadLibrary(true);
       else renderStore();
     } catch (error) {
-      showToast(`그룹을 못 바꿨습니다: ${error.message || error}`, 'error');
+      showToast(`옮기지 못했습니다: ${error.message || error}`, 'error');
     }
   }
 
-  async function groupOp(groupId, op) {
-    const group = lib[tab].groups.find(g => g.id === groupId);
-    if (!group) return;
-    if (op === 'apply-clean' || op === 'apply-append') {
-      setModuleParam(KINDS.vibe, 'apply_group', JSON.stringify({group_id: groupId, mode: op === 'apply-clean' ? 'clean' : 'append'}));
-      return;
-    }
+  async function categoryOp(body) {
     try {
-      if (op === 'rename') {
-        const name = await promptDialog('그룹 이름', {title: '그룹 이름 바꾸기', defaultValue: group.name});
-        if (!name || !String(name).trim()) return;
-        await api('/api/ref-vibe/library/group', {method: 'POST', body: {kind: API_KIND[tab], op: 'rename', group_id: groupId, name: String(name).trim(), model: lib[tab].model}});
-      } else if (op === 'delete') {
-        if (!await confirmDialog(`그룹 "${group.name}" 을 지웁니다. 항목은 보관함에 그대로 남습니다.`)) return;
-        await api('/api/ref-vibe/library/group', {method: 'POST', body: {kind: API_KIND[tab], op: 'delete', group_id: groupId, model: lib[tab].model}});
-        if (lib[tab].groupId === groupId) { lib[tab].filter = 'all'; lib[tab].groupId = ''; }
-      }
-      loadLibrary(true);
+      const data = await api('/api/ref-vibe/library/category', {method: 'POST',
+        body: {kind: API_KIND[tab], model: lib[tab].model, ...body}});
+      const state = lib[tab];
+      if (Array.isArray(data.categories)) state.categories = data.categories;
+      if (data.counts) state.counts = data.counts;
+      return true;
     } catch (error) {
-      showToast(`그룹 작업을 못 했습니다: ${error.message || error}`, 'error');
+      showToast(`카테고리 작업을 못 했습니다: ${error.message || error}`, 'error');
+      return false;
     }
   }
 
-  // ── 작은 메뉴(그룹 칩 우클릭 · 항목의 그룹 ▾) ─────────────────────────────
+  async function newCategory() {
+    const name = await promptDialog('카테고리 이름', {title: '새 카테고리', placeholder: '인물 톤'});
+    if (!name || !String(name).trim()) return '';
+    const before = new Set(lib[tab].categories.map(c => c.id));
+    if (!await categoryOp({op: 'create', name: String(name).trim()})) return '';
+    renderStore();
+    return lib[tab].categories.find(c => !before.has(c.id))?.id || '';
+  }
+
+  async function renameCategory(id) {
+    const name = await promptDialog('카테고리 이름', {title: '카테고리 이름 바꾸기', defaultValue: categoryName(id)});
+    if (!name || !String(name).trim()) return;
+    if (await categoryOp({op: 'rename', category_id: id, name: String(name).trim()})) renderStore();
+  }
+
+  async function deleteCategory(id) {
+    if (!await confirmDialog(`카테고리 "${categoryName(id)}" 을 지웁니다. 안의 항목은 미분류로 갑니다.`, {title: '카테고리 지우기', okText: '지우기'})) return;
+    if (!await categoryOp({op: 'delete', category_id: id})) return;
+    const state = lib[tab];
+    if (state.categoryId === id) { state.filter = 'all'; state.categoryId = ''; }
+    loadLibrary(true);
+  }
+
+  async function reorderCategory(dragId, targetId, after) {
+    const ids = lib[tab].categories.map(c => c.id).filter(id => id !== dragId);
+    const at = ids.indexOf(targetId);
+    if (at < 0) return;
+    ids.splice(after ? at + 1 : at, 0, dragId);
+    // 먼저 화면에서 옮겨 둔다(서버 답이 늦어도 손이 놓인 자리 그대로).
+    const byId = new Map(lib[tab].categories.map(c => [c.id, c]));
+    lib[tab].categories = ids.map(id => byId.get(id)).filter(Boolean);
+    renderStore();
+    if (await categoryOp({op: 'reorder', order: ids})) renderStore();
+  }
+
+  function openCategoryMenu(anchor) {
+    const item = selectedItem();
+    if (!item) return;
+    const current = String(item.category || '');
+    const rows = lib[tab].categories.map(c => `<button type="button" class="rvw-menu-i${c.id === current ? ' is-selected' : ''}" data-rvw-menu="${escHtml(c.id)}">`
+      + `<span class="rvw-menu-mark">${c.id === current ? '✓' : ''}</span>${escHtml(c.name)}</button>`).join('');
+    openMenu(anchor, rows
+      + `<button type="button" class="rvw-menu-i${current ? '' : ' is-selected'}" data-rvw-menu="__none"><span class="rvw-menu-mark">${current ? '' : '✓'}</span>미분류</button>`
+      + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="__new"><span class="rvw-menu-mark">+</span>새 카테고리</button>`, async id => {
+      if (id === '__new') {
+        const created = await newCategory();
+        if (created) moveTo([item.file_hash], created);
+        return;
+      }
+      const target = id === '__none' ? '' : id;
+      if (target !== current) moveTo([item.file_hash], target);
+    });
+  }
+
+  function openCategoryRowMenu(anchor, id) {
+    openMenu(anchor, `<button type="button" class="rvw-menu-i" data-rvw-menu="rename">이름 바꾸기</button>`
+      + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete">카테고리 지우기</button>`, op => {
+      if (op === 'rename') renameCategory(id);
+      else if (op === 'delete') deleteCategory(id);
+    });
+  }
+
+  // ── 클러스터 ──────────────────────────────────────────────────────────────
+  async function loadClusters() {
+    if (!panel || !panel.isOpen()) return;
+    const seq = ++clusters.seq;
+    clusters.loading = true;
+    clusters.error = '';
+    if (inClusters()) renderStore();
+    try {
+      const data = await api('/api/ref-vibe/clusters');
+      if (seq !== clusters.seq) return;
+      clusters.list = Array.isArray(data.clusters) ? data.clusters : [];
+      clusters.loaded = true;
+      if (clusters.openId && !clusters.list.some(c => c.id === clusters.openId)) clusters.openId = '';
+    } catch (error) {
+      if (seq !== clusters.seq) return;
+      clusters.error = `클러스터를 못 받았습니다: ${error.message || error}`;
+    } finally {
+      if (seq === clusters.seq) clusters.loading = false;
+    }
+    if (tab === 'vibe') renderStore();
+  }
+
+  function clusterById(id) { return clusters.list.find(c => c.id === id) || null; }
+
+  function replaceCluster(next) {
+    if (!next || !next.id) return;
+    const at = clusters.list.findIndex(c => c.id === next.id);
+    if (at >= 0) clusters.list[at] = next; else clusters.list.push(next);
+    clusters.list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
+
+  async function clusterOp(body, {quiet = false} = {}) {
+    try {
+      const data = await api('/api/ref-vibe/clusters', {method: 'POST', body});
+      if (data.deleted) {
+        clusters.list = clusters.list.filter(c => c.id !== data.deleted);
+        if (clusters.openId === data.deleted) clusters.openId = '';
+      } else {
+        replaceCluster(data.cluster || data);
+      }
+      renderStore();
+      return data;
+    } catch (error) {
+      if (!quiet) showToast(`클러스터 작업을 못 했습니다: ${error.message || error}`, 'error');
+      return null;
+    }
+  }
+
+  function memberThumb(member) {
+    return member.has_image && member.thumbnail_url
+      ? `<img class="rvw-th" loading="lazy" draggable="false" src="${escHtml(member.thumbnail_url)}" alt="">`
+      : `<span class="rvw-th is-empty" aria-hidden="true">enc</span>`;
+  }
+
+  function clustersHtml() {
+    if (clusters.openId) return clusterDetailHtml(clusterById(clusters.openId));
+    const q = String(clusters.q || '').trim().toLowerCase();
+    const list = clusters.list.filter(c => !q || String(c.name).toLowerCase().includes(q));
+    const current = lib.vibe.currentModel;
+    const cards = list.map(c => {
+      const thumbs = (c.members || []).slice(0, 4).map(m => (m.has_image && m.thumbnail_url
+        ? `<img src="${escHtml(m.thumbnail_url)}" alt="" loading="lazy" draggable="false">` : `<span></span>`)).join('');
+      const other = current && c.model && c.model !== current;
+      return `<div class="rvw-cl" data-rvw-clopen="${escHtml(c.id)}">`
+        + `<span class="rvw-cl-stack">${thumbs}</span>`
+        + `<span class="rvw-cl-body"><span class="rvw-cl-n">${escHtml(c.name)}</span>`
+        + `<span class="rvw-cl-m">${Number(c.enabled_count ?? 0)}/${Number(c.frame_count ?? 0)} · ${escHtml(c.model || '?')}`
+        + (other ? ` <em data-naia-title="지금 모델과 다릅니다 - 적용하면 결과가 달라질 수 있습니다">다른 모델</em>` : '') + `</span></span>`
+        + `<button type="button" class="rvw-btn is-accent" data-rvw-clapply="clean" data-id="${escHtml(c.id)}" data-naia-title="활성 Vibe 를 이 클러스터로 바꿉니다">바꾸기</button>`
+        + `<button type="button" class="rvw-btn" data-rvw-clapply="append" data-id="${escHtml(c.id)}" data-naia-title="활성 Vibe 뒤에 더합니다">더하기</button></div>`;
+    }).join('');
+    const empty = clusters.loading ? '불러오는 중…' : (clusters.error ? escHtml(clusters.error)
+      : (q ? '맞는 클러스터가 없습니다.' : '클러스터가 없습니다. 활성 Vibe 를 맞춰 두고 아래에서 묶으세요.'));
+    return (cards || `<div class="rvw-empty">${empty}</div>`)
+      + `<button type="button" class="rvw-cl-new" data-rvw-act="clnew">+ 지금 활성 Vibe 로 새 클러스터</button>`;
+  }
+
+  function clusterDetailHtml(c) {
+    if (!c) return `<div class="rvw-empty">클러스터를 찾지 못했습니다.</div>`;
+    const rows = (c.members || []).map(m => {
+      const keys = (m.encoding_keys || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+      const ie = Number(m.ie);
+      const chips = keys.length
+        ? keys.map(k => `<button type="button" class="rvw-chip${Math.abs(k - ie) < 1e-6 ? ' on' : ''}" data-rvw-mie="${m.index}" data-ie="${fmt(k)}">${fmt(k)}</button>`).join('')
+        : `<span class="rvw-chip on">IE ${fmt(ie)}</span>`;
+      const rs = fmt(m.rs);
+      // 두 줄 - 위: 켜짐 · 썸네일 · 이름 · 빼기 / 아래: RS · IE 칩(한 줄에 넣으면 이름이 잘리고 칩이 접혔다).
+      return `<div class="rvw-mrow${m.enabled ? ' is-live' : ' is-off'}">`
+        + `<button type="button" class="rvw-en" data-rvw-men="${m.index}" aria-label="${m.enabled ? '끄기' : '켜기'}">${m.enabled ? '✔' : '✘'}</button>`
+        + memberThumb(m)
+        + `<span class="rvw-mrow-main"><span class="rvw-mrow-top">`
+        + `<span class="rvw-name">${escHtml(String(m.display_name || `#${m.index + 1}`))}</span>`
+        + `<button type="button" class="rvw-x" data-rvw-mremove="${m.index}" aria-label="클러스터에서 빼기">-</button></span>`
+        + `<span class="rvw-mrow-sub"><span class="rvw-k">RS</span>`
+        + `<input type="range" class="rvw-range" min="-100" max="100" step="1" value="${Math.round(Number(rs) * 100)}" data-rvw-mrs="${m.index}">`
+        + `<span class="rvw-v" data-rvw-mrs-out="${m.index}">${rs}</span>`
+        + `<span class="rvw-k">IE</span><span class="rvw-mchips">${chips}</span></span></span></div>`;
+    }).join('');
+    return `<div class="rvw-cl-head">`
+      + `<button type="button" class="rvw-btn" data-rvw-act="clback" aria-label="클러스터 목록">←</button>`
+      + `<span class="rvw-cl-n">${escHtml(c.name)}</span><span class="rvw-cl-m">${escHtml(c.model || '')}</span>`
+      + `<span class="rvw-pick-tools">`
+      + `<button type="button" class="rvw-btn is-accent" data-rvw-clapply="clean" data-id="${escHtml(c.id)}">바꾸기</button>`
+      + `<button type="button" class="rvw-btn" data-rvw-clapply="append" data-id="${escHtml(c.id)}">더하기</button>`
+      + `<button type="button" class="rvw-btn" data-rvw-act="clmore" data-id="${escHtml(c.id)}" aria-label="클러스터 메뉴">⋯</button></span></div>`
+      + (c.description ? `<div class="rvw-hint rvw-cl-desc">${escHtml(c.description)}</div>` : '')
+      + (rows || `<div class="rvw-empty">멤버가 없습니다. 보관함 썸네일을 [클러스터 ▾] 로 넣으세요.</div>`);
+  }
+
+  async function newClusterFromActive() {
+    const frames = (getModuleState(KINDS.vibe)?.frames || []).filter(f => f.has_encoding || (f.encoding_keys || []).length);
+    if (!frames.length) { showToast('인코딩된 활성 Vibe 가 없습니다 - 먼저 Vibe 를 올리고 인코딩하세요', 'info'); return; }
+    const name = await promptDialog(`활성 Vibe ${frames.length}개를 IE · RS · 켜짐까지 묶습니다. 이름은 글자 · 숫자 · 한글만(프롬프트 vibe:이름 으로도 부릅니다).`,
+      {title: '새 클러스터', placeholder: 'semireal'});
+    if (!name || !String(name).trim()) return;
+    if (!CLUSTER_NAME.test(String(name).trim())) { showToast('클러스터 이름은 글자 · 숫자 · 한글만 됩니다(띄어쓰기 · 기호 없이)', 'error'); return; }
+    const data = await clusterOp({op: 'create', name: String(name).trim()});
+    const made = data?.cluster || data;
+    if (made?.id) { clusters.openId = made.id; renderStore(); showToast(`클러스터 "${made.name}" 를 만들었습니다`, 'success'); }
+  }
+
+  async function addToCluster(id, item) {
+    const c = clusterById(id);
+    if (!c || !item) return;
+    const ie = lib.vibe.selected === item.file_hash && lib.vibe.ie !== null ? lib.vibe.ie : defaultIe(item);
+    const data = await clusterOp({op: 'add', id, model: lib.vibe.model, file_hash: item.file_hash, ie});
+    if (data) showToast(`${item.display_name || item.file_hash} → ◆ ${c.name}`, 'info');
+  }
+
+  function openClusterPickMenu(anchor, item) {
+    if (!item) return;
+    const model = lib.vibe.model;
+    const rows = clusters.list.map(c => {
+      const ok = !c.model || c.model === model;
+      return `<button type="button" class="rvw-menu-i${ok ? '' : ' is-off'}" data-rvw-menu="${ok ? escHtml(c.id) : ''}"`
+        + (ok ? '' : ` data-naia-title="${escHtml(c.model)} 클러스터 - 같은 모델의 Vibe 만 넣을 수 있습니다"`)
+        + `><span class="rvw-menu-mark">◆</span>${escHtml(c.name)}</button>`;
+    }).join('');
+    openMenu(anchor, (rows || `<div class="rvw-menu-h">클러스터가 없습니다</div>`)
+      + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="__view"><span class="rvw-menu-mark">◆</span>클러스터 보기</button>`, id => {
+      if (id === '__view') { lib.vibe.filter = 'clusters'; clusters.openId = ''; loadLibrary(true); renderStore(); return; }
+      if (id) addToCluster(id, item);
+    });
+  }
+
+  function openClusterMoreMenu(anchor, id) {
+    const c = clusterById(id);
+    if (!c) return;
+    openMenu(anchor, `<button type="button" class="rvw-menu-i" data-rvw-menu="rename">이름 바꾸기</button>`
+      + `<button type="button" class="rvw-menu-i" data-rvw-menu="desc">설명 고치기</button>`
+      + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete" data-naia-title="클러스터 파일을 지웁니다(이 PC 에서만) - 보관함의 Vibe 는 그대로">클러스터 지우기</button>`, async op => {
+      if (op === 'rename') {
+        const name = await promptDialog('글자 · 숫자 · 한글만(프롬프트 vibe:이름 으로도 부릅니다)', {title: '클러스터 이름', defaultValue: c.name});
+        if (!name || !String(name).trim() || String(name).trim() === c.name) return;
+        if (!CLUSTER_NAME.test(String(name).trim())) { showToast('클러스터 이름은 글자 · 숫자 · 한글만 됩니다', 'error'); return; }
+        clusterOp({op: 'rename', id, name: String(name).trim()});
+      } else if (op === 'desc') {
+        const text = await promptDialog('설명', {title: '클러스터 설명', defaultValue: c.description || ''});
+        if (text === null || text === undefined) return;
+        clusterOp({op: 'update', id, description: String(text)});
+      } else if (op === 'delete') {
+        if (!await confirmDialog(`클러스터 "${c.name}" 을 지웁니다. 보관함의 Vibe 는 그대로 남습니다.`, {title: '클러스터 지우기', okText: '지우기'})) return;
+        clusterOp({op: 'delete', id});
+      }
+    });
+  }
+
+  // ── 작은 메뉴 ─────────────────────────────────────────────────────────────
   function closeMenu() {
     if (!menu) return;
     menu.remove();
@@ -724,13 +992,16 @@ export function createRefVibeWindow({
     if (menu && !menu.contains(event.target)) closeMenu();
   }
 
+  /** `anchor` = 요소 또는 {x, y}(끌어 놓은 자리). */
   function openMenu(anchor, html, onPick) {
     closeMenu();
     menu = doc.createElement('div');
     menu.className = 'rvw-menu';
     menu.innerHTML = html;
     doc.body.appendChild(menu);
-    const box = anchor.getBoundingClientRect();
+    const box = anchor && typeof anchor.getBoundingClientRect === 'function'
+      ? anchor.getBoundingClientRect()
+      : {left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y};
     const width = menu.offsetWidth;
     const left = Math.min(box.left, win.innerWidth - width - 8);
     const below = box.bottom + 4;
@@ -739,45 +1010,111 @@ export function createRefVibeWindow({
     menu.style.top = `${Math.round(top)}px`;
     menu.addEventListener('click', event => {
       const item = event.target.closest('[data-rvw-menu]');
-      if (!item) return;
+      if (!item || !item.dataset.rvwMenu) return;
       const keep = onPick(item.dataset.rvwMenu, item) === 'keep';
       if (!keep) closeMenu();
     });
     doc.addEventListener('pointerdown', onMenuOutside, true);
   }
 
-  function openGroupsMenu(anchor) {
-    const item = selectedItem();
-    if (!item) return;
-    const mine = new Set(item.groups || []);
-    const groups = lib[tab].groups;
-    const rows = groups.length
-      ? groups.map(g => `<button type="button" class="rvw-menu-i${mine.has(g.id) ? ' is-selected' : ''}" data-rvw-menu="${escHtml(g.id)}">`
-        + `<span class="rvw-menu-mark">${mine.has(g.id) ? '✓' : ''}</span>${escHtml(g.name)}</button>`).join('')
-      : `<div class="rvw-menu-h">그룹이 없습니다</div>`;
-    openMenu(anchor, rows + `<div class="rvw-menu-sep"></div>`
-      + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="__new"><span class="rvw-menu-mark">+</span>새 그룹</button>`, id => {
-      if (id === '__new') { newGroup(); return; }
-      setMembership(id, !mine.has(id));
-    });
-  }
-
-  function openGroupChipMenu(anchor, groupId) {
-    const rows = (tab === 'vibe'
-      ? `<button type="button" class="rvw-menu-i" data-rvw-menu="apply-clean">이 그룹으로 바꾸기</button>`
-        + `<button type="button" class="rvw-menu-i" data-rvw-menu="apply-append">이 그룹 더하기</button>`
-      : '')
-      + (tab === 'vibe' ? `<div class="rvw-menu-sep"></div>` : '')
-      + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename">이름 바꾸기</button>`
-      + `<div class="rvw-menu-sep"></div>`
-      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete">그룹 지우기</button>`;
-    openMenu(anchor, rows, op => { groupOp(groupId, op); });
-  }
-
   function openImportMenu(anchor) {
     openMenu(anchor, `<button type="button" class="rvw-menu-i" data-rvw-menu="file">.naiv4vibe / .naiv4vibebundle 파일…</button>`, () => {
       panel.body.querySelector('[data-rvw-import]').click();
     });
+  }
+
+  // ── 끌어 놓기 (Snapshot 창과 같은 규칙) ──────────────────────────────────
+  // ⚠️ 놓을 자리 판별은 **자료형만으로** 한다 - 끌던 중 목록이 다시 그려져 dragend 가 안 오면 `drag` 가 남는다.
+  //    그 값을 통행증으로 쓰면 다른 데서 끌어온 파일이 엉뚱한 항목으로 옮겨진다(Scene 창에서 실측된 결함).
+  function dndTypes(event) {
+    const types = event.dataTransfer?.types || [];
+    return {item: Array.prototype.indexOf.call(types, DND_ITEM) >= 0, cat: Array.prototype.indexOf.call(types, DND_CAT) >= 0};
+  }
+
+  function clearDropMarks() {
+    panel?.body.querySelectorAll('.is-drop, .is-drop-before, .is-drop-after').forEach(node => node.classList.remove('is-drop', 'is-drop-before', 'is-drop-after'));
+  }
+
+  function onDragStart(event) {
+    const card = event.target.closest?.('[data-rvw-card]');
+    const catRow = event.target.closest?.('[data-rvw-catdrag]');
+    try {
+      if (card) {
+        drag = {type: 'item', hash: card.dataset.rvwCard};
+        event.dataTransfer.setData(DND_ITEM, JSON.stringify({kind: tab, hash: drag.hash}));
+        event.dataTransfer.setData('text/plain', drag.hash);   // 표준 자료형이 없으면 끌기를 취소하는 브라우저가 있다
+        event.dataTransfer.effectAllowed = 'move';
+        card.classList.add('is-dragging');
+        panel.body.querySelector('[data-rvw-cats]')?.classList.add('is-dropzone');
+      } else if (catRow) {
+        drag = {type: 'cat', id: catRow.dataset.rvwCatdrag};
+        event.dataTransfer.setData(DND_CAT, drag.id);
+        event.dataTransfer.setData('text/plain', drag.id);
+        event.dataTransfer.effectAllowed = 'move';
+        catRow.classList.add('is-dragging');
+      }
+    } catch (_) { /* drag 값으로도 동작한다 */ }
+    closeMenu();
+  }
+
+  function onDragEnd() {
+    drag = null;
+    clearDropMarks();
+    panel?.body.querySelectorAll('.is-dragging').forEach(node => node.classList.remove('is-dragging'));
+    panel?.body.querySelector('[data-rvw-cats]')?.classList.remove('is-dropzone');
+  }
+
+  function onDragOver(event) {
+    const types = dndTypes(event);
+    if (types.item) {
+      const zone = event.target.closest?.('[data-rvw-drop]');
+      if (!zone) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      clearDropMarks();
+      zone.classList.add('is-drop');
+    } else if (types.cat) {
+      const row = event.target.closest?.('[data-rvw-catdrag]');
+      if (!row) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      clearDropMarks();
+      const box = row.getBoundingClientRect();
+      row.classList.add(event.clientY < box.top + box.height / 2 ? 'is-drop-before' : 'is-drop-after');
+    }
+  }
+
+  function onDragLeave(event) {
+    const zone = event.target.closest?.('[data-rvw-drop], [data-rvw-catdrag]');
+    if (zone && !zone.contains(event.relatedTarget)) zone.classList.remove('is-drop', 'is-drop-before', 'is-drop-after');
+  }
+
+  function onDrop(event) {
+    const types = dndTypes(event);
+    if (!types.item && !types.cat) return;
+    event.preventDefault();
+    const point = {x: event.clientX, y: event.clientY};
+    clearDropMarks();
+    if (types.item) {
+      const zone = event.target.closest?.('[data-rvw-drop]');
+      let hash = '';
+      try { hash = JSON.parse(event.dataTransfer.getData(DND_ITEM) || '{}').hash || ''; } catch (_) { hash = ''; }
+      hash = hash || (drag?.type === 'item' ? drag.hash : '');
+      onDragEnd();
+      if (!zone || !hash) return;
+      const target = zone.dataset.rvwDrop;
+      const item = lib[tab].items.find(i => String(i.file_hash) === hash);
+      if (target === '__fav') { if (!item?.favorite) setFavorite(hash, true); return; }
+      if (target === '__cluster') { openClusterPickMenu(point, item); return; }
+      if (String(item?.category || '') === target) return;          // 제자리면 아무것도 안 한다
+      moveTo([hash], target);
+      return;
+    }
+    const row = event.target.closest?.('[data-rvw-catdrag]');
+    const dragId = (() => { try { return event.dataTransfer.getData(DND_CAT); } catch (_) { return ''; } })() || drag?.id || '';
+    const after = row ? event.clientY >= row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2 : false;
+    onDragEnd();
+    if (row && dragId && row.dataset.rvwCatdrag !== dragId) reorderCategory(dragId, row.dataset.rvwCatdrag, after);
   }
 
   // ── 이벤트 ────────────────────────────────────────────────────────────────
@@ -819,9 +1156,38 @@ export function createRefVibeWindow({
     }
     if ((el = t.closest('[data-rvw-filter]'))) {
       const state = lib[tab];
-      state.filter = el.dataset.rvwFilter;
-      state.groupId = el.dataset.group || '';
+      const filter = el.dataset.rvwFilter;
+      if (filter === 'clusters') {
+        // 이미 클러스터 보기면 목록으로 돌아간다(멤버 편집 중에 다시 누른 손버릇).
+        clusters.openId = state.filter === 'clusters' ? '' : clusters.openId;
+      }
+      state.filter = filter;
+      state.categoryId = el.dataset.cat || '';
+      state.selected = '';
       loadLibrary(true);
+      renderStore();
+      return;
+    }
+    if ((el = t.closest('[data-rvw-clapply]'))) {
+      setModuleParam(KINDS.vibe, 'cluster_load', JSON.stringify({id: el.dataset.id, mode: el.dataset.rvwClapply}));
+      return;
+    }
+    if ((el = t.closest('[data-rvw-men]'))) {
+      const member = clusterById(clusters.openId)?.members?.find(m => m.index === index(el, 'data-rvw-men'));
+      if (member) clusterOp({op: 'update', id: clusters.openId, index: member.index, enabled: !member.enabled});
+      return;
+    }
+    if ((el = t.closest('[data-rvw-mie]'))) {
+      clusterOp({op: 'update', id: clusters.openId, index: index(el, 'data-rvw-mie'), ie: Number(el.dataset.ie)});
+      return;
+    }
+    if ((el = t.closest('[data-rvw-mremove]'))) {
+      clusterOp({op: 'remove', id: clusters.openId, index: index(el, 'data-rvw-mremove')});
+      return;
+    }
+    if ((el = t.closest('[data-rvw-clopen]'))) {
+      clusters.openId = el.dataset.rvwClopen;
+      renderStore();
       return;
     }
     if ((el = t.closest('[data-rvw-card]'))) {
@@ -844,10 +1210,14 @@ export function createRefVibeWindow({
       else if (act === 'import') openImportMenu(el);
       else if (act === 'apply') applySelected();
       else if (act === 'rename') renameSelected();
-      else if (act === 'fav') toggleFavorite();
-      else if (act === 'groups') openGroupsMenu(el);
+      else if (act === 'fav') { const item = selectedItem(); if (item) setFavorite(item.file_hash, !item.favorite); }
+      else if (act === 'catmenu') openCategoryMenu(el);
+      else if (act === 'clustermenu') { if (!clusters.loaded) loadClusters(); openClusterPickMenu(el, selectedItem()); }
       else if (act === 'delete') deleteSelected();
-      else if (act === 'newgroup') newGroup();
+      else if (act === 'newcat') newCategory();
+      else if (act === 'clnew') newClusterFromActive();
+      else if (act === 'clback') { clusters.openId = ''; renderStore(); }
+      else if (act === 'clmore') openClusterMoreMenu(el, el.dataset.id);
     }
   }
 
@@ -861,10 +1231,10 @@ export function createRefVibeWindow({
   }
 
   function onContextMenu(event) {
-    const chip = event.target.closest('[data-rvw-filter="group"]');
-    if (!chip) return;
+    const row = event.target.closest('[data-rvw-filter="category"]');
+    if (!row) return;
     event.preventDefault();
-    openGroupChipMenu(chip, chip.dataset.group);
+    openCategoryRowMenu(row, row.dataset.cat);
   }
 
   let qTimer = 0;
@@ -888,7 +1258,11 @@ export function createRefVibeWindow({
     } else if (t.matches('[data-rvw-cr]')) {
       const out = panel.body.querySelector(`[data-rvw-cr-out="${t.dataset.rvwCr}:${t.dataset.index}"]`);
       if (out) out.textContent = fmt(Number(t.value) / 20);
+    } else if (t.matches('[data-rvw-mrs]')) {
+      const out = panel.body.querySelector(`[data-rvw-mrs-out="${t.dataset.rvwMrs}"]`);
+      if (out) out.textContent = fmt(Number(t.value) / 100);
     } else if (t.matches('[data-rvw-q]')) {
+      if (inClusters()) { clusters.q = t.value; renderStore(); return; }
       const state = lib[tab];
       state.q = t.value;
       win.clearTimeout(qTimer);
@@ -910,6 +1284,8 @@ export function createRefVibeWindow({
       if (encodedKeys(frame || {}).some(k => Math.abs(k - Number(ie)) < 1e-6)) {
         setModuleParam(KINDS.vibe, `info_extracted_${t.dataset.rvwIe}`, ie);
       }
+    } else if (t.matches('[data-rvw-mrs]')) {
+      clusterOp({op: 'update', id: clusters.openId, index: Number(t.dataset.rvwMrs), rs: Number(fmt(Number(t.value) / 100))});
     } else if (t.matches('[data-rvw-cr]')) {
       setModuleParam(KINDS.cr, `${t.dataset.rvwCr}_${t.dataset.index}`, fmt(Number(t.value) / 20));
     } else if (t.matches('[data-rvw-type]')) {
@@ -932,6 +1308,7 @@ export function createRefVibeWindow({
     if (t.matches('[data-rvw-q]') && event.key === 'Escape' && t.value) {
       event.preventDefault();
       t.value = '';
+      if (inClusters()) { clusters.q = ''; renderStore(); return; }
       lib[tab].q = '';
       loadLibrary(true);
     }
@@ -950,7 +1327,7 @@ export function createRefVibeWindow({
       const sig = frameSig(getModuleState(moduleId));
       lastFrameSig[moduleId] = sig;
       renderActive();
-      if (before !== undefined && before !== sig && tab === 'vibe') loadLibrary(true);
+      if (before !== undefined && before !== sig && tab === 'vibe' && !inClusters()) loadLibrary(true);
     }
   }
   const lastFrameSig = {};
@@ -964,6 +1341,7 @@ export function createRefVibeWindow({
     if (!panel || !panel.isOpen()) return;
     lib.vibe.model = '';
     lib.vibe.loaded = false;
+    lib.vibe.selected = '';
     renderAll();
     loadLibrary(true);
   }

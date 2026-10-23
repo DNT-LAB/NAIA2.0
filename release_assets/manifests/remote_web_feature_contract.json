@@ -262,6 +262,7 @@
         {"method": "GET", "path": "/api/event-compress/state", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-compress/toggle", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/event-compress/events", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-compress/tags", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-compress/random", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/event-compress/generate", "smoke": "external_live"}
       ]

@@ -125,6 +125,11 @@ class EventCompress:
         self.signature = None
         self.groups = {}
         self.sorted_groups = {"asc": [], "desc": []}
+        self.tag_index = {}
+        self.group_tag_counts = {}
+        self.tag_count_hist = {}
+        self.tag_count_min = 0
+        self.tag_count_max = 0
         self.dropped = set()
         self.token_cache = {}
         self.cache_generation = None
@@ -328,7 +333,8 @@ class EventCompress:
             if group is None:
                 opaque = hashlib.sha256(json.dumps([rating, sorted(key[1])], ensure_ascii=True).encode()).hexdigest()
                 group = groups[key] = {"key": opaque, "rating": rating,
-                                      "tags": ", ".join(dict.fromkeys(tags)), "members": [],
+                                      "tags": ", ".join(sorted(key[1])), "tag_set": key[1],
+                                      "tag_count": len(key[1]), "members": [],
                                       "frame": frame, "index": index}
             group["members"].append(ref)
         result = {g["key"]: g for g in groups.values()}
@@ -363,6 +369,17 @@ class EventCompress:
             while True:
                 stamp, settings, data = self._capture()
                 groups, special, ordered, kept, dropped, ratings, mask = self._compute(stamp, settings, data)
+                # Build once outside the pool lock; publish with the same groups.
+                tag_index = {}
+                group_tag_counts = {}
+                for key, group in groups.items():
+                    group_tag_counts[key] = group["tag_count"]
+                    for tag in group["tag_set"]:
+                        tag_index.setdefault(tag, []).append(key)
+                histogram = Counter(group_tag_counts.values())
+                tag_count_hist = {str(n): histogram[n] for n in sorted(histogram)}
+                tag_count_min = min(histogram, default=0)
+                tag_count_max = max(histogram, default=0)
                 with self.guard():
                     current = (self._identity(), self._revision(),
                                pe_settings(self.context)[0], self.sequence)
@@ -373,6 +390,11 @@ class EventCompress:
                     before = self._remaining()
                     self.groups = groups
                     self.sorted_groups = ordered
+                    self.tag_index = tag_index
+                    self.group_tag_counts = group_tag_counts
+                    self.tag_count_hist = tag_count_hist
+                    self.tag_count_min = tag_count_min
+                    self.tag_count_max = tag_count_max
                     self.identity, self.signature = stamp[0], settings[0]
                     self.per_row_rounds = special
                     if enabled(self.context):
@@ -431,7 +453,11 @@ class EventCompress:
                 payload.update(ok=False, error=self.error)
             return payload
 
-    def events(self, sort="desc", q="", offset=0, limit=60):
+    @staticmethod
+    def _passes_tag_cut(count, min_tags, max_tags):
+        return (min_tags is None or count >= min_tags) and (max_tags is None or count <= max_tags)
+
+    def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None):
         while True:
             self.refresh()
             with self.guard():
@@ -439,12 +465,38 @@ class EventCompress:
                     continue
                 live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
                 words = q.lower().split()
+                # Filtering the cached order is equivalent to sorting after cut + q.
                 groups = [g for g in self.sorted_groups[sort]
-                          if all(word in g["tags"].lower() for word in words)]
-                items = [{**{k: g[k] for k in ("key", "rating", "tags", "size")},
+                          if self._passes_tag_cut(g["tag_count"], min_tags, max_tags)
+                          and all(word in g["tags"].lower() for word in words)]
+                items = [{**{k: g[k] for k in ("key", "rating", "tags", "tag_count", "size")},
                           "remaining": sum(ref in live for ref in g["members"])}
                          for g in groups[offset:offset + limit]]
-                return {"ok": True, "total": len(groups), "offset": offset, "items": items}
+                return {"ok": True, "total": len(groups), "offset": offset, "items": items,
+                        "tag_count_hist": dict(self.tag_count_hist),
+                        "tag_count_min": self.tag_count_min, "tag_count_max": self.tag_count_max}
+
+    def tags(self, q="", min_tags=None, max_tags=None, limit=20):
+        query = q.lower().replace("_", " ")
+        while True:
+            self.refresh()
+            with self.guard():
+                if self.is_stale():
+                    continue
+                items = []
+                for tag, keys in self.tag_index.items():
+                    normalized = tag.lower().replace("_", " ")
+                    if query not in normalized:
+                        continue
+                    count = len(keys) if min_tags is None and max_tags is None else sum(
+                        self._passes_tag_cut(self.group_tag_counts[key], min_tags, max_tags)
+                        for key in keys)
+                    if count:
+                        items.append({"tag": tag, "events": count})
+                items.sort(key=lambda item: (
+                    not item["tag"].lower().replace("_", " ").startswith(query),
+                    -item["events"], item["tag"]))
+                return {"ok": True, "items": items[:limit]}
 
     def source_row(self, key):
         while True:

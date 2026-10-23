@@ -51,13 +51,47 @@ def register_event_compress_routes(
         service = ensure_event_compress(session_context)
         return response(await run_in_thread(service.toggle, payload["enabled"]))
 
+    def tag_cut(min_tags, max_tags):
+        try:
+            lower = None if min_tags is None else int(min_tags)
+            upper = None if max_tags is None else int(max_tags)
+        except ValueError:
+            raise ValueError("min_tags and max_tags must be integers")
+        if (lower is not None and lower < 0) or (upper is not None and upper < 0):
+            raise ValueError("min_tags and max_tags must be non-negative")
+        if lower is not None and upper is not None and lower > upper:
+            raise ValueError("min_tags must not exceed max_tags")
+        return lower, upper
+
     @app.get("/api/event-compress/events")
-    async def event_compress_events(sort: str = "desc", q: str = "", offset: int = 0, limit: int = 60):
+    async def event_compress_events(sort: str = "desc", q: str = "", offset: int = 0, limit: int = 60,
+                                    min_tags: str | None = None, max_tags: str | None = None):
         if sort not in ("asc", "desc") or offset < 0 or limit < 1:
             return error("bad_request", "Invalid sort, offset or limit")
         try:
+            lower, upper = tag_cut(min_tags, max_tags)
+        except ValueError as exc:
+            return error("bad_request", str(exc))
+        try:
             result = await run_in_thread(ensure_event_compress(session_context).events,
-                                         sort, q, offset, limit)
+                                         sort, q, offset, limit, lower, upper)
+        except RuntimeError as exc:
+            return error("internal_error", str(exc), 500)
+        return response(result)
+
+    @app.get("/api/event-compress/tags")
+    async def event_compress_tags(q: str = "", min_tags: str | None = None,
+                                 max_tags: str | None = None, limit: str = "20"):
+        try:
+            lower, upper = tag_cut(min_tags, max_tags)
+            count = int(limit)
+            if not 1 <= count <= 100:
+                raise ValueError("limit must be between 1 and 100")
+        except ValueError as exc:
+            return error("bad_request", str(exc))
+        try:
+            result = await run_in_thread(ensure_event_compress(session_context).tags,
+                                         q, lower, upper, count)
         except RuntimeError as exc:
             return error("internal_error", str(exc), 500)
         return response(result)

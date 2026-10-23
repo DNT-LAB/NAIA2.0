@@ -1405,6 +1405,34 @@ export function createRefVibeWindow({
     doc.body.appendChild(el);
     cpBox = {el, hash: String(item.file_hash), extracted: null, extracting: false};
     doc.addEventListener('keydown', onCharacterPromptKey, true);
+    // 머리를 잡고 끌어 옮긴다(사용자 지시 2026-10-23 - 에셋 창의 프롬프트를 옆에 두고 옮겨 적는다). 창 밖으로는 못 나간다.
+    el.querySelector('.rvw-cp-head').addEventListener('pointerdown', event => {
+      if (event.button !== 0 || event.target.closest('[data-cp]')) return;
+      event.preventDefault();
+      const start = el.getBoundingClientRect();
+      const dx = event.clientX - start.left;
+      const dy = event.clientY - start.top;
+      el.style.transform = 'none';
+      el.style.left = `${Math.round(start.left)}px`;
+      el.style.top = `${Math.round(start.top)}px`;
+      el.classList.add('is-drag');
+      const move = e => {
+        const r = el.getBoundingClientRect();
+        const left = Math.max(0, Math.min(e.clientX - dx, win.innerWidth - r.width));
+        const top = Math.max(0, Math.min(e.clientY - dy, win.innerHeight - 40));
+        el.style.left = `${Math.round(left)}px`;
+        el.style.top = `${Math.round(top)}px`;
+      };
+      const up = () => {
+        el.classList.remove('is-drag');
+        doc.removeEventListener('pointermove', move);
+        doc.removeEventListener('pointerup', up);
+        doc.removeEventListener('pointercancel', up);
+      };
+      doc.addEventListener('pointermove', move);
+      doc.addEventListener('pointerup', up);
+      doc.addEventListener('pointercancel', up);
+    });
     el.addEventListener('click', event => {
       const mode = event.target.closest('[data-cp-mode]');
       if (mode && cpBox?.extracted) {

@@ -32975,7 +32975,8 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   background: var(--bg-surface); border: 1px solid var(--border-glow); border-radius: 10px;
   box-shadow: 0 16px 40px rgba(0,0,0,0.5); font: 11px var(--font-mono); color: var(--text-primary);
 }
-.rvw-cp-head { display: flex; align-items: center; gap: 8px; }
+.rvw-cp-head { display: flex; align-items: center; gap: 8px; cursor: move; user-select: none; touch-action: none; }
+.rvw-cp.is-drag { opacity: 0.92; }
 .rvw-cp-title { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rvw-cp-x { border: 0; background: none; color: var(--text-dim); font: inherit; font-size: 13px; cursor: pointer; }
 .rvw-cp-x:hover { color: var(--text-primary); }

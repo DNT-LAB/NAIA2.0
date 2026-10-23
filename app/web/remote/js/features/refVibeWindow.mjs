@@ -1371,11 +1371,21 @@ export function createRefVibeWindow({
       if (setModuleParam('character', `remove_character_${index}`, condition, {slotUuid: character.slot_uuid}) !== false) sent += 1;
     });
     if (sent < slots.length) { showToast('연결이 끊겨 캐릭터 슬롯을 다 걷지 못했습니다', 'error'); return; }
+    // 끝났는지는 **짚은 슬롯(uuid)이 새 상태에서 사라졌는가** 로 본다 - 내용으로 보면 서버가 '그사이 고쳤다' 며 남긴 슬롯도
+    // 더는 안 맞으니 걷은 것처럼 보였다(Codex 리뷰 2026-10-23). 새 상태가 안 왔으면 모른다고 알린다.
     const name = itemName(item);
+    const targets = slots.map(({character}) => String(character.slot_uuid || '')).filter(Boolean);
+    const before = getModuleState('character');
     win.setTimeout(() => {
-      const left = matchingCharacterSlots(item).length;
-      showToast(left ? `${name} 의 캐릭터 슬롯 ${left}개를 걷지 못했습니다 - 슬롯에서 직접 지워 주세요`
-        : `${name} 의 캐릭터 슬롯도 걷었습니다`, left ? 'error' : 'info');
+      const now = getModuleState('character');
+      if (!targets.length || now === before) {
+        showToast(`${name} 의 캐릭터 슬롯을 걷었는지 아직 확인하지 못했습니다 - 슬롯을 확인해 주세요`, 'info');
+        return;
+      }
+      const alive = new Set((now?.characters || []).map(character => String(character.slot_uuid || '')));
+      const left = targets.filter(uuid => alive.has(uuid)).length;
+      showToast(left ? `${name} 의 캐릭터 슬롯 ${left}개는 그사이 바뀌어 남겨 두었습니다 - 필요하면 슬롯에서 지워 주세요`
+        : `${name} 의 캐릭터 슬롯도 걷었습니다`, 'info');
     }, 1200);
   }
 

@@ -258,20 +258,35 @@ def _active_duplicate(frames: Any, prompt: Any, uc: Any) -> tuple[int, dict[str,
     return None
 
 
-def _remove_if_match(value: Any) -> dict[str, Any] | None:
+_INVALID_CONDITION = object()
+
+
+def _remove_if_match(value: Any) -> Any:
     """`remove_character_N` 의 조건 값 `{"if_match": {"prompt", "uc"}}` - 그 슬롯이 **지금도** 이 캐릭터일 때만 지운다.
 
     REF & VIBE [REF+프롬프트 해제](사용자 지시 2026-10-23)가 보낸다. 화면이 맞춰 본 뒤 번호로 지우면, 그사이 고친
     슬롯(`alice` -> `alice, new outfit`)까지 지워진다(Codex 리뷰) - 그래서 서버가 지금의 내용으로 다시 본다.
+
+    반환: None = 조건 없음(옛 값 `true` · `if_empty` · 안쪽 호출의 True - 예전 그대로) · dict = 맞춰 볼 내용 ·
+    `_INVALID_CONDITION` = 조건처럼 생겼는데 깨졌다(`{"if_match": null}` · 잘린 JSON · 글자 아닌 prompt) - **지우지 않는다**.
+    깨진 조건을 '조건 없음' 으로 읽으면 무조건 삭제가 된다(Codex 리뷰 2026-10-23 HIGH).
     """
-    if isinstance(value, str) and value.strip().startswith("{"):
+    if isinstance(value, str):
+        if not value.strip().startswith("{"):
+            return None
         try:
             value = json.loads(value)
         except (TypeError, ValueError):
-            return None
-    if isinstance(value, dict) and isinstance(value.get("if_match"), dict):
-        return value["if_match"]
-    return None
+            return _INVALID_CONDITION
+    if not isinstance(value, dict):
+        return None
+    expected = value.get("if_match")
+    if not isinstance(expected, dict):
+        return _INVALID_CONDITION
+    prompt, uc = expected.get("prompt", ""), expected.get("uc", "")
+    if not isinstance(prompt, str) or not isinstance(uc, str):
+        return _INVALID_CONDITION
+    return {"prompt": prompt, "uc": uc}
 
 
 def _same_active_character(frame: Any, expected: dict[str, Any]) -> bool:
@@ -1068,7 +1083,7 @@ class HeadlessCharacterService:
             # `{"if_match": {prompt, uc}}` = 지금도 그 캐릭터인 활성 슬롯일 때만 지운다. 사용자가 '이 캐릭터를 걷어라' 고
             # 짚은 것이라 마지막 하나여도 지운다(캐릭터 0 은 유효한 상태 - 아래 주석).
             expected = _remove_if_match(value)
-            if expected is not None and not _same_active_character(_target, expected):
+            if expected is _INVALID_CONDITION or (expected is not None and not _same_active_character(_target, expected)):
                 return self.state()
             # 세션 와일드카드 슬롯은 마지막 하나여도 뺀다 - 이 세션에만 있는 임시 칸이다(사용자 지시 2026-10-19).
             if _target is not None and (len(frames) > 1 or _stored or bool(_target.get("session_wildcard"))

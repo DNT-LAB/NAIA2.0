@@ -907,10 +907,20 @@ class HeadlessVibeTransferService:
         context = self.context
         self._ensure_loaded()
         if key == "upload_image":
+            image_bytes = base64.b64decode(data_url_payload(str(value or "")))
+            frame = self.frame_from_bytes(image_bytes, file_name="remote_vibe.png")
+            # 같은 이미지가 이미 활성에 있으면 새 칸을 만들지 않고 그 칸을 켠다(사용자 제보 2026-10-23: 결과 우클릭 >
+            # Set as ... 를 누를 때마다 같은 그림이 쌓였다). 창 업로드 · 붙여넣기 · Detected Image 패널도 이 길을 지난다.
+            existing = next((f for f in context.vibe_transfer_frames if f.get("file_hash") == frame["file_hash"]), None)
+            if existing is not None:
+                existing["is_enabled"] = True
+                context._disable_all_character_reference_frames()
+                self._persist()
+                slot = context.vibe_transfer_frames.index(existing) + 1
+                return [context._toast(f"이미 V{slot} 칸에 있는 이미지입니다 - 그 칸을 켰습니다.", level="info"), self.module_state()]
             if len(context.vibe_transfer_frames) >= MAX_NAI_VIBE_REFERENCES:
                 return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
-            image_bytes = base64.b64decode(data_url_payload(str(value or "")))
-            context.vibe_transfer_frames.append(self.frame_from_bytes(image_bytes, file_name="remote_vibe.png"))
+            context.vibe_transfer_frames.append(frame)
             context._disable_all_character_reference_frames()
         elif key.startswith("remove_frame_"):
             index = context._index_from_key(key, "remove_frame_")
@@ -1117,14 +1127,15 @@ class HeadlessVibeTransferService:
         source_model = str(payload.get("source_model") or context._current_model_key() or "")
         is_naid3 = "NAID3" in source_model
         available = MAX_NAI_VIBE_REFERENCES - len(context.vibe_transfer_frames)
-        if available <= 0:
-            return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
+        updated = 0
         # raw_refs는 외부 페이로드라 크기가 무제한일 수 있다. 비싼 작업(문자열화 + 프레임 생성)은
         # available(≤MAX) 개로 바운드한다 — 캡에 도달하면 즉시 break(전체 materialize 안 함).
         added = 0
         truncated = False
         for index, raw_encoding in enumerate(raw_refs):
-            if added >= available:
+            # 외부 페이로드 - 앞의 MAX 개까지만 본다(비싼 작업 바운드). 빈 칸 한계는 아래 '새 칸' 에서 따로 센다 -
+            # 이미 있는 Vibe 는 칸이 꽉 차 있어도 켤 수 있어야 한다.
+            if index >= MAX_NAI_VIBE_REFERENCES:
                 truncated = True
                 break
             encoding = str(raw_encoding) if raw_encoding else ""
@@ -1140,6 +1151,23 @@ class HeadlessVibeTransferService:
             ie = max(0.01, min(1.0, round(ie, 2)))
             # 인코딩 내용으로 고유 file_hash 부여(동일 인코딩 충돌 방지, placeholder처럼 내용 해시).
             file_hash = image_hash(f"{source_model}|{ie:.2f}|{encoding}".encode("utf-8"))
+            # 같은 Vibe 가 이미 활성에 있으면(다시 복원 · 보관함에서 같은 인코딩을 적용한 칸) 새 칸을 만들지 않는다
+            # (사용자 제보 2026-10-23 - 같은 것을 여러 번 넣는 길을 전부 막는다). 그 칸을 켜고 RS · IE 를 메타데이터 값으로.
+            existing = next((f for f in context.vibe_transfer_frames
+                             if f.get("file_hash") == file_hash
+                             or str(encoding) in (f.get("vibe_encodings") or {}).values()), None)
+            if existing is not None:
+                existing["is_enabled"] = True
+                existing["reference_strength"] = strength
+                for key_text, value_text in (existing.get("vibe_encodings") or {}).items():
+                    if value_text == str(encoding):
+                        existing["information_extracted"] = _as_float(key_text, ie)
+                        break
+                updated += 1
+                continue
+            if added >= available:
+                truncated = True
+                break
             context.vibe_transfer_frames.append({
                 "file_hash": file_hash,
                 "file_name": f"metadata_vibe_{file_hash[:8]}.png",
@@ -1158,7 +1186,9 @@ class HeadlessVibeTransferService:
                 "source_model": source_model,
             })
             added += 1
-        if not added:
+        if not added and not updated:
+            if available <= 0:
+                return context._toast(f"Maximum {MAX_NAI_VIBE_REFERENCES} Vibe Transfer frames allowed", level="error")
             return context._toast("복원할 Vibe Transfer 데이터가 없습니다.", level="error")
         norm = payload.get("normalize_reference_strength_multiple")
         if isinstance(norm, bool):
@@ -1166,6 +1196,8 @@ class HeadlessVibeTransferService:
         context._disable_all_character_reference_frames()
         self._persist()
         message = f"메타데이터에서 Vibe {added}개를 복원했어요."
+        if updated:
+            message += f" 이미 있던 {updated}개는 새 칸 없이 그 칸을 켰어요."
         if truncated:
             message += f" (슬롯 한계 {MAX_NAI_VIBE_REFERENCES}개 초과분 제외)"
         # 모델 불일치 경고: vibe 인코딩은 모델 버전별로 다르다. 정확한 키 비교는 별칭(NAID4.5 등)·

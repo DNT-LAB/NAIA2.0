@@ -467,11 +467,11 @@ async def handle_module_command(
     #
     #    VT/CR 도 모두에게 보낸다(REF & VIBE 2026-10-23) - 같은 인덱스 주소(`enable_3`)이고, 서로를 끄므로
     #    상대 모듈의 상태도 함께 보낸다. storage_list · toast 는 보낸 소켓에만.
-    if other_module_id and isinstance(module_state, dict) and module_state.get("type") == "module_state":
+    if _is_inpaint_canvas_edit(command):
         from app.backend.server.websocket_broadcast import broadcast_json
 
         await broadcast_json(clients, module_state)
-    elif _is_inpaint_canvas_edit(command):
+    elif other_module_id and isinstance(module_state, dict) and module_state.get("type") == "module_state":
         from app.backend.server.websocket_broadcast import broadcast_json
 
         await broadcast_json(clients, module_state)

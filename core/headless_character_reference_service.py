@@ -257,6 +257,12 @@ class HeadlessCharacterReferenceService:
         if key == "upload_image":
             image_bytes = base64.b64decode(data_url_payload(str(value or "")))
             frame = self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
+            # 같은 이미지가 이미 있으면 새 칸을 만들지 않는다(사용자 제보 2026-10-23: 결과 우클릭 > Set as ... 를 누를 때마다
+            # 같은 그림이 R1 · R2 · R3 으로 쌓였다). 켜짐 상태는 그대로 - 업로드는 원래 끈 채로 넣는다.
+            existing = next((f for f in context.character_reference_frames if f.get("file_hash") == frame["file_hash"]), None)
+            if existing is not None:
+                slot = context.character_reference_frames.index(existing) + 1
+                return [context._toast(f"이미 R{slot} 칸에 있는 이미지입니다.", level="info"), self.module_state()]
             self.save_storage(frame)
             context.character_reference_frames.append(frame)
         elif key.startswith("remove_frame_"):

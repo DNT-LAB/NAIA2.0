@@ -29,6 +29,16 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
 
 
+def _image_action_result(result: Any, added_message: str) -> tuple[Any, str]:
+    """CR · VT `upload_image` 결과 -> (module_state, 알림 문구). 같은 그림이 이미 있으면 서비스가 [toast, state] 를
+    돌려준다(사용자 제보 2026-10-23 - Set as ... 가 같은 그림을 쌓았다) - 그때는 'added' 대신 그 문구를 쓴다."""
+    if isinstance(result, list):
+        state = next((item for item in result if isinstance(item, dict) and item.get("type") == "module_state"), None)
+        toast = next((item for item in result if isinstance(item, dict) and item.get("type") == "toast"), None)
+        return state, str((toast or {}).get("message") or added_message)
+    return result, added_message
+
+
 def _viewer_save_dir(context: WebSessionContext) -> Path:
     return context._current_save_directory()
 
@@ -1959,13 +1969,14 @@ def register_result_display_routes(
                     "upload_image",
                     base64.b64encode(image_bytes).decode("ascii"),
                 )
+                module_state, message = _image_action_result(module_state, "Vibe Transfer image added")
                 if isinstance(module_state, dict):
                     await broadcast_json(clients, module_state)
                 return {
                     "ok": True,
                     "action": action,
                     "state": module_state,
-                    "message": "Vibe Transfer image added",
+                    "message": message,
                 }
             if action == "character_reference":
                 if session_context.get_api_mode() != "NAI":
@@ -1984,13 +1995,14 @@ def register_result_display_routes(
                     "upload_image",
                     base64.b64encode(image_bytes).decode("ascii"),
                 )
+                module_state, message = _image_action_result(module_state, "Character Reference image added")
                 if isinstance(module_state, dict):
                     await broadcast_json(clients, module_state)
                 return {
                     "ok": True,
                     "action": action,
                     "state": module_state,
-                    "message": "Character Reference image added",
+                    "message": message,
                 }
         except Exception as exc:
             return JSONResponse({"error": f"Image action failed: {exc}"}, status_code=500)

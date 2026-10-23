@@ -1248,8 +1248,10 @@ class HeadlessVibeTransferService:
                     image_bytes = image_path.read_bytes()
                     with Image.open(io.BytesIO(image_bytes)) as image:
                         thumbnail = thumbnail_b64(image)
+                    # 보관함에 원본이 있으면 보통 프레임이다 - IE 를 바꾸고 다시 인코딩할 수 있다(사용자 확인 2026-10-23:
+                    # 클러스터로 불러온 Vibe 가 썸네일은 있는데 '원본 없음' 으로 IE 가 잠겼다). 원본이 없을 때만 잠근다.
                     frame.update(image_bytes=image_bytes, image_data=base64.b64encode(image_bytes).decode("ascii"),
-                                 thumbnail=thumbnail, is_no_image=False, file_path=str(image_path))
+                                 thumbnail=thumbnail, is_no_image=False, no_source=False, file_path=str(image_path))
                 except (OSError, ValueError):
                     pass
             frames.append(frame)

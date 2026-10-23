@@ -390,7 +390,9 @@ export function createRefVibeWindow({
       + `</div><div class="rvw-line">${chips}`
       + (canEncode
         ? `<button type="button" class="rvw-btn is-accent${hasIe ? ' is-hidden' : ''}" data-rvw-encode="${index}" data-ie="${ie}">IE ${ie} 인코딩 (2 Anlas)</button>`
-        : (frame.encoding_in_progress ? `<span class="rvw-hint">인코딩 중…</span>` : ''))
+        : (frame.encoding_in_progress ? `<span class="rvw-hint">인코딩 중…</span>`
+          // 못 하는 이유를 말한다(토큰 없음 등) - 단추만 사라지면 고장으로 보인다. 원본 없는 Vibe 는 위 줄이 이미 말한다.
+          : (locked ? '' : `<span class="rvw-hint">${escHtml(String(frame.encoding_unavailable_reason || '지금은 인코딩할 수 없습니다'))}</span>`)))
       + `</div></div>`;
     return head + detail;
   }

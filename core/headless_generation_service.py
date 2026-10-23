@@ -127,6 +127,13 @@ class NaiCharacterDataError(ValueError):
     """
 
 
+class TransientGenerationError(RuntimeError):
+    """요청을 보내기 전 연결이 끊겨 생성이 넘어졌다(API 결과의 `transient` 표식 - 소켓 연결 · TLS 핸드셰이크).
+
+    러너는 이 실패로 Auto Gen 을 끝내지 않고 잠시 뒤 이어 간다(generation_runner 참고).
+    """
+
+
 @dataclass
 class HeadlessGenerationDispatch:
     request: GenerationRequest | None
@@ -653,6 +660,8 @@ class HeadlessGenerationService:
         if api_result.get("status") == "error":
             error_message = str(api_result.get("message") or "Unknown API error")
             request.mark_failed(error_message)
+            if api_result.get("transient"):
+                raise TransientGenerationError(error_message)
             raise RuntimeError(error_message)
         # I.Sequence 캔버스 연쇄: 사용자가 보고 저장할 것은 **컷**이지 캔버스가 아니다.
         # 여기가 이미지가 저장물로 굳기 직전의 유일한 목이라, 자르려면 여기서 잘라야

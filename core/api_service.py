@@ -3,6 +3,7 @@ from core.generation_access_policy import generation_operation
 import zipfile
 import io, time, re, json
 import socket
+import ssl
 import threading
 from contextlib import contextmanager
 import base64
@@ -271,6 +272,82 @@ def _force_close_response(response) -> None:
         response.close()
     except Exception:
         pass
+
+
+def _tls12_ssl_context(*, system_store: bool = False) -> ssl.SSLContext:
+    """TLS 1.2 상한 판. 목적지는 requests 처럼 certifi 묶음으로, HTTPS 프록시는 urllib3 기본처럼 시스템 저장소로 검증한다."""
+    context = None
+    if not system_store:
+        try:
+            import certifi
+            context = ssl.create_default_context(cafile=certifi.where())
+        except ImportError:
+            context = None
+    if context is None:
+        context = ssl.create_default_context()
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+    return context
+
+
+class _Tls12HttpAdapter(requests.adapters.HTTPAdapter):
+    """TLS 1.2 까지만 쓰는 연결. NAI 요청이 TLS 오류로 넘어진 뒤의 재시도에만 쓴다.
+
+    `[SSL: INVALID_SESSION_ID]` 는 TLS 1.3 핸드셰이크에서 서버가 되돌려 준 세션 ID 가 보낸 것과
+    다를 때 난다. 서버(Cloudflare)는 그대로 돌려주므로, 사이에 낀 보안 프로그램 · VPN · 프록시가
+    응답을 바꾼 것이다(사용자 제보 2026-10-23, 간헐적). TLS 1.2 에는 그 대조가 없어 같은 길로도
+    지나간다(image.novelai.net 은 TLS 1.2 로도 잇는다 - 2026-10-23 핸드셰이크 확인).
+    시스템 프록시를 타는 연결도 같은 판을 쓰게 프록시 쪽에도 건다 - HTTPS 프록시면 프록시와의 TLS 구간까지
+    (그 구간에서 깨지는 경우도 있다, Codex 리뷰 2026-10-23 MEDIUM).
+    """
+
+    def init_poolmanager(self, *args, **kwargs):
+        kwargs["ssl_context"] = _tls12_ssl_context()
+        return super().init_poolmanager(*args, **kwargs)
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        proxy_kwargs.setdefault("ssl_context", _tls12_ssl_context())
+        if str(proxy).lower().startswith("https://"):
+            proxy_kwargs.setdefault("proxy_ssl_context", _tls12_ssl_context(system_store=True))
+        return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+
+def _nai_failed_before_sending(exc: BaseException) -> tuple[bool, bool]:
+    """연결 오류가 **요청을 보내기 전**(소켓 연결 · TLS 핸드셰이크)에 났나, 그중 TLS 핸드셰이크였나.
+
+    보내기 전에 끊긴 것만 마음 놓고 다시 보낼 수 있다 - 응답을 받기 시작한 뒤의 실패는 서버가 이미
+    생성(과금)했을 수 있다(Codex 리뷰 2026-10-23 HIGH). requests 는 urllib3 오류를 겹겹이 싸서 넘기고
+    프록시 오류는 한 겹 더 싼다 - 원인 사슬(args · reason · __cause__ · __context__)을 따라 내려가 본다.
+      - urllib3 NewConnectionError(이름 풀기 실패 포함) = 소켓 연결 단계
+      - ssl.SSLError 가 `do_handshake` 안에서 났다 = TLS 핸드셰이크 단계(본문을 읽다 난 TLS 오류는 recv 쪽에서 난다)
+    실측(2026-10-23, 로컬 소켓): 핸드셰이크 실패의 ssl.SSLError traceback 끝은 `wrap_socket -> _create -> do_handshake`,
+    연결 거부는 `_validate_conn -> connect -> _new_conn` 의 NewConnectionError.
+    """
+    import urllib3.exceptions
+
+    before_send = tls_handshake = False
+    seen: set[int] = set()
+    stack: list[Any] = [exc]
+    while stack:
+        item = stack.pop()
+        if not isinstance(item, BaseException) or id(item) in seen:
+            continue
+        seen.add(id(item))
+        if isinstance(item, urllib3.exceptions.NewConnectionError):
+            before_send = True
+        elif isinstance(item, ssl.SSLError) and _raised_in_tls_handshake(item):
+            before_send = tls_handshake = True
+        stack.extend(item.args)
+        stack.extend(getattr(item, name, None) for name in ("reason", "__cause__", "__context__"))
+    return before_send, tls_handshake
+
+
+def _raised_in_tls_handshake(error: BaseException) -> bool:
+    tb = error.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name == "do_handshake":
+            return True
+        tb = tb.tb_next
+    return False
 
 
 def _get_loaded_middle_module(app_context, class_name: str):
@@ -793,6 +870,14 @@ class APIService:
             ).strip().lower() in {"eps", "anima"}
         )
         pending_swap: Optional[Dict[str, Any]] = None
+        # NAI 가 TLS 오류로 넘어지면 남은 시도는 TLS 1.2 로 잇는다(_Tls12HttpAdapter 설명 참고).
+        force_tls12 = False
+        # 모든 시도가 '보내기 전 연결 실패' 였나 - 한 번이라도 다른 실패(받는 중 끊김 등 이미 생성됐을 수 있는 것)가
+        # 섞였으면 최종 실패에 transient 를 달지 않는다(Codex 리뷰 2026-10-23 HIGH).
+        # ⚠️ 서버 오류(502/503/504/520)는 넣지 않는다 - 모든 사용자에게 똑같이 오는 서버 장애이고 504/520 은
+        #    서버가 이미 생성했을 수 있다. 그때 Auto Gen 이 멈추던 예전 동작을 그대로 둔다(사용자 지시 2026-10-23:
+        #    드문 경우를 위해 잘 쓰던 사람이 피해를 보면 안 된다).
+        all_attempts_transient = True
 
         result = None
         for attempt in range(1, max_retries + 1):
@@ -817,7 +902,7 @@ class APIService:
                         return {'status': 'error', 'message': str(lost)}
                     result = self._call_nai_api(
                         parameters, progress_callback=progress_callback, preview_callback=preview_callback,
-                        deadline_guard=nai_guard,
+                        deadline_guard=nai_guard, force_tls12=force_tls12,
                     )
                 elif api_mode == "WEBUI":
                     result = self._call_webui_api(parameters)
@@ -835,9 +920,22 @@ class APIService:
                         return {'status': 'error', 'message': error_msg}
 
                     # HTTP 520 등 서버 오류는 재시도 가능
-                    if 'HTTP 520' in error_msg or 'HTTP 502' in error_msg or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg:
+                    server_error = (
+                        'HTTP 520' in error_msg or 'HTTP 502' in error_msg
+                        or 'HTTP 503' in error_msg or 'HTTP 504' in error_msg
+                    )
+                    # NAI 연결 · TLS 단계 실패도 서버 오류처럼 간격을 두고 보낸다 - 1초 간격 세 번은
+                    # 같은 순간에 다 걸려 넘어졌다(사용자 제보 2026-10-23 INVALID_SESSION_ID).
+                    connection_error = bool(result.get('transient'))
+                    if not connection_error:
+                        all_attempts_transient = False
+                    if result.get('tls_error') and not force_tls12:
+                        force_tls12 = True
+                        print("[RETRY] TLS 오류 - 남은 시도는 TLS 1.2 로 잇습니다.")
+                    if server_error or connection_error:
                         if attempt < max_retries:
-                            print(f"[WAIT] 서버 오류 감지. {2 * attempt}초 후 재시도합니다...")
+                            kind = "연결" if connection_error else "서버"
+                            print(f"[WAIT] {kind} 오류 감지. {2 * attempt}초 후 재시도합니다...")
                             _retry_wait(2 * attempt)  # 점진적으로 대기 시간 증가
                             continue
 
@@ -848,7 +946,11 @@ class APIService:
                         continue
                     else:
                         # 마지막 시도에서도 실패하면 에러 반환
-                        return {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
+                        failure = {'status': 'error', 'message': f"API 호출 실패 (최대 재시도 3회 초과): {error_msg}"}
+                        # 일시 오류 표식(보내기 전 연결 실패뿐) - Auto Gen 은 이 한 번으로 끝나지 않고 잠시 뒤 이어 간다(generation_runner).
+                        if api_mode == "NAI" and all_attempts_transient:
+                            failure['transient'] = True
+                        return failure
 
                 # 레퍼런스 인셋: 결과에서 인셋 칸을 잘라 내고 그린 부분만 남긴다(사용자 지정 2026-10-09).
                 if result and result.get('status') == 'success' and parameters.get('_reference_inset_crop_left'):
@@ -873,6 +975,7 @@ class APIService:
             except Exception as e:
                 print(f"[WARNING] API 호출 실패 (시도 {attempt}/{max_retries}): {e}")
                 last_exception = e
+                all_attempts_transient = False
                 if attempt < max_retries:
                     _retry_wait(1)  # 1초 대기 후 재시도 (필요에 따라 시간 조정 가능)
                 else:
@@ -1011,7 +1114,8 @@ class APIService:
 
     @generation_operation
     def _call_nai_api(self, params: Dict[str, Any], progress_callback=None, preview_callback=None,
-                      deadline_guard: "_NaiDeadlineGuard | None" = None) -> Dict[str, Any]:
+                      deadline_guard: "_NaiDeadlineGuard | None" = None,
+                      force_tls12: bool = False) -> Dict[str, Any]:
         """NovelAI 이미지 생성 API를 호출합니다.
 
         preview_callback이 전달되고 기본 txt2img(generate) 액션이면
@@ -1846,6 +1950,7 @@ class APIService:
                     preview_callback=preview_callback,
                     multipart=nai_multipart,
                     deadline_guard=deadline_guard,
+                    force_tls12=force_tls12,
                 )
                 self._cleanup_http_threads()
                 if not image_bytes:
@@ -1861,7 +1966,7 @@ class APIService:
             # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다 - 본문까지 다 받아야 끝이다.
             # 가드는 call_generation_api 가 준 것을 쓴다(재시도까지 같은 시계).
             guard = deadline_guard or _NaiDeadlineGuard()
-            with requests.Session() as session:
+            with self._nai_http_session(force_tls12) as session:
                 try:
                     response = session.post(
                         self.NAI_V3_API_URL,
@@ -1905,9 +2010,26 @@ class APIService:
             error_message = f"API 오류 (HTTP {e.response.status_code}): {e.response.text}"
             print(f"❌ {error_message}")
             return {'status': 'error', 'message': error_message}
+        except requests.exceptions.ConnectionError as e:
+            # 보내기 전(연결 · TLS 핸드셰이크)에 끊겼으면 잠깐 뒤 다시 하면 대개 지나간다. 표식을 실어
+            # call_generation_api 가 간격을 두고 다시 보내게 한다(핸드셰이크 실패면 남은 시도는 TLS 1.2).
+            # 그 밖의 연결 오류(보낸 뒤 · 받는 중)는 예전 그대로 일반 오류다 - 서버가 이미 생성했을 수 있다.
+            print(f"❌ NAI 연결 오류: {e}")
+            before_send, tls_handshake = _nai_failed_before_sending(e)
+            if not before_send:
+                return {'status': 'error', 'message': str(e)}
+            return {'status': 'error', 'message': str(e), 'transient': True, 'tls_error': tls_handshake}
         except Exception as e:
             print(f"❌ NAI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
+
+    @staticmethod
+    def _nai_http_session(force_tls12: bool = False) -> requests.Session:
+        """NAI 생성 요청용 세션. `force_tls12` 면 TLS 1.2 로만 잇는다(_Tls12HttpAdapter 설명 참고)."""
+        session = requests.Session()
+        if force_tls12:
+            session.mount("https://", _Tls12HttpAdapter())
+        return session
 
     def _call_webui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -2295,7 +2417,8 @@ class APIService:
     def _stream_nai_request(self, payload: Dict[str, Any], headers: Dict[str, str], steps: int,
                             progress_callback=None, preview_callback=None,
                             multipart: bool = False,
-                            deadline_guard: "_NaiDeadlineGuard | None" = None) -> bytes | None:
+                            deadline_guard: "_NaiDeadlineGuard | None" = None,
+                            force_tls12: bool = False) -> bytes | None:
         """
         NovelAI generate-image-stream(SSE) 엔드포인트를 호출합니다.
 
@@ -2320,7 +2443,7 @@ class APIService:
         # 총 대기 상한(NAI_REQUEST_DEADLINE_S)을 벽시계로 잰다. 프레임이 조금씩 계속 와도 상한이 되면 끊는다
         # (예전 (30, 300) 은 '한 번 읽기' 상한이라, 바이트가 이어지면 끝없이 기다렸다).
         guard = deadline_guard or _NaiDeadlineGuard()
-        with requests.Session() as session:
+        with self._nai_http_session(force_tls12) as session:
             try:
                 response = session.post(
                     stream_url,

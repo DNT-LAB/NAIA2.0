@@ -51,6 +51,12 @@ _AUTOMATION_BINDABLE_DESPITE_SUPPRESSION = {
     "remote_preset_request",
 }
 
+# 보내기 전 연결 실패(TransientGenerationError - 소켓 연결 · TLS 핸드셰이크)로 넘어진 Auto Gen 은 끝내지 않고 잠시 뒤 이어 간다
+# (사용자 제보 2026-10-23: 간헐적 [SSL: INVALID_SESSION_ID] 한 번에 Auto Gen 이 멈췄다 - 1.5 는 연속 10번까지
+# 버텼다). 쉬는 시간은 연속 횟수만큼 늘고(5초, 10초, ...), 연속으로 이만큼 넘어지면 Auto Gen 을 끄고 알린다.
+AUTO_GEN_TRANSIENT_RETRY_DELAY_S = 5.0
+AUTO_GEN_TRANSIENT_FAILURE_LIMIT = 5
+
 AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     "_generation_request",
     "credential",
@@ -582,6 +588,10 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                     await _advance_sequence_run(context, clients, request)
                 except Exception:
                     pass
+                try:
+                    await _resume_auto_generation_after_transient_error(context, clients, request, exc)
+                except Exception as resume_exc:
+                    print(f"[AutoGen] resume after transient error failed: {ascii(str(resume_exc))}", flush=True)
                 continue
             finally:
                 if request_params.get("_session_pool_character"):
@@ -600,6 +610,7 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             history_limit_stopped = await _stop_generation_for_history_limit(context, clients, stored)
 
             context.is_generating = False
+            context._auto_gen_transient_streak = 0   # 연속 일시 오류 수 - 한 장이라도 나오면 처음부터 센다
             # ⚠️ 완료 알림은 **모든 클라이언트에게** 간다. 지금까지 알맹이가 없어서, 탭 두
             #    개가 각자 V5 연속 생성을 돌리면 서로의 완료를 자기 것으로 세고 각자 다음
             #    컷을 냈다 - 시키지 않은 그림에 돈이 나간다(Codex 리뷰 BLOCK).
@@ -1612,6 +1623,74 @@ async def _maybe_continue_auto_generation(
         return False
     await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "queued"})
     return True
+
+
+def _transient_failure_keeps_auto_gen(context: WebSessionContext, request, exc: BaseException) -> bool:
+    """이 실패 뒤에 Auto Gen 을 이어 가도 되는가 - 일반 Auto Gen 이 일시 오류로 넘어졌을 때만."""
+    from core.headless_generation_service import TransientGenerationError
+
+    if not isinstance(exc, TransientGenerationError):
+        return False
+    params = getattr(request, "params", {}) or {}
+    # Storyteller · Automation 은 실패하면 `_broadcast_generation_error` 가 런을 끝낸다(그쪽 사양 그대로).
+    # 시퀀스 프레임은 실패 분기의 `_advance_sequence_run` 이 라운드를 맡는다 - 여기서 또 이으면 두 번 넣는다.
+    if params.get("event_stream_run_id") or params.get("automation_run_id"):
+        return False
+    if _sequence_kind_for(request) is not None:
+        return False
+    return _should_continue_auto_generation(context, request)
+
+
+async def _wait_before_auto_gen_retry(context: WebSessionContext, request, delay_seconds: float) -> bool:
+    """쉬는 동안 Auto Gen 이 꺼지거나 큐에 다른 장이 들어오면 바로 그만둔다(그 장이 먼저 나간다)."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(0.0, delay_seconds)
+    while True:
+        if not _should_continue_auto_generation(context, request):
+            return False
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return True
+        await asyncio.sleep(min(0.5, remaining))
+
+
+async def _resume_auto_generation_after_transient_error(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    request,
+    exc: BaseException,
+) -> bool:
+    """일시 오류로 넘어진 Auto Gen 을 잠시 쉬었다가 이어 간다. 이었으면 True.
+
+    다음 장은 성공 완료와 같은 길(`_maybe_continue_auto_generation`)로 넣는다 - 프롬프트 고정이 아니면
+    새 프롬프트다(Dev0714 의 자동 재시도와 같다). 넘어진 장을 다시 보내지는 않는다.
+    """
+    if not _transient_failure_keeps_auto_gen(context, request, exc):
+        context._auto_gen_transient_streak = 0
+        return False
+    streak = int(getattr(context, "_auto_gen_transient_streak", 0) or 0) + 1
+    if streak >= AUTO_GEN_TRANSIENT_FAILURE_LIMIT:
+        context._auto_gen_transient_streak = 0
+        context.set_option("auto_generate", False)
+        await broadcast_json(clients, {"type": "options", **context.get_options()})
+        await broadcast_json(clients, context._toast(
+            f"연결 오류가 {streak}번 이어져 Auto Gen 을 멈췄습니다. 네트워크 · 보안 프로그램 · VPN 을 확인해 주세요.",
+            level="error",
+        ))
+        return False
+    context._auto_gen_transient_streak = streak
+    delay = AUTO_GEN_TRANSIENT_RETRY_DELAY_S * streak
+    await broadcast_json(clients, context._toast(
+        f"연결 오류 - {delay:g}초 뒤 Auto Gen 을 이어 갑니다 (재시도 {streak}/{AUTO_GEN_TRANSIENT_FAILURE_LIMIT - 1})",
+        level="warning",
+    ))
+    if not await _wait_before_auto_gen_retry(context, request, delay):
+        context._auto_gen_transient_streak = 0
+        return False
+    continued = await _maybe_continue_auto_generation(context, clients, request)
+    if not continued:
+        context._auto_gen_transient_streak = 0
+    return continued
 
 
 def _automation_should_bind(context: WebSessionContext, request) -> bool:

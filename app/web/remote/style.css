@@ -32504,7 +32504,9 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
    아래 '특징 제거' 칸은 PE 창의 .pe-opt-* 를 그대로 쓰고 칸 폭만 5열 최소 폭으로 바꾼다(사용자 지시 - 5x2). */
 .tag-filter-evc.is-on, .ecw-toggle.is-on { border-color: #a8742e; background: rgba(168,116,46,0.22); color: #ffd9a3; }
 .tag-filter-evc.is-on:hover, .ecw-toggle.is-on:hover:not(:disabled) { border-color: #d39a45; color: #ffe9c7; }
-.ecw-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* 본문 여백은 0 - 칸마다 제 여백을 둔다(세션 와일드카드 · Characters 창과 같다). */
+.dragpanel.ecw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
+.ecw-body { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
 .ecw-top {
   display: flex; align-items: center; gap: 8px; padding: 7px 10px; flex: none;
   border-bottom: 1px solid rgba(255,255,255,0.06); font-family: var(--font-mono); font-size: 11px;
@@ -32521,12 +32523,54 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-ratings { display: flex; gap: 3px; flex: none; }
 .ecw-ratings .rating-btn { width: 22px; height: 22px; padding: 0; font-size: 10px; }
 .ecw-tools { display: flex; gap: 5px; align-items: center; padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); flex: none; }
-.ecw-sort, .ecw-q {
-  height: 26px; padding: 0 8px; border-radius: 5px; background: rgba(0,0,0,0.34);
+/* 정렬 = 앱 표준 콤보박스(.custom-mod-select-sm 은 width:100% - 자리 폭을 여기서 준다). */
+.ecw-sortbox { flex: 0 0 132px; min-width: 0; }
+.ecw-qbox { position: relative; flex: 1 1 auto; min-width: 0; }
+.ecw-q {
+  width: 100%; height: 26px; padding: 0 8px; border-radius: 5px; background: rgba(0,0,0,0.34); box-sizing: border-box;
   border: 1px solid var(--border-dim); color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px;
 }
-.ecw-q { flex: 1 1 auto; min-width: 0; }
-.ecw-q:focus, .ecw-sort:focus { outline: none; border-color: rgba(168,116,46,0.7); }
+.ecw-q:focus { outline: none; border-color: rgba(168,116,46,0.7); }
+/* 찾기 자동완성 - 지금 이벤트에 든 태그만(서버 /api/event-compress/tags). */
+.ecw-ac {
+  position: absolute; left: 0; right: 0; top: calc(100% + 3px); z-index: 5; max-height: 260px; overflow-y: auto;
+  padding: 3px; border: 1px solid var(--border-dim); border-radius: 6px; background: var(--bg-elevated, #22232b);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.ecw-ac[hidden] { display: none; }
+.ecw-ac-item {
+  display: flex; justify-content: space-between; gap: 10px; width: 100%; padding: 4px 8px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px; text-align: left; cursor: pointer;
+}
+.ecw-ac-item:hover, .ecw-ac-item.is-on { background: rgba(168,116,46,0.2); }
+/* 태그 수 컷 - Search [기간 컷오프](.dr-*) 와 같은 두 손잡이 트랙 + 태그 수마다 이벤트 수 막대. 목록만 거른다. */
+.ecw-cut { flex: none; padding: 6px 12px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); font-family: var(--font-mono); font-size: 10.5px; }
+.ecw-cut:empty { display: none; }
+.ecw-cut-head { display: flex; justify-content: space-between; align-items: baseline; color: var(--text-dim); }
+.ecw-cut-range { color: var(--text-primary); }
+.ecw-cut-bars { display: flex; align-items: flex-end; gap: 1px; height: 22px; margin: 4px 7px 0; }
+.ecw-cut-bars span { flex: 1 1 0; min-width: 1px; border-radius: 1px 1px 0 0; background: rgba(255,255,255,0.14); }
+.ecw-cut-bars span.is-in { background: rgba(168,116,46,0.75); }
+.ecw-cut-track { position: relative; height: 6px; margin: 6px 7px 4px; border-radius: 3px; background: var(--bg-elevated, #2a2a33); touch-action: none; }
+.ecw-cut-fill { position: absolute; top: 0; height: 100%; border-radius: 3px; background: #a8742e; }
+.ecw-cut-handle {
+  position: absolute; top: 50%; width: 14px; height: 14px; margin-left: -7px; transform: translateY(-50%); border-radius: 50%;
+  background: var(--text, #e8e8ee); border: 2px solid #a8742e; cursor: grab; touch-action: none; box-shadow: 0 1px 3px rgba(0,0,0,0.5); z-index: 2;
+}
+.ecw-cut-handle.is-drag, .ecw-cut-handle:active { cursor: grabbing; }
+.ecw-cut-handle:focus-visible { outline: 1px solid #d39a45; outline-offset: 2px; }
+.ecw-cut-handle span { display: none; }
+.ecw-cut-ends { display: flex; justify-content: space-between; margin: 0 2px; color: var(--text-dim); font-size: 9.5px; }
+/* 다시 세는 동안 창을 막는다(사용자 지시 2026-10-23 - 특징 제거를 연달아 누르면 셈이 겹친다). */
+.ecw-wait {
+  position: absolute; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center;
+  background: rgba(12,12,16,0.55); cursor: progress;
+}
+.ecw-wait[hidden] { display: none; }
+.ecw-wait span {
+  padding: 7px 14px; border: 1px solid rgba(168,116,46,0.6); border-radius: 6px; background: rgba(28,28,34,0.95);
+  color: #ffd9a3; font-family: var(--font-mono); font-size: 11px;
+}
 .ecw-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ecw-row { border-bottom: 1px solid rgba(255,255,255,0.04); }
 .ecw-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; }
@@ -32559,7 +32603,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-pe { flex: none; padding: 6px 10px 9px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18); }
 .ecw-pe-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 5px; font-size: 10.5px; color: var(--text-dim); }
 .ecw-pe-head span { font-size: 9.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.ecw-pe .pe-opt-list { grid-template-columns: repeat(5, max-content); gap: 3px 4px; }
+.ecw-pe .pe-opt-list { grid-template-columns: repeat(5, max-content); gap: 3px 4px; width: max-content; }
 
 /* Search 창 RATING 줄의 'n assigned' 는 숨긴다 - 같은 수(풀림 · 재적용 중… 포함)가 Tag Filter 머리줄에 비춰진다
    (searchQuickWindow mirrorMeta). [⇊ 압축] 이 늘어 줄이 밀렸다(사용자 지시 2026-10-23). 요소는 남는다 - quickFilter 가 쓴다. */

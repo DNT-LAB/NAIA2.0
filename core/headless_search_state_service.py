@@ -181,7 +181,10 @@ class HeadlessSearchStateService:
     def normalize_search_filter_state(self, raw: Any) -> dict[str, Any]:
         state = self.default_search_filter_state()
         if isinstance(raw, dict):
-            state["event_compress"] = bool(raw.get("event_compress", False))
+            # 압축 켬 단추는 회수됐다(사용자 2026-10-23 - 풀이 커질수록 실시간 재압축이 비싸다 · 커밋으로 대신).
+            # 저장된 켬은 불러올 때 끈다 - 켜 둔 채 단추가 사라지면 가린 행을 되돌릴 길이 없다. 이어 하기는 꺼진 세션에
+            # 가렸던 행(dropped)을 되돌려 준다(tag_filter_remaining.load_remaining).
+            state["event_compress"] = False
             state["query"] = str(raw.get("query", state["query"]) or "")
             state["exclude"] = str(raw.get("exclude", state["exclude"]) or "")
             state["exclude_permanent"] = str(raw.get("exclude_permanent", state["exclude_permanent"]) or "")

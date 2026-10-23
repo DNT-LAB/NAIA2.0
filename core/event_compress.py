@@ -483,13 +483,13 @@ class EventCompress:
         live = self._live_ids()
         ids = set()
         for group in groups:
-            # The first member is the representative. Never restore dropped or
-            # consumed members; fall back only to another currently live member.
+            # Always ONE row per event (user 2026-10-23: commit count == event count; the live
+            # "compress on" mode was removed from the window). The first member is the
+            # representative; if it was consumed, fall back to another currently live member.
             for member in group["members"]:
                 if member in live:
                     ids.add(member)
-                    if enabled(self.context):
-                        break
+                    break
         return ids
 
     def commit(self, events_signature, min_tags=None, max_tags=None, q=""):

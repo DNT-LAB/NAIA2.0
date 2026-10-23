@@ -3335,7 +3335,7 @@ function paintEventCompressButton(state) {
   if (button) button.classList.toggle('is-on', !!(state && state.enabled));
 }
 function openEventCompressWindow() {
-  import('./js/features/eventCompressWindow.mjs?v=20261023-evc12').then(({createEventCompressWindow}) => {
+  import('./js/features/eventCompressWindow.mjs?v=20261023-evc13').then(({createEventCompressWindow}) => {
     if (!eventCompressWindow) {
       eventCompressWindow = createEventCompressWindow({
         document, window, escHtml, showToast,

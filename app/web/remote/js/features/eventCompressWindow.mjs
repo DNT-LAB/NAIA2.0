@@ -1,7 +1,7 @@
 /**
  * 이벤트 압축 창(사용자 지시 2026-10-23) - Search 창 Tag Filter 의 [⇊ 압축] 단추가 연다.
  *
- *   [ ⇊ 압축 켬 ]  풀 6,158행 → 2,340 이벤트                       G S Q E
+ *   풀 6,158행 → 2,340 이벤트                                     G S Q E
  *   태그 수  ▁▃▇▅▃▂▁▁                                   3 – 24 · 812 이벤트
  *            ──●━━━━━━━━━━━━━━━●──                       <- 이벤트의 태그 개수 최소 · 최대 컷(목록만 거른다)
  *   [ 큰 묶음 먼저 ▾ ] [ 태그로 찾기 ]                    <- 찾기 칸 자동완성 = 지금 이벤트에 든 태그만
@@ -11,7 +11,9 @@
  *   [✓ 캐릭터 특징] [ 의상 ] [ 의상 이벤트 ] [✓ 색상] [✓ 장소·배경]
  *   [ 표정 ] [✓ 포즈·동작] [✓ 메타 태그] [✓ 사물] [ 저빈도 태그 ]
  *
- * 이벤트 = 지금 PE 전처리를 건 뒤 남는 태그 집합(+ 등급). 압축을 켜면 이벤트마다 1행만 풀에 남는다(서버가 한다).
+ * 이벤트 = 지금 PE 전처리를 건 뒤 남는 태그 집합(+ 등급). [커밋] = 걸러진 이벤트마다 1행으로 Tag Filter 를 좁힌다.
+ * 압축 켬 단추(풀이 바뀔 때마다 실시간 재압축)는 회수했다(사용자 2026-10-23 - 풀이 10만 · 100만으로 커지면 비싸다 ·
+ * 커밋 수와 이벤트 수가 어긋났다). 서버의 켬 상태는 불러올 때 꺼진다.
  * 아래 칸은 PE 창의 '특징 제거' 와 같은 설정이다 - 여기서 바꾸면 PE 창도 바뀌고 서버가 이벤트를 다시 센다.
  * 다시 세는 동안은 창을 막는다(사용자 지시 - 연달아 누르면 셈이 겹친다).
  * [랜덤] = 그 이벤트 행으로 메인 프롬프트 · [생성] = 그대로 한 장. 둘 다 풀을 소진하지 않는다.
@@ -69,7 +71,7 @@ export function createEventCompressWindow({
   let acTimer = 0;
   let ac = {items: [], index: -1, open: false};
   let open = '';                   // 펼친 이벤트 키
-  let busy = '';                   // 'toggle' | 'random:<key>' | 'generate:<key>'
+  let busy = '';                   // 'commit' | 'random:<key>' | 'generate:<key>'
   let waiting = false;             // 다시 세는 동안 창을 막는다
   let waitTimer = 0;
   let listSig = '';                // 목록을 다시 받을지 가르는 서명(풀 · 이벤트 수 · 켬)
@@ -158,7 +160,6 @@ export function createEventCompressWindow({
     const el = panel?.body.querySelector('[data-ecw-top]');
     if (!el) return;
     const s = state || {};
-    const on = !!s.enabled;
     const ratings = new Set(activeRatings());
     let count;
     if (!state) count = '<span class="ecw-dim">불러오는 중…</span>';
@@ -168,14 +169,9 @@ export function createEventCompressWindow({
     else if (s.computing || s.stale) count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> <span class="ecw-dim">이벤트 세는 중…</span>`;
     else {
       count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> `
-        + `<b class="ecw-events">${fmt(s.events)}</b> <span class="ecw-dim">이벤트</span>`
-        // 꺼져 있으면 세어 보여 주기만 한다 - 풀(Random 이 뽑는 행)은 그대로다(사용자 질문 2026-10-23: '미적용' 이 무슨 뜻).
-        + (on ? '' : ' <span class="ecw-dim" title="압축이 꺼져 있습니다 - 이벤트 수는 세어 보여 주기만 하고 풀은 줄이지 않았습니다">(세기만 · 풀 그대로)</span>');
+        + `<b class="ecw-events">${fmt(s.events)}</b> <span class="ecw-dim">이벤트</span>`;
     }
-    const html = `<button type="button" class="ecw-toggle${on ? ' is-on' : ''}" data-ecw-toggle${busy === 'toggle' ? ' disabled' : ''}`
-      + ` title="켜면 이벤트마다 1행만 풀에 남깁니다 · 끄면 뺀 행을 되돌립니다(Random 이 이미 쓴 행은 그대로)">`
-      + `⇊ 압축 ${on ? '켬' : '끔'}</button>`
-      + `<span class="ecw-count">${count}</span>`
+    const html = `<span class="ecw-count">${count}</span>`
       + `<span class="ecw-ratings">${['g', 's', 'q', 'e'].map(r => `<button type="button" class="rating-btn${ratings.has(r) ? ' active' : ''}"`
         + ` data-r="${r}" data-ecw-rating="${r}">${r.toUpperCase()}</button>`).join('')}</span>`;
     if (el._html !== html) { el._html = html; el.innerHTML = html; }
@@ -270,10 +266,9 @@ export function createEventCompressWindow({
     if (!el) return;
     const scopeOk = !!state && state.scope === 'tag_filter' && !state.error;
     const ready = scopeOk && !state.computing && !state.stale && commitRows > 0 && !busy;
-    const on = !!(state && state.enabled);
     const title = !scopeOk
       ? 'Tag Filter 가 걸려 있을 때만 커밋합니다'
-      : `걸러진 이벤트(태그 수 컷 · 찾기)로 Tag Filter 를 좁힙니다 - ${on ? '이벤트마다 1행' : '이벤트의 행 전부'}. 다 쓰면 이 행들로 다시 채웁니다. [재적용] 으로 원래 풀로 돌아갑니다`;
+      : '걸러진 이벤트(태그 수 컷 · 찾기)마다 1행으로 Tag Filter 를 좁힙니다. 다 쓰면 이 행들로 다시 채웁니다. [재적용] 으로 원래 풀로 돌아갑니다';
     const html = `<button type="button" class="ecw-commit" data-ecw-commit${ready ? '' : ' disabled'} title="${escAttr(title)}">`
       + `커밋 · ${fmt(commitRows)}행</button>`
       + `<button type="button" class="ecw-reapply" data-ecw-reapply${canReapply() && !busy ? '' : ' disabled'}`
@@ -447,22 +442,6 @@ export function createEventCompressWindow({
   }
 
   // ── 손 ──────────────────────────────────────────────────────────────────
-  async function toggle() {
-    if (busy || waiting || !state || state.error) return;
-    busy = 'toggle';
-    startWaiting();
-    renderTop();
-    try {
-      applyState(await postJson('/api/event-compress/toggle', {enabled: !state.enabled}));
-    } catch (error) {
-      stopWaiting();
-      showToast(error.message || String(error), 'error');
-    } finally {
-      busy = '';
-      renderTop();
-    }
-  }
-
   async function commit() {
     if (busy || waiting || !commitRows) return;
     busy = 'commit';
@@ -513,7 +492,6 @@ export function createEventCompressWindow({
 
   function onClick(event) {
     if (waiting) return;
-    if (event.target.closest('[data-ecw-toggle]')) { void toggle(); return; }
     if (event.target.closest('[data-ecw-commit]')) { void commit(); return; }
     if (event.target.closest('[data-ecw-reapply]')) { reapply(); return; }
     const acItem = event.target.closest('[data-ecw-ac-i]');

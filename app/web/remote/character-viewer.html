@@ -73,7 +73,11 @@
   .cell { position: absolute; top: 0; left: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); overflow: hidden; cursor: pointer; padding: 0; text-align: left; }
   .cell:hover { border-color: var(--accent); }
   .cell.on { border-color: var(--selected); box-shadow: 0 0 0 1px var(--selected); }
-  .cell .im { width: 100%; display: flex; align-items: center; justify-content: center; background: var(--panel-3); }
+  .cell .im { width: 100%; display: flex; align-items: center; justify-content: center; background: var(--panel-3); position: relative; }
+  /* 즐겨찾기 = ★ 색 테두리 + ★ 표(창과 같다 · 2026-10-23). 고른 칸이면 고른 색 테를 바깥에 한 겹 더. */
+  .cell.fav { border-color: rgba(250,199,117,0.9); box-shadow: 0 0 0 1px rgba(250,199,117,0.45); }
+  .cell.fav.on { border-color: rgb(250,199,117); box-shadow: 0 0 0 2px var(--selected); }
+  .cell .star { position: absolute; right: 4px; top: 3px; color: rgb(250,199,117); font-size: 12px; text-shadow: 0 0 3px #000; }
   .cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .cell .ini { font-size: 30px; color: var(--muted); }
   .cell .nm { padding: 4px 7px 0; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -322,8 +326,8 @@ function paintGrid() {
     if (!it) { html += `<div class="cell" style="${style}"><div class="im" style="height:${geo.cellW}px"></div></div>`; continue; }
     const on = selected && selected.group === it.group && selected.character === it.character;
     const img = it.thumbnail_url ? `<img loading="lazy" decoding="async" alt="" src="${esc(it.thumbnail_url)}">` : `<span class="ini">${esc(String(it.character || '?').charAt(0).toUpperCase())}</span>`;
-    html += `<button type="button" class="cell${on ? ' on' : ''}" style="${style}" data-i="${i}" aria-label="${esc(`${it.character} · ${label(it.group)}`)}">`
-      + `<div class="im" style="height:${geo.cellW}px">${img}</div><div class="nm">${esc(it.character)}</div>`
+    html += `<button type="button" class="cell${on ? ' on' : ''}${it.favorite ? ' fav' : ''}" style="${style}" data-i="${i}" aria-label="${esc(`${it.character} · ${label(it.group)}`)}">`
+      + `<div class="im" style="height:${geo.cellW}px">${img}${it.favorite ? '<span class="star">★</span>' : ''}</div><div class="nm">${esc(it.character)}</div>`
       + `<div class="mt"><span class="glink" data-goto="${esc(it.group)}" title="이 작품 그룹으로 가기">${esc(label(it.group))}</span> · ${Number(it.count || 0).toLocaleString()}</div></button>`;
   }
   $('spacer').innerHTML = html;

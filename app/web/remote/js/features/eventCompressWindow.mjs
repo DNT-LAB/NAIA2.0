@@ -41,6 +41,7 @@ const PE_KEYS = [
 const PAGE = 60;
 const CUT_KEY = 'naia.ecw.tagcut';
 const FREQ_CUT_KEY = 'naia.ecw.freqcut';
+const FREQ_BINS = 48;              // 빈도 막대 칸 수(로그 눈금 위 같은 너비)
 const BUSY_CAP_MS = 60000;           // 서버가 답을 못 주면 막은 창을 이만큼 뒤에 푼다
 
 export function createEventCompressWindow({
@@ -231,6 +232,18 @@ export function createEventCompressWindow({
     else cutFreq.min = i === last ? null : v;
   }
 
+  // 눈금 번호 -> 트랙 위 자리(0~1). 태그 수 = 번호 그대로. 빈도 = 로그 눈금(사용자 지시 2026-10-23) - 흔한 쪽 값은
+  // 816 · 412 · 270 … 처럼 드문드문하고 희귀 쪽은 1 · 2 · 3 … 촘촘해서, 번호 눈금이면 트랙 대부분이 30 아래에 쏠린다.
+  function posOf(kind, i) {
+    const vals = sliderVals(kind);
+    const last = vals.length - 1;
+    if (last <= 0) return 0;
+    if (kind !== 'freq') return i / last;
+    const top = Math.log(Math.max(1, vals[0]));
+    const span = top - Math.log(Math.max(1, vals[last]));
+    return span > 0 ? (top - Math.log(Math.max(1, vals[i]))) / span : i / last;
+  }
+
   function sliderHtml(kind) {
     const vals = sliderVals(kind);
     const head = kind === 'freq' ? '빈도' : '태그 수';
@@ -240,16 +253,38 @@ export function createEventCompressWindow({
     const last = vals.length - 1;
     const lo = edgeIndex(kind, 'lo');
     const hi = edgeIndex(kind, 'hi');
-    const pct = i => (i / last) * 100;
+    const pct = i => posOf(kind, i) * 100;
     const label = v => (kind === 'freq' ? fmt(v) : String(v));
+    let cols;
+    if (kind === 'freq') {
+      // 로그 눈금 위에 같은 너비의 칸으로 모은다 - 값 하나에 막대 하나면 희귀 쪽 값이 촘촘해 막대가 오른쪽에 쏠린다.
+      const nb = Math.min(vals.length, FREQ_BINS);
+      const bins = Array.from({length: nb}, () => ({c: 0, a: -1, b: -1}));
+      vals.forEach((v, i) => {
+        const bin = bins[Math.min(nb - 1, Math.floor(posOf(kind, i) * nb))];
+        bin.c += Number(counts[v]) || 0;
+        if (bin.a < 0) bin.a = i;
+        bin.b = i;
+      });
+      cols = bins.map((bin, k) => {
+        if (bin.a < 0) {
+          const mid = ((k + 0.5) / nb) * 100;
+          return {c: 0, inn: mid >= pct(lo) && mid <= pct(hi), tip: ''};
+        }
+        const range = bin.a === bin.b ? fmt(vals[bin.a]) : `${fmt(vals[bin.b])}–${fmt(vals[bin.a])}`;
+        return {c: bin.c, inn: bin.b >= lo && bin.a <= hi, tip: `이벤트 ${range}개에 나오는 태그 · ${fmt(bin.c)}개`};
+      });
+    } else {
+      cols = vals.map((v, i) => {
+        const c = Number(counts[v]) || 0;
+        return {c, inn: i >= lo && i <= hi, tip: `세는 태그 ${v}개 · ${fmt(c)} 이벤트`};
+      });
+    }
     let top = 1;
-    vals.forEach(v => { top = Math.max(top, Number(counts[v]) || 0); });
-    const bars = vals.map((v, i) => {
-      const c = Number(counts[v]) || 0;
-      const tip = kind === 'freq' ? `이벤트 ${fmt(v)}개에 나오는 태그 · ${fmt(c)}개` : `세는 태그 ${v}개 · ${fmt(c)} 이벤트`;
-      return `<span class="${i >= lo && i <= hi ? 'is-in' : ''}" style="height:${c ? Math.max(6, Math.round(Math.sqrt(c / top) * 100)) : 0}%"`
-        + ` title="${tip}"></span>`;
-    }).join('');
+    cols.forEach(col => { top = Math.max(top, col.c); });
+    const bars = cols.map(col => `<span class="${col.inn ? 'is-in' : ''}"`
+      + ` style="height:${col.c ? Math.max(6, Math.round(Math.sqrt(col.c / top) * 100)) : 0}%"`
+      + `${col.tip ? ` title="${col.tip}"` : ''}></span>`).join('');
     const ends = kind === 'freq'
       ? `<span>흔함 ${label(vals[0])}</span><span>희귀 ${label(vals[last])}</span>`
       : `<span>${vals[0]}</span><span>${vals[last]}</span>`;
@@ -275,12 +310,15 @@ export function createEventCompressWindow({
     }
   }
 
-  /** 'b, a, 1girl' 을 abc 차례로(사용자 지시 - 1boy, 1girl, apron …). 빈도 컷 밖이라 태그 수에서 빠진 태그는 회색(사용자 지시 2026-10-23). */
+  /** 'b, a, 1girl' 을 abc 차례로(사용자 지시 - 1boy, 1girl, apron …). 빈도 컷 밖이라 태그 수에서 빠진 태그는 회색이고
+   *  세는 태그 뒤로 민다(사용자 지시 2026-10-23) - 앞부분만 읽어도 이벤트를 가르는 태그가 보이게. */
   function tagsHtml(text, uncounted) {
     const off = new Set(Array.isArray(uncounted) ? uncounted : []);
-    return String(text || '').split(', ').filter(Boolean).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(t => (off.has(t) ? `<span class="ecw-t-off" title="빈도 컷 밖 - 태그 수에 세지 않습니다">${escHtml(t)}</span>` : escHtml(t)))
-      .join(', ');
+    const tags = String(text || '').split(', ').filter(Boolean).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    const on = tags.filter(t => !off.has(t)).map(escHtml);
+    const grey = tags.filter(t => off.has(t))
+      .map(t => `<span class="ecw-t-off" title="빈도 컷 밖 - 태그 수에 세지 않습니다">${escHtml(t)}</span>`);
+    return on.concat(grey).join(', ');
   }
 
   function renderList() {
@@ -644,7 +682,11 @@ export function createEventCompressWindow({
     if (!track) return 0;
     const rect = track.getBoundingClientRect();
     const f = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
-    return f * Math.max(0, sliderVals(kind).length - 1);
+    const n = sliderVals(kind).length;
+    if (kind !== 'freq') return f * Math.max(0, n - 1);
+    let best = 0;                    // 로그 눈금 - 자리가 가장 가까운 값
+    for (let i = 1; i < n; i += 1) if (Math.abs(posOf(kind, i) - f) < Math.abs(posOf(kind, best) - f)) best = i;
+    return best;
   }
 
   function onPointerDown(event) {

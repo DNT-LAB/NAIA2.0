@@ -554,7 +554,15 @@ export function createRefVibeWindow({
 
   function selectionBar() {
     const item = selectedItem();
-    if (!item) return '';
+    if (!item) {
+      // 고르기 전에도 같은 줄을 미리 둔다 - 썸네일을 누르는 순간 줄이 생기며 격자가 밀리지 않게(사용자 지시 2026-10-23).
+      // 단추는 잠가 둔다(data-rvw-act 가 없어 눌려도 아무 일 없다).
+      const labels = ['적용', '이름', '★', '카테고리 ▾', ...(tab === 'vibe' ? ['클러스터 ▾'] : []), '삭제'];
+      return `<div class="rvw-pick is-empty"><span class="rvw-pick-n">썸네일을 고르세요</span><span class="rvw-pick-tools">`
+        + labels.map(label => `<button type="button" class="rvw-btn${label === '적용' ? ' is-accent' : ''}${label === '삭제' ? ' is-danger' : ''}"`
+          + ` disabled>${label}</button>`).join('')
+        + `</span></div>`;
+    }
     const state = lib[tab];
     const name = escHtml(String(item.display_name || item.name || item.file_hash));
     const slots = activeSlots(item.file_hash);

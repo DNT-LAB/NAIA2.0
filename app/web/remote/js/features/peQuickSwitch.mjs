@@ -95,7 +95,23 @@ export function createPeQuickSwitch({
           + `<button type="button" class="peq-rm" data-peq-rm="${escHtml(f.name)}" title="Quick 에서 빼기" aria-label="Quick 에서 빼기">−</button></div>`).join('')}</div>`
         + '<div class="peq-thumb" hidden><img alt=""></div>';
     if (pop._html !== html) { pop._html = html; pop.innerHTML = html; }
+    placePop(host);
     paintButton(s);
+  }
+
+  /** 판의 왼쪽 = '프롬프트 엔지니어링' 의 마지막 글자('링') 위(사용자 지정 2026-10-23). 글자 폭은 글꼴 · 확대에 따라 달라 잰다. */
+  function placePop(host) {
+    const label = host.querySelector('.module-primary-btn > span');
+    const text = label?.firstChild;
+    let left = 0;
+    if (text && text.nodeType === 3 && text.length) {
+      const range = doc.createRange();
+      range.setStart(text, text.length - 1);
+      range.setEnd(text, text.length);
+      left = range.getBoundingClientRect().left - host.getBoundingClientRect().left;
+    }
+    const room = doc.documentElement.clientWidth - host.getBoundingClientRect().left - pop.offsetWidth - 8;
+    pop.style.left = `${Math.max(0, Math.min(Math.round(left), Math.round(room)))}px`;
   }
 
   function close() {

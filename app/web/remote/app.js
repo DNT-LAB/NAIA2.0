@@ -3006,7 +3006,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-rv12')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-rvpick1')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -15547,7 +15547,7 @@ function togglePromptPresetQuick(name) {
     showToast('연결이 끊겨 Quick 을 바꾸지 못했습니다', 'error');
   }
 }
-import('./js/features/peQuickSwitch.mjs?v=20261023-peq2')
+import('./js/features/peQuickSwitch.mjs?v=20261023-peq4')
   .then(({createPeQuickSwitch}) => {
     peQuickSwitch = createPeQuickSwitch({
       document, escHtml,

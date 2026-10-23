@@ -32909,7 +32909,7 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .peq-pop {
   position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 240;
   display: grid; grid-template-columns: auto minmax(0, 1fr);
-  width: min(380px, calc(100vw - 24px)); max-height: min(300px, 52vh);
+  width: min(300px, calc(100vw - 24px)); max-height: min(300px, 52vh);
   background: rgba(18,18,28,0.98); border: 1px solid var(--border-glow); border-radius: 8px;
   box-shadow: 0 12px 28px rgba(0,0,0,0.42);
   font-family: var(--font-mono); font-size: 11px;
@@ -32951,3 +32951,7 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .pe-quick-fav:hover:not(:disabled) { color: #ffe2a8; border-color: rgba(255,226,168,0.5); }
 .pe-quick-fav.is-on { color: #ffe2a8; border-color: rgba(255,226,168,0.55); background: rgba(255,226,168,0.10); }
 .pe-quick-fav:disabled { opacity: 0.4; cursor: default; }
+
+/* 고르기 전 자리 맡기 줄(사용자 지시 2026-10-23) - 같은 높이 · 잠긴 단추 · 흐린 테. */
+.rvw-pick.is-empty { border-color: var(--border-dim); }
+.rvw-pick.is-empty .rvw-pick-n { color: var(--text-dim); }

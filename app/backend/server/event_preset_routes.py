@@ -192,15 +192,19 @@ def _apply_server_side_resolution(context: WebSessionContext, overrides: dict[st
 
     메인 Generate 는 화면이 Rnd Res 를 추첨하고 Auto Res 감지값을 실어 보낸다. 이 길들은 그 둘을 못 거쳐
     Rnd Res 를 켜도 저장된 한 해상도로만, Auto Res 를 켜도 맞춘 값이 아닌 기준 해상도로 나갔다
-    (사용자 제보 2026-10-23). Refine · 세션 풀 생성과 같은 순서로 맞춘다: Rnd Res 추첨 -> Auto Res 감지값.
-    요청이 해상도를 직접 실었으면(창이 화면 값을 보냄) 추첨은 그것을 존중한다.
+    (사용자 제보 2026-10-23). 메인 수동 Generate 와 같은 규칙: Rnd Res 가 켜졌으면 추첨(Auto Res 보다 앞선다),
+    아니면 Auto Res 감지값, 둘 다 꺼졌으면 저장된 해상도. 요청이 해상도를 직접 실었으면(창이 화면에서 이미
+    추첨한 값) 다시 뽑지 않는다.
     """
     live = getattr(context, "remote_params", None) or {}
     rnd_res = live.get("random_resolution", overrides.get("random_resolution", False))
-    if (rnd_res is True or str(rnd_res).strip().lower() == "true") \
-            and (overrides.get("width") is None or overrides.get("height") is None):
-        from app.backend.server.generation_runner import _reroll_random_resolution
-        _reroll_random_resolution(context, overrides)
+    if rnd_res is True or str(rnd_res).strip().lower() == "true":
+        # 둘 다 켜졌으면 Rnd Res 가 이긴다 - 메인 수동 Generate 와 같다(화면이 Auto Res 감지값 대신 매번 추첨해
+        # 싣는다). Auto Res 를 앞세웠더니 늘 행의 해상도로 고정돼 Rnd Res 가 죽어 보였다(사용자 제보 2026-10-23).
+        if overrides.get("width") is None or overrides.get("height") is None:
+            from app.backend.server.generation_runner import _reroll_random_resolution
+            _reroll_random_resolution(context, overrides)
+        return
     try:
         width, height = (int(detected[0]), int(detected[1])) if detected else (0, 0)
     except (TypeError, ValueError, IndexError):

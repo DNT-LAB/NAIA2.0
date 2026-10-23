@@ -3378,7 +3378,7 @@ async function openTemporarySearchPreview() {
     showToast('임시 검색 창을 열지 못했습니다.', 'error');
   } finally { temporarySearchLoading = false; }
 }
-const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20260926-childalign')
+const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=20261023-evc4')
   .then(({createSearchQuickWindow}) => {
     searchQuickWindow = createSearchQuickWindow({
       document,

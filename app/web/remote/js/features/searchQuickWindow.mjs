@@ -74,7 +74,8 @@ export function createSearchQuickWindow({
     title: 'Search',
     variant: 'sqw',
     storageKey: 'search-quick',
-    width: 400,
+    // 440 - Tag Filter RATING 줄에 [⇊ 압축] 이 늘어 400 에서 G/S/Q/E 가 밀렸다(사용자 제보 2026-10-23).
+    width: 440,
     minWidth: 320,
     maxWidth: 760,
     height: 640,

@@ -32560,3 +32560,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-pe-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 5px; font-size: 10.5px; color: var(--text-dim); }
 .ecw-pe-head span { font-size: 9.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ecw-pe .pe-opt-list { grid-template-columns: repeat(5, max-content); gap: 3px 4px; }
+
+/* Search 창 RATING 줄의 'n assigned' 는 숨긴다 - 같은 수(풀림 · 재적용 중… 포함)가 Tag Filter 머리줄에 비춰진다
+   (searchQuickWindow mirrorMeta). [⇊ 압축] 이 늘어 줄이 밀렸다(사용자 지시 2026-10-23). 요소는 남는다 - quickFilter 가 쓴다. */
+.sqw-body .tag-filter-rating-row .tag-filter-count { display: none; }

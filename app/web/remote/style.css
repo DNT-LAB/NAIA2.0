@@ -32995,3 +32995,10 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 }
 .rvw-cp-text:focus { outline: none; border-color: var(--accent); }
 .rvw-cp-foot { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* REF & VIBE (사용자 지시 2026-10-23) - 클러스터 안 항목은 위 활성 줄과 같은 일자형(둥근 상자 + 안쪽 왼선 = '{' 모양 회수) ·
+   지금 탭(Vibe / Char Ref)은 채운 강조색으로 - 어느 쪽을 보고 있는지 한눈에. */
+.rvw-mrow { border: 0; border-bottom: 1px solid rgba(255,255,255,.05); border-radius: 0; background: transparent; padding: 3px 8px; }
+.rvw-mrow.is-live { background: rgba(124,106,239,.16); box-shadow: inset 2px 0 0 rgb(124,106,239); }
+.rvw-tab.on { border-color: rgb(124,106,239); background: rgb(124,106,239); color: #fff; font-weight: 700; }
+.rvw-tab.on:hover { color: #fff; }

@@ -500,7 +500,9 @@ export function createTagAssistController({
     tagTooltip.classList.toggle('feature-modal-target', !!acTarget?.closest?.('.char-bench'));
     syncTooltipLayer();
     if (window.innerWidth < 768) return;
-    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup');
+    // 캐릭터 퀵 패널(Result 위 C1 · C2 …)의 프롬프트 칸도 왼쪽 프롬프트 자리에 그린다(사용자 제보 · 결정 2026-10-23).
+    // 기본 자리(뷰어 왼쪽 위)가 바로 그 패널이라, 창을 세로로 좁히면 카드가 치고 있는 칸을 덮었다.
+    const inModule = acTarget && acTarget.closest('.module-popup, .refine-popup, .tag-filter-popup, .cq-float');
     tagTooltip.classList.toggle('left-side', !!inModule);
   }
 

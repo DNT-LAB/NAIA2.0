@@ -4,6 +4,7 @@ export function createPromptEngineeringPopupRenderers({
   escHtml,
   createPromptPreset,
   renamePromptPreset = () => false,
+  presetThumbnailAction = null,   // (kind, getBlob) - 지금 프리셋 썸네일 고치기(app.js presetThumbnailAction)
   applyPromptPreset,
   addRandomizedPreset,
   removeRandomizedPreset,
@@ -33,6 +34,11 @@ export function createPromptEngineeringPopupRenderers({
   let searchDebounceTimer = null;
   let savedFlashUntil = 0;   // "저장됨" 피드백이 재렌더에도 잠깐 유지되도록 하는 만료 타임스탬프
   let presetBrowser = null;
+  // Manage Preset [썸네일 편집] 을 펼쳐 두었나(사용자 지시 2026-10-23 - 평소에는 접혀 있다). 서버 push 재렌더에도 유지.
+  let thumbEditOpen = false;
+  const thumbEditable = name => !!name && !String(name).startsWith('*');
+  const currentThumbUrl = m => String((m.preset_summaries || []).find(s => s && s.name === m.preset)?.thumbnail_url || '');
+  const thumbImHtml = url => (url ? `<img src="${escHtml(url)}" alt="">` : '<span>썸네일 없음</span>');
   let presetDetailRequest = 0;
   // 랜덤 칸(`*randomized` · `*randomized:이름`). 파일이 없는 합성 이름이라 프리셋 미리보기 목록에는 올리지 않는다.
   const isRandomizedPreset = name => String(name || '').startsWith('*randomized');
@@ -353,7 +359,48 @@ export function createPromptEngineeringPopupRenderers({
     }
   }
 
+  /** [썸네일 편집] 칸을 지금 상태(프리셋 · 썸네일 · 펼침)에 맞춘다 - 첫 그리기와 서버 push 의 빠른 길이 함께 쓴다. */
+  function syncThumbEdit(body, m) {
+    const toggle = body.querySelector('[data-thumb-toggle]');
+    const row = body.querySelector('[data-thumb-edit]');
+    if (!toggle || !row) return;
+    const editable = thumbEditable(m.preset) && typeof presetThumbnailAction === 'function';
+    toggle.disabled = !editable;
+    toggle.title = editable ? '' : '랜덤 칸 · 스냅샷에는 썸네일을 둘 수 없습니다';
+    const open = thumbEditOpen && editable;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.classList.toggle('is-on', open);
+    row.hidden = !open;
+    const html = thumbImHtml(currentThumbUrl(m));
+    const im = row.querySelector('[data-thumb-im]');
+    if (im && im._html !== html) { im._html = html; im.innerHTML = html; }
+  }
+
+  function bindThumbEdit(body) {
+    const row = body.querySelector('[data-thumb-edit]');
+    const file = row?.querySelector('[data-thumb-file]');
+    body.querySelector('[data-thumb-toggle]')?.addEventListener('click', () => {
+      thumbEditOpen = !thumbEditOpen;
+      const m = presetManageState;
+      if (m) syncThumbEdit(body, m);
+    });
+    file?.addEventListener('change', () => {
+      const picked = file.files?.[0];
+      file.value = '';
+      if (picked) presetThumbnailAction?.('image', async () => picked);
+    });
+    row?.addEventListener('click', event => {
+      const button = event.target.closest('[data-thumb-act]');
+      if (!button || typeof presetThumbnailAction !== 'function') return;
+      const kind = button.dataset.thumbAct;
+      if (kind === 'upload') file?.click();
+      else presetThumbnailAction(kind);
+    });
+  }
+
+  let presetManageState = null;
   function renderPresetManage(m) {
+    presetManageState = m;
     const body = getBody(panels.presetManage);
     if (!body) return;
     const title = panels.presetManage?.querySelector('.module-popup-title');
@@ -382,6 +429,7 @@ export function createPromptEngineeringPopupRenderers({
       body.querySelector('[data-delete-current]').disabled = !canDeleteCurrent;
       const renameBtn = body.querySelector('[data-rename-current]');
       if (renameBtn) renameBtn.disabled = !canDeleteCurrent;
+      syncThumbEdit(body, m);
       presetBrowser.updateApply();
       return;
     }
@@ -394,6 +442,19 @@ export function createPromptEngineeringPopupRenderers({
       <button class="mod-btn-secondary" data-save-current ${canSaveCurrent ? '' : 'disabled'} onclick="saveCurrentPromptPreset()">Save Current</button>
       <button type="button" class="mod-btn-secondary" data-rename-current ${canDeleteCurrent ? '' : 'disabled'}>이름 바꾸기</button>
       <button class="mod-btn-danger" data-delete-current ${canDeleteCurrent ? '' : 'disabled'} onclick="deleteCurrentPromptPreset()">Delete Current</button>
+      <button type="button" class="mod-btn-secondary" data-thumb-toggle aria-expanded="false">썸네일 편집</button>
+    </div>
+    <div class="pe-thumb-edit" data-thumb-edit hidden>
+      <div class="pe-thumb-edit-im" data-thumb-im></div>
+      <div class="pe-thumb-edit-tools">
+        <div class="mod-inline-row">
+          <button type="button" class="mod-btn-secondary" data-thumb-act="upload">썸네일 업로드</button>
+          <button type="button" class="mod-btn-secondary" data-thumb-act="paste">썸네일 붙여넣기</button>
+          <button type="button" class="mod-btn-secondary" data-thumb-act="generate">임시 썸네일 생성</button>
+        </div>
+        <input type="file" accept="image/png,image/jpeg,image/webp" hidden data-thumb-file>
+        <p class="pe-preset-hint">지금 프리셋의 썸네일입니다. 결과 그림 우클릭 › 프리셋 썸네일로 등록 으로도 바꿀 수 있습니다.</p>
+      </div>
     </div>
     <div class="mod-inline-row" data-rename-row style="display:none">
       <input class="mod-input" type="text" data-rename-input aria-label="새 프리셋 이름" maxlength="120" style="flex:1;min-width:0">
@@ -456,6 +517,9 @@ export function createPromptEngineeringPopupRenderers({
       if (event.key === 'Enter') { event.preventDefault(); submitRename(); }
       else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRename(); }
     });
+
+    bindThumbEdit(body);
+    syncThumbEdit(body, m);
 
     const root = body.querySelector('.pe-preset-browser');
     const search = root.querySelector('input');

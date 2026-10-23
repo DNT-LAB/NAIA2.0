@@ -12744,7 +12744,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20261017-auxf
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261017-rename')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261023-thumbedit1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -12753,6 +12753,8 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       escHtml,
       createPromptPreset,
       renamePromptPreset,
+      // Manage Preset [썸네일 편집](사용자 지시 2026-10-23) - 지금 프리셋의 썸네일.
+      presetThumbnailAction,
       applyPromptPreset: onPromptPresetChange,
       addRandomizedPreset: addRandomizedPromptPreset,
       removeRandomizedPreset: removeRandomizedPromptPreset,
@@ -13310,23 +13312,43 @@ function onPromptEngineeringPresetThumbnailUpdated(m) {
 // 결과 그림 우클릭 > [프리셋 썸네일로 등록](사용자 지시 2026-10-23). 지금 PE 프리셋의 썸네일을 이 그림으로 바꾼다 -
 // PE 콤보 미리보기의 [썸네일 업로드] 와 같은 라우트(저장 뒤 서버가 prompt_engineering_preset_thumbnail_updated 를 쏜다).
 async function setResultAsPresetThumbnail(context) {
-  const s = lastPromptEngineeringState || {};
-  const name = String(s.preset || '');
-  if (!name || name.startsWith('*')) {
-    showToast('랜덤 칸 · 스냅샷에는 썸네일을 둘 수 없습니다 - 파일 프리셋을 고른 뒤 다시 하세요', 'error');
-    return;
-  }
   const path = String(context?.path || '');
   const src = String(context?.imageSrc || '') || (path ? '/api/viewer/image/' + encodeURI(path) : '');
   if (!src) {
     showToast('썸네일로 쓸 그림을 찾지 못했습니다', 'error');
     return;
   }
-  try {
+  await presetThumbnailAction('image', async () => {
     const image = await fetch(src, {cache: 'no-store'});
     if (!image.ok) throw new Error(`그림을 읽지 못했습니다 (HTTP ${image.status})`);
-    const blob = await image.blob();
-    const params = new URLSearchParams({name, mode: String(s.api_mode || '')});
+    return image.blob();
+  });
+}
+
+/** 지금 PE 프리셋의 썸네일 고치기 한 벌(우클릭 등록 · Manage Preset [썸네일 편집] - 사용자 지시 2026-10-23).
+ *  kind: 'image'(getBlob 이 준 그림) · 'paste'(클립보드) · 'generate'(임시 썸네일 생성 - PE 콤보 미리보기와 같은 라우트).
+ *  저장이 끝나면 서버가 prompt_engineering_preset_thumbnail_updated 를 쏘고, 그 처리기가 PE 상태를 다시 받는다. */
+async function presetThumbnailAction(kind, getBlob = null) {
+  const s = lastPromptEngineeringState || {};
+  const name = String(s.preset || '');
+  if (!name || name.startsWith('*')) {
+    showToast('랜덤 칸 · 스냅샷에는 썸네일을 둘 수 없습니다 - 파일 프리셋을 고른 뒤 다시 하세요', 'error');
+    return false;
+  }
+  const mode = String(s.api_mode || '');
+  try {
+    if (kind === 'generate') {
+      const response = await fetch('/api/prompt-engineering/preset-thumbnail/generate', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, mode}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.error || data.message || `HTTP ${response.status}`);
+      showToast(data.message || '임시 썸네일 생성을 요청했습니다', 'success');
+      return true;
+    }
+    const blob = kind === 'paste' ? await readClipboardImageForThumbnail() : await getBlob();
+    if (!blob) throw new Error('그림이 없습니다');
+    const params = new URLSearchParams({name, mode});
     const response = await fetch(`/api/prompt-engineering/preset-thumbnail/upload?${params}`, {
       method: 'POST',
       headers: {'Content-Type': blob.type || 'application/octet-stream'},
@@ -13334,9 +13356,36 @@ async function setResultAsPresetThumbnail(context) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.ok === false) throw new Error(data.error || `HTTP ${response.status}`);
-    showToast(`'${name}' 프리셋 썸네일로 등록했습니다`, 'success');
+    showToast(`'${name}' 프리셋 썸네일을 바꿨습니다`, 'success');
+    return true;
   } catch (error) {
-    showToast(`프리셋 썸네일 등록 실패: ${error.message || error}`, 'error');
+    showToast(`프리셋 썸네일 저장 실패: ${error.message || error}`, 'error');
+    return false;
+  }
+}
+
+/** 클립보드 그림 - 데스크톱 셸 · 로컬이면 앱의 클립보드 다리를 먼저(customSelects 의 [썸네일 붙여넣기] 와 같은 순서). */
+async function readClipboardImageForThumbnail() {
+  let failure = null;
+  if (canUseHostClipboardBridge) {
+    try {
+      const response = await fetch('/api/clipboard/png', {cache: 'no-store'});
+      if (response.ok) return await response.blob();
+      const data = await response.json().catch(() => ({}));
+      failure = new Error(data.error || `클립보드 이미지 읽기 실패: HTTP ${response.status}`);
+    } catch (error) {
+      failure = error;
+    }
+  }
+  try {
+    if (!navigator.clipboard?.read) throw new Error('이 브라우저는 이미지 붙여넣기를 지원하지 않습니다');
+    for (const item of await navigator.clipboard.read()) {
+      const type = item.types.find(candidate => candidate.startsWith('image/'));
+      if (type) return await item.getType(type);
+    }
+    throw new Error('클립보드에 이미지가 없습니다');
+  } catch (error) {
+    throw failure || error;
   }
 }
 

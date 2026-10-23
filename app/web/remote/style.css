@@ -32956,3 +32956,14 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 /* 고르기 전 자리 맡기 줄(사용자 지시 2026-10-23) - 같은 높이 · 잠긴 단추 · 흐린 테. */
 .rvw-pick.is-empty { border-color: var(--border-dim); }
 .rvw-pick.is-empty .rvw-pick-n { color: var(--text-dim); }
+
+/* Manage Preset [썸네일 편집] (사용자 지시 2026-10-23) - 평소엔 접힘. 지금 프리셋의 썸네일 + 단추 셋. */
+.pe-thumb-edit { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 8px; padding: 8px; border: 1px solid var(--border-dim); border-radius: 8px; }
+.pe-thumb-edit[hidden] { display: none; }
+.pe-thumb-edit-im {
+  flex: 0 0 auto; width: 84px; height: 112px; border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.3);
+  display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; text-align: center;
+}
+.pe-thumb-edit-im img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pe-thumb-edit-tools { display: grid; gap: 6px; min-width: 0; }
+[data-thumb-toggle].is-on { color: #ffe2a8; border-color: rgba(255,226,168,0.55); }

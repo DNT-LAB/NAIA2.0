@@ -32672,7 +32672,8 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvp-note { color: var(--text-dim); letter-spacing: 0; }
 .rvp-note[hidden], .rvp-count[hidden] { display: none !important; }
 .rvp-count { margin-left: auto; padding: 0 6px; border-radius: 9px; background: rgba(124,106,239,.25); color: #cfc8ff; letter-spacing: 0; }
-.rvp.is-unsupported .rvp-box { opacity: .35; cursor: default; }
+/* 못 쓰는 모델(V5 등)에서는 알약을 아예 숨긴다(사용자 지시 2026-10-23). */
+.rvp.is-unsupported { display: none !important; }
 
 .dragpanel.rvw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
 .rvw-tabs { display: inline-flex; gap: 2px; }
@@ -32723,7 +32724,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
   color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0;
 }
 .rvw-en:hover, .rvw-x:hover { background: rgba(255,255,255,.07); color: var(--text-primary); }
-.rvw-th { flex: 0 0 auto; width: 28px; height: 35px; border-radius: 4px; object-fit: cover; background: #1a1a26; }
+.rvw-th { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 4px; object-fit: cover; background: #1a1a26; }
 .rvw-th.is-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 9px; border: 1px dashed var(--border-glow); }
 .rvw-name {
   flex: 1 1 auto; min-width: 0; text-align: left; border: none; background: transparent; color: var(--text-primary);
@@ -32774,7 +32775,8 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 }
 .rvw-card:hover { border-color: rgba(124,106,239,.6); }
 .rvw-card.is-sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.rvw-card-im { width: 100%; aspect-ratio: 4 / 5; object-fit: cover; background: #14141c; display: block; }
+/* 정사각형(사용자 지시 2026-10-23) - 크게 보기는 마우스를 올렸을 때(.rvw-zoom). */
+.rvw-card-im { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #14141c; display: block; }
 .rvw-card-im.is-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; }
 .rvw-card-lb { padding: 2px 4px; font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rvw-card-star { position: absolute; top: 2px; right: 4px; color: #f5c542; font-size: 11px; text-shadow: 0 1px 2px rgba(0,0,0,.8); }
@@ -32854,7 +32856,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-cl:hover { border-color: rgba(124,106,239,.6); }
 .rvw-cl-stack { flex: 0 0 auto; display: flex; }
 .rvw-cl-stack > img, .rvw-cl-stack > span {
-  width: 24px; height: 30px; border-radius: 3px; object-fit: cover; background: #14141c;
+  width: 28px; height: 28px; border-radius: 3px; object-fit: cover; background: #14141c;
   border: 1px solid var(--bg-elevated); margin-left: -8px;
 }
 .rvw-cl-stack > :first-child { margin-left: 0; }
@@ -32882,3 +32884,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-mchips { display: flex; gap: 3px; flex-wrap: wrap; }
 .rvw-menu-i.is-off { opacity: .45; cursor: default; }
 .rvw-menu-i.is-off:hover { background: transparent; color: var(--text-muted); }
+
+/* 썸네일 확대 - Character Find 의 .cq-find-zoom 옷 그대로 · 정사각 그림이라 폭만 조금 넓힌다. */
+.cq-find-zoom.rvw-zoom { width: 300px; z-index: var(--z-floating-select-open); }
+.cq-find-zoom.rvw-zoom img { object-fit: contain; }   /* 그림 제 비율 - 정사각으로 두면 가로 그림에 검은 띠가 컸다 */

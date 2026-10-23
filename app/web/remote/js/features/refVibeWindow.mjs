@@ -138,10 +138,11 @@ export function createRefVibeWindow({
     const vibeOff = isToolUnsupported(KINDS.vibe);
     const crOff = isToolUnsupported(KINDS.cr);
     const unsupported = vibeOff && crOff;
+    // 못 쓰는 모델(V5 등)에서는 알약을 아예 숨긴다(사용자 지시 2026-10-23 - 흐린 'V4.5 전용' 도 자리만 차지했다).
     el.classList.toggle('is-unsupported', unsupported);
     const note = el.querySelector('[data-rvp-note]');
-    note.hidden = !unsupported;
-    note.textContent = unsupported ? 'V4.5 전용' : '';
+    note.hidden = true;
+    note.textContent = '';
     const vibe = vibeOff ? 0 : enabledCount(KINDS.vibe);
     const cr = crOff ? 0 : enabledCount(KINDS.cr);
     const count = el.querySelector('[data-rvp-count]');
@@ -170,7 +171,7 @@ export function createRefVibeWindow({
         initial: {x: 520, y: 90},
         escHtml,
         onOpen: () => paintPill(),
-        onClose: () => { closeMenu(); paintPill(); },
+        onClose: () => { closeMenu(); closePreview(); paintPill(); },
       });
       panel.slot.innerHTML = `<span class="rvw-tabs" data-nodrag-tabs>`
         + `<button type="button" class="rvw-tab" data-rvw-tab="vibe"></button>`
@@ -192,7 +193,10 @@ export function createRefVibeWindow({
       body.addEventListener('change', onChange);
       body.addEventListener('keydown', onKey);
       body.addEventListener('contextmenu', onContextMenu);
-      body.addEventListener('dragstart', onDragStart);
+      body.addEventListener('pointerover', onPointerOver);
+      body.addEventListener('pointerleave', closePreview);
+      body.addEventListener('scroll', closePreview, {capture: true, passive: true});
+      body.addEventListener('dragstart', event => { closePreview(); onDragStart(event); });
       body.addEventListener('dragend', onDragEnd);
       body.addEventListener('dragover', onDragOver);
       body.addEventListener('dragleave', onDragLeave);
@@ -226,12 +230,10 @@ export function createRefVibeWindow({
       const wanted = nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab;
       if (toggle && panel.isOpen() && wanted === tab) { panel.close(); return; }
       setTab(wanted, {quiet: true});
-      const first = !openedOnce;
-      openedOnce = true;
       panel.open();
-      // 이번 실행 첫 열기는 공용 규칙(FN | Result 경계)에 뜨는데, 그 자리는 퀵 슬롯 · 이 알약을 덮는다 -
-      // 알약 오른쪽으로 비켜 선다. 그 뒤로는 사용자가 옮긴 자리를 따른다.
-      if (first) stepAsideFromPill();
+      // 이번 실행 첫 열기는 결과 칸 가운데로(사용자 지시 2026-10-23). 공용 규칙(FN | Result 경계)은 퀵 슬롯 ·
+      // 이 알약을 덮었다. 그 뒤(같은 실행 - F5 포함)로는 사용자가 옮긴 자리를 따른다.
+      centerOnFirstOpen();
       requestModuleState(KINDS.vibe);
       requestModuleState(KINDS.cr);
       renderAll();
@@ -241,16 +243,18 @@ export function createRefVibeWindow({
 
   function hide() { panel?.close(); }
 
-  let openedOnce = false;
-  function stepAsideFromPill() {
-    const el = pill && pill.classList.contains('open') ? pill : null;
-    if (!el || !panel) return;
-    const pillBox = el.getBoundingClientRect();
+  // '이번 실행에 이미 가운데 놓았다' 는 sessionStorage 에 - draggablePanel 의 자리 기억과 같은 수명(앱을 다시 켜면 빈다).
+  const CENTERED_KEY = 'naia.refvibe.centered';
+  function centerOnFirstOpen() {
+    try { if (globalThis.sessionStorage?.getItem(CENTERED_KEY)) return; } catch (_) { /* 못 읽으면 매번 가운데 */ }
     const box = panel.el.getBoundingClientRect();
-    if (pillBox.width <= 0 || box.left >= pillBox.right || box.right <= pillBox.left) return;
-    const cq = doc.querySelector('.cq-float.open .cq-box') || doc.querySelector('.cq-float.open');
-    const right = Math.max(pillBox.right, cq ? cq.getBoundingClientRect().right : 0);
-    panel.moveTo(right + 12, Math.max(box.top, pillBox.top - 30));
+    const area = doc.querySelector('.viewer-wrapper')?.getBoundingClientRect();
+    const host = area && area.width > 0 && area.height > 0
+      ? area : {left: 0, top: 0, width: win.innerWidth, height: win.innerHeight};
+    const x = host.left + Math.max(0, (host.width - box.width) / 2);
+    const y = host.top + Math.max(12, (host.height - box.height) / 2);
+    panel.moveTo(Math.round(x), Math.round(y));
+    try { globalThis.sessionStorage?.setItem(CENTERED_KEY, '1'); } catch (_) { /* 다음에 또 가운데 */ }
   }
 
   function setTab(next, {quiet = false} = {}) {
@@ -1233,10 +1237,114 @@ export function createRefVibeWindow({
   }
 
   function onContextMenu(event) {
+    const card = event.target.closest('[data-rvw-card]');
+    if (card) {
+      event.preventDefault();
+      closePreview();
+      lib[tab].selected = card.dataset.rvwCard;
+      lib[tab].ie = null;
+      renderStore();
+      openCardMenu({x: event.clientX, y: event.clientY});
+      return;
+    }
     const row = event.target.closest('[data-rvw-filter="category"]');
     if (!row) return;
     event.preventDefault();
     openCategoryRowMenu(row, row.dataset.cat);
+  }
+
+  /** 썸네일 우클릭(사용자 지시 2026-10-23) - 카테고리 옮기기 · 지우기를 한 자리에서. 옮길 곳은 메뉴 안에 바로 나열한다. */
+  function openCardMenu(point) {
+    const item = selectedItem();
+    if (!item) return;
+    const current = String(item.category || '');
+    const cats = lib[tab].categories.map(c => `<button type="button" class="rvw-menu-i${c.id === current ? ' is-selected' : ''}" data-rvw-menu="cat:${escHtml(c.id)}">`
+      + `<span class="rvw-menu-mark">${c.id === current ? '✓' : ''}</span>${escHtml(c.name)}</button>`).join('')
+      + `<button type="button" class="rvw-menu-i${current ? '' : ' is-selected'}" data-rvw-menu="cat:"><span class="rvw-menu-mark">${current ? '' : '✓'}</span>미분류</button>`
+      + `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="newcat"><span class="rvw-menu-mark">+</span>새 카테고리로</button>`;
+    const sameModel = c => !c.model || c.model === lib.vibe.model;
+    const clusterRows = tab === 'vibe'
+      ? `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">클러스터에 넣기</div>`
+        + (clusters.list.length
+          ? clusters.list.map(c => `<button type="button" class="rvw-menu-i${sameModel(c) ? '' : ' is-off'}" data-rvw-menu="${sameModel(c) ? `cl:${escHtml(c.id)}` : ''}">`
+            + `<span class="rvw-menu-mark">◆</span>${escHtml(c.name)}</button>`).join('')
+          : `<div class="rvw-menu-h">클러스터가 없습니다</div>`)
+      : '';
+    openMenu(point, `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`
+      + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
+      + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
+      + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
+      + clusterRows
+      + `<div class="rvw-menu-sep"></div>`
+      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete"><span class="rvw-menu-mark"></span>보관함에서 삭제</button>`, async op => {
+      if (op === 'apply') applySelected();
+      else if (op === 'rename') renameSelected();
+      else if (op === 'fav') setFavorite(item.file_hash, !item.favorite);
+      else if (op === 'delete') deleteSelected();
+      else if (op === 'newcat') { const made = await newCategory(); if (made) moveTo([item.file_hash], made); }
+      else if (op.startsWith('cat:')) { const target = op.slice(4); if (target !== current) moveTo([item.file_hash], target); }
+      else if (op.startsWith('cl:')) addToCluster(op.slice(3), item);
+    });
+    if (tab === 'vibe' && !clusters.loaded) loadClusters();
+  }
+
+  // ── 마우스를 올리면 크게(사용자 지시 2026-10-23 - Artist · Character Find 썸네일 확대와 같은 결) ──
+  //  창 왼쪽(자리가 없으면 오른쪽)에 640px 판으로. 옷은 Character Find 의 `.cq-find-zoom` 을 그대로 입는다.
+  let previewEl = null;
+  let previewKey = '';
+  function closePreview() {
+    if (previewEl) previewEl.hidden = true;
+    previewKey = '';
+  }
+
+  function previewSource(target) {
+    const card = target.closest?.('[data-rvw-card]');
+    if (card) {
+      const item = lib[tab].items.find(i => String(i.file_hash) === card.dataset.rvwCard);
+      if (!item || !item.thumbnail_url) return null;
+      const note = tab === 'vibe'
+        ? `IE ${(item.encoding_keys || []).map(k => fmt(k)).join(' · ')}`
+        : `${item.settings?.reference_type || 'character&style'} · S ${fmt(item.settings?.strength ?? 1)} · F ${fmt(item.settings?.fidelity ?? 0.8)}`;
+      return {key: `card:${tab}:${item.file_hash}`, src: `${item.thumbnail_url}&size=640`, title: item.display_name || item.file_hash, note, anchor: card};
+    }
+    const thumb = target.closest?.('.rvw-mrow img.rvw-th');
+    if (thumb) {
+      const row = thumb.closest('.rvw-mrow');
+      return {key: `member:${thumb.getAttribute('src')}`, src: `${thumb.getAttribute('src')}&size=640`,
+        title: row.querySelector('.rvw-name')?.textContent || '', note: '', anchor: row};
+    }
+    return null;
+  }
+
+  function showPreview(source) {
+    if (!previewEl) {
+      previewEl = doc.createElement('div');
+      previewEl.className = 'cq-find-zoom rvw-zoom';
+      previewEl.setAttribute('aria-hidden', 'true');
+      doc.body.appendChild(previewEl);
+    }
+    if (previewKey !== source.key) {
+      previewKey = source.key;
+      previewEl.innerHTML = `<img alt="" decoding="async" src="${escHtml(source.src)}">`
+        + `<div class="cq-find-zoom-cap"><b>${escHtml(source.title)}</b><span>${escHtml(source.note)}</span></div>`;
+    }
+    previewEl.hidden = false;
+    const margin = 8;
+    const winBox = panel.el.getBoundingClientRect();
+    const row = source.anchor.getBoundingClientRect();
+    const width = previewEl.offsetWidth;
+    const height = previewEl.offsetHeight;
+    let left = winBox.left - width - margin;
+    if (left < margin) left = Math.min(win.innerWidth - width - margin, winBox.right + margin);
+    const top = Math.min(Math.max(margin, row.top + row.height / 2 - height / 2), win.innerHeight - height - margin);
+    previewEl.style.left = `${Math.round(left)}px`;
+    previewEl.style.top = `${Math.round(top)}px`;
+  }
+
+  function onPointerOver(event) {
+    if (drag || menu) { closePreview(); return; }
+    const source = previewSource(event.target);
+    if (source) showPreview(source); else closePreview();
   }
 
   let qTimer = 0;
@@ -1341,6 +1449,12 @@ export function createRefVibeWindow({
   function refresh() {
     paintPill();
     if (!panel || !panel.isOpen()) return;
+    if (isToolUnsupported(KINDS.vibe) && isToolUnsupported(KINDS.cr)) {
+      // V4.5 -> V5 프리셋: 창도 즉시 닫는다(사용자 지시 2026-10-23 - 패널도 아예 안 보이게).
+      closePreview();
+      panel.close();
+      return;
+    }
     lib.vibe.model = '';
     lib.vibe.loaded = false;
     lib.vibe.selected = '';

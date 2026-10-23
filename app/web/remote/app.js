@@ -3006,7 +3006,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-rv9')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-rv10')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -6790,7 +6790,6 @@ function setParam(key, value) {
     }
     // 못 쓰는 도구가 열려 있으면 먼저 닫는다(순수 프런트 판단이라 왕복이 필요 없다).
     naiCloseUnsupportedTool();
-    refVibeWindow?.refresh();
     if (img2imgPanel) img2imgPanel.refresh();
   }
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -10660,7 +10659,6 @@ function syncMode(mode) {
   // 이것이 사용자가 본 "요약은 맞는데 버튼은 비활성"의 경로 분리다(Bug 1, ComfyUI→NAI 재현).
   if (moduleLauncherControl) moduleLauncherControl.updateState();
   syncRefVibePillVisibility();
-  refVibeWindow?.refresh();
   updateModuleHeaderAction(currentModuleId);
   updateModeSelectAvailability();
   if (resultEnhance) resultEnhance.update();
@@ -12443,6 +12441,8 @@ async function onNaiPreviewResult(message) {
 // 긴 이름이 남아 있다가 다음 타이핑에서야 짧아진다(사용자가 볼 때 어긋난 상태).
 function refreshV5DependentChrome() {
   refreshTransparentBgPill();
+  // 프리셋 전환(서버 에코)도 여기를 지난다 - REF & VIBE 와 NAI 전용 도구 칩을 같이 맞춘다.
+  syncNaiReferenceToolChrome();
   // 모델 · 모드가 바뀌는 자리마다 여기를 지난다 - Medium 의 칸 잠금 · Negative 탭도 함께 맞춘다.
   refreshNaiModelLimits();
   if (tokenDisplayControl) tokenDisplayControl.updatePromptTokenEstimate();
@@ -13416,11 +13416,33 @@ function updateCharBadge(m) {
 }
 
 function updateCharRefBadge(m) {
-  if (moduleBadges) moduleBadges.updateCharacterReference(m);
+  if (moduleBadges) moduleBadges.updateCharacterReference(naiToolShownState('character_reference', m));
 }
 
 function updateVibeBadge(m) {
-  if (moduleBadges) moduleBadges.updateVibe(m);
+  if (moduleBadges) moduleBadges.updateVibe(naiToolShownState('vibe_transfer', m));
+}
+
+/** 모델이 못 쓰는 CR · VT 는 켜진 프레임이 있어도 **0 으로 보인다**(사용자 제보 2026-10-23: V4.5 -> V5 프리셋으로 넘어가도
+ *  NAI 전용 도구의 V2 칩 · Activated 요약이 그대로 남았다 - 생성 페이로드에는 안 실리는데 화면만 켜진 것처럼). */
+function naiToolShownState(moduleId, m) {
+  const off = String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
+    || naiModelBlocksReference() || naiModelToolUnsupported(moduleId);
+  return off ? {...(m || {}), frames: []} : (m || {});
+}
+
+/** 모델 · 모드가 바뀐 그 자리에서 CR · VT 표시를 맞춘다 - 배지 · 런처 칩 · REF & VIBE 알약과 창.
+ *  ⚠️ 창(목록 다시 받기)은 모드 · 모델이 **실제로 바뀔 때만** - 시작 중엔 같은 모델 에코가 여러 번 와서 목록을 다섯 번 받았다. */
+let naiReferenceToolChromeKey = '';
+function syncNaiReferenceToolChrome() {
+  updateVibeBadge(moduleStateCache.get('vibe_transfer'));
+  updateCharRefBadge(moduleStateCache.get('character_reference'));
+  if (moduleLauncherControl) moduleLauncherControl.updateState();
+  syncRefVibePillVisibility();
+  const key = `${String(currentMode || modeSelect?.value || '')}|${document.getElementById('pModel')?.value || ''}`;
+  if (key === naiReferenceToolChromeKey) { refVibeWindow?.paintPill(); return; }
+  naiReferenceToolChromeKey = key;
+  refVibeWindow?.refresh();
 }
 
 // 런처 render 직후, render 이전에 도착해 leaf 버튼 부재로 흘려보낸 module_state 들을 다시 흘려

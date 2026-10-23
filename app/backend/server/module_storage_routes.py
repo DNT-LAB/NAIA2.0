@@ -28,9 +28,19 @@ def _thumbnail_cache(context: WebSessionContext) -> dict[tuple[str, int, int], b
     return cache
 
 
-def _thumbnail_payload(context: WebSessionContext, image_path: Path) -> bytes:
+# 미리보기(마우스를 올렸을 때 크게)는 큰 판을 받는다(REF & VIBE 2026-10-23). 고를 수 있는 크기는 둘뿐 - 아무 숫자나 받으면
+# 캐시가 크기마다 갈린다.
+_THUMB_SIZES = (256, 640)
+
+
+def _thumb_size(size: int) -> int:
+    return _THUMB_SIZES[-1] if int(size or 0) > _THUMB_SIZES[0] else _THUMB_SIZES[0]
+
+
+def _thumbnail_payload(context: WebSessionContext, image_path: Path, size: int = 256) -> bytes:
     stat = image_path.stat()
-    cache_key = (str(image_path), int(stat.st_mtime_ns), int(stat.st_size))
+    size = _thumb_size(size)
+    cache_key = (str(image_path), int(stat.st_mtime_ns), int(stat.st_size), size)
     cache = _thumbnail_cache(context)
     cached = cache.get(cache_key)
     if isinstance(cached, bytes):
@@ -41,7 +51,7 @@ def _thumbnail_payload(context: WebSessionContext, image_path: Path) -> bytes:
     with Image.open(image_path) as image:
         image.load()
         thumb = image.convert("RGB")
-        thumb.thumbnail((256, 256), Image.Resampling.LANCZOS)
+        thumb.thumbnail((size, size), Image.Resampling.LANCZOS)
         buffer = io.BytesIO()
         thumb.save(buffer, "WEBP", quality=78, method=4)
     payload = buffer.getvalue()
@@ -51,17 +61,17 @@ def _thumbnail_payload(context: WebSessionContext, image_path: Path) -> bytes:
     return payload
 
 
-def _character_reference_thumb(context: WebSessionContext, file_hash: str) -> bytes:
+def _character_reference_thumb(context: WebSessionContext, file_hash: str, size: int = 256) -> bytes:
     safe_hash = _safe_name(file_hash)
     if not safe_hash:
         raise FileNotFoundError("Character Reference thumbnail not found")
     image_path = context._existing_save_path("character_reference", "images", f"{safe_hash}.png")
     if not image_path.exists():
         raise FileNotFoundError("Character Reference thumbnail not found")
-    return _thumbnail_payload(context, image_path)
+    return _thumbnail_payload(context, image_path, size)
 
 
-def _vibe_transfer_thumb(context: WebSessionContext, model: str, file_hash: str) -> bytes:
+def _vibe_transfer_thumb(context: WebSessionContext, model: str, file_hash: str, size: int = 256) -> bytes:
     safe_model = _safe_name(model)
     safe_hash = _safe_name(file_hash)
     if not safe_model or not safe_hash:
@@ -69,7 +79,7 @@ def _vibe_transfer_thumb(context: WebSessionContext, model: str, file_hash: str)
     image_path = context._existing_save_path("vibe_transfer", safe_model, "images", f"{safe_hash}.png")
     if not image_path.exists():
         raise FileNotFoundError("Vibe Transfer thumbnail not found")
-    return _thumbnail_payload(context, image_path)
+    return _thumbnail_payload(context, image_path, size)
 
 
 def register_module_storage_routes(
@@ -141,9 +151,9 @@ def register_module_storage_routes(
         return await library_call("delete_character", body.get("file_hash"))
 
     @app.get("/api/module-storage/character-reference/thumb")
-    async def api_character_reference_storage_thumb(file_hash: str = ""):
+    async def api_character_reference_storage_thumb(file_hash: str = "", size: int = 256):
         try:
-            payload = await run_in_thread(_character_reference_thumb, session_context, file_hash)
+            payload = await run_in_thread(_character_reference_thumb, session_context, file_hash, size)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:
@@ -155,9 +165,9 @@ def register_module_storage_routes(
         )
 
     @app.get("/api/module-storage/vibe/thumb")
-    async def api_vibe_transfer_storage_thumb(model: str = "", file_hash: str = ""):
+    async def api_vibe_transfer_storage_thumb(model: str = "", file_hash: str = "", size: int = 256):
         try:
-            payload = await run_in_thread(_vibe_transfer_thumb, session_context, model, file_hash)
+            payload = await run_in_thread(_vibe_transfer_thumb, session_context, model, file_hash, size)
         except FileNotFoundError as exc:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except Exception as exc:

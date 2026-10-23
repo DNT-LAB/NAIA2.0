@@ -809,6 +809,8 @@
         "core/headless_character_reference_service.py",
         "core/headless_vibe_transfer_service.py",
         "core/ref_vibe_library.py",
+        "core/wd_tagger_service.py",
+        "core/inset_feature_extract.py",
         "app/web/remote/js/features/imageModulePanels.mjs",
         "app/web/remote/js/features/refVibeWindow.mjs"
       ],
@@ -818,6 +820,8 @@
         {"method": "GET", "path": "/api/module-storage/vibe/thumb", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/ref-vibe/library", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ref-vibe/library/item", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/character-prompt", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/extract-features", "smoke": "external_live"},
         {"method": "POST", "path": "/api/ref-vibe/library/category", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/move", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/delete", "smoke": "state_mutation"},

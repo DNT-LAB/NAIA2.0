@@ -1305,6 +1305,168 @@ export function createRefVibeWindow({
     openCategoryRowMenu(row, row.dataset.cat);
   }
 
+  // ── 캐릭터 프롬프트(사용자 지시 2026-10-23) ─────────────────────────────────────────────
+  //  Character Ref 보관 그림마다 캐릭터 프롬프트를 하나 묶어 둔다 - 옛 데스크톱(Dev0714)의 'C1 할당' 을 되살린 것.
+  //  저장 = character_reference/metadata/<해시>.json 의 character_prompt · character_uc(옛 형식 그대로 - 남아 있던 것이 보인다).
+  //  [적용] = Character Find 와 같은 add_character(슬롯 맨 아래 · 같은 프롬프트가 있으면 그 슬롯을 켠다).
+  //  [추가] · [편집] = 작은 창. [특징 추출] = 레퍼런스 인셋과 같은 WD 태거(그림이 외부로 나간다 - 누를 때만).
+  function characterPromptRows(item) {
+    if (tab !== 'cr') return '';
+    const has = !!String(item.character_prompt || '').trim();
+    return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">캐릭터 프롬프트</div>`
+      + (has
+        ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:apply"><span class="rvw-menu-mark">＋</span>캐릭터 프롬프트 적용</button>`
+          + `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:edit"><span class="rvw-menu-mark">✎</span>캐릭터 프롬프트 편집</button>`
+          + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="cp:delete"><span class="rvw-menu-mark">✕</span>캐릭터 프롬프트 삭제</button>`
+        : `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="cp:edit"><span class="rvw-menu-mark">＋</span>캐릭터 프롬프트 추가</button>`);
+  }
+
+  function itemName(item) {
+    return String(item.display_name || item.name || item.file_hash || '');
+  }
+
+  /** 서버가 돌려준 항목으로 CR 목록을 고친다 - 저장하는 사이 탭을 바꿨어도 CR 쪽을 고친다. */
+  function replaceCrItem(next) {
+    if (!next || !next.file_hash) return;
+    const items = lib.cr.items;
+    const at = items.findIndex(item => String(item.file_hash) === String(next.file_hash));
+    if (at >= 0) items[at] = {...items[at], ...next};
+    if (tab === 'cr') renderStore();
+  }
+
+  function applyCharacterPrompt(item) {
+    const prompt = String(item.character_prompt || '').trim();
+    if (!prompt) return;
+    setModuleParam('character', 'add_character', JSON.stringify({
+      prompt, uc: String(item.character_uc || '').trim(), custom_name: itemName(item),
+    }));
+    showToast(`${itemName(item)} 의 캐릭터 프롬프트를 슬롯 맨 아래에 담았습니다`, 'info');
+  }
+
+  async function saveCharacterPrompt(fileHash, prompt, uc) {
+    const data = await api('/api/ref-vibe/library/character-prompt', {method: 'POST', body: {file_hash: fileHash, prompt, uc}});
+    replaceCrItem(data.item || data);
+    return data;
+  }
+
+  async function deleteCharacterPrompt(item) {
+    const ok = await confirmDialog(`"${itemName(item)}" 의 캐릭터 프롬프트를 지웁니다. 그림과 이름은 그대로입니다.`,
+      {title: '캐릭터 프롬프트 삭제', okText: '지우기'});
+    if (!ok) return;
+    try {
+      await saveCharacterPrompt(item.file_hash, '', '');
+      showToast('캐릭터 프롬프트를 지웠습니다', 'success');
+    } catch (error) {
+      showToast(`캐릭터 프롬프트를 못 지웠습니다: ${error.message || error}`, 'error');
+    }
+  }
+
+  let cpBox = null;            // 열린 추가 · 편집 창 {el, hash, extracted, extracting}
+  function closeCharacterPrompt() {
+    if (!cpBox) return;
+    cpBox.el.remove();
+    doc.removeEventListener('keydown', onCharacterPromptKey, true);
+    cpBox = null;
+  }
+
+  function onCharacterPromptKey(event) {
+    if (event.key === 'Escape' && cpBox) { event.preventDefault(); event.stopPropagation(); closeCharacterPrompt(); }
+  }
+
+  function cpModeText(extracted, mode) {
+    if (!extracted) return '';
+    const tags = mode === 'clothes' ? extracted.clothes
+      : mode === 'both' ? [...extracted.features, ...extracted.clothes] : extracted.features;
+    return tags.join(', ');
+  }
+
+  function openCharacterPrompt(item) {
+    closeCharacterPrompt();
+    const el = doc.createElement('div');
+    el.className = 'rvw-cp';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', '캐릭터 프롬프트');
+    const thumb = item.thumbnail_url ? `<img class="rvw-cp-im" src="${escHtml(item.thumbnail_url)}" alt="">` : '<span class="rvw-cp-im is-empty">enc</span>';
+    el.innerHTML = `<div class="rvw-cp-head"><span class="rvw-cp-title">캐릭터 프롬프트 — ${escHtml(itemName(item))}</span>`
+      + `<button type="button" class="rvw-cp-x" data-cp="close" aria-label="닫기">✕</button></div>`
+      + `<div class="rvw-cp-top">${thumb}<div class="rvw-cp-tools">`
+      + `<div class="rvw-cp-row"><button type="button" class="rvw-btn" data-cp="extract">특징 추출</button>`
+      + `<span class="rvw-cp-note">그림이 WD 태거(huggingface)로 나갑니다 - 누를 때만</span></div>`
+      + `<div class="rvw-cp-row" data-cp-modes hidden><span class="rvw-cp-note">추출 결과</span>`
+      + `<button type="button" class="rvw-chip on" data-cp-mode="features">특징만</button>`
+      + `<button type="button" class="rvw-chip" data-cp-mode="both">특징+의상</button>`
+      + `<button type="button" class="rvw-chip" data-cp-mode="clothes">의상만</button></div></div></div>`
+      + `<label class="rvw-cp-k">CHARACTER PROMPT<textarea class="rvw-cp-text" data-cp-prompt rows="4" spellcheck="false"`
+      + ` placeholder="girl, orange hair, long hair …">${escHtml(String(item.character_prompt || ''))}</textarea></label>`
+      + `<label class="rvw-cp-k">CHARACTER NEGATIVE (선택)<textarea class="rvw-cp-text" data-cp-uc rows="2" spellcheck="false">`
+      + `${escHtml(String(item.character_uc || ''))}</textarea></label>`
+      + `<div class="rvw-cp-foot"><button type="button" class="rvw-btn" data-cp="cancel">취소</button>`
+      + `<button type="button" class="rvw-btn is-accent" data-cp="save">저장</button></div>`;
+    doc.body.appendChild(el);
+    cpBox = {el, hash: String(item.file_hash), extracted: null, extracting: false};
+    doc.addEventListener('keydown', onCharacterPromptKey, true);
+    el.addEventListener('click', event => {
+      const mode = event.target.closest('[data-cp-mode]');
+      if (mode && cpBox?.extracted) {
+        el.querySelectorAll('[data-cp-mode]').forEach(b => b.classList.toggle('on', b === mode));
+        el.querySelector('[data-cp-prompt]').value = cpModeText(cpBox.extracted, mode.dataset.cpMode);
+        return;
+      }
+      const act = event.target.closest('[data-cp]')?.dataset.cp;
+      if (act === 'close' || act === 'cancel') closeCharacterPrompt();
+      else if (act === 'extract') extractCharacterPrompt();
+      else if (act === 'save') submitCharacterPrompt();
+    });
+    el.querySelector('[data-cp-prompt]').focus();
+  }
+
+  async function extractCharacterPrompt() {
+    const box = cpBox;
+    if (!box || box.extracting) return;
+    box.extracting = true;
+    const button = box.el.querySelector('[data-cp="extract"]');
+    button.disabled = true;
+    button.textContent = '특징 추출 중…';
+    try {
+      const data = await api('/api/ref-vibe/library/extract-features', {method: 'POST', body: {file_hash: box.hash}});
+      if (cpBox !== box) return;            // 기다리는 사이 창을 닫았거나 다른 그림을 열었다 - 버린다
+      // 사전에 없는 태그(unknown)는 넣지 않는다 - 레퍼런스 인셋과 같다(사용자 결정 2026-10-18).
+      box.extracted = {
+        features: (data.keep || []).map(String),
+        clothes: (data.dropped || []).filter(row => row && row.group === '의상').map(row => String(row.tag)),
+      };
+      box.el.querySelector('[data-cp-modes]').hidden = false;
+      box.el.querySelectorAll('[data-cp-mode]').forEach(b => b.classList.toggle('on', b.dataset.cpMode === 'features'));
+      box.el.querySelector('[data-cp-prompt]').value = cpModeText(box.extracted, 'features');
+    } catch (error) {
+      if (cpBox === box) showToast(`특징을 뽑지 못했습니다: ${error.message || error}`, 'error');
+    } finally {
+      box.extracting = false;
+      if (cpBox === box) {
+        button.disabled = false;
+        button.textContent = '특징 추출';
+      }
+    }
+  }
+
+  async function submitCharacterPrompt() {
+    const box = cpBox;
+    if (!box) return;
+    const prompt = box.el.querySelector('[data-cp-prompt]').value.trim();
+    const uc = box.el.querySelector('[data-cp-uc]').value.trim();
+    if (!prompt) { showToast('캐릭터 프롬프트를 적어 주세요 - 지우려면 우클릭 [캐릭터 프롬프트 삭제]', 'info'); return; }
+    const save = box.el.querySelector('[data-cp="save"]');
+    save.disabled = true;
+    try {
+      await saveCharacterPrompt(box.hash, prompt, uc);
+      showToast('캐릭터 프롬프트를 저장했습니다', 'success');
+      if (cpBox === box) closeCharacterPrompt();
+    } catch (error) {
+      showToast(`캐릭터 프롬프트를 저장하지 못했습니다: ${error.message || error}`, 'error');
+      if (cpBox === box) save.disabled = false;
+    }
+  }
+
   /** 썸네일 우클릭(사용자 지시 2026-10-23) - 카테고리 옮기기 · 지우기를 한 자리에서. 옮길 곳은 메뉴 안에 바로 나열한다. */
   function openCardMenu(point) {
     const item = selectedItem();
@@ -1329,9 +1491,13 @@ export function createRefVibeWindow({
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
+      + characterPromptRows(item)
       + clusterRows
       + `<div class="rvw-menu-sep"></div>`
       + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete"><span class="rvw-menu-mark"></span>보관함에서 삭제</button>`, async op => {
+      if (op === 'cp:apply') { applyCharacterPrompt(item); return; }
+      if (op === 'cp:edit') { openCharacterPrompt(item); return; }
+      if (op === 'cp:delete') { deleteCharacterPrompt(item); return; }
       if (op === 'apply') applySelected();
       else if (op === 'release') releaseSelected();
       else if (op === 'rename') renameSelected();

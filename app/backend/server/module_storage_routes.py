@@ -110,6 +110,29 @@ def register_module_storage_routes(
                                   model=body.get("model", ""),
                                   **{k: body[k] for k in ("name", "favorite") if k in body})
 
+    @app.post("/api/ref-vibe/library/character-prompt")
+    async def api_ref_vibe_character_prompt(body: dict):
+        return await library_call("set_character_prompt", body.get("file_hash"),
+                                  body.get("prompt"), body.get("uc", ""))
+
+    @app.post("/api/ref-vibe/library/extract-features")
+    async def api_ref_vibe_extract_features(body: dict):
+        from core.wd_tagger_service import TaggerError
+
+        try:
+            result = await run_in_thread(
+                get_ref_vibe_library(session_context).extract_character_features, body.get("file_hash")
+            )
+        except LibraryError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except TaggerError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        except Exception as exc:
+            return JSONResponse({"error": f"Character Reference feature extraction failed: {exc}"}, status_code=500)
+        return {**result, "space_url": "https://huggingface.co/spaces/SmilingWolf/wd-tagger", "notice": "\uc6f9\uc5d0\uc11c \uc0ac\uc6a9"}
+
     @app.post("/api/ref-vibe/library/category")
     async def api_ref_vibe_category(body: dict):
         return await library_call("change_category", body.get("kind"), body.get("op"),

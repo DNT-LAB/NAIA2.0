@@ -9,6 +9,7 @@ import copy
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 import tempfile
 import threading
@@ -74,6 +75,7 @@ class RefVibeLibrary:
     def __init__(self, context):
         self.context = context
         self._lock = threading.Lock()
+        self._extract_lock = threading.Lock()
         self._index_cache = None
         self._index_signature = None
         self._names_cache: dict[str, dict[str, str]] | None = None
@@ -249,7 +251,9 @@ class RefVibeLibrary:
                     continue
                 meta = self._json(folder.parent / "metadata" / (path.stem + ".json"))
                 items[path.stem] = {"file_hash": path.stem, "file_name": path.name, "mtime": path.stat().st_mtime,
-                                    "character_name": str(meta.get("character_name") or ""), "has_image": True}
+                                    "character_name": str(meta.get("character_name") or ""),
+                                    "character_prompt": str(meta.get("character_prompt") or ""),
+                                    "character_uc": str(meta.get("character_uc") or ""), "has_image": True}
         return items
 
     def _listing(self, data, kind, model="", filter="all", category_id="", q="", sort="recent", offset=0, limit=60, _file_hash=""):
@@ -286,6 +290,8 @@ class RefVibeLibrary:
                 url = "/api/module-storage/vibe/thumb?" + urlencode({"model": model, "file_hash": file_hash})
             else:
                 item["settings"] = reference_settings(meta.get("settings"))
+                item["character_prompt"] = stored["character_prompt"]
+                item["character_uc"] = stored["character_uc"]
                 url = "/api/module-storage/character-reference/thumb?" + urlencode({"file_hash": file_hash})
             item["thumbnail_url"] = url if item["has_image"] else ""
             counts["favorite"] += item["favorite"]
@@ -472,6 +478,77 @@ class RefVibeLibrary:
             if not remaining:
                 data["vibe"]["items"].pop(file_hash, None)
             self._write(data)
+
+    def _character_image(self, file_hash):
+        # Caller holds the library lock; prefer the same root as the listing.
+        for root in self._roots("character_reference"):
+            target = root / "images" / (file_hash + ".png")
+            if root.resolve() not in target.resolve().parents:
+                raise LibraryError("Storage path escapes its root")
+            if target.is_file():
+                return root, target
+        raise LibraryError("Storage item not found", 404)
+
+    def set_character_prompt(self, file_hash, prompt, uc=""):
+        file_hash = safe_component(file_hash)
+        for name, value in (("prompt", prompt), ("uc", uc)):
+            if not isinstance(value, str) or len(value.strip()) > 4000:
+                raise LibraryError(f"{name} must be a string of at most 4000 characters")
+        prompt, uc = prompt.strip(), uc.strip()
+        with self._lock:
+            root, image = self._character_image(file_hash)
+            path = root / "metadata" / (file_hash + ".json")
+            if root.resolve() not in path.resolve().parents:
+                raise LibraryError("Storage path escapes its root")
+            defaults = {"file_name": image.name, "file_hash": file_hash}
+            try:
+                metadata = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(metadata, dict):
+                    raise ValueError("Invalid character metadata")
+            except FileNotFoundError:
+                metadata = defaults
+            except (ValueError, UnicodeError):
+                backup = path.with_name(path.name + ".broken")
+                if root.resolve() not in backup.resolve().parents:
+                    raise LibraryError("Storage path escapes its root")
+                if not backup.exists():
+                    # Preserve the first corrupt file, even if the atomic write fails.
+                    shutil.copy2(path, backup)
+                metadata = defaults
+            if prompt or uc:
+                metadata.update(character_prompt=prompt, character_uc=uc)
+            else:
+                metadata.pop("character_prompt", None)
+                metadata.pop("character_uc", None)
+            self._atomic_write(path, metadata)
+            # _characters reads fresh, including edits to legacy per-image metadata.
+            return self._item(self._read(), "character_reference", file_hash)
+
+    def extract_character_features(self, file_hash):
+        from core.inset_feature_extract import split_character_features
+        from core.wd_tagger_service import tag_image
+
+        file_hash = safe_component(file_hash)
+        if not self._extract_lock.acquire(blocking=False):
+            raise LibraryError("already running")
+        try:
+            with self._lock:
+                _root, image = self._character_image(file_hash)
+                try:
+                    data = image.read_bytes()
+                except FileNotFoundError:
+                    raise LibraryError("Storage item not found", 404) from None
+            # External request only from the explicit extraction route; no metadata writes.
+            result = tag_image(data)
+            split = split_character_features(
+                [row["tag"] for row in result.character],
+                [row["tag"] for row in result.general],
+                getattr(self.context, "filter_data_manager", None),
+                getattr(self.context, "repo_root", None),
+            )
+            return {"ok": True, **split, "elapsed_ms": result.elapsed_ms}
+        finally:
+            self._extract_lock.release()
 
     def delete_character(self, file_hash):
         file_hash = safe_component(file_hash)

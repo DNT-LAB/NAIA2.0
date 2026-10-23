@@ -32967,3 +32967,30 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .pe-thumb-edit-im img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pe-thumb-edit-tools { display: grid; gap: 6px; min-width: 0; }
 [data-thumb-toggle].is-on { color: #ffe2a8; border-color: rgba(255,226,168,0.55); }
+
+/* REF & VIBE 캐릭터 프롬프트 창(사용자 지시 2026-10-23) - 우클릭 [추가] · [편집]. */
+.rvw-cp {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: var(--z-floating-select-open);
+  width: min(460px, calc(100vw - 24px)); display: grid; gap: 8px; padding: 12px; box-sizing: border-box;
+  background: var(--bg-surface); border: 1px solid var(--border-glow); border-radius: 10px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.5); font: 11px var(--font-mono); color: var(--text-primary);
+}
+.rvw-cp-head { display: flex; align-items: center; gap: 8px; }
+.rvw-cp-title { flex: 1 1 auto; min-width: 0; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rvw-cp-x { border: 0; background: none; color: var(--text-dim); font: inherit; font-size: 13px; cursor: pointer; }
+.rvw-cp-x:hover { color: var(--text-primary); }
+.rvw-cp-top { display: flex; gap: 10px; align-items: flex-start; }
+.rvw-cp-im { flex: 0 0 auto; width: 72px; height: 72px; object-fit: cover; border-radius: 6px; background: #14141c; }
+.rvw-cp-im.is-empty { display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
+.rvw-cp-tools { display: grid; gap: 6px; min-width: 0; }
+.rvw-cp-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.rvw-cp-row[hidden] { display: none; }
+.rvw-cp-note { color: var(--text-dim); font-size: 10.5px; }
+.rvw-cp-k { display: grid; gap: 4px; color: var(--text-dim); font-size: 10px; letter-spacing: 0.08em; }
+.rvw-cp-text {
+  width: 100%; box-sizing: border-box; resize: vertical; padding: 6px 8px; border-radius: 6px;
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border-dim); color: var(--text-primary);
+  font: 11.5px var(--font-editor); letter-spacing: 0;
+}
+.rvw-cp-text:focus { outline: none; border-color: var(--accent); }
+.rvw-cp-foot { display: flex; justify-content: flex-end; gap: 6px; }

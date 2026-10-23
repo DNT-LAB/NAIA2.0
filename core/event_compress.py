@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import threading
+from bisect import bisect_left, bisect_right
 from collections import Counter
 
 from core.event_map.pe_filter import _pe_options, _category_overrides, _filter_manager
@@ -22,7 +23,31 @@ OPTIONS = (
     "remove_pose_action", "remove_meta_tags", "remove_object_tags", "remove_noise_tags",
 )
 ROUNDS = ("auto_hide", "category_hide", *OPTIONS)
+PEOPLE_COUNT_TAGS = frozenset({
+    "solo", "solo focus", "1girl", "2girls", "3girls", "4girls", "5girls", "6+girls",
+    "multiple girls", "1boy", "2boys", "3boys", "4boys", "5boys", "6+boys",
+    "multiple boys", "1other", "2others", "3others", "4others", "5others", "6+others",
+    "multiple others", "no humans",
+})
 _CREATE_LOCK = threading.Lock()
+
+
+def _is_people_tag(tag):
+    return tag.lower().replace("_", " ") in PEOPLE_COUNT_TAGS
+
+
+def _frequency_metadata(groups, tag_index):
+    """Build immutable request inputs once, before publishing an analysis."""
+    frequencies = {tag: len(keys) for tag, keys in tag_index.items()}
+    non_people = {tag: freq for tag, freq in frequencies.items() if not _is_people_tag(tag)}
+    group_frequencies = {}
+    for key, group in groups.items():
+        values = sorted(non_people[tag] for tag in group["tag_set"] if tag in non_people)
+        group_frequencies[key] = (group["tag_count"] - len(values), values)
+    histogram = Counter(non_people.values())
+    return (frequencies, group_frequencies,
+            {str(n): histogram[n] for n in sorted(histogram)},
+            min(histogram, default=0), max(histogram, default=0))
 
 
 def pe_settings(context):
@@ -136,6 +161,12 @@ class EventCompress:
         self.tag_count_hist = {}
         self.tag_count_min = 0
         self.tag_count_max = 0
+        self.tag_frequencies = {}
+        self.group_frequencies = {}
+        self.tag_freq_hist = {}
+        self.tag_freq_min = 0
+        self.tag_freq_max = 0
+        self._effective_cache = None
         self.size_hist = {}
         self.size_min = 0
         self.size_max = 0
@@ -385,6 +416,7 @@ class EventCompress:
                     group_tag_counts[key] = group["tag_count"]
                     for tag in group["tag_set"]:
                         tag_index.setdefault(tag, []).append(key)
+                frequency_metadata = _frequency_metadata(groups, tag_index)
                 histogram = Counter(group_tag_counts.values())
                 tag_count_hist = {str(n): histogram[n] for n in sorted(histogram)}
                 tag_count_min = min(histogram, default=0)
@@ -405,6 +437,9 @@ class EventCompress:
                     self.sorted_groups = ordered
                     self.tag_index = tag_index
                     self.group_tag_counts = group_tag_counts
+                    (self.tag_frequencies, self.group_frequencies, self.tag_freq_hist,
+                     self.tag_freq_min, self.tag_freq_max) = frequency_metadata
+                    self._effective_cache = None
                     self.tag_count_hist = tag_count_hist
                     self.tag_count_min = tag_count_min
                     self.tag_count_max = tag_count_max
@@ -473,8 +508,30 @@ class EventCompress:
     def _passes_tag_cut(count, min_tags, max_tags):
         return (min_tags is None or count >= min_tags) and (max_tags is None or count <= max_tags)
 
-    def _passes_cuts(self, group, min_tags, max_tags, min_size, max_size):
-        return (self._passes_tag_cut(group["tag_count"], min_tags, max_tags)
+    def _effective_counts(self, min_freq, max_freq):
+        # Called under the pool guard. Cache only the last frequency selection;
+        # paging, search and the other cuts do not affect these global counts.
+        bounds = (min_freq, max_freq)
+        if self._effective_cache is not None and self._effective_cache[0] == bounds:
+            return self._effective_cache[1]
+        if bounds == (None, None):
+            result = (self.group_tag_counts, self.tag_count_hist,
+                      self.tag_count_min, self.tag_count_max)
+        else:
+            counts, histogram = {}, {}
+            for key, (people_count, frequencies) in self.group_frequencies.items():
+                lower = 0 if min_freq is None else bisect_left(frequencies, min_freq)
+                upper = len(frequencies) if max_freq is None else bisect_right(frequencies, max_freq)
+                count = people_count + upper - lower
+                counts[key] = count
+                histogram[count] = histogram.get(count, 0) + 1
+            result = (counts, {str(n): histogram[n] for n in sorted(histogram)},
+                      min(histogram, default=0), max(histogram, default=0))
+        self._effective_cache = (bounds, result)
+        return result
+
+    def _passes_cuts(self, group, min_tags, max_tags, min_size, max_size, counts):
+        return (self._passes_tag_cut(counts[group["key"]], min_tags, max_tags)
                 and (min_size is None or group["size"] >= min_size)
                 and (max_size is None or group["size"] <= max_size))
 
@@ -486,10 +543,10 @@ class EventCompress:
             self._identity(), self.signature, enabled(self.context),
         ], ensure_ascii=True).encode()).hexdigest()
 
-    def _matching_groups(self, sort, q, min_tags, max_tags, min_size, max_size):
+    def _matching_groups(self, sort, q, min_tags, max_tags, min_size, max_size, counts):
         words = q.lower().split()
         return [g for g in self.sorted_groups[sort]
-                if self._passes_cuts(g, min_tags, max_tags, min_size, max_size)
+                if self._passes_cuts(g, min_tags, max_tags, min_size, max_size, counts)
                 and all(word in g["tags"].lower() for word in words)]
 
     def _commit_ids(self, groups):
@@ -508,7 +565,7 @@ class EventCompress:
         return ids
 
     def commit(self, events_signature, min_tags=None, max_tags=None, q="",
-               min_size=None, max_size=None):
+               min_size=None, max_size=None, min_freq=None, max_freq=None):
         from core.tag_filter_remaining import save_committed
 
         with self.guard():
@@ -516,7 +573,8 @@ class EventCompress:
                 raise CommitError("no_tag_filter", "An active non-empty Tag Filter is required", 409)
             if self.computing or self.is_stale() or events_signature != self._events_signature():
                 raise CommitError("stale", "Event analysis changed; reload the event list", 409)
-            groups = self._matching_groups("desc", q, min_tags, max_tags, min_size, max_size)
+            counts, _, _, _ = self._effective_counts(min_freq, max_freq)
+            groups = self._matching_groups("desc", q, min_tags, max_tags, min_size, max_size, counts)
             ids = self._commit_ids(groups)
             if not ids:
                 raise CommitError("empty", "No live rows match the event selection", 400)
@@ -543,32 +601,41 @@ class EventCompress:
             return {"ok": True, "committed": len(ids), "state": self.state()}
 
     def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None,
-               min_size=None, max_size=None):
+               min_size=None, max_size=None, min_freq=None, max_freq=None):
         while True:
             self.refresh()
             with self.guard():
                 if self.is_stale():
                     continue
                 live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
-                groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size)
-                items = [{**{k: g[k] for k in ("key", "rating", "tags", "tag_count", "size")},
+                counts, histogram, count_min, count_max = self._effective_counts(min_freq, max_freq)
+                groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
+                items = [{**{k: g[k] for k in ("key", "rating", "tags", "size")},
+                          "tag_count": counts[g["key"]],
+                          "uncounted": sorted(tag for tag in g["tag_set"]
+                                              if not _is_people_tag(tag) and not self._passes_tag_cut(
+                                                  self.tag_frequencies[tag], min_freq, max_freq)),
                           "remaining": sum(ref in live for ref in g["members"])}
                          for g in groups[offset:offset + limit]]
                 return {"ok": True, "total": len(groups), "offset": offset, "items": items,
                         "commit_rows": len(self._commit_ids(groups)),
                         "events_signature": self._events_signature(),
-                        "tag_count_hist": dict(self.tag_count_hist),
-                        "tag_count_min": self.tag_count_min, "tag_count_max": self.tag_count_max,
+                        "tag_count_hist": dict(histogram),
+                        "tag_count_min": count_min, "tag_count_max": count_max,
+                        "tag_freq_hist": dict(self.tag_freq_hist),
+                        "tag_freq_min": self.tag_freq_min, "tag_freq_max": self.tag_freq_max,
                         "size_hist": dict(self.size_hist),
                         "size_min": self.size_min, "size_max": self.size_max}
 
-    def tags(self, q="", min_tags=None, max_tags=None, limit=20, min_size=None, max_size=None):
+    def tags(self, q="", min_tags=None, max_tags=None, limit=20, min_size=None, max_size=None,
+             min_freq=None, max_freq=None):
         query = q.lower().replace("_", " ")
         while True:
             self.refresh()
             with self.guard():
                 if self.is_stale():
                     continue
+                counts, _, _, _ = self._effective_counts(min_freq, max_freq)
                 items = []
                 for tag, keys in self.tag_index.items():
                     normalized = tag.lower().replace("_", " ")
@@ -576,7 +643,7 @@ class EventCompress:
                         continue
                     unbounded = min_tags is None and max_tags is None and min_size is None and max_size is None
                     count = len(keys) if unbounded else sum(
-                        self._passes_cuts(self.groups[key], min_tags, max_tags, min_size, max_size)
+                        self._passes_cuts(self.groups[key], min_tags, max_tags, min_size, max_size, counts)
                         for key in keys)
                     if count:
                         items.append({"tag": tag, "events": count})

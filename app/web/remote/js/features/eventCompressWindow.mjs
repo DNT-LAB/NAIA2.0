@@ -2,8 +2,10 @@
  * 이벤트 압축 창(사용자 지시 2026-10-23) - Search 창 Tag Filter 의 [⇊ 압축] 단추가 연다.
  *
  *   풀 6,158행 → 2,340 이벤트                                     G S Q E
- *   태그 수  ▁▃▇▅▃▂   6 – 11      빈도  ▁▂▃▅▇   ×14 – ×2     <- 반씩 나란히(사용자 지시 2026-10-23)
- *            ●━━━━━●                    ●━━━━●              태그 수 = 이벤트의 태그 개수 · 빈도 = 묶인 행 수(왼쪽 흔함 · 오른쪽 희귀)
+ *   태그 수  ▁▃▇▅▃▂   6 – 11      빈도  ▁▂▃▅▇   1,320 – 3     <- 반씩 나란히(사용자 지시 2026-10-23)
+ *            ●━━━━━●                    ●━━━━●              태그 수 = 이벤트에서 '세는' 태그 개수
+ *   빈도 = 태그 하나가 나오는 이벤트 수(왼쪽 흔함 · 오른쪽 희귀 · 하늘색). 범위 밖 태그는 이벤트를 거르지 않고 태그 수에서만
+ *   빠진다 - 목록에서 회색. 1girl · solo 같은 인원수 태그는 늘 센다(서버 PEOPLE 목록).
  *   [ 큰 묶음 먼저 ▾ ] [ 태그로 찾기 ]                    <- 찾기 칸 자동완성 = 지금 이벤트에 든 태그만
  *   1girl, breasts, navel, solo, thighs                                 ×60   <- 보기만. 누르면 [랜덤] [생성]
  *   ...
@@ -38,7 +40,7 @@ const PE_KEYS = [
 ];
 const PAGE = 60;
 const CUT_KEY = 'naia.ecw.tagcut';
-const SIZE_CUT_KEY = 'naia.ecw.sizecut';
+const FREQ_CUT_KEY = 'naia.ecw.freqcut';
 const BUSY_CAP_MS = 60000;           // 서버가 답을 못 주면 막은 창을 이만큼 뒤에 푼다
 
 export function createEventCompressWindow({
@@ -62,9 +64,9 @@ export function createEventCompressWindow({
   let histMin = 0;
   let histMax = 0;
   let cut = readCut(CUT_KEY);      // 태그 수 {min, max} - null = 끝까지
-  let sizeHist = {};               // {묶인 행 수: 이벤트 수} - 컷 · 찾기와 무관한 전체
-  let sizeVals = [];               // 있는 묶음 크기 - 큰 것(흔함)부터 작은 것(희귀)까지. 눈금 = 이 값들(×373 하나에 쏠리지 않게)
-  let cutSize = readCut(SIZE_CUT_KEY);  // 빈도 {min, max}(묶인 행 수) - null = 끝까지
+  let freqHist = {};               // {태그 빈도: 그 빈도의 태그 수} - 인원수 태그 · 컷 · 찾기와 무관한 전체
+  let freqVals = [];               // 있는 빈도값 - 큰 것(흔함)부터 작은 것(희귀)까지. 눈금 = 이 값들(한 값에 쏠리지 않게)
+  let cutFreq = readCut(FREQ_CUT_KEY);  // 빈도 {min, max} - 범위 밖 태그는 태그 수에서 빠진다 · null = 끝까지
   let listSeq = 0;
   let stateSeq = 0;
   let acSeq = 0;
@@ -101,7 +103,7 @@ export function createEventCompressWindow({
   function saveCut() {
     try {
       win.localStorage.setItem(CUT_KEY, JSON.stringify(cut));
-      win.localStorage.setItem(SIZE_CUT_KEY, JSON.stringify(cutSize));
+      win.localStorage.setItem(FREQ_CUT_KEY, JSON.stringify(cutFreq));
     } catch (_) { /* 이번 창에서만 */ }
   }
 
@@ -113,8 +115,8 @@ export function createEventCompressWindow({
     // 다음 목록이 컷 없이 세어 [커밋 n행] 이 실제와 달랐다(실측 196 vs 184 · 468 vs 256).
     if (cut.min != null) p.min_tags = String(cut.min);
     if (cut.max != null) p.max_tags = String(cut.max);
-    if (cutSize.min != null) p.min_size = String(cutSize.min);
-    if (cutSize.max != null) p.max_size = String(cutSize.max);
+    if (cutFreq.min != null) p.min_freq = String(cutFreq.min);
+    if (cutFreq.max != null) p.max_freq = String(cutFreq.max);
     return p;
   }
 
@@ -188,10 +190,10 @@ export function createEventCompressWindow({
 
   // ── 컷 슬라이더 둘(사용자 지시 2026-10-23) - Search [기간 컷오프] 와 같은 두 손잡이 트랙. 눈금 = 값 목록의 번호.
   //    태그 수: 값 = 최소 … 최대 태그 수(작은 것 → 큰 것). 왼쪽 손잡이 = min_tags · 오른쪽 = max_tags.
-  //    빈도:    값 = 있는 묶음 크기(큰 것 = 흔함 → 작은 것 = 희귀). 왼쪽 손잡이 = max_size · 오른쪽 = min_size.
+  //    빈도:    값 = 있는 태그 빈도(큰 것 = 흔함 → 작은 것 = 희귀). 왼쪽 손잡이 = max_freq · 오른쪽 = min_freq.
   //    손잡이를 끝에 두면 null(끝까지) 로 기억한다 - 풀이 바뀌어 끝값이 달라져도 '끝까지' 가 유지된다.
   function sliderVals(kind) {
-    if (kind === 'size') return sizeVals;
+    if (kind === 'freq') return freqVals;
     const vals = [];
     for (let n = histMin; n <= histMax && histMax > 0; n += 1) vals.push(n);
     return vals;
@@ -208,10 +210,10 @@ export function createEventCompressWindow({
       while (i > 0 && vals[i] > cut.max) i -= 1;
       return i;
     }
-    if (edge === 'lo') { const i = cutSize.max == null ? 0 : vals.findIndex(v => v <= cutSize.max); return i < 0 ? last : i; }
-    if (cutSize.min == null) return last;
+    if (edge === 'lo') { const i = cutFreq.max == null ? 0 : vals.findIndex(v => v <= cutFreq.max); return i < 0 ? last : i; }
+    if (cutFreq.min == null) return last;
     let i = last;
-    while (i > 0 && vals[i] < cutSize.min) i -= 1;
+    while (i > 0 && vals[i] < cutFreq.min) i -= 1;
     return i;
   }
 
@@ -225,32 +227,33 @@ export function createEventCompressWindow({
     const v = vals[i];
     if (kind === 'tags') {
       if (edge === 'lo') cut.min = i === 0 ? null : v; else cut.max = i === last ? null : v;
-    } else if (edge === 'lo') cutSize.max = i === 0 ? null : v;
-    else cutSize.min = i === last ? null : v;
+    } else if (edge === 'lo') cutFreq.max = i === 0 ? null : v;
+    else cutFreq.min = i === last ? null : v;
   }
 
   function sliderHtml(kind) {
     const vals = sliderVals(kind);
-    const head = kind === 'size' ? '빈도' : '태그 수';
-    if (vals.length < 2) return `<div class="ecw-cut-one"><div class="ecw-cut-head"><span>${head}</span><span class="ecw-dim">—</span></div></div>`;
-    const counts = kind === 'size' ? sizeHist : hist;
+    const head = kind === 'freq' ? '빈도' : '태그 수';
+    const cls = kind === 'freq' ? 'ecw-cut-one is-freq' : 'ecw-cut-one';
+    if (vals.length < 2) return `<div class="${cls}"><div class="ecw-cut-head"><span>${head}</span><span class="ecw-dim">—</span></div></div>`;
+    const counts = kind === 'freq' ? freqHist : hist;
     const last = vals.length - 1;
     const lo = edgeIndex(kind, 'lo');
     const hi = edgeIndex(kind, 'hi');
     const pct = i => (i / last) * 100;
-    const label = v => (kind === 'size' ? `×${fmt(v)}` : String(v));
+    const label = v => (kind === 'freq' ? fmt(v) : String(v));
     let top = 1;
     vals.forEach(v => { top = Math.max(top, Number(counts[v]) || 0); });
     const bars = vals.map((v, i) => {
       const c = Number(counts[v]) || 0;
-      const tip = kind === 'size' ? `${fmt(v)}행 묶음 · ${fmt(c)} 이벤트` : `태그 ${v}개 · ${fmt(c)} 이벤트`;
+      const tip = kind === 'freq' ? `이벤트 ${fmt(v)}개에 나오는 태그 · ${fmt(c)}개` : `세는 태그 ${v}개 · ${fmt(c)} 이벤트`;
       return `<span class="${i >= lo && i <= hi ? 'is-in' : ''}" style="height:${c ? Math.max(6, Math.round(Math.sqrt(c / top) * 100)) : 0}%"`
         + ` title="${tip}"></span>`;
     }).join('');
-    const ends = kind === 'size'
+    const ends = kind === 'freq'
       ? `<span>흔함 ${label(vals[0])}</span><span>희귀 ${label(vals[last])}</span>`
       : `<span>${vals[0]}</span><span>${vals[last]}</span>`;
-    return `<div class="ecw-cut-one"><div class="ecw-cut-head"><span>${head}</span>`
+    return `<div class="${cls}"><div class="ecw-cut-head"><span>${head}</span>`
       + `<span class="ecw-cut-range">${label(vals[lo])} – ${label(vals[hi])}</span></div>`
       + `<div class="ecw-cut-bars">${bars}</div>`
       + `<div class="ecw-cut-track" data-ecw-track="${kind}"><div class="ecw-cut-fill" style="left:${pct(lo)}%;right:${100 - pct(hi)}%"></div>`
@@ -262,7 +265,7 @@ export function createEventCompressWindow({
   function renderCut() {
     const el = panel?.body.querySelector('[data-ecw-cut]');
     if (!el) return;
-    const html = histMax > histMin || sizeVals.length > 1 ? sliderHtml('tags') + sliderHtml('size') : '';
+    const html = histMax > histMin || freqVals.length > 1 ? sliderHtml('tags') + sliderHtml('freq') : '';
     if (el._html !== html) {
       // 다시 그리면 손잡이가 새 요소다 - 키보드로 옮기던 손잡이의 초점을 되돌린다(안 하면 한 칸 뒤 끊긴다).
       const a = el.contains(doc.activeElement) ? doc.activeElement.dataset : null;
@@ -272,9 +275,12 @@ export function createEventCompressWindow({
     }
   }
 
-  /** 'b, a, 1girl' 을 abc 차례로(사용자 지시 - 1boy, 1girl, apron …). 서버도 같은 차례로 주지만 옛 서버를 위해 한 번 더. */
-  function sortedTags(text) {
-    return String(text || '').split(', ').filter(Boolean).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).join(', ');
+  /** 'b, a, 1girl' 을 abc 차례로(사용자 지시 - 1boy, 1girl, apron …). 빈도 컷 밖이라 태그 수에서 빠진 태그는 회색(사용자 지시 2026-10-23). */
+  function tagsHtml(text, uncounted) {
+    const off = new Set(Array.isArray(uncounted) ? uncounted : []);
+    return String(text || '').split(', ').filter(Boolean).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(t => (off.has(t) ? `<span class="ecw-t-off" title="빈도 컷 밖 - 태그 수에 세지 않습니다">${escHtml(t)}</span>` : escHtml(t)))
+      .join(', ');
   }
 
   function renderList() {
@@ -284,7 +290,7 @@ export function createEventCompressWindow({
     if (!state || (state.computing && !items.length)) html = '<div class="ecw-empty">이벤트를 세는 중…</div>';
     else if (state.error && !items.length) html = `<div class="ecw-empty">${escHtml(state.error)}</div>`;
     else if (!items.length) {
-      const filtered = query || cut.min != null || cut.max != null || cutSize.min != null || cutSize.max != null;
+      const filtered = query || cut.min != null || cut.max != null;
       html = `<div class="ecw-empty">${filtered ? '맞는 이벤트가 없습니다.' : '이벤트가 없습니다.'}</div>`;
     }
     else {
@@ -304,7 +310,7 @@ export function createEventCompressWindow({
         return `<div class="ecw-row${isOpen ? ' is-open' : ''}${used ? ' is-used' : ''}" data-ecw-key="${escAttr(key)}">`
           + `<div class="ecw-head" data-ecw-head><div class="ecw-tags">`
           + `<span class="ecw-r ecw-r-${escAttr(it.rating || '')}">${escHtml(String(it.rating || '').toUpperCase())}</span>`
-          + `${escHtml(sortedTags(it.tags))}<div class="ecw-bar" style="width:${Math.max(2, Math.round(size / top * 100))}%"></div></div>`
+          + `${tagsHtml(it.tags, it.uncounted)}<div class="ecw-bar" style="width:${Math.max(2, Math.round(size / top * 100))}%"></div></div>`
           + `<span class="ecw-size" title="${used ? '이 이벤트는 Random 이 이미 썼습니다' : '묶인 행 수'}">×${fmt(size)}</span></div>`
           + acts + `</div>`;
       }).join('');
@@ -339,11 +345,9 @@ export function createEventCompressWindow({
     if (!el) return;
     const pe = (state && state.pe) || {};
     const options = pe.options || {};
-    const extra = [];
-    if (Number(pe.auto_hide_count) > 0) extra.push(`Auto Hide ${fmt(pe.auto_hide_count)}`);
-    if (Number(pe.hide_count) > 0) extra.push(`개별 숨김 ${fmt(pe.hide_count)}`);
     // PE 창과 같은 칸(.pe-opt-*) - 모양이 어긋나지 않게 그 클래스를 그대로 쓴다. 칸 폭만 5열 최소 폭(.ecw-pe).
-    const html = `<div class="ecw-pe-head">특징 제거<span>체크 = 지운다 · 남는 태그로 같은 이벤트를 가른다${extra.length ? ` · ${extra.join(' · ')}` : ''}</span></div>`
+    // 머리 글(사용자 지시 2026-10-23 · 연노랑) - 여기서 켜고 끄면 PE 창 · 지금 프리셋에도 들어간다는 것을 알린다.
+    const html = `<div class="ecw-pe-head">[PE 특징 제거] - 여기에서 On/Off 시 현재 프리셋에도 반영됩니다</div>`
       + `<div class="pe-opt-list ecw-pe-grid">${PE_KEYS.map(([key, label]) => `<div class="pe-opt-cell"><label class="pe-opt-row">`
         + `<input type="checkbox" class="pe-opt-input" data-ecw-pe-key="${key}"${options[key] ? ' checked' : ''}>`
         + `<span class="pe-opt-check" aria-hidden="true"></span><span class="pe-opt-label">${escHtml(label)}</span></label></div>`).join('')}</div>`;
@@ -455,9 +459,9 @@ export function createEventCompressWindow({
         histMin = Number(body.tag_count_min) || 0;
         histMax = Number(body.tag_count_max) || 0;
       }
-      if (body.size_hist && typeof body.size_hist === 'object') {
-        sizeHist = body.size_hist;
-        sizeVals = Object.keys(sizeHist).map(Number).filter(Number.isFinite).sort((a, b) => b - a);
+      if (body.tag_freq_hist && typeof body.tag_freq_hist === 'object') {
+        freqHist = body.tag_freq_hist;
+        freqVals = Object.keys(freqHist).map(Number).filter(Number.isFinite).sort((a, b) => b - a);
       }
       if (!more && open && !items.some(it => it.key === open)) open = '';
       // 목록을 청해서 서버가 다시 셌다 - 윗줄의 수도 새것으로(꺼져 있을 때는 WS 가 안 올 수 있다).
@@ -514,8 +518,8 @@ export function createEventCompressWindow({
       const body = await postJson('/api/event-compress/commit', {
         min_tags: cutNow.min_tags != null ? Number(cutNow.min_tags) : null,
         max_tags: cutNow.max_tags != null ? Number(cutNow.max_tags) : null,
-        min_size: cutNow.min_size != null ? Number(cutNow.min_size) : null,
-        max_size: cutNow.max_size != null ? Number(cutNow.max_size) : null,
+        min_freq: cutNow.min_freq != null ? Number(cutNow.min_freq) : null,
+        max_freq: cutNow.max_freq != null ? Number(cutNow.max_freq) : null,
         q: query, events_signature: eventsSig,
       });
       showToast(`${fmt(body.committed)}행으로 Tag Filter 를 좁혔습니다 - [재적용] 으로 원래 풀로 돌아갑니다`, 'info');

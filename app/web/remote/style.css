@@ -32601,7 +32601,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-empty, .ecw-more { padding: 14px 10px; color: var(--text-dim); font-family: var(--font-mono); font-size: 10.5px; text-align: center; }
 .ecw-more { padding: 8px 10px; }
 .ecw-pe { flex: none; padding: 6px 10px 9px; border-top: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.18); }
-.ecw-pe-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 5px; font-size: 10.5px; color: var(--text-dim); }
+.ecw-pe-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px 5px; font-size: 10.5px; color: #ffe2a8; }
 .ecw-pe-head span { font-size: 9.5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ecw-pe .pe-opt-list { grid-template-columns: repeat(5, max-content); gap: 3px 4px; width: max-content; }
 
@@ -32645,3 +32645,10 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .ecw-cut { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
 .ecw-cut-one { min-width: 0; }
 .ecw-cut-ends span { white-space: nowrap; }
+
+/* 빈도 슬라이더 = 하늘색(태그 수 = 노랑과 구분 - 사용자 지시 2026-10-23) · 빈도 컷 밖 태그 = 회색. */
+.ecw-cut-one.is-freq .ecw-cut-fill { background: #4f9fd1; }
+.ecw-cut-one.is-freq .ecw-cut-bars span.is-in { background: rgba(79,159,209,0.75); }
+.ecw-cut-one.is-freq .ecw-cut-handle { border-color: #4f9fd1; }
+.ecw-cut-one.is-freq .ecw-cut-handle:focus-visible { outline-color: #7fc0e8; }
+.ecw-t-off { color: #6c6c78; }

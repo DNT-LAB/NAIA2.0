@@ -187,6 +187,28 @@ def _event_preset_bootstrap(
     return payload
 
 
+def _apply_server_side_resolution(context: WebSessionContext, overrides: dict[str, Any], detected: Any) -> None:
+    """서버가 직접 조립하는 생성(이벤트 프리셋 · 이벤트 맵 · 이벤트 압축 · Assist)의 해상도.
+
+    메인 Generate 는 화면이 Rnd Res 를 추첨하고 Auto Res 감지값을 실어 보낸다. 이 길들은 그 둘을 못 거쳐
+    Rnd Res 를 켜도 저장된 한 해상도로만, Auto Res 를 켜도 맞춘 값이 아닌 기준 해상도로 나갔다
+    (사용자 제보 2026-10-23). Refine · 세션 풀 생성과 같은 순서로 맞춘다: Rnd Res 추첨 -> Auto Res 감지값.
+    요청이 해상도를 직접 실었으면(창이 화면 값을 보냄) 추첨은 그것을 존중한다.
+    """
+    live = getattr(context, "remote_params", None) or {}
+    rnd_res = live.get("random_resolution", overrides.get("random_resolution", False))
+    if (rnd_res is True or str(rnd_res).strip().lower() == "true") \
+            and (overrides.get("width") is None or overrides.get("height") is None):
+        from app.backend.server.generation_runner import _reroll_random_resolution
+        _reroll_random_resolution(context, overrides)
+    try:
+        width, height = (int(detected[0]), int(detected[1])) if detected else (0, 0)
+    except (TypeError, ValueError, IndexError):
+        width, height = 0, 0
+    if width > 0 and height > 0:
+        overrides.update(width=width, height=height, resolution=f"{width} x {height}")
+
+
 def _preset_source_to_generation_command(
     context: WebSessionContext,
     result: dict[str, Any],
@@ -195,6 +217,7 @@ def _preset_source_to_generation_command(
     overrides: dict[str, Any] | None = None,
     prompt_override: str | None = None,
     prompt_run_id_override: str = "",
+    detected_resolution: Any = None,
 ) -> dict[str, Any]:
     source_row_data = result.get("sourceRow") if isinstance(result.get("sourceRow"), dict) else {}
     # Assist [생성] 은 태그를 지우고 문장만 남긴 결과도 보낸다 — general 은 비고 문장(source_row['sentence'])만 있다(09-30,
@@ -231,6 +254,7 @@ def _preset_source_to_generation_command(
     generation_overrides = dict(overrides or {})
     result_overrides = result.get("overrides") if isinstance(result.get("overrides"), dict) else {}
     generation_overrides.update(result_overrides)
+    _apply_server_side_resolution(context, generation_overrides, detected_resolution)
     generation_overrides.update({
         "input": prompt,
         "_raw_input": prompt,
@@ -582,6 +606,7 @@ def register_event_preset_routes(
                 overrides=pipeline_overrides,
                 prompt_override=processed.prompt,
                 prompt_run_id_override=processed.prompt_run_id,
+                detected_resolution=getattr(processed, "detected_resolution", None),
             )
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:
@@ -641,6 +666,7 @@ def register_event_preset_routes(
                 overrides=pipeline_overrides,
                 prompt_override=processed.prompt,
                 prompt_run_id_override=processed.prompt_run_id,
+                detected_resolution=getattr(processed, "detected_resolution", None),
             )
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:

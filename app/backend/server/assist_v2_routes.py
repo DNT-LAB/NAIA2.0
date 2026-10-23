@@ -93,7 +93,8 @@ def register_assist_v2_routes(
                       "sourceName": f"assist:{request_id}"}
             command = _preset_source_to_generation_command(
                 context, result, source="preset", overrides=overrides,
-                prompt_override=processed.prompt, prompt_run_id_override=processed.prompt_run_id)
+                prompt_override=processed.prompt, prompt_run_id_override=processed.prompt_run_id,
+                detected_resolution=getattr(processed, "detected_resolution", None))
             command["overrides"]["_source_row_data"] = source_row
             command["overrides"]["_remote_queue_label"] = "assist"
             dispatch = await run_in_thread(_generation_service(context).enqueue_remote_request, command)

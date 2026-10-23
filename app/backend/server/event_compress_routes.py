@@ -233,7 +233,8 @@ def register_event_compress_routes(
                 {"requestId": request_id, "sourceRow": source_row,
                  "sourceName": f"event_compress:{request_id}"},
                 source="preset", overrides=dict(overrides), prompt_override=processed.prompt,
-                prompt_run_id_override=processed.prompt_run_id)
+                prompt_run_id_override=processed.prompt_run_id,
+                detected_resolution=getattr(processed, "detected_resolution", None))
             command["overrides"]["_remote_queue_label"] = "event_compress"
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:

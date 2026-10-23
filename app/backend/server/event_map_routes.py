@@ -618,7 +618,8 @@ def register_event_map_routes(
             result = {"requestId": request_id, "sourceRow": source_row, "sourceName": f"event_map:{request_id}"}
             command = _preset_source_to_generation_command(
                 session_context, result, source="preset", overrides={},
-                prompt_override=processed.prompt, prompt_run_id_override=processed.prompt_run_id)
+                prompt_override=processed.prompt, prompt_run_id_override=processed.prompt_run_id,
+                detected_resolution=getattr(processed, "detected_resolution", None))
             command["overrides"]["_remote_queue_label"] = "event_map"
             dispatch = await run_in_thread(_generation_service(session_context).enqueue_remote_request, command)
         except RuntimeError as exc:

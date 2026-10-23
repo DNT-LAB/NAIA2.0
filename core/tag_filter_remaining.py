@@ -23,6 +23,7 @@ from typing import Any
 
 REMAINING_MAX = 500_000      # 남은 행이 이보다 많으면 저장하지 않는다(사용자 지정 - 큰 풀은 이어 하기 대상이 아니다)
 FORMAT_VERSION = 2
+_COMMIT_LOCK = threading.Lock()
 _SAVE_LOCK = threading.Lock()   # 종료 요청 · lifespan · 읽기가 겹쳐도 한 번에 하나(같은 임시 파일 이름을 쓴다 - Codex P2)
 
 
@@ -83,7 +84,91 @@ def _remove(*paths: Path) -> None:
         _invalidate(path)
 
 
-def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any], set[Any]] | None:
+def _commit_path(context):
+    return _paths(context)[1].with_name("naia_tag_filter_committed.json")
+
+
+def _write_commit(context, record):
+    from core.temporary_search import is_temporary_search
+
+    if is_temporary_search(context):
+        return
+    # One atomic document pairs the full condition result with the selected ids.
+    # This lock never nests the remaining saver lock (which captures pool state).
+    with _COMMIT_LOCK:
+        path = _commit_path(context)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(record, ensure_ascii=True), encoding="utf-8")
+        tmp.replace(path)
+
+
+def clear_committed(context):
+    # A tombstone also prevents a saved commit from reviving after re-apply.
+    if _commit_path(context).exists():
+        _write_commit(context, None)
+
+
+def save_committed(context, ids):
+    from uuid import uuid4
+
+    snapshot = context.active_tag_filter_snapshot
+    previous = snapshot.get("_event_compress_commit") or {}
+    full = snapshot["ids"]
+    record = {
+        "version": 1,
+        "condition": _condition(snapshot.get("tags"), snapshot.get("branches")),
+        "matched": previous.get("matched", fingerprint(full)),
+        "matched_count": previous.get("matched_count", len(full)),
+        "ids": sorted(_norm_id(i) for i in ids),
+        "fingerprint": fingerprint(ids), "count": len(ids), "token": uuid4().hex,
+    }
+    _write_commit(context, record)
+    return record
+
+
+def restore_committed(context, result, ids):
+    """Return the paired refill set, record, and permission to resume remaining.
+
+    Any damaged/mismatched commit rejects remaining too, even if an older
+    remaining file happens to match the newly reconstructed full condition.
+    """
+    with _COMMIT_LOCK:
+        try:
+            record = json.loads(_commit_path(context).read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return ids, None, True
+        except (OSError, ValueError):
+            return ids, None, False
+    if record is None:
+        return ids, None, True
+    try:
+        if (record["version"] != 1
+                or record["condition"] != _condition(result.get("tags"), result.get("branches"))
+                or record["matched_count"] != len(ids)
+                or record["matched"] != fingerprint(ids)
+                or not isinstance(record["token"], str) or not record["token"]):
+            return ids, None, False
+        selected = set(record["ids"])
+        kept = {i for i in ids if _norm_id(i) in selected}
+        if (not kept or len(kept) != record["count"] or len(selected) != record["count"]
+                or len(record["ids"]) != record["count"]
+                or fingerprint(kept) != record["fingerprint"]):
+            return ids, None, False
+        return kept, record, True
+    except (KeyError, TypeError, ValueError):
+        return ids, None, False
+
+
+def selected_rating_counts(result, ids):
+    snapshot = result.get("_source_snapshot")
+    if snapshot is not None and "rating" in snapshot and "id" in snapshot:
+        counts = snapshot.loc[snapshot["id"].isin(ids), "rating"].astype(str).str.strip().str.lower().value_counts()
+        return {r: int(counts.get(r, 0)) for r in "gsqe"}
+    return {}
+
+
+def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any], set[Any], str | None] | None:
     """남은 id · 조건 · 적용 순간의 전체 id 를 **한 잠금 안에서** 뜬다(셋이 한 풀의 것이어야 한다). 대상이 아니면 None."""
     from contextlib import nullcontext
 
@@ -102,7 +187,8 @@ def _capture(context: Any) -> tuple[list[Any], dict[str, Any], list[Any], set[An
             return None
         service = getattr(context, "_event_compress", None)
         dropped = service.persisted_dropped() if service is not None else set()
-        return list(tag_filter["ids"]), _condition(tag_filter.get("tags"), tag_filter.get("branches")), list(full), dropped
+        token = (snapshot.get("_event_compress_commit") or {}).get("token")
+        return list(tag_filter["ids"]), _condition(tag_filter.get("tags"), tag_filter.get("branches")), list(full), dropped, token
 
 
 def save_remaining(context: Any) -> str:
@@ -112,7 +198,7 @@ def save_remaining(context: Any) -> str:
         captured = _capture(context)
         if captured is None:
             return "skip"
-        ids, condition, full, dropped = captured
+        ids, condition, full, dropped, commit_token = captured
         dropped_path = parquet_path.with_name("naia_tag_filter_dropped.parquet")
         if (not ids and not dropped) or len(ids) >= REMAINING_MAX:
             _remove(meta_path, parquet_path, dropped_path)
@@ -135,13 +221,15 @@ def save_remaining(context: Any) -> str:
                 "matched_count": len(full), "count": len(ids),
                 "dropped_count": len(dropped), "dropped_fingerprint": fingerprint(dropped),
                 "remaining_fingerprint": fingerprint(ids)}
+        if commit_token is not None:
+            meta["commit_token"] = commit_token
         tmp_meta = meta_path.with_suffix(".json.tmp")
         tmp_meta.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
         tmp_meta.replace(meta_path)
         return f"saved {len(ids)}"
 
 
-def load_remaining(context: Any, tags: Any, branches: Any, matched_ids: Any) -> set[str] | None:
+def load_remaining(context: Any, tags: Any, branches: Any, matched_ids: Any, commit_token=None) -> set[str] | None:
     """지금(같은 조건 · 같은 전체 집합)에 맞는 저장본이 있으면 남은 id(정규화 문자열) 집합, 아니면 None.
     저장과 같은 잠금으로 읽는다 - 바꾸는 중의 옛 명함 + 새 id 를 짝으로 읽지 않게(Codex P2). 풀 잠금 밖에서 부른다."""
     with _SAVE_LOCK:
@@ -149,6 +237,8 @@ def load_remaining(context: Any, tags: Any, branches: Any, matched_ids: Any) -> 
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            return None
+        if meta.get("commit_token") != commit_token:
             return None
         if meta.get("version") != FORMAT_VERSION or meta.get("condition") != _condition(tags, branches):
             return None
@@ -182,7 +272,10 @@ def load_remaining(context: Any, tags: Any, branches: Any, matched_ids: Any) -> 
 
 def apply_remaining(context: Any, result: dict[str, Any], ids: set[Any]) -> tuple[set[Any], dict[str, int] | None]:
     """재조립된 필터 id 중 저장된 남은 행만 남긴다. 맞는 저장본이 없거나 겹침이 없으면 그대로(ids, None)."""
-    remaining = load_remaining(context, result.get("tags"), result.get("branches"), ids)
+    if result.get("_skip_remaining"):
+        return ids, None
+    token = (result.get("_event_compress_commit") or {}).get("token")
+    remaining = load_remaining(context, result.get("tags"), result.get("branches"), ids, token)
     if not remaining:
         return ids, None
     kept = {i for i in ids if _norm_id(i) in remaining}

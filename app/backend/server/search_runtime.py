@@ -157,6 +157,9 @@ def normalize_custom_parquet_frame(frame):
 
 
 def _reset_active_tag_filter_assignment(context: WebSessionContext) -> None:
+    from core.tag_filter_remaining import clear_committed
+
+    clear_committed(context)
     context.active_tag_filter_ids = None
     # 스냅샷도 함께 버린다 - 남겨 두면 해제한 조건이 되살아난다.
     context.active_tag_filter_snapshot = None
@@ -554,14 +557,21 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     if snapshot is None or getattr(snapshot, "empty", True):
         return False
     tags = [*include, *[f"-{tag}" for tag in exclude]]
+    source_revision = current_tag_filter_revision(context)
     result = tag_filter_search(context, tags, applied_branches or None)
     ids = result.get("_ids", set())
     source_snapshot = result.get("_source_snapshot")
     source_generation = int(result.get("_pool_generation") or 0)
     # 이어 하기(사용자 2026-10-18): 지난번에 남겨 둔 행 색인이 같은 원본 · 같은 조건이면 그만큼만 남긴다
-    # (core/tag_filter_remaining). 다 쓴 뒤 되채우는 기준(아래 snapshot)은 그대로 전체 ids 다. 파일 읽기는 잠금 밖.
-    from core.tag_filter_remaining import apply_remaining
+    # Refill uses the full condition result, or the paired committed subset. Read files outside the pool lock.
+    from core.tag_filter_remaining import apply_remaining, restore_committed, selected_rating_counts
 
+    ids, committed, resume_allowed = restore_committed(context, result, set(ids))
+    result["_skip_remaining"] = not resume_allowed
+    result["_event_compress_commit"] = committed
+    if committed is not None:
+        result["count"] = len(ids)
+        result["rating_counts"] = selected_rating_counts(result, ids)
     live_ids, resumed_ratings = apply_remaining(context, result, set(ids))
     # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
     # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
@@ -572,6 +582,9 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
         if (
             source_snapshot is not getattr(context, "search_results_snapshot", None)
             or source_generation != current_search_pool_generation(context)
+            or source_revision != current_tag_filter_revision(context)
+            or getattr(context, "active_tag_filter_ids", None) is not None
+            or isinstance(getattr(context, "active_tag_filter", None), dict)
         ):
             return False
         context.active_tag_filter_ids = set(live_ids)
@@ -593,6 +606,8 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
             "rating_counts": dict(result.get("rating_counts") or {}),
             "request_id": "",
         }
+        if committed is not None:
+            context.active_tag_filter_snapshot["_event_compress_commit"] = committed
         mark_tag_filter_changed(context)
         apply_search_runtime_filters(context)
     return True
@@ -782,6 +797,9 @@ def commit_pending_tag_filter_assignment(
                 context.pending_tag_filter = None
             return {"ok": False, "reason": "pool_changed"}
 
+        from core.tag_filter_remaining import clear_committed
+
+        clear_committed(context)
         context.active_tag_filter_ids = set(pending.get("ids") or set())
         context.active_tag_filter_frame = pending.get("frame")
         context.active_tag_filter_frame_for = context.active_tag_filter_ids

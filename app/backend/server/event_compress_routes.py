@@ -6,7 +6,7 @@ import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from core.event_compress import ensure_event_compress, check_event_compress
+from core.event_compress import CommitError, ensure_event_compress, check_event_compress
 
 
 def register_event_compress_routes(
@@ -76,6 +76,29 @@ def register_event_compress_routes(
             result = await run_in_thread(ensure_event_compress(session_context).events,
                                          sort, q, offset, limit, lower, upper)
         except RuntimeError as exc:
+            return error("internal_error", str(exc), 500)
+        return response(result)
+
+    @app.post("/api/event-compress/commit")
+    async def event_compress_commit(req: Request):
+        try:
+            payload = await payload_for(req)
+            for key in ("min_tags", "max_tags"):
+                if payload.get(key) is not None and type(payload[key]) is not int:
+                    raise ValueError("min_tags and max_tags must be integers or null")
+            lower, upper = tag_cut(payload.get("min_tags"), payload.get("max_tags"))
+            q = payload.get("q", "")
+            signature = payload.get("events_signature")
+            if not isinstance(q, str) or not isinstance(signature, str) or not signature:
+                raise ValueError("q must be a string and events_signature is required")
+        except ValueError as exc:
+            return error("bad_request", str(exc))
+        try:
+            result = await run_in_thread(ensure_event_compress(session_context).commit,
+                                         signature, lower, upper, q)
+        except CommitError as exc:
+            return error(exc.code, str(exc), exc.status)
+        except (OSError, RuntimeError) as exc:
             return error("internal_error", str(exc), 500)
         return response(result)
 

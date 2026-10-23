@@ -114,6 +114,12 @@ def check_event_compress(context):
             service.request()
 
 
+class CommitError(ValueError):
+    def __init__(self, code, message, status):
+        super().__init__(message)
+        self.code, self.status = code, status
+
+
 class EventCompress:
     def __init__(self, context):
         self.context = context
@@ -457,6 +463,69 @@ class EventCompress:
     def _passes_tag_cut(count, min_tags, max_tags):
         return (min_tags is None or count >= min_tags) and (max_tags is None or count <= max_tags)
 
+    def _events_signature(self):
+        # Pool identity (generation/assignment), PE signature and the toggle - NOT consumption.
+        # Random using rows (Auto Gen) must not make every commit stale: commit only ever takes
+        # rows that are still live at commit time (_commit_ids), so a consumed row simply drops out.
+        return hashlib.sha256(json.dumps([
+            self._identity(), self.signature, enabled(self.context),
+        ], ensure_ascii=True).encode()).hexdigest()
+
+    def _matching_groups(self, sort, q, min_tags, max_tags):
+        words = q.lower().split()
+        return [g for g in self.sorted_groups[sort]
+                if self._passes_tag_cut(g["tag_count"], min_tags, max_tags)
+                and all(word in g["tags"].lower() for word in words)]
+
+    def _commit_ids(self, groups):
+        if self._identity()[1] != "tag_filter":
+            return set()
+        live = self._live_ids()
+        ids = set()
+        for group in groups:
+            # The first member is the representative. Never restore dropped or
+            # consumed members; fall back only to another currently live member.
+            for member in group["members"]:
+                if member in live:
+                    ids.add(member)
+                    if enabled(self.context):
+                        break
+        return ids
+
+    def commit(self, events_signature, min_tags=None, max_tags=None, q=""):
+        from core.tag_filter_remaining import save_committed
+
+        with self.guard():
+            if self._identity()[1] != "tag_filter" or not self._live_ids():
+                raise CommitError("no_tag_filter", "An active non-empty Tag Filter is required", 409)
+            if self.computing or self.is_stale() or events_signature != self._events_signature():
+                raise CommitError("stale", "Event analysis changed; reload the event list", 409)
+            groups = self._matching_groups("desc", q, min_tags, max_tags)
+            ids = self._commit_ids(groups)
+            if not ids:
+                raise CommitError("empty", "No live rows match the event selection", 400)
+            ratings = Counter()
+            for group in groups:
+                ratings[group["rating"]] += len(ids.intersection(group["members"]))
+            ctx = self.context
+            # Persist before publishing the new assignment. A failure leaves the
+            # live pool untouched. Repeated commits keep the original full pair.
+            record = save_committed(ctx, ids)
+            self.sequence += 1
+            self.dropped.clear()
+            self._set_ids(ids, ratings)
+            ctx.active_tag_filter_snapshot = copy.deepcopy(ctx.active_tag_filter)
+            ctx.active_tag_filter_snapshot["_event_compress_commit"] = record
+            # Refill rebinds frame_for to the restored ids. Discard the old
+            # pre-commit slice so it cannot then masquerade as the committed set.
+            ctx.active_tag_filter_frame = None
+            ctx.active_tag_filter_frame_snapshot = None
+            self.identity = None
+            _runtime().apply_search_runtime_filters(ctx)
+            self.request()
+            self._notify(pool_changed=True)
+            return {"ok": True, "committed": len(ids), "state": self.state()}
+
     def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None):
         while True:
             self.refresh()
@@ -464,15 +533,13 @@ class EventCompress:
                 if self.is_stale():
                     continue
                 live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
-                words = q.lower().split()
-                # Filtering the cached order is equivalent to sorting after cut + q.
-                groups = [g for g in self.sorted_groups[sort]
-                          if self._passes_tag_cut(g["tag_count"], min_tags, max_tags)
-                          and all(word in g["tags"].lower() for word in words)]
+                groups = self._matching_groups(sort, q, min_tags, max_tags)
                 items = [{**{k: g[k] for k in ("key", "rating", "tags", "tag_count", "size")},
                           "remaining": sum(ref in live for ref in g["members"])}
                          for g in groups[offset:offset + limit]]
                 return {"ok": True, "total": len(groups), "offset": offset, "items": items,
+                        "commit_rows": len(self._commit_ids(groups)),
+                        "events_signature": self._events_signature(),
                         "tag_count_hist": dict(self.tag_count_hist),
                         "tag_count_min": self.tag_count_min, "tag_count_max": self.tag_count_max}
 

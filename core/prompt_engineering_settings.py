@@ -993,6 +993,17 @@ class PromptEngineeringHeadlessStore:
     def remove_quick_favorite(self, name: str) -> None:
         self._replace_quick_favorite(name)
 
+    def _propagate_quick_favorite(self, old: str, new: str | None = None) -> None:
+        """Rename/delete already changed the preset files - a Quick list write failure must not skip refresh().
+
+        The list is filtered against existing presets on every read, so a missed update only drops the favorite
+        (Codex review 2026-10-23: raising here left the cached selection on the old name and resurrected it).
+        """
+        try:
+            self._replace_quick_favorite(old, new)
+        except OSError as exc:
+            print(f"[warn] Quick favorites not updated after preset rename/delete: {ascii(str(exc))}", flush=True)
+
     def list_preset_names(self, mode: str | None = None) -> list[str]:
         return list_preset_names(mode, save_root=self._save_root)
 
@@ -1415,7 +1426,7 @@ class PromptEngineeringHeadlessStore:
         # 지운 프리셋의 정상본 사본도 치운다 - 같은 이름으로 새로 만들면 남의 옛 내용이 되살아날 수 있다
         backup_path(path).unlink(missing_ok=True)
         if mode_key == "NAI":
-            self.remove_quick_favorite(name)
+            self._propagate_quick_favorite(name)
         self.refresh(mode_key)
         return True, name
 
@@ -1529,7 +1540,7 @@ class PromptEngineeringHeadlessStore:
         if state.get("current_preset") == old:
             self.save_last_used_preset(mode_key, new)
         if mode_key == "NAI":
-            self._replace_quick_favorite(old, new)
+            self._propagate_quick_favorite(old, new)
         self.refresh(mode_key)
         return True, new
 

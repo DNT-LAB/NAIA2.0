@@ -4,7 +4,8 @@ export function createPromptEngineeringPopupRenderers({
   escHtml,
   createPromptPreset,
   renamePromptPreset = () => false,
-  presetThumbnailAction = null,   // (kind, getBlob) - 지금 프리셋 썸네일 고치기(app.js presetThumbnailAction)
+  presetThumbnailAction = null,   // (kind, getBlob, target) - 지금 프리셋 썸네일 고치기(app.js presetThumbnailAction)
+  presetThumbnailTarget = () => null,  // 누른 순간의 {name, mode} - 파일 창이 열린 사이 프리셋이 바뀌어도 그 프리셋에 쓴다
   applyPromptPreset,
   addRandomizedPreset,
   removeRandomizedPreset,
@@ -379,6 +380,7 @@ export function createPromptEngineeringPopupRenderers({
   function bindThumbEdit(body) {
     const row = body.querySelector('[data-thumb-edit]');
     const file = row?.querySelector('[data-thumb-file]');
+    let pickTarget = null;           // [썸네일 업로드] 를 누른 순간의 프리셋(Codex 리뷰 2026-10-23)
     body.querySelector('[data-thumb-toggle]')?.addEventListener('click', () => {
       thumbEditOpen = !thumbEditOpen;
       const m = presetManageState;
@@ -387,14 +389,16 @@ export function createPromptEngineeringPopupRenderers({
     file?.addEventListener('change', () => {
       const picked = file.files?.[0];
       file.value = '';
-      if (picked) presetThumbnailAction?.('image', async () => picked);
+      if (picked && pickTarget) presetThumbnailAction?.('image', async () => picked, pickTarget);
+      pickTarget = null;
     });
     row?.addEventListener('click', event => {
       const button = event.target.closest('[data-thumb-act]');
       if (!button || typeof presetThumbnailAction !== 'function') return;
       const kind = button.dataset.thumbAct;
-      if (kind === 'upload') file?.click();
-      else presetThumbnailAction(kind);
+      const target = presetThumbnailTarget();
+      if (kind === 'upload') { pickTarget = target; file?.click(); }
+      else presetThumbnailAction(kind, null, target);
     });
   }
 

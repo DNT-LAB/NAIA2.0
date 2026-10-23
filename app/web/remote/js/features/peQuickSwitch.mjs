@@ -18,6 +18,7 @@ export function createPeQuickSwitch({
   document: doc = document,
   escHtml = value => String(value ?? ''),
   getState = () => null,           // 마지막 PE 상태(module_state prompt_engineering)
+  getMode = () => 'NAI',           // 화면의 지금 모드 - PE 상태가 앞 모드의 것일 수 있다(모드를 바꾼 직후)
   selectPreset = () => {},         // (name) - Quick Preset 콤보와 같은 길
   removeFavorite = () => {},       // (name) - preset_quick_remove
 } = {}) {
@@ -31,7 +32,7 @@ export function createPeQuickSwitch({
   }
 
   function isNai(s) {
-    return String(s?.api_mode || '').toUpperCase() === 'NAI';
+    return String(s?.api_mode || '').toUpperCase() === 'NAI' && String(getMode() || '').toUpperCase() === 'NAI';
   }
 
   function favorites(s) {
@@ -159,7 +160,9 @@ export function createPeQuickSwitch({
     if (btn) {
       event.preventDefault();
       event.stopPropagation();
-      open = !open;
+      // 런처가 다시 그려지면(확장 목록 갱신 등) 판이 문서에서 떨어진다 - 그때는 닫힌 것으로 본다(Codex 리뷰 2026-10-23).
+      const shown = open && !!pop && pop.isConnected;
+      open = !shown;
       if (open) render(); else close();
       return;
     }

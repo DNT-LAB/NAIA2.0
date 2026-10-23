@@ -10804,6 +10804,9 @@ function onModeResult(m) {
     // PE 상태(Interactive 조립 · 슬래시 메뉴 · 프리셋 창이 읽는 것)를 새 모드의 것으로 다시 받는다.
     // 답이 올 때까지는 들고 있는 프리셋 이름이 **앞 모드의 것**이다 - 그동안의 편집에 그 이름표를 달지 않는다.
     if (moduleStateCache.get('prompt_engineering') || lastPromptEngineeringState) refreshPresetStamp();
+    // [Quick] 은 NAI 프리셋만 다룬다 - 모드가 바뀌면 열린 판을 닫고 단추를 다시 칠한다(새 PE 상태가 오기 전 옛 목록으로
+    // 고르면 새 모드의 같은 이름 프리셋이 걸린다 - Codex 리뷰 2026-10-23).
+    try { peQuickSwitch?.sync(); } catch (_) {}
   } else {
     syncMode(prevMode);
     showToast(m.message || 'Mode change failed', 'error', true);
@@ -12744,7 +12747,7 @@ const boostV2PanelReady = import('./js/features/boostV2Panel.mjs?v=20261017-auxf
   .catch(error => {
     console.error('Failed to initialize Boost v2 panel module', error);
   });
-const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261023-thumbedit1')
+const promptEngineeringPopupRenderersReady = import('./js/features/promptEngineeringPopupRenderers.mjs?v=20261023-peqrev1')
   .then(({createPromptEngineeringPopupRenderers}) => {
     promptEngineeringPopupRenderers = createPromptEngineeringPopupRenderers({
       renderBoostV2: (host, m) => { if (boostV2Panel) boostV2Panel.render(host, m); },
@@ -12755,6 +12758,7 @@ const promptEngineeringPopupRenderersReady = import('./js/features/promptEnginee
       renamePromptPreset,
       // Manage Preset [썸네일 편집](사용자 지시 2026-10-23) - 지금 프리셋의 썸네일.
       presetThumbnailAction,
+      presetThumbnailTarget,
       applyPromptPreset: onPromptPresetChange,
       addRandomizedPreset: addRandomizedPromptPreset,
       removeRandomizedPreset: removeRandomizedPromptPreset,
@@ -13322,20 +13326,24 @@ async function setResultAsPresetThumbnail(context) {
     const image = await fetch(src, {cache: 'no-store'});
     if (!image.ok) throw new Error(`그림을 읽지 못했습니다 (HTTP ${image.status})`);
     return image.blob();
-  });
+  }, presetThumbnailTarget());
+}
+
+/** 누른 순간의 프리셋 = 썸네일을 쓸 곳. 고르는 사이(파일 창 · 클립보드 읽기) 프리셋이 바뀌어도 이 대상에 쓴다(Codex 리뷰 2026-10-23). */
+function presetThumbnailTarget() {
+  const s = lastPromptEngineeringState || {};
+  return {name: String(s.preset || ''), mode: String(s.api_mode || '')};
 }
 
 /** 지금 PE 프리셋의 썸네일 고치기 한 벌(우클릭 등록 · Manage Preset [썸네일 편집] - 사용자 지시 2026-10-23).
  *  kind: 'image'(getBlob 이 준 그림) · 'paste'(클립보드) · 'generate'(임시 썸네일 생성 - PE 콤보 미리보기와 같은 라우트).
  *  저장이 끝나면 서버가 prompt_engineering_preset_thumbnail_updated 를 쏘고, 그 처리기가 PE 상태를 다시 받는다. */
-async function presetThumbnailAction(kind, getBlob = null) {
-  const s = lastPromptEngineeringState || {};
-  const name = String(s.preset || '');
+async function presetThumbnailAction(kind, getBlob = null, target = null) {
+  const {name, mode} = target && target.name ? target : presetThumbnailTarget();
   if (!name || name.startsWith('*')) {
     showToast('랜덤 칸 · 스냅샷에는 썸네일을 둘 수 없습니다 - 파일 프리셋을 고른 뒤 다시 하세요', 'error');
     return false;
   }
-  const mode = String(s.api_mode || '');
   try {
     if (kind === 'generate') {
       const response = await fetch('/api/prompt-engineering/preset-thumbnail/generate', {
@@ -15632,13 +15640,20 @@ function togglePromptPresetQuick(name) {
     showToast('연결이 끊겨 Quick 을 바꾸지 못했습니다', 'error');
   }
 }
-import('./js/features/peQuickSwitch.mjs?v=20261023-peq5')
+import('./js/features/peQuickSwitch.mjs?v=20261023-peqrev1')
   .then(({createPeQuickSwitch}) => {
     peQuickSwitch = createPeQuickSwitch({
       document, escHtml,
       getState: () => lastPromptEngineeringState,
+      // 화면의 지금 모드 - PE 상태(api_mode)가 아직 앞 모드의 것일 수 있어 둘 다 NAI 여야 연다(Codex 리뷰 2026-10-23).
+      getMode: () => String(currentMode || modeSelect?.value || ''),
       // Quick Preset 콤보와 같은 길 - PE 창을 한 번도 안 열었으면 액션 모듈이 아직 없을 수 있다.
       selectPreset: name => {
+        if (String(currentMode || modeSelect?.value || '').toUpperCase() !== 'NAI'
+            || String(lastPromptEngineeringState?.api_mode || '').toUpperCase() !== 'NAI') {
+          showToast('Quick 은 NAI 모드에서만 씁니다', 'error');
+          return;
+        }
         if (promptEngineeringActions) promptEngineeringActions.onPresetChange(name);
         else setModuleParam('prompt_engineering', 'preset', name);
       },

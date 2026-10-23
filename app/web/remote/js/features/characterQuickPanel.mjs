@@ -1408,6 +1408,8 @@ export function createCharacterQuickPanel({
   const findQuery = {dex: '', lib: '', pool: '', hid: ''};
   let findDexRows = [];
   let findDexSeq = 0;
+  let findRefreshSeq = 0;
+  let findRefreshTimer = 0;
   let findDexTimer = 0;
   let findDexLoading = false;
   // 끝까지 굴리면 다음 쪽을 이어 붙인다(사용자 지시 2026-10-19) - 마지막으로 받은 쪽 · 이어 받는 중인가.
@@ -2217,12 +2219,15 @@ export function createCharacterQuickPanel({
    *  지금까지 펼친 쪽수만큼 다시 받아 바꾼다 - 스크롤 자리는 둔다. 받는 중 조건이 바뀌면 버린다. */
   async function refreshFindDex() {
     if (findDexTotal == null && !findDexRows.length) return;      // 아직 연 적이 없다 - 열 때 새로 받는다
+    if (findDexLoading) return;                                    // 새 검색이 도는 중 - 그 답이 더 새것이다
     const seq = findDexSeq;
+    const rseq = ++findRefreshSeq;
     const pages = findDexPage + 1;
     try {
       const results = await Promise.all(Array.from({length: pages}, (_, page) =>
         fetch(findDexUrl(page)).then(res => res.json().then(data => (res.ok ? data : null)))));
-      if (seq !== findDexSeq || results.some(data => !data)) return;
+      if (seq !== findDexSeq || rseq !== findRefreshSeq || results.some(data => !data)) return;
+      if (findDexPage + 1 !== pages) { void refreshFindDex(); return; }   // 받는 사이 다음 쪽을 이어 붙였다 - 그 쪽까지 다시
       const seen = new Set();
       findDexRows = results.flatMap(data => (Array.isArray(data.items) ? data.items : []))
         .filter(row => { const key = `${row.group}\u0000${row.character}`; if (seen.has(key)) return false; seen.add(key); return true; });
@@ -2230,7 +2235,18 @@ export function createCharacterQuickPanel({
       renderFindList();
     } catch (_) { /* 다음 검색 때 새로 받는다 */ }
   }
-  try { window.addEventListener('naia:character-pack-ready', () => { void refreshFindDex(); }); } catch (_) {}
+  /** 다른 화면(Characters 창 · Random 줄)이 ★ · 숨김 · 썸네일을 바꿨다 - Find 목록도 자리를 지키며 다시 받는다
+   *  (사용자 지시 2026-10-23: 창에서 ★ 하면 Find 줄은 옛 ★ 그대로였다). 몰려 오면 한 번만. Find 가 제 손으로 고친 것
+   *  (source: 'find')은 그 줄을 이미 고쳤으니 다시 받지 않는다. */
+  function scheduleFindRefresh(event) {
+    if (event && event.detail && event.detail.source === 'find') return;
+    clearTimeout(findRefreshTimer);
+    findRefreshTimer = setTimeout(() => { findRefreshTimer = 0; void refreshFindDex(); }, 150);
+  }
+  for (const name of ['naia:character-pack-ready', 'naia:character-favorite-changed',
+    'naia:character-hidden-changed', 'naia:character-thumb-changed']) {
+    try { window.addEventListener(name, scheduleFindRefresh); } catch (_) { /* 다음 검색 때 새로 받는다 */ }
+  }
 
   /** 보관함(활성이 아닌 것) - ★ 먼저, 그다음 그룹, 그다음 히스토리(최근 순). 검색은 이름 · 프롬프트 · 그룹. */
   function findLibRows() {
@@ -2618,12 +2634,12 @@ export function createCharacterQuickPanel({
       if (fav) {
         row.favorite = !!data.favorite;
         showToast(row.favorite ? `${character} - 즐겨찾기에 넣었습니다` : `${character} - 즐겨찾기에서 뺐습니다`, 'info');
-        try { window.dispatchEvent(new CustomEvent('naia:character-favorite-changed')); } catch (_) {}
+        try { window.dispatchEvent(new CustomEvent('naia:character-favorite-changed', {detail: {source: 'find'}})); } catch (_) {}
         if (findFavOnly && !row.favorite) dropRow();       // [★] 보기에서는 빠진다
       } else {
         dropRow();
         showToast(`${character} - 숨겼습니다. 검색 · 랜덤에서 빠지고 Find [제외] 에서 되돌립니다`, 'info');
-        try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (error) { /* 없으면 그만 */ }
+        try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed', {detail: {source: 'find'}})); } catch (error) { /* 없으면 그만 */ }
       }
     } catch (error) {
       showToast(error.message || String(error), 'error');
@@ -3223,7 +3239,7 @@ export function createCharacterQuickPanel({
     findDexLoading = false;
     findDexRows = [];
     if (findEl && findTab === 'dex') void loadFindDex();
-    try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed')); } catch (error) { /* 없으면 그만 */ }
+    try { window.dispatchEvent(new CustomEvent('naia:character-hidden-changed', {detail: {source: 'find'}})); } catch (error) { /* 없으면 그만 */ }
   }
 
   /** Random 이 굴렸다 - 기다리던 그림 읽기는 접고(그보다 Random 이 나중이다) 마지막으로 뽑힌 것을 보인다(A). */

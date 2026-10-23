@@ -803,17 +803,26 @@
     },
     {
       "id": "image_module_storage",
-      "name": "Character Reference and Vibe Transfer storage thumbnails",
+      "name": "Character Reference and Vibe Transfer storage thumbnails and REF & VIBE library",
       "source_files": [
         "app/backend/server/module_storage_routes.py",
         "core/headless_character_reference_service.py",
         "core/headless_vibe_transfer_service.py",
-        "app/web/remote/js/features/imageModulePanels.mjs"
+        "core/ref_vibe_library.py",
+        "app/web/remote/js/features/imageModulePanels.mjs",
+        "app/web/remote/js/features/refVibeWindow.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
         {"method": "GET", "path": "/api/module-storage/character-reference/thumb", "smoke": "asset_runtime"},
-        {"method": "GET", "path": "/api/module-storage/vibe/thumb", "smoke": "asset_runtime"}
+        {"method": "GET", "path": "/api/module-storage/vibe/thumb", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/ref-vibe/library", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ref-vibe/library/item", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/category", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/move", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/delete", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/api/ref-vibe/clusters", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/ref-vibe/clusters", "smoke": "state_mutation"}
       ]
     },
     {

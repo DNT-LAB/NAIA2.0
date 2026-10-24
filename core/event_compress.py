@@ -240,9 +240,15 @@ class EventCompress:
             self.error = None
             self.done.clear()
             if not self._worker_running and not _runtime().is_pool_busy(self.context):
+                # Start the worker BEFORE notifying: a failing notification used to leave
+                # _worker_running set with no thread, stranding the analysis (Codex re-review).
                 self._worker_running = True
+                try:
+                    threading.Thread(target=self._worker, name="naia-event-compress", daemon=True).start()
+                except BaseException:
+                    self._worker_running = False
+                    raise
                 self._notify()
-                threading.Thread(target=self._worker, name="naia-event-compress", daemon=True).start()
             elif _runtime().is_pool_busy(self.context):
                 self._notify()
 
@@ -884,6 +890,14 @@ class EventCompress:
             return set()
 
     def _notify(self, pool_changed=False):
+        # A broadcast is a courtesy to the windows - it must never break analysis/worker bookkeeping.
+        try:
+            self._publish_state(pool_changed)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[event_compress] notify failed: {type(exc).__name__}: {exc}"
+                  .encode("ascii", "replace").decode("ascii"))
+
+    def _publish_state(self, pool_changed):
         publish = getattr(self.context, "publish", None)
         if callable(publish):
             publish("search_pool_broadcast", {"type": "event_compress_state", **self.state()})

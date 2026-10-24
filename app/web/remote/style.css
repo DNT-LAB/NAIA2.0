@@ -32573,6 +32573,8 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 }
 .ecw-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .ecw-row { border-bottom: 1px solid rgba(255,255,255,0.04); }
+/* 행 묶음 - 화면 밖 상자는 배치를 건너뛴다(한 번 그린 크기는 기억) */
+.ecw-chunk { content-visibility: auto; contain-intrinsic-size: auto 6000px; }
 .ecw-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; }
 .ecw-head:hover { background: rgba(168,116,46,0.08); }
 .ecw-row.is-open .ecw-head { background: rgba(168,116,46,0.12); box-shadow: inset 2px 0 0 #a8742e; }

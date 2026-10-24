@@ -184,6 +184,7 @@ class EventCompress:
         self.identity = None
         self.signature = None
         self.groups = {}
+        self._page_cache = None
         self.sorted_groups = {"asc": [], "desc": []}
         self.tag_index = {}
         self.group_tag_counts = {}
@@ -610,18 +611,6 @@ class EventCompress:
                     pass
                 self.done.set()
 
-    def _plain_live(self, include_dropped=False):
-        model = getattr(self.context, "search_results", None)
-        if model is None:
-            return set()
-        if self.sample:
-            masks = {key: (consumed, dropped) for key, _, consumed, dropped in model.event_compress_snapshot()}
-            return {ref for group in self.groups.values() for ref in group["members"]
-                    if ref[0] in masks and ref[1] not in masks[ref[0]][0]
-                    and (include_dropped or ref[1] not in masks[ref[0]][1])}
-        return {(key, i) for key, frame, consumed, dropped in model.event_compress_snapshot()
-                for i in range(len(frame)) if i not in consumed and (include_dropped or i not in dropped)}
-
     def _remaining(self):
         if self._identity()[1] == "tag_filter":
             return len(self._live_ids())
@@ -694,6 +683,39 @@ class EventCompress:
         return [g for g in self.sorted_groups[sort]
                 if self._passes_cuts(g, min_tags, max_tags, min_size, max_size, counts)
                 and all(word in g["tags"].lower() for word in words)]
+
+    def _page_groups(self, sort, q, min_tags, max_tags, min_size, max_size, counts):
+        # Scrolling asks for the same selection page after page. Keep the last one, tied
+        # to the published ordering and counts objects themselves (not their ids).
+        key = (sort, q, min_tags, max_tags, min_size, max_size)
+        cached = self._page_cache
+        if cached is not None and cached[0] is self.sorted_groups and cached[1] is counts and cached[2] == key:
+            return cached[3], cached[4]
+        groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
+        # Largest event of the whole selection - the window scales its bars by this, so rows
+        # drawn on earlier pages never need redrawing when a later page brings a bigger one.
+        top = max((g["size"] for g in groups), default=0)
+        self._page_cache = (self.sorted_groups, counts, key, groups, top)
+        return groups, top
+
+    def _live_predicate(self):
+        # Liveness of a few listed members only - building the whole live set (every
+        # member of every event) cost ~1 s per page on a 500k-row sample.
+        if self.identity[1] == "tag_filter":
+            active = getattr(self.context, "active_tag_filter", None)
+            ids = active.get("ids") if isinstance(active, dict) else getattr(
+                self.context, "active_tag_filter_ids", None)
+            ids = ids or ()
+            return lambda ref: ref in ids
+        model = getattr(self.context, "search_results", None)
+        if model is None:
+            return lambda ref: False
+        masks = {key: (consumed, dropped) for key, _, consumed, dropped in model.event_compress_snapshot()}
+
+        def live(ref):
+            mask = masks.get(ref[0])
+            return mask is not None and ref[1] not in mask[0] and ref[1] not in mask[1]
+        return live
 
     def _commit_ids(self, groups):
         if not groups or self._identity()[1] != "tag_filter":
@@ -770,17 +792,17 @@ class EventCompress:
         with self.guard():
             if self._list_pending():
                 return self._pending_events(offset)
-            live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
+            live = self._live_predicate()
             counts, histogram, count_min, count_max = self._effective_counts(min_freq, max_freq)
-            groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
+            groups, size_top = self._page_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
             items = [{**{k: g[k] for k in ("key", "rating", "tags", "size")},
                       "tag_count": counts[g["key"]],
                       "uncounted": sorted(tag for tag in g["tag_set"]
                                           if not _is_people_tag(tag) and not self._passes_tag_cut(
                                               self.tag_frequencies[tag], min_freq, max_freq)),
-                      "remaining": sum(ref in live for ref in g["members"])}
+                      "remaining": sum(1 for ref in g["members"] if live(ref))}
                      for g in groups[offset:offset + limit]]
-            return {"ok": True, "total": len(groups), "offset": offset, "items": items,
+            return {"ok": True, "total": len(groups), "offset": offset, "items": items, "size_top": size_top,
                     "row_limit": EVENT_COMPRESS_ROW_LIMIT,
                     "sample": dict(self.sample) if self.sample else None,
                     "commit_rows": len(self._commit_ids(groups)),

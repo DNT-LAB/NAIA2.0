@@ -62,6 +62,7 @@ export function createEventCompressWindow({
   let state = null;                // GET /state
   let items = [];
   let total = 0;
+  let sizeTop = 0;                 // 걸러진 이벤트 전체에서 가장 큰 크기 - 막대 비율(쪽이 늘어도 앞 행을 다시 안 그린다)
   let hist = {};                   // {태그 수: 이벤트 수} - 컷 · 찾기와 무관한 전체
   let histMin = 0;
   let histMax = 0;
@@ -73,6 +74,7 @@ export function createEventCompressWindow({
   let stateSeq = 0;
   let acSeq = 0;
   let loadingMore = false;
+  let relisting = false;
   let sort = 'desc';
   let query = '';
   let queryTimer = 0;
@@ -333,6 +335,45 @@ export function createEventCompressWindow({
     return on.concat(grey).join(', ');
   }
 
+  function rowHtml(it, top) {
+    const key = String(it.key || '');
+    const size = Number(it.size) || 0;
+    const used = !(Number(it.remaining) > 0);
+    const isOpen = key === open;
+    const acts = isOpen
+      ? `<div class="ecw-acts">`
+        + `<button type="button" class="ecw-act" data-ecw-act="random"${busy ? ' disabled' : ''}`
+        + ` title="이 이벤트 행으로 메인 프롬프트를 채웁니다(Random 과 같은 파이프라인 · 풀은 그대로)">랜덤</button>`
+        + `<button type="button" class="ecw-act is-gen" data-ecw-act="generate"${busy ? ' disabled' : ''}`
+        + ` title="이 이벤트 행으로 바로 한 장 생성합니다(메인 프롬프트는 그대로)">생성</button></div>`
+      : '';
+    return `<div class="ecw-row${isOpen ? ' is-open' : ''}${used ? ' is-used' : ''}" data-ecw-key="${escAttr(key)}">`
+      + `<div class="ecw-head" data-ecw-head><div class="ecw-tags">`
+      + `<span class="ecw-r ecw-r-${escAttr(it.rating || '')}">${escHtml(String(it.rating || '').toUpperCase())}</span>`
+      + `${tagsHtml(it.tags, it.uncounted)}<div class="ecw-bar" style="width:${Math.max(2, Math.round(size / top * 100))}%"></div></div>`
+      + `<span class="ecw-size" title="${used ? '이 이벤트는 Random 이 이미 썼습니다' : '묶인 행 수'}">×${fmt(size)}</span></div>`
+      + acts + `</div>`;
+  }
+
+  function moreHtml() {
+    if (items.length >= total) return '';
+    return `<div class="ecw-more">${loadingMore || relisting ? '불러오는 중…' : state && state.computing ? '이벤트를 다시 세는 중 — 끝나면 이어서' : `${fmt(items.length)} / ${fmt(total)} — 스크롤하면 이어서`}</div>`;
+  }
+
+  /** 행 묶음 - 행을 몇백 개씩 상자에 담는다. 상자 수천 행을 한 부모에 바로 두면 쪽을 붙일 때마다 브라우저가
+   *  모든 행을 다시 배치했다(1만 행에서 쪽마다 ~130ms). 묶어 두면 마지막 상자만 다시 배치하고, 화면 밖 상자는 건너뛴다. */
+  const CHUNK = 300;
+
+  function chunksHtml(list, top) {
+    let html = '';
+    for (let i = 0; i < list.length; i += CHUNK) {
+      html += `<div class="ecw-chunk">${list.slice(i, i + CHUNK).map(it => rowHtml(it, top)).join('')}</div>`;
+    }
+    return html;
+  }
+
+  /** 목록. 행은 한 번 그리면 다시 그리지 않는다 - 다음 쪽은 뒤에 붙이고, 펼친 행만 바꿔 끼운다.
+   *  전부 다시 그리면 수천 행에서 쪽마다 느려져 스크롤이 굳었다(사용자 제보 2026-10-24). */
   function renderList() {
     const el = panel?.body.querySelector('[data-ecw-list]');
     if (!el) return;
@@ -344,35 +385,54 @@ export function createEventCompressWindow({
       const filtered = query || cut.min != null || cut.max != null;
       html = `<div class="ecw-empty">${filtered ? '맞는 이벤트가 없습니다.' : '이벤트가 없습니다.'}</div>`;
     }
-    else {
-      const top = Math.max(1, ...items.map(it => Number(it.size) || 0));
-      html = items.map(it => {
-        const key = String(it.key || '');
-        const size = Number(it.size) || 0;
-        const used = !(Number(it.remaining) > 0);
-        const isOpen = key === open;
-        const acts = isOpen
-          ? `<div class="ecw-acts">`
-            + `<button type="button" class="ecw-act" data-ecw-act="random"${busy ? ' disabled' : ''}`
-            + ` title="이 이벤트 행으로 메인 프롬프트를 채웁니다(Random 과 같은 파이프라인 · 풀은 그대로)">랜덤</button>`
-            + `<button type="button" class="ecw-act is-gen" data-ecw-act="generate"${busy ? ' disabled' : ''}`
-            + ` title="이 이벤트 행으로 바로 한 장 생성합니다(메인 프롬프트는 그대로)">생성</button></div>`
-          : '';
-        return `<div class="ecw-row${isOpen ? ' is-open' : ''}${used ? ' is-used' : ''}" data-ecw-key="${escAttr(key)}">`
-          + `<div class="ecw-head" data-ecw-head><div class="ecw-tags">`
-          + `<span class="ecw-r ecw-r-${escAttr(it.rating || '')}">${escHtml(String(it.rating || '').toUpperCase())}</span>`
-          + `${tagsHtml(it.tags, it.uncounted)}<div class="ecw-bar" style="width:${Math.max(2, Math.round(size / top * 100))}%"></div></div>`
-          + `<span class="ecw-size" title="${used ? '이 이벤트는 Random 이 이미 썼습니다' : '묶인 행 수'}">×${fmt(size)}</span></div>`
-          + acts + `</div>`;
-      }).join('');
-      if (items.length < total) html += `<div class="ecw-more">${loadingMore ? '불러오는 중…' : `${fmt(items.length)} / ${fmt(total)} — 스크롤하면 이어서`}</div>`;
+    if (html != null) {
+      el._rows = null;
+      if (el._html !== html) { el._html = html; el.innerHTML = html; }
+      return;
     }
-    if (el._html !== html) {
-      const keep = el.scrollTop;
-      el._html = html;
-      el.innerHTML = html;
-      el.scrollTop = keep;
+    const top = Math.max(1, sizeTop, Number(items[0].size) || 0);
+    const drawn = el._rows;
+    // 같은 목록(첫 행 · 막대 비율이 그대로)이면 새로 온 행만 붙인다.
+    if (drawn && drawn.first === items[0] && drawn.top === top && drawn.count <= items.length) {
+      const moreEl = el.querySelector(':scope > .ecw-more');
+      if (drawn.count < items.length) {
+        // 마지막 상자를 CHUNK 까지 채우고, 남은 것은 새 상자로.
+        let add = items.slice(drawn.count);
+        const tail = moreEl ? moreEl.previousElementSibling : el.lastElementChild;
+        const last = tail && tail.classList.contains('ecw-chunk') ? tail : null;
+        const room = last ? CHUNK - last.childElementCount : 0;
+        if (room > 0) {
+          last.insertAdjacentHTML('beforeend', add.slice(0, room).map(it => rowHtml(it, top)).join(''));
+          add = add.slice(room);
+        }
+        if (add.length) {
+          if (moreEl) moreEl.insertAdjacentHTML('beforebegin', chunksHtml(add, top));
+          else el.insertAdjacentHTML('beforeend', chunksHtml(add, top));
+        }
+        drawn.count = items.length;
+      }
+      if (drawn.open !== open || drawn.busy !== busy) {
+        for (const key of new Set([drawn.open, open])) {
+          if (!key) continue;
+          const it = items.find(x => x.key === key);
+          const row = el.querySelector(`[data-ecw-key="${CSS.escape(key)}"]`);
+          if (it && row) row.outerHTML = rowHtml(it, top);
+        }
+        drawn.open = open;
+        drawn.busy = busy;
+      }
+      const more = moreHtml();
+      if (!more) moreEl?.remove();
+      else if (moreEl) { if (moreEl.outerHTML !== more) moreEl.outerHTML = more; }
+      else el.insertAdjacentHTML('beforeend', more);
+      el._html = null;
+      return;
     }
+    const keep = el.scrollTop;
+    el._html = null;
+    el.innerHTML = chunksHtml(items, top) + moreHtml();
+    el._rows = {first: items[0], top, count: items.length, open, busy};
+    el.scrollTop = keep;
   }
 
   /** [커밋 · n행] = 걸러진 이벤트로 Tag Filter 를 좁힌다(새 검색처럼) · [재적용] = 칩 조건으로 다시 걸어 되돌린다(사용자 지시 2026-10-23). */
@@ -494,24 +554,30 @@ export function createEventCompressWindow({
   /** more=false 면 처음부터, true 면 다음 쪽을 붙인다. 조건이 바뀌면 늦은 답은 버린다. */
   async function loadList(more) {
     if (!panel || !panel.isOpen()) return;
-    if (more && (loadingMore || items.length >= total)) return;
+    // 처음부터 청하는 중이면 다음 쪽은 기다린다 - 옛 목록 길이로 청한 쪽이 새 목록 뒤에 붙는다.
+    // 서버가 다시 세는 동안은 다음 쪽을 청하지 않는다 - 끝나면 상태 알림이 목록을 처음부터 다시 청한다.
+    if (more && (loadingMore || relisting || items.length >= total || (state && state.computing))) return;
     const mine = more ? listSeq : ++listSeq;
     const offset = more ? items.length : 0;
+    // 처음부터 다시 청하면 진행 중인 다음 쪽은 버린다 - 안 풀면 '불러오는 중…' 에 영영 멈춘다(사용자 제보 2026-10-24).
     if (more) { loadingMore = true; renderList(); }
+    else { loadingMore = false; relisting = true; }
     try {
       const params = new URLSearchParams({sort, q: query, offset: String(offset), limit: String(PAGE), ...cutParams()});
       const body = await getJson(`/api/event-compress/events?${params}`);
       if (mine !== listSeq) return;
       // 서버는 세는 동안 기다리지 않고 바로 '세는 중' 이라 답한다 - 끝나면 event_compress_state 가 와서 다시 청한다.
-      if (!more && body.computing) {
+      // 다음 쪽도 같다: 빈 답을 목록 끝으로 읽으면 총수가 지금 길이로 줄어 스크롤이 거기서 멈춘다.
+      if (body.computing) {
         state = {...(state || {}), computing: true, paused: !!body.paused};
-        stopWaiting();
+        if (!more) stopWaiting();
         render();
         return;
       }
       const got = Array.isArray(body.items) ? body.items : [];
       items = more ? items.concat(got) : got;
       total = Number(body.total) || items.length;
+      if (!more) sizeTop = Number(body.size_top) || 0;
       if (!more) {
         commitRows = Number(body.commit_rows) || 0;
         eventsSig = String(body.events_signature || '');
@@ -534,11 +600,19 @@ export function createEventCompressWindow({
       if (!more) { items = []; total = 0; stopWaiting(); }
       showToast(error.message || String(error), 'error');
     } finally {
-      if (more && mine === listSeq) loadingMore = false;
+      if (mine === listSeq) {
+        if (more) loadingMore = false;
+        else relisting = false;
+      }
     }
     renderCut();
     renderList();
     renderCommit();
+    // 빨리 내려 쪽이 오기 전에 바닥에 닿았으면 스크롤 이벤트가 다시 안 온다 - 아직 바닥이면 이어서 청한다.
+    if (more && mine === listSeq) {
+      const list = panel?.body.querySelector('[data-ecw-list]');
+      if (list && list.scrollTop + list.clientHeight >= list.scrollHeight - 60) void loadList(true);
+    }
   }
 
   async function loadAc() {

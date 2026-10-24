@@ -2,7 +2,8 @@
 
 The worker owns expensive tokenization/grouping. The context pool lock owns
 publication; generation, assignment revision, PE signature and request sequence
-must all match before a result can change the live pool.
+must all match before a result can change the live pool. Read-only analysis may
+be published across consumption, but never across an assignment/settings change.
 """
 from __future__ import annotations
 
@@ -10,12 +11,18 @@ import copy
 import hashlib
 import json
 import threading
+import time
+from itertools import chain, islice
 from bisect import bisect_left, bisect_right
 from collections import Counter
+
+import numpy as np
 
 from core.event_map.pe_filter import _pe_options, _category_overrides, _filter_manager
 from core.tag_filter_helpers import apply_tag_filters, compile_hide_pattern
 from core.wildcard_processor import split_tags_smart
+
+EVENT_COMPRESS_ROW_LIMIT = 500_000
 
 OPTIONS = (
     "remove_character_features", "remove_clothes", "remove_clothing_event",
@@ -32,16 +39,37 @@ PEOPLE_COUNT_TAGS = frozenset({
 _CREATE_LOCK = threading.Lock()
 
 
+class _AnalysisCancelled(Exception):
+    """An obsolete/deferred analysis must never publish partial results."""
+
+
+def _cooperative(rows, checkpoint=None):
+    """C-level iteration within each batch avoids a Python yield per row."""
+    def batches():
+        iterator = iter(rows)
+        while True:
+            if checkpoint is not None:
+                checkpoint()
+            time.sleep(0)
+            if checkpoint is not None:
+                checkpoint()
+            batch = tuple(islice(iterator, 2000))
+            if not batch:
+                return
+            yield batch
+    return chain.from_iterable(batches())
+
+
 def _is_people_tag(tag):
     return tag.lower().replace("_", " ") in PEOPLE_COUNT_TAGS
 
 
-def _frequency_metadata(groups, tag_index):
+def _frequency_metadata(groups, tag_index, checkpoint=None):
     """Build immutable request inputs once, before publishing an analysis."""
-    frequencies = {tag: len(keys) for tag, keys in tag_index.items()}
-    non_people = {tag: freq for tag, freq in frequencies.items() if not _is_people_tag(tag)}
+    frequencies = {tag: len(keys) for tag, keys in _cooperative(tag_index.items(), checkpoint)}
+    non_people = {tag: freq for tag, freq in _cooperative(frequencies.items(), checkpoint) if not _is_people_tag(tag)}
     group_frequencies = {}
-    for key, group in groups.items():
+    for key, group in _cooperative(groups.items(), checkpoint):
         values = sorted(non_people[tag] for tag in group["tag_set"] if tag in non_people)
         group_frequencies[key] = (group["tag_count"] - len(values), values)
     histogram = Counter(non_people.values())
@@ -62,16 +90,16 @@ def pe_settings(context):
     return signature, options, auto_hide, overrides
 
 
-def filter_rows(rows, options, auto_hide, manager, overrides):
+def filter_rows(rows, options, auto_hide, manager, overrides, checkpoint=None):
     """Union-once fast path; replay ONLY context-sensitive rounds when needed.
 
     Auto Hide patterns remove one occurrence, not all duplicates. Round includes
     deduplicate by lower-case name, so multiplicity/case aliases are contextual.
     Dictionary, color exceptions, category hide and noise whitelist are unary.
     """
-    union = list(dict.fromkeys(tag for row in rows for tag in row))
+    union = list(dict.fromkeys(tag for row in _cooperative(rows, checkpoint) for tag in row))
     aliases = len({t.strip().lower() for t in union}) != len(union)
-    duplicates = any(len(set(row)) != len(row) for row in rows)
+    duplicates = any(len(set(row)) != len(row) for row in _cooperative(rows, checkpoint))
     special = set()
     if duplicates and any(compile_hide_pattern(t) for t in auto_hide if not t.startswith("~")):
         special.add("auto_hide")
@@ -87,7 +115,7 @@ def filter_rows(rows, options, auto_hide, manager, overrides):
 
     if not special:
         kept = set(run(union))
-        return [tuple(t for t in row if t in kept) for row in rows], special
+        return [tuple(t for t in row if t in kept) for row in _cooperative(rows, checkpoint)], special
     # Keep round order. A prior contextual round can leave a tag in only some
     # rows; each later unary segment therefore uses the union of CURRENT rows.
     current = rows
@@ -97,12 +125,12 @@ def filter_rows(rows, options, auto_hide, manager, overrides):
             pending.append(key)
             continue
         if pending:
-            union = list(dict.fromkeys(t for row in current for t in row))
+            union = list(dict.fromkeys(t for row in _cooperative(current, checkpoint) for t in row))
             kept = set(run(union, set(pending)))
-            current = [tuple(t for t in row if t in kept) for row in current]
+            current = [tuple(t for t in row if t in kept) for row in _cooperative(current, checkpoint)]
             pending = []
         if key is not None:
-            current = [tuple(run(row, {key})) for row in current]
+            current = [tuple(run(row, {key})) for row in _cooperative(current, checkpoint)]
     return current, special
 
 
@@ -135,7 +163,7 @@ def check_event_compress(context):
     """Cheap signature/identity check before Random, including Quick Presets."""
     if enabled(context):
         service = ensure_event_compress(context)
-        if service.is_stale():
+        if service.is_stale() and not service.computing:
             service.request()
 
 
@@ -150,6 +178,7 @@ class EventCompress:
         self.context = context
         self.sequence = 0
         self.computing = False
+        self._worker_running = False
         self.done = threading.Event()
         self.done.set()
         self.identity = None
@@ -174,6 +203,7 @@ class EventCompress:
         self.token_cache = {}
         self.cache_generation = None
         self.error = None
+        self.sample = None
         self.per_row_rounds = set()
 
     def guard(self):
@@ -203,11 +233,34 @@ class EventCompress:
     def request(self):
         with self.guard():
             self.sequence += 1
-            if not self.computing:
-                self.computing = True
-                self.error = None
-                self.done.clear()
+            self.computing = True
+            self.error = None
+            self.done.clear()
+            if not self._worker_running and not _runtime().is_pool_busy(self.context):
+                self._worker_running = True
+                self._notify()
                 threading.Thread(target=self._worker, name="naia-event-compress", daemon=True).start()
+            elif _runtime().is_pool_busy(self.context):
+                self._notify()
+
+    def pool_busy_changed(self):
+        # Called under the same pool guard as worker start/publication.
+        if _runtime().is_pool_busy(self.context):
+            if self.computing or self.is_stale():
+                self.request()
+        elif self.computing or self.is_stale():
+            running = self._worker_running
+            self.request()
+            if running:
+                self._notify()
+
+    def _checkpoint(self, stamp):
+        if _runtime().is_pool_busy(self.context):
+            raise _AnalysisCancelled()
+        with self.guard():
+            current = (self._identity(), self._revision(), stamp[2], self.sequence)
+            if _runtime().is_pool_busy(self.context) or not self._can_publish(stamp, current):
+                raise _AnalysisCancelled()
 
     def refresh(self):
         if self.is_stale():
@@ -281,7 +334,22 @@ class EventCompress:
         model = getattr(self.context, "search_results", None)
         return (_runtime().current_tag_filter_revision(self.context), id(model),
                 getattr(model, "_event_compress_version", 0),
-                getattr(model, "_event_compress_consumption", 0))
+                getattr(model, "_event_compress_consumption", 0),
+                int(getattr(self.context, "_tag_filter_consumption", 0) or 0))
+
+    def _can_publish(self, stamp, current):
+        if enabled(self.context):
+            # Compression writes kept ids back, so consumption must also match.
+            return current == stamp
+
+        def without_consumption(value):
+            identity, revision, signature, sequence = value
+            tag_revision, model_id, version, _, tag_consumption = revision
+            if identity[1] == "tag_filter":
+                tag_revision -= tag_consumption
+            return identity, (tag_revision, model_id, version), signature, sequence
+
+        return without_consumption(current) == without_consumption(stamp)
 
     def _capture(self):
         with self.guard():
@@ -305,7 +373,41 @@ class EventCompress:
                 data = model.event_compress_snapshot() if model is not None else []
             return stamp, settings, data
 
-    def _compute(self, stamp, settings, data):
+    def _sample_candidates(self, stamp, data):
+        """Select integer positions only; never exclude rows from the live pool."""
+        identity = stamp[0]
+        tag_filter = identity[1] == "tag_filter"
+        rows = (len(data[1]) if tag_filter else
+                sum(len(frame) - len(consumed) for _, frame, consumed, _ in data))
+        limit = EVENT_COMPRESS_ROW_LIMIT
+        if rows <= limit:
+            return data, None, None
+        # Identity includes generation, scope, assignment/model identity and version.
+        # Neither request sequence, PE settings nor global RNG state affects the seed.
+        seed = int.from_bytes(hashlib.sha256(
+            json.dumps(identity, ensure_ascii=True).encode()).digest()[:8], "big")
+        selected = np.sort(np.random.default_rng(seed).choice(rows, size=limit, replace=False))
+        sample = {"rows": rows, "used": limit, "limit": limit}
+        if tag_filter:
+            candidates = np.fromiter(data[1], dtype=np.int64, count=rows)
+            candidates.sort()
+            return (data[0], set(candidates[selected].tolist()), data[2], data[3]), {}, sample
+        positions, offset = {}, 0
+        for bucket, frame, consumed, _ in data:
+            count = len(frame) - len(consumed)
+            lo, hi = np.searchsorted(selected, [offset, offset + count])
+            local = selected[lo:hi] - offset
+            if len(local) and consumed:
+                available = np.ones(len(frame), dtype=bool)
+                available[np.fromiter(consumed, dtype=np.intp, count=len(consumed))] = False
+                local = np.flatnonzero(available)[local]
+            positions[bucket] = local
+            offset += count
+        return data, positions, sample
+
+    def _compute(self, stamp, settings, data, sampled_positions=None):
+        checkpoint = lambda: self._checkpoint(stamp)
+        checkpoint()
         identity = stamp[0]
         # Frame references are immutable until replacement. Cache integer tag
         # arrays across PE edits, consumption and assignment within a generation.
@@ -320,53 +422,47 @@ class EventCompress:
         for bucket, frame, consumed in frames:
             if frame is None:
                 continue
+            if bucket is None:
+                positions = frame["id"].isin(data[1]).to_numpy().nonzero()[0] if "id" in frame else []
+            elif sampled_positions is not None:
+                positions = sampled_positions[bucket]
+            else:
+                available = np.ones(len(frame), dtype=bool)
+                if consumed:
+                    available[np.fromiter(consumed, dtype=np.intp, count=len(consumed))] = False
+                positions = np.flatnonzero(available)
+            if not len(positions):
+                continue
             cache_key = (id(frame), len(frame))
             cached = self.token_cache.get(cache_key)
-            if bucket is None:
-                # Scan only ids; read/tokenize payload columns only at selected positions.
-                positions = frame["id"].isin(data[1]).to_numpy().nonzero()[0] if "id" in frame else []
-                if cached is None or cached[0] is not frame:
-                    cached = (frame, [], {}, {}, {})
-                    self.token_cache[cache_key] = cached
-                _, vocabulary, arrays, ratings, ids = cached
-                unseen = [i for i in positions if i not in arrays]
-                mapping = {t: i for i, t in enumerate(vocabulary)}
-                generals = frame["general"].iloc[unseen].tolist() if "general" in frame else [None] * len(unseen)
-                selected_ratings = frame["rating"].iloc[unseen].astype(str).str.strip().str.lower().tolist() if "rating" in frame else [""] * len(unseen)
-                selected_ids = frame["id"].iloc[unseen].tolist() if "id" in frame else []
-                for i, general, rating, row_id in zip(unseen, generals, selected_ratings, selected_ids):
-                    tokens = tuple(split_tags_smart(general)) if isinstance(general, str) and general.strip().lower() not in {"", "nan", "none", "null"} else ()
-                    for tag in tokens:
-                        if tag not in mapping:
-                            mapping[tag] = len(vocabulary)
-                            vocabulary.append(tag)
-                    arrays[i] = tuple(mapping[t] for t in tokens)
-                    ratings[i], ids[i] = rating, row_id
-                for i in positions:
-                    # Missing text is not an event and must never cause a drop.
-                    if arrays[i]:
-                        records.append((ids[i], tuple(vocabulary[t] for t in arrays[i]), ratings[i], frame, i))
-                continue
             if cached is None or cached[0] is not frame:
-                generals = frame["general"].tolist() if "general" in frame else [""] * len(frame)
-                tokens = [tuple(split_tags_smart(t)) if isinstance(t, str) else () for t in generals]
-                vocabulary = list(dict.fromkeys(t for row in tokens for t in row))
-                mapping = {t: i for i, t in enumerate(vocabulary)}
-                arrays = [tuple(mapping[t] for t in row) for row in tokens]
-                ratings = frame["rating"].astype(str).str.strip().str.lower().tolist() if "rating" in frame else [""] * len(frame)
-                ids = frame["id"].tolist() if "id" in frame else list(range(len(frame)))
-                cached = (frame, vocabulary, arrays, ratings, ids)
+                cached = (frame, [], {}, {}, {})
                 self.token_cache[cache_key] = cached
             _, vocabulary, arrays, ratings, ids = cached
-            for i, array in enumerate(arrays):
-                ref = ids[i] if bucket is None else (bucket, i)
-                if (bucket is None and ref not in data[1]) or (bucket is not None and i in consumed):
-                    continue
-                records.append((ref, tuple(vocabulary[t] for t in array), ratings[i], frame, i))
-        filtered, special = filter_rows([r[1] for r in records], settings[1], settings[2],
-                                        _filter_manager(self.context), settings[3])
+            # Payload reads and Python row objects are restricted to selected rows.
+            unseen = [i for i in _cooperative(positions, checkpoint) if i not in arrays]
+            mapping = {t: i for i, t in enumerate(vocabulary)}
+            generals = frame["general"].iloc[unseen].tolist() if "general" in frame else [None] * len(unseen)
+            selected_ratings = frame["rating"].iloc[unseen].astype(str).str.strip().str.lower().tolist() if "rating" in frame else [""] * len(unseen)
+            selected_ids = frame["id"].iloc[unseen].tolist() if bucket is None and "id" in frame else unseen
+            for i, general, rating, row_id in _cooperative(zip(unseen, generals, selected_ratings, selected_ids), checkpoint):
+                valid_text = isinstance(general, str) and (bucket is not None or general.strip().lower() not in {"", "nan", "none", "null"})
+                tokens = tuple(split_tags_smart(general)) if valid_text else ()
+                for tag in tokens:
+                    if tag not in mapping:
+                        mapping[tag] = len(vocabulary)
+                        vocabulary.append(tag)
+                arrays[i] = tuple(mapping[t] for t in tokens)
+                ratings[i], ids[i] = rating, row_id
+            for i in _cooperative(positions, checkpoint):
+                # Missing Tag Filter text is not an event and must never cause a drop.
+                if bucket is not None or arrays[i]:
+                    ref = ids[i] if bucket is None else (bucket, int(i))
+                    records.append((ref, tuple(vocabulary[t] for t in arrays[i]), ratings[i], frame, i))
+        filtered, special = filter_rows([r[1] for r in _cooperative(records, checkpoint)], settings[1], settings[2],
+                                        _filter_manager(self.context), settings[3], checkpoint)
         groups = {}
-        for record, tags in zip(records, filtered):
+        for record, tags in _cooperative(zip(records, filtered), checkpoint):
             ref, _, rating, frame, index = record
             key = (rating, frozenset(tags))
             group = groups.get(key)
@@ -377,58 +473,94 @@ class EventCompress:
                                       "tag_count": len(key[1]), "members": [],
                                       "frame": frame, "index": index}
             group["members"].append(ref)
-        result = {g["key"]: g for g in groups.values()}
-        for group in result.values():
+        result = {g["key"]: g for g in _cooperative(groups.values(), checkpoint)}
+        for group in _cooperative(result.values(), checkpoint):
             group["size"] = len(group["members"])
-        ordered = {
-            "asc": sorted(result.values(), key=lambda g: (g["size"], g["tags"])),
-            "desc": sorted(result.values(), key=lambda g: (-g["size"], g["tags"])),
-        }
+        def ordered_groups(direction):
+            count = 0
+            def sort_key(group):
+                nonlocal count
+                if count % 2000 == 0:
+                    checkpoint()
+                    time.sleep(0)
+                    checkpoint()
+                count += 1
+                return direction * group["size"], group["tags"]
+            return sorted(result.values(), key=sort_key)
+
+        ordered = {"asc": ordered_groups(1), "desc": ordered_groups(-1)}
         kept, dropped, ratings = set(), set(), Counter()
-        for group in result.values():
+        for group in _cooperative(result.values(), checkpoint):
             kept.add(group["members"][0])
-            dropped.update(group["members"][1:])
+            dropped.update(_cooperative(islice(group["members"], 1, None), checkpoint)
+                           if len(group["members"]) > 2000 else group["members"][1:])
             ratings[group["rating"]] += 1
         mask = dropped
-        if identity[1] == "tag_filter":
+        if identity[1] == "tag_filter" and sampled_positions is None:
             # Only grouped duplicates may leave the pool. Delta accounting keeps
             # the previous per-rating contribution of every ungrouped live id.
             kept = data[1] - dropped
             ratings = data[3].copy()
-            for group in result.values():
+            for group in _cooperative(result.values(), checkpoint):
                 ratings[group["rating"]] -= len(group["members"]) - 1
             mask = set()
             for bucket, frame, consumed, _ in data[2]:
                 if "id" in frame:
                     positions = frame["id"].isin(dropped).to_numpy().nonzero()[0]
-                    mask.update((bucket, i) for i in positions if i not in consumed)
+                    mask.update((bucket, i) for i in _cooperative(positions, checkpoint) if i not in consumed)
+        checkpoint()
         return result, special, ordered, kept, dropped, ratings, mask
 
     def _worker(self):
+        while True:
+            try:
+                self._analyze()
+                return
+            except _AnalysisCancelled:
+                with self.guard():
+                    self._clear_token_cache()
+                    if _runtime().is_pool_busy(self.context):
+                        self._worker_running = False
+                        return
+                    # A short busy block can finish before the worker observes it.
+                    # Its sequence change still cancels the old pass, then retries here.
+                    self._notify()
+
+    def _analyze(self):
         try:
             while True:
-                stamp, settings, data = self._capture()
-                groups, special, ordered, kept, dropped, ratings, mask = self._compute(stamp, settings, data)
+                with self.guard():
+                    if _runtime().is_pool_busy(self.context):
+                        raise _AnalysisCancelled()
+                    stamp, settings, data = self._capture()
+                checkpoint = lambda: self._checkpoint(stamp)
+                data, sampled_positions, sample = self._sample_candidates(stamp, data)
+                if sample:
+                    # Do not retain full-pool tokens from an earlier legacy analysis.
+                    self._clear_token_cache()
+                groups, special, ordered, kept, dropped, ratings, mask = self._compute(
+                    stamp, settings, data, sampled_positions)
                 # Build once outside the pool lock; publish with the same groups.
                 tag_index = {}
                 group_tag_counts = {}
-                for key, group in groups.items():
+                for key, group in _cooperative(groups.items(), checkpoint):
                     group_tag_counts[key] = group["tag_count"]
                     for tag in group["tag_set"]:
                         tag_index.setdefault(tag, []).append(key)
-                frequency_metadata = _frequency_metadata(groups, tag_index)
+                frequency_metadata = _frequency_metadata(groups, tag_index, checkpoint)
                 histogram = Counter(group_tag_counts.values())
                 tag_count_hist = {str(n): histogram[n] for n in sorted(histogram)}
                 tag_count_min = min(histogram, default=0)
                 tag_count_max = max(histogram, default=0)
-                size_histogram = Counter(group["size"] for group in groups.values())
+                size_histogram = Counter(group["size"] for group in _cooperative(groups.values(), checkpoint))
                 size_hist = {str(n): size_histogram[n] for n in sorted(size_histogram)}
                 size_min = min(size_histogram, default=0)
                 size_max = max(size_histogram, default=0)
                 with self.guard():
+                    checkpoint()
                     current = (self._identity(), self._revision(),
                                pe_settings(self.context)[0], self.sequence)
-                    if current != stamp:
+                    if not self._can_publish(stamp, current):
                         if current[0] != stamp[0] or not enabled(self.context):
                             self._clear_token_cache()
                         continue
@@ -448,25 +580,30 @@ class EventCompress:
                     self.size_max = size_max
                     self.identity, self.signature = stamp[0], settings[0]
                     self.per_row_rounds = special
-                    if enabled(self.context):
+                    self.sample = sample
+                    if enabled(self.context) and sample is None:
                         self.dropped = dropped
                         if self.identity[1] == "tag_filter":
                             self._set_ids(kept, ratings)
                         model = getattr(self.context, "search_results", None)
                         if model is not None:
                             model.set_event_compress_dropped(mask)
-                    if not enabled(self.context):
+                    if sample or not enabled(self.context):
                         self._clear_token_cache()
                     self.computing = False
+                    self._worker_running = False
                     self.error = None
                     self._notify(pool_changed=before != self._remaining())
                     self.done.set()
                     return
+        except _AnalysisCancelled:
+            raise
         except Exception as exc:
             with self.guard():
                 self.error = str(exc)
                 self.signature = None
                 self.computing = False
+                self._worker_running = False
                 try:
                     self._notify()
                 except Exception:
@@ -477,6 +614,11 @@ class EventCompress:
         model = getattr(self.context, "search_results", None)
         if model is None:
             return set()
+        if self.sample:
+            masks = {key: (consumed, dropped) for key, _, consumed, dropped in model.event_compress_snapshot()}
+            return {ref for group in self.groups.values() for ref in group["members"]
+                    if ref[0] in masks and ref[1] not in masks[ref[0]][0]
+                    and (include_dropped or ref[1] not in masks[ref[0]][1])}
         return {(key, i) for key, frame, consumed, dropped in model.event_compress_snapshot()
                 for i in range(len(frame)) if i not in consumed and (include_dropped or i not in dropped)}
 
@@ -495,6 +637,10 @@ class EventCompress:
             dropped = len(self.dropped) if valid and enabled(self.context) else 0
             payload = {"ok": True, "enabled": enabled(self.context), "computing": self.computing,
                        "stale": not valid or signature != self.signature,
+                       "paused": _runtime().is_pool_busy(self.context) and (
+                           self.computing or not valid or signature != self.signature),
+                       "row_limit": EVENT_COMPRESS_ROW_LIMIT,
+                       "sample": dict(self.sample) if self.sample else None,
                        "scope": identity[1] if remaining or dropped else "empty",
                        "pool_rows": remaining + dropped, "events": len(self.groups) if valid else 0,
                        "dropped": dropped, "remaining": remaining,
@@ -550,7 +696,7 @@ class EventCompress:
                 and all(word in g["tags"].lower() for word in words)]
 
     def _commit_ids(self, groups):
-        if self._identity()[1] != "tag_filter":
+        if not groups or self._identity()[1] != "tag_filter":
             return set()
         live = self._live_ids()
         ids = set()
@@ -600,68 +746,82 @@ class EventCompress:
             self._notify(pool_changed=True)
             return {"ok": True, "committed": len(ids), "state": self.state()}
 
+    def _list_pending(self):
+        if self.computing or self.is_stale() or _runtime().is_pool_busy(self.context):
+            if not self.computing:
+                self.request()
+            return True
+        return False
+
+    def _pending_flags(self):
+        return {"computing": True, "paused": _runtime().is_pool_busy(self.context),
+                "row_limit": EVENT_COMPRESS_ROW_LIMIT,
+                "sample": dict(self.sample) if self.sample else None}
+
+    def _pending_events(self, offset):
+        return {"ok": True, **self._pending_flags(), "total": 0, "offset": offset,
+                "items": [], "commit_rows": 0, "events_signature": None,
+                "tag_count_hist": {}, "tag_count_min": 0, "tag_count_max": 0,
+                "tag_freq_hist": {}, "tag_freq_min": 0, "tag_freq_max": 0,
+                "size_hist": {}, "size_min": 0, "size_max": 0}
+
     def events(self, sort="desc", q="", offset=0, limit=60, min_tags=None, max_tags=None,
                min_size=None, max_size=None, min_freq=None, max_freq=None):
-        while True:
-            self.refresh()
-            with self.guard():
-                if self.is_stale():
-                    continue
-                live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
-                counts, histogram, count_min, count_max = self._effective_counts(min_freq, max_freq)
-                groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
-                items = [{**{k: g[k] for k in ("key", "rating", "tags", "size")},
-                          "tag_count": counts[g["key"]],
-                          "uncounted": sorted(tag for tag in g["tag_set"]
-                                              if not _is_people_tag(tag) and not self._passes_tag_cut(
-                                                  self.tag_frequencies[tag], min_freq, max_freq)),
-                          "remaining": sum(ref in live for ref in g["members"])}
-                         for g in groups[offset:offset + limit]]
-                return {"ok": True, "total": len(groups), "offset": offset, "items": items,
-                        "commit_rows": len(self._commit_ids(groups)),
-                        "events_signature": self._events_signature(),
-                        "tag_count_hist": dict(histogram),
-                        "tag_count_min": count_min, "tag_count_max": count_max,
-                        "tag_freq_hist": dict(self.tag_freq_hist),
-                        "tag_freq_min": self.tag_freq_min, "tag_freq_max": self.tag_freq_max,
-                        "size_hist": dict(self.size_hist),
-                        "size_min": self.size_min, "size_max": self.size_max}
+        with self.guard():
+            if self._list_pending():
+                return self._pending_events(offset)
+            live = self._live_ids() if self.identity[1] == "tag_filter" else self._plain_live()
+            counts, histogram, count_min, count_max = self._effective_counts(min_freq, max_freq)
+            groups = self._matching_groups(sort, q, min_tags, max_tags, min_size, max_size, counts)
+            items = [{**{k: g[k] for k in ("key", "rating", "tags", "size")},
+                      "tag_count": counts[g["key"]],
+                      "uncounted": sorted(tag for tag in g["tag_set"]
+                                          if not _is_people_tag(tag) and not self._passes_tag_cut(
+                                              self.tag_frequencies[tag], min_freq, max_freq)),
+                      "remaining": sum(ref in live for ref in g["members"])}
+                     for g in groups[offset:offset + limit]]
+            return {"ok": True, "total": len(groups), "offset": offset, "items": items,
+                    "row_limit": EVENT_COMPRESS_ROW_LIMIT,
+                    "sample": dict(self.sample) if self.sample else None,
+                    "commit_rows": len(self._commit_ids(groups)),
+                    "events_signature": self._events_signature(),
+                    "tag_count_hist": dict(histogram),
+                    "tag_count_min": count_min, "tag_count_max": count_max,
+                    "tag_freq_hist": dict(self.tag_freq_hist),
+                    "tag_freq_min": self.tag_freq_min, "tag_freq_max": self.tag_freq_max,
+                    "size_hist": dict(self.size_hist),
+                    "size_min": self.size_min, "size_max": self.size_max}
 
     def tags(self, q="", min_tags=None, max_tags=None, limit=20, min_size=None, max_size=None,
              min_freq=None, max_freq=None):
         query = q.lower().replace("_", " ")
-        while True:
-            self.refresh()
-            with self.guard():
-                if self.is_stale():
+        with self.guard():
+            if self._list_pending():
+                return {"ok": True, "items": [], **self._pending_flags()}
+            counts, _, _, _ = self._effective_counts(min_freq, max_freq)
+            items = []
+            for tag, keys in self.tag_index.items():
+                normalized = tag.lower().replace("_", " ")
+                if query not in normalized:
                     continue
-                counts, _, _, _ = self._effective_counts(min_freq, max_freq)
-                items = []
-                for tag, keys in self.tag_index.items():
-                    normalized = tag.lower().replace("_", " ")
-                    if query not in normalized:
-                        continue
-                    unbounded = min_tags is None and max_tags is None and min_size is None and max_size is None
-                    count = len(keys) if unbounded else sum(
-                        self._passes_cuts(self.groups[key], min_tags, max_tags, min_size, max_size, counts)
-                        for key in keys)
-                    if count:
-                        items.append({"tag": tag, "events": count})
-                items.sort(key=lambda item: (
-                    not item["tag"].lower().replace("_", " ").startswith(query),
-                    -item["events"], item["tag"]))
-                return {"ok": True, "items": items[:limit]}
+                unbounded = min_tags is None and max_tags is None and min_size is None and max_size is None
+                count = len(keys) if unbounded else sum(
+                    self._passes_cuts(self.groups[key], min_tags, max_tags, min_size, max_size, counts)
+                    for key in keys)
+                if count:
+                    items.append({"tag": tag, "events": count})
+            items.sort(key=lambda item: (
+                not item["tag"].lower().replace("_", " ").startswith(query),
+                -item["events"], item["tag"]))
+            return {"ok": True, "items": items[:limit]}
 
     def source_row(self, key):
-        while True:
-            self.refresh()
-            with self.guard():
-                if self.is_stale():
-                    continue
-                group = self.groups.get(key)
-                if group is None:
-                    raise KeyError(key)
-                return group["frame"].iloc[group["index"]].to_dict()
+        with self.guard():
+            self._list_pending()
+            group = self.groups.get(key) if self.identity == self._identity() else None
+            if group is None:
+                raise KeyError(key)
+            return group["frame"].iloc[group["index"]].to_dict()
 
     def persisted_dropped(self):
         with self.guard():

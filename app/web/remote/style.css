@@ -33002,3 +33002,6 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .rvw-mrow.is-live { background: rgba(124,106,239,.16); box-shadow: inset 2px 0 0 rgb(124,106,239); }
 .rvw-tab.on { border-color: rgb(124,106,239); background: rgb(124,106,239); color: #fff; font-weight: 700; }
 .rvw-tab.on:hover { color: #fff; }
+
+/* 이벤트 압축 한도 초과(사용자 결정 2026-10-24 - 50만 행) */
+.ecw-over { color: #ffb070; }

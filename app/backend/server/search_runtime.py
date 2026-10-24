@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
+from functools import wraps
 import os
 import re
 import threading
@@ -64,6 +65,36 @@ def search_pool_state_guard(context: WebSessionContext):
         return getter()
     lock = getattr(context, "_search_pool_state_lock", None)
     return lock if lock is not None else nullcontext()
+
+
+def is_pool_busy(context) -> bool:
+    return bool(getattr(context, "_event_compress_pool_busy", 0))
+
+
+@contextmanager
+def pool_busy(context):
+    """Give archive scans/pool writers priority; nested operations defer once."""
+    with search_pool_state_guard(context):
+        context._event_compress_pool_busy = getattr(context, "_event_compress_pool_busy", 0) + 1
+        service = getattr(context, "_event_compress", None)
+        if context._event_compress_pool_busy == 1 and service is not None:
+            service.pool_busy_changed()
+    try:
+        yield
+    finally:
+        with search_pool_state_guard(context):
+            context._event_compress_pool_busy -= 1
+            service = getattr(context, "_event_compress", None)
+            if not context._event_compress_pool_busy and service is not None:
+                service.pool_busy_changed()
+
+
+def _pool_operation(function):
+    @wraps(function)
+    def wrapped(context, *args, **kwargs):
+        with pool_busy(context):
+            return function(context, *args, **kwargs)
+    return wrapped
 
 
 def current_search_pool_generation(context: WebSessionContext) -> int:
@@ -266,6 +297,7 @@ def _last_search_meta(context: WebSessionContext, frame) -> dict[str, Any]:
     return make_meta("last_search", pool_provenance(context), len(frame))
 
 
+@_pool_operation
 def install_custom_parquet_frame(context: WebSessionContext, frame, provenance: Any = None) -> None:
     with search_pool_state_guard(context):
         _set_pool_provenance(context, provenance, base=True)
@@ -342,6 +374,7 @@ def filter_source_frame(
     return filtered.copy()
 
 
+@_pool_operation
 def tag_archive_parquet_sources(context: WebSessionContext) -> list[tuple[Path, str]]:
     sources = getattr(context, "tag_archive_parquet_sources", None)
     if callable(sources):
@@ -415,6 +448,7 @@ def search_tag_archive_frame(
     return pd.concat(frames, ignore_index=True)
 
 
+@_pool_operation
 def apply_search_runtime_filters(context: WebSessionContext) -> dict[str, Any]:
     source = getattr(context, "search_results_snapshot", None)
     if source is None or getattr(source, "empty", True):
@@ -497,6 +531,7 @@ def search_state_with_runner_save(context: WebSessionContext) -> dict[str, Any]:
     return state
 
 
+@_pool_operation
 def clear_active_tag_filter(context: WebSessionContext, reset_draft: bool = True) -> dict[str, Any]:
     with search_pool_state_guard(context):
         _reset_active_tag_filter_assignment(context)
@@ -557,60 +592,63 @@ def _reconstruct_active_tag_filter_impl(context: WebSessionContext) -> bool:
     if snapshot is None or getattr(snapshot, "empty", True):
         return False
     tags = [*include, *[f"-{tag}" for tag in exclude]]
-    source_revision = current_tag_filter_revision(context)
-    result = tag_filter_search(context, tags, applied_branches or None)
-    ids = result.get("_ids", set())
-    source_snapshot = result.get("_source_snapshot")
-    source_generation = int(result.get("_pool_generation") or 0)
-    # 이어 하기(사용자 2026-10-18): 지난번에 남겨 둔 행 색인이 같은 원본 · 같은 조건이면 그만큼만 남긴다
-    # Refill uses the full condition result, or the paired committed subset. Read files outside the pool lock.
-    from core.tag_filter_remaining import apply_remaining, restore_committed, selected_rating_counts
+    # Random calls reconstruct even when already assigned. Only a real rebuild
+    # may pause analysis; otherwise Auto Gen would cancel it on every draw.
+    with pool_busy(context):
+        source_revision = current_tag_filter_revision(context)
+        result = tag_filter_search(context, tags, applied_branches or None)
+        ids = result.get("_ids", set())
+        source_snapshot = result.get("_source_snapshot")
+        source_generation = int(result.get("_pool_generation") or 0)
+        # 이어 하기(사용자 2026-10-18): 지난번에 남겨 둔 행 색인이 같은 원본 · 같은 조건이면 그만큼만 남긴다
+        # Refill uses the full condition result, or the paired committed subset. Read files outside the pool lock.
+        from core.tag_filter_remaining import apply_remaining, restore_committed, selected_rating_counts
 
-    ids, committed, resume_allowed = restore_committed(context, result, set(ids))
-    result["_skip_remaining"] = not resume_allowed
-    result["_event_compress_commit"] = committed
-    if committed is not None:
-        result["count"] = len(ids)
-        result["rating_counts"] = selected_rating_counts(result, ids)
-    live_ids, resumed_ratings = apply_remaining(context, result, set(ids))
-    # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
-    # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
-    # 찢긴 읽기는 _active_tag_filter_state 가 ids 로 임시 상태를 복원해 graceful. 동시 호출(get_search_state
-    # + random 레이스)은 guard 를 둘 다 통과해 tag_filter_search 가 중복 실행될 수 있으나 결과가 동일
-    # (idempotent)이라 무해 — 시작 시점 한정 드문 경우라 락은 두지 않는다.
-    with search_pool_state_guard(context):
-        if (
-            source_snapshot is not getattr(context, "search_results_snapshot", None)
-            or source_generation != current_search_pool_generation(context)
-            or source_revision != current_tag_filter_revision(context)
-            or getattr(context, "active_tag_filter_ids", None) is not None
-            or isinstance(getattr(context, "active_tag_filter", None), dict)
-        ):
-            return False
-        context.active_tag_filter_ids = set(live_ids)
-        context.active_tag_filter = {
-            "tags": [str(tag) for tag in result.get("tags", [])],
-            "branches": [list(b) for b in (result.get("branches") or [])],
-            "ids": set(live_ids),
-            # 이어 갔는지는 id 수로 본다 - rating 열이 없는 풀은 등급 수가 None 이라도 이어 갔다(Codex).
-            "count": len(live_ids) if len(live_ids) != len(ids) else int(result.get("count") or 0),
-            "request_id": "",
-            "rating_counts": dict(resumed_ratings if resumed_ratings is not None else (result.get("rating_counts") or {})),
-        }
-        # 적용 순간의 불변 집합 - commit 과 같은 모양(저장이 뽑아 쓴 행을 포함하고, 소진 뒤 같은 조건으로 되채운다).
-        context.active_tag_filter_snapshot = {
-            "ids": set(ids),
-            "tags": [str(tag) for tag in result.get("tags", [])],
-            "branches": [list(b) for b in (result.get("branches") or [])],
-            "count": int(result.get("count") or 0),
-            "rating_counts": dict(result.get("rating_counts") or {}),
-            "request_id": "",
-        }
+        ids, committed, resume_allowed = restore_committed(context, result, set(ids))
+        result["_skip_remaining"] = not resume_allowed
+        result["_event_compress_commit"] = committed
         if committed is not None:
-            context.active_tag_filter_snapshot["_event_compress_commit"] = committed
-        mark_tag_filter_changed(context)
-        apply_search_runtime_filters(context)
-    return True
+            result["count"] = len(ids)
+            result["rating_counts"] = selected_rating_counts(result, ids)
+        live_ids, resumed_ratings = apply_remaining(context, result, set(ids))
+        # 쓰기 순서 주의(Codex F2): 각 속성 대입은 GIL 하에서 원자적이고, 소비자 우선순위가 active_tag_filter
+        # (dict)이므로 dict 를 마지막에 둔다 → dict 가 보이면 ids 도 이미 set. 반대(ids set·dict None)로
+        # 찢긴 읽기는 _active_tag_filter_state 가 ids 로 임시 상태를 복원해 graceful. 동시 호출(get_search_state
+        # + random 레이스)은 guard 를 둘 다 통과해 tag_filter_search 가 중복 실행될 수 있으나 결과가 동일
+        # (idempotent)이라 무해 — 시작 시점 한정 드문 경우라 락은 두지 않는다.
+        with search_pool_state_guard(context):
+            if (
+                source_snapshot is not getattr(context, "search_results_snapshot", None)
+                or source_generation != current_search_pool_generation(context)
+                or source_revision != current_tag_filter_revision(context)
+                or getattr(context, "active_tag_filter_ids", None) is not None
+                or isinstance(getattr(context, "active_tag_filter", None), dict)
+            ):
+                return False
+            context.active_tag_filter_ids = set(live_ids)
+            context.active_tag_filter = {
+                "tags": [str(tag) for tag in result.get("tags", [])],
+                "branches": [list(b) for b in (result.get("branches") or [])],
+                "ids": set(live_ids),
+                # 이어 갔는지는 id 수로 본다 - rating 열이 없는 풀은 등급 수가 None 이라도 이어 갔다(Codex).
+                "count": len(live_ids) if len(live_ids) != len(ids) else int(result.get("count") or 0),
+                "request_id": "",
+                "rating_counts": dict(resumed_ratings if resumed_ratings is not None else (result.get("rating_counts") or {})),
+            }
+            # 적용 순간의 불변 집합 - commit 과 같은 모양(저장이 뽑아 쓴 행을 포함하고, 소진 뒤 같은 조건으로 되채운다).
+            context.active_tag_filter_snapshot = {
+                "ids": set(ids),
+                "tags": [str(tag) for tag in result.get("tags", [])],
+                "branches": [list(b) for b in (result.get("branches") or [])],
+                "count": int(result.get("count") or 0),
+                "rating_counts": dict(result.get("rating_counts") or {}),
+                "request_id": "",
+            }
+            if committed is not None:
+                context.active_tag_filter_snapshot["_event_compress_commit"] = committed
+            mark_tag_filter_changed(context)
+            apply_search_runtime_filters(context)
+        return True
 
 
 def settled_tag_filter_rating_counts(context: WebSessionContext) -> dict[str, int] | None:
@@ -653,6 +691,7 @@ def _tag_filter_condition_key(tags: Any, branches: Any) -> tuple:
     return tuple(sorted({tuple(sorted({canon(t) for t in group} - {""})) for group in groups}))
 
 
+@_pool_operation
 def run_search_command(
     context: WebSessionContext,
     command: dict[str, Any],
@@ -749,6 +788,7 @@ def run_search_command(
     return apply_search_runtime_filters(context)
 
 
+@_pool_operation
 def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
     base = search_base_frame(context)
     if base is not None:
@@ -762,6 +802,7 @@ def restore_search_snapshot(context: WebSessionContext) -> dict[str, Any]:
     return search_state_with_runner_save(context)
 
 
+@_pool_operation
 def commit_pending_tag_filter_assignment(
     context: WebSessionContext,
     pending: dict[str, Any],
@@ -983,6 +1024,7 @@ def normalize_tag_filter_branches(value: Any) -> list[list[str]]:
 from core.headless_search_state_service import TAG_FILTER_MAX_BRANCHES, TAG_FILTER_MAX_BRANCH_TAGS  # noqa: E402
 
 
+@_pool_operation
 def tag_filter_search(context: WebSessionContext, tags: list[Any], branches: Any = None, *,
                       announce: bool = True) -> dict[str, Any]:
     """칩 검색. ``branches`` 가 있으면 **분기 스테이징**(계획서 P3): 결과 = 분기마다
@@ -1246,6 +1288,7 @@ def resolve_custom_parquet_path(context: WebSessionContext, filename: str) -> Pa
     return context.custom_parquet_dir() / clean
 
 
+@_pool_operation
 def load_or_merge_custom_parquet(
     context: WebSessionContext,
     filename: str,

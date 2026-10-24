@@ -700,6 +700,9 @@ class HeadlessRandomPromptService:
                 self.context._tag_filter_revision = int(
                     getattr(self.context, "_tag_filter_revision", 0) or 0
                 ) + 1
+            self.context._tag_filter_consumption = int(
+                getattr(self.context, "_tag_filter_consumption", 0) or 0
+            ) + 1
             return True
         except Exception as exc:
             safe_print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)

@@ -15,6 +15,7 @@ from app.backend.server.search_runtime import (
     reconstruct_active_tag_filter,
     restore_search_snapshot,
     run_search_command,
+    pool_busy,
     search_parquet_action,
     search_pool_state_guard,
     settled_tag_filter_rating_counts,
@@ -162,55 +163,56 @@ async def handle_search_command(
         return True
 
     if command_type == "search":
-        archive_count = 0
-        sources = getattr(context, "tag_archive_parquet_sources", None)
-        # The green [검색] is always a full tag-archive search (a previously fast-loaded
-        # custom parquet must not confine it — see run_search_command), so count the
-        # archive sources for the progress bar regardless of the current scope.
-        if callable(sources):
-            archive_count = len(sources())
-        # ⚠️ 기간 컷오프를 **여기서도 똑같이 적용한다.** 진행률의 여는/닫는 메시지는
-        #    이 수를 쓰고 중간 메시지는 실제로 훑는 수를 쓰는데, 둘이 갈리면 막대가
-        #    `0/175 -> 25/25 -> 175/175` 로 튄다. 슬라이싱 규칙은
-        #    `run_search_command` 와 같아야 한다 - 다르면 또 갈린다.
-        if archive_count and (command.get("bucket_start") is not None
-                              or command.get("bucket_end") is not None):
-            from core.tag_bucket_dates import clamp_bucket_range
+        with pool_busy(context):
+            archive_count = 0
+            sources = getattr(context, "tag_archive_parquet_sources", None)
+            # The green [검색] is always a full tag-archive search (a previously fast-loaded
+            # custom parquet must not confine it — see run_search_command), so count the
+            # archive sources for the progress bar regardless of the current scope.
+            if callable(sources):
+                archive_count = len(await run_in_thread(sources))
+            # ⚠️ 기간 컷오프를 **여기서도 똑같이 적용한다.** 진행률의 여는/닫는 메시지는
+            #    이 수를 쓰고 중간 메시지는 실제로 훑는 수를 쓰는데, 둘이 갈리면 막대가
+            #    `0/175 -> 25/25 -> 175/175` 로 튄다. 슬라이싱 규칙은
+            #    `run_search_command` 와 같아야 한다 - 다르면 또 갈린다.
+            if archive_count and (command.get("bucket_start") is not None
+                                  or command.get("bucket_end") is not None):
+                from core.tag_bucket_dates import clamp_bucket_range
 
-            s, e = clamp_bucket_range(command.get("bucket_start"),
-                                      command.get("bucket_end"), archive_count)
-            archive_count = e - s + 1
-        progress_total = max(1, archive_count)
-        await _send_json(ws, {
-            "type": "search_progress",
-            "completed": 0,
-            "total": progress_total,
-        })
-        # Stream per-file progress from the worker thread onto this event loop so
-        # the "Searching... N/150" counter actually climbs instead of sitting at 0.
-        loop = asyncio.get_running_loop()
+                s, e = clamp_bucket_range(command.get("bucket_start"),
+                                          command.get("bucket_end"), archive_count)
+                archive_count = e - s + 1
+            progress_total = max(1, archive_count)
+            await _send_json(ws, {
+                "type": "search_progress",
+                "completed": 0,
+                "total": progress_total,
+            })
+            # Stream per-file progress from the worker thread onto this event loop so
+            # the "Searching... N/150" counter actually climbs instead of sitting at 0.
+            loop = asyncio.get_running_loop()
 
-        def _emit_progress(completed: int, total: int) -> None:
-            asyncio.run_coroutine_threadsafe(
-                _send_json(ws, {"type": "search_progress", "completed": completed, "total": total}),
-                loop,
-            )
+            def _emit_progress(completed: int, total: int) -> None:
+                asyncio.run_coroutine_threadsafe(
+                    _send_json(ws, {"type": "search_progress", "completed": completed, "total": total}),
+                    loop,
+                )
 
-        state = await run_in_thread(run_search_command, context, command, progress_callback=_emit_progress)
-        await _send_json(ws, {
-            "type": "search_progress",
-            "completed": progress_total,
-            "total": progress_total,
-        })
-        # 이 search_state 가 '실제 green 검색 완료'임을 표시한다. 검색은 워커 스레드로
-        # 돌아(비블로킹) 그동안 rating 토글/tag_filter 공유 broadcast 등 다른 search_state 가
-        # 끼어들 수 있는데, 프론트가 그걸 검색 완료로 오인해 Quick Filter '해제됨' 오버레이를
-        # 잘못 띄우고 pool 잠금을 조기 해제하던 문제(Codex A3). 이 명령이 보내는 완료 state 에만
-        # 마커를 달아, 프론트가 끼어든 broadcast 를 무시하게 한다.
-        if isinstance(state, dict):
-            state["search_completed"] = True
-        await _send_json(ws, state)
-        return True
+            state = await run_in_thread(run_search_command, context, command, progress_callback=_emit_progress)
+            await _send_json(ws, {
+                "type": "search_progress",
+                "completed": progress_total,
+                "total": progress_total,
+            })
+            # 이 search_state 가 '실제 green 검색 완료'임을 표시한다. 검색은 워커 스레드로
+            # 돌아(비블로킹) 그동안 rating 토글/tag_filter 공유 broadcast 등 다른 search_state 가
+            # 끼어들 수 있는데, 프론트가 그걸 검색 완료로 오인해 Quick Filter '해제됨' 오버레이를
+            # 잘못 띄우고 pool 잠금을 조기 해제하던 문제(Codex A3). 이 명령이 보내는 완료 state 에만
+            # 마커를 달아, 프론트가 끼어든 broadcast 를 무시하게 한다.
+            if isinstance(state, dict):
+                state["search_completed"] = True
+            await _send_json(ws, state)
+            return True
 
     if command_type in {"load_parquet", "merge_parquet"}:
         state, toast = await run_in_thread(

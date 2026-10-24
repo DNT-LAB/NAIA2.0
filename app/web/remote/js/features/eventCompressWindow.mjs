@@ -169,6 +169,12 @@ export function createEventCompressWindow({
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────────
+  /** 풀이 서버 한도(EVENT_COMPRESS_ROW_LIMIT = 50만 행)보다 크면 서버가 **50만 행만 뽑아(같은 풀이면 늘 같은 표본)** 센다
+   *  (사용자 결정 2026-10-24). 행마다 ~46µs · ~4KB 라 457만 행을 다 세면 3분 넘게 · 19GB 였다. 이벤트 · 커밋 · 분포는 표본 기준. */
+  function sampleOf(s) {
+    return s && s.sample && s.sample.used ? {rows: Number(s.sample.rows) || 0, used: Number(s.sample.used) || 0} : null;
+  }
+
   function renderTop() {
     const el = panel?.body.querySelector('[data-ecw-top]');
     if (!el) return;
@@ -178,10 +184,15 @@ export function createEventCompressWindow({
     if (!state) count = '<span class="ecw-dim">불러오는 중…</span>';
     else if (state.error) count = `<span class="ecw-dim">${escHtml(state.error)}</span>`;
     else if (s.scope === 'empty') count = '<span class="ecw-dim">풀이 비어 있습니다 — 검색이나 Tag Filter 를 먼저 거세요</span>';
+    // 검색 · Tag Filter 가 풀을 바꾸는 동안은 세지 않는다 - 끝나면 서버가 센다(검색이 먼저 - 사용자 제보 2026-10-24).
+    else if (s.paused) count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> <span class="ecw-over">검색 중 — 끝나면 셉니다</span>`;
     // 아직 안 셌다(stale - 꺼진 채 처음 연 창 · PE 를 바꾼 뒤)도 '세는 중' - 목록을 청하면 서버가 센다.
     else if (s.computing || s.stale) count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> <span class="ecw-dim">이벤트 세는 중…</span>`;
     else {
-      count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> `
+      const sample = sampleOf(s);
+      count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행`
+        + (sample ? ` <span class="ecw-over" title="풀이 커서 무작위 표본으로 셉니다(같은 풀이면 늘 같은 표본)">(표본 ${fmt(sample.used)}행)</span>` : '')
+        + ` <span class="ecw-dim">→</span> `
         + `<b class="ecw-events">${fmt(s.events)}</b> <span class="ecw-dim">이벤트</span>`;
     }
     const html = `<span class="ecw-count">${count}</span>`
@@ -326,7 +337,8 @@ export function createEventCompressWindow({
     const el = panel?.body.querySelector('[data-ecw-list]');
     if (!el) return;
     let html;
-    if (!state || (state.computing && !items.length)) html = '<div class="ecw-empty">이벤트를 세는 중…</div>';
+    if (state && state.paused && !items.length) html = '<div class="ecw-empty">검색 중입니다 — 끝나면 이벤트를 셉니다.</div>';
+    else if (!state || (state.computing && !items.length)) html = '<div class="ecw-empty">이벤트를 세는 중…</div>';
     else if (state.error && !items.length) html = `<div class="ecw-empty">${escHtml(state.error)}</div>`;
     else if (!items.length) {
       const filtered = query || cut.min != null || cut.max != null;
@@ -368,9 +380,11 @@ export function createEventCompressWindow({
     const el = panel?.body.querySelector('[data-ecw-cmt]');
     if (!el) return;
     const scopeOk = !!state && state.scope === 'tag_filter' && !state.error;
-    const ready = scopeOk && !state.computing && !state.stale && commitRows > 0 && !busy;
+    const ready = scopeOk && !state.paused && !state.computing && !state.stale && commitRows > 0 && !busy;
     const title = !scopeOk
       ? 'Tag Filter 가 걸려 있을 때만 커밋합니다'
+      : sampleOf(state)
+      ? `풀이 커서 ${fmt(sampleOf(state).used)}행 표본으로 셌습니다 - 커밋하면 Tag Filter 가 표본의 이벤트마다 1행으로 좁혀집니다`
       : '걸러진 이벤트(태그 수 컷 · 찾기)마다 1행으로 Tag Filter 를 좁힙니다. 다 쓰면 이 행들로 다시 채웁니다. [재적용] 으로 원래 풀로 돌아갑니다';
     const html = `<button type="button" class="ecw-commit" data-ecw-commit${ready ? '' : ' disabled'} title="${escAttr(title)}">`
       + `커밋 · ${fmt(commitRows)}행</button>`
@@ -446,7 +460,8 @@ export function createEventCompressWindow({
   }
 
   function sigOf(s) {
-    return s ? [s.scope, s.pool_rows, s.events, s.enabled ? 1 : 0, s.computing ? 1 : 0].join('|') : '';
+    return s ? [s.scope, s.pool_rows, s.events, s.enabled ? 1 : 0, s.computing ? 1 : 0, s.paused ? 1 : 0,
+      s.sample ? s.sample.rows : 0].join('|') : '';
   }
 
   /** 상태를 받는다 - 풀 · 이벤트 수 · 켬이 바뀌었으면 목록도 처음부터. */
@@ -458,6 +473,7 @@ export function createEventCompressWindow({
     const relist = (sig !== listSig || !!state.stale) && !state.computing;
     if (!state.computing) listSig = sig;
     render();
+    if (state.paused) { stopWaiting(); return; }   // 검색이 먼저 - 끝나면 서버가 세고 알린다(그때 목록을 청한다)
     if (relist) void loadList(false);
     else if (!state.computing && !state.stale) stopWaiting();
   }
@@ -486,6 +502,13 @@ export function createEventCompressWindow({
       const params = new URLSearchParams({sort, q: query, offset: String(offset), limit: String(PAGE), ...cutParams()});
       const body = await getJson(`/api/event-compress/events?${params}`);
       if (mine !== listSeq) return;
+      // 서버는 세는 동안 기다리지 않고 바로 '세는 중' 이라 답한다 - 끝나면 event_compress_state 가 와서 다시 청한다.
+      if (!more && body.computing) {
+        state = {...(state || {}), computing: true, paused: !!body.paused};
+        stopWaiting();
+        render();
+        return;
+      }
       const got = Array.isArray(body.items) ? body.items : [];
       items = more ? items.concat(got) : got;
       total = Number(body.total) || items.length;

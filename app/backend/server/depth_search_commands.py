@@ -10,6 +10,7 @@ from app.backend.server.search_runtime import (
     mark_search_pool_replaced,
     next_custom_parquet_path,
     pool_provenance,
+    pool_busy,
     reset_active_tag_filter_assignment,
     search_base_frame,
     search_pool_state_guard,
@@ -201,6 +202,11 @@ def _note_history(state: dict[str, Any], entry: dict[str, Any]) -> None:
 
 
 def handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    with pool_busy(context):
+        return _handle_depth_action(context, command)
+
+
+def _handle_depth_action(context: WebSessionContext, command: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
     action = str(command.get("action") or "").strip()
     if action == "open":
         # ⚠️ 예전엔 여기서 활성 Tag Filter 를 **칩까지 지웠다**(clear_active_tag_filter 기본 = 초기화).

@@ -659,6 +659,12 @@ export function createEventCompressWindow({
         q: query, events_signature: eventsSig,
       });
       showToast(`${fmt(body.committed)}행으로 Tag Filter 를 좁혔습니다 - [재적용] 으로 원래 풀로 돌아갑니다`, 'info');
+      // 컷은 이번 커밋에 쓰였다 - 좁힌 풀에선 두 슬라이더를 끝까지로 되돌린다(사용자 지시 2026-10-24).
+      // 안 풀면 새 풀을 같은 컷으로 다시 세어 [커밋 n행] 이 풀보다 작게 남는다(496 -> 482).
+      cut = {min: null, max: null};
+      cutFreq = {min: null, max: null};
+      saveCut();
+      renderCut();
       if (body.state) applyState(body.state); else void refreshState();
     } catch (error) {
       stopWaiting();

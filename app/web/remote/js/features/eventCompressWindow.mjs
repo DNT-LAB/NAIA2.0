@@ -442,7 +442,8 @@ export function createEventCompressWindow({
     const el = panel?.body.querySelector('[data-ecw-cmt]');
     if (!el) return;
     const scopeOk = !!state && state.scope === 'tag_filter' && !state.error;
-    const pooled = scopeOk ? Number(state.committed_rows) || 0 : 0;
+    // 커밋 기록이 남아 있으면 - Random 이 커밋한 행을 다 써서 scope 가 'empty' 여도 풀링은 된다(전부 담는다 · Codex 리뷰).
+    const pooled = state && !state.error ? Number(state.committed_rows) || 0 : 0;
     const reapplyHtml = `<button type="button" class="ecw-reapply" data-ecw-reapply${canReapply() && !busy ? '' : ' disabled'}`
       + ` title="Tag Filter [재적용] 과 같습니다 - 칩 조건으로 다시 걸어 원래 풀로 돌아갑니다(커밋 되돌리기)">↻ 재적용</button>`;
     // 커밋한 뒤(지금 풀 = 커밋 결과) - [커밋] 자리가 [↑↑풀링] 으로(사용자 지시 2026-10-24).
@@ -531,8 +532,10 @@ export function createEventCompressWindow({
   }
 
   function sigOf(s) {
+    // analysis = 서버가 분석을 낼 때마다 오르는 번호 - 수가 같아도(PE 만 바뀐 경우) 새 분석이면 목록을 다시 청한다.
+    // 다시 청하면 그 전에 보낸 요청(늦게 오는 '세는 중' 답 포함)은 listSeq 로 버려진다(Codex 리뷰).
     return s ? [s.scope, s.pool_rows, s.events, s.enabled ? 1 : 0, s.computing ? 1 : 0, s.paused ? 1 : 0,
-      s.sample ? s.sample.rows : 0].join('|') : '';
+      s.sample ? s.sample.rows : 0, s.analysis || 0].join('|') : '';
   }
 
   /** 상태를 받는다 - 풀 · 이벤트 수 · 켬이 바뀌었으면 목록도 처음부터. */
@@ -575,6 +578,7 @@ export function createEventCompressWindow({
     // 처음부터 다시 청하면 진행 중인 다음 쪽은 버린다 - 안 풀면 '불러오는 중…' 에 영영 멈춘다(사용자 제보 2026-10-24).
     if (more) { loadingMore = true; renderList(); }
     else { loadingMore = false; relisting = true; }
+    let advanced = false;            // 이번 쪽이 실제로 늘었나 - 실패 · 빈 답이면 바닥에서 다시 청하지 않는다
     try {
       const params = new URLSearchParams({sort, q: query, offset: String(offset), limit: String(PAGE), ...cutParams()});
       const body = await getJson(`/api/event-compress/events?${params}`);
@@ -588,6 +592,7 @@ export function createEventCompressWindow({
         return;
       }
       const got = Array.isArray(body.items) ? body.items : [];
+      advanced = got.length > 0;
       items = more ? items.concat(got) : got;
       total = Number(body.total) || items.length;
       if (!more) sizeTop = Number(body.size_top) || 0;
@@ -622,7 +627,7 @@ export function createEventCompressWindow({
     renderList();
     renderCommit();
     // 빨리 내려 쪽이 오기 전에 바닥에 닿았으면 스크롤 이벤트가 다시 안 온다 - 아직 바닥이면 이어서 청한다.
-    if (more && mine === listSeq) {
+    if (more && advanced && mine === listSeq) {
       const list = panel?.body.querySelector('[data-ecw-list]');
       if (list && list.scrollTop + list.clientHeight >= list.scrollHeight - 60) void loadList(true);
     }

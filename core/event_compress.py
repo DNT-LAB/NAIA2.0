@@ -185,6 +185,8 @@ class EventCompress:
         self.signature = None
         self.groups = {}
         self._page_cache = None
+        # Bumped on every published analysis - the window relists on it even when the counts match.
+        self.analysis = 0
         self.sorted_groups = {"asc": [], "desc": []}
         self.tag_index = {}
         self.group_tag_counts = {}
@@ -567,6 +569,7 @@ class EventCompress:
                         continue
                     before = self._remaining()
                     self.groups = groups
+                    self.analysis += 1
                     self.sorted_groups = ordered
                     self.tag_index = tag_index
                     self.group_tag_counts = group_tag_counts
@@ -636,6 +639,7 @@ class EventCompress:
                        # Rows of the event commit the live Tag Filter came from (0 = not a commit).
                        # A plain re-apply replaces the snapshot, so it never reads as committed.
                        "committed_rows": self._committed_rows(),
+                       "analysis": self.analysis,
                        "pe": {"options": options, "auto_hide_count": len(auto_hide),
                               "hide_count": sum(len(v.get("hide") or []) for v in overrides.values() if isinstance(v, dict))}}
             if self.error:
@@ -731,16 +735,19 @@ class EventCompress:
     def pool(self):
         """[↑↑풀링] - make the committed rows the session search result, exactly like saving them as
         a parquet and loading it back (user 2026-10-24: every committed row, consumed ones included)."""
+        # Check, export and install under ONE hold of the (reentrant) pool guard: otherwise another tab
+        # can re-apply Tag Filter between the commit check and the export, and an uncommitted selection
+        # would be installed (Codex review 2026-10-24).
         with self.guard():
             if not self._committed_rows():
                 raise CommitError("not_committed", "Commit the event selection first", 409)
-        # Same frame as [이 결과 저장]: the applied (immutable) commit set x active ratings.
-        frame, recipe = _runtime().export_condition_frame(self.context)
-        if frame is None or frame.empty:
-            raise CommitError("empty", "No committed rows to pool", 400)
-        recipe["event_compress"] = {"rows": int(len(frame))}
-        _runtime().install_custom_parquet_frame(self.context, frame, provenance=recipe)
-        return int(len(frame))
+            # Same frame as [이 결과 저장]: the applied (immutable) commit set x active ratings.
+            frame, recipe = _runtime().export_condition_frame(self.context)
+            if frame is None or frame.empty:
+                raise CommitError("empty", "No committed rows to pool", 400)
+            recipe["event_compress"] = {"rows": int(len(frame))}
+            _runtime().install_custom_parquet_frame(self.context, frame, provenance=recipe)
+            return int(len(frame))
 
     def _commit_ids(self, groups):
         if not groups or self._identity()[1] != "tag_filter":

@@ -76,17 +76,28 @@ def pool_busy(context):
     """Give archive scans/pool writers priority; nested operations defer once."""
     with search_pool_state_guard(context):
         context._event_compress_pool_busy = getattr(context, "_event_compress_pool_busy", 0) + 1
-        service = getattr(context, "_event_compress", None)
-        if context._event_compress_pool_busy == 1 and service is not None:
-            service.pool_busy_changed()
+        if context._event_compress_pool_busy == 1:
+            _notify_pool_busy(context)
     try:
         yield
     finally:
         with search_pool_state_guard(context):
             context._event_compress_pool_busy -= 1
-            service = getattr(context, "_event_compress", None)
-            if not context._event_compress_pool_busy and service is not None:
-                service.pool_busy_changed()
+            if not context._event_compress_pool_busy:
+                _notify_pool_busy(context)
+
+
+def _notify_pool_busy(context) -> None:
+    # Called under the pool guard. A failing event-compress notification must never fail the
+    # search/pool operation nor leak the busy count (Codex review 2026-10-24) - log and go on.
+    service = getattr(context, "_event_compress", None)
+    if service is None:
+        return
+    try:
+        service.pool_busy_changed()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[event_compress] pool_busy_changed failed: {type(exc).__name__}: {exc}"
+              .encode("ascii", "replace").decode("ascii"))
 
 
 def _pool_operation(function):

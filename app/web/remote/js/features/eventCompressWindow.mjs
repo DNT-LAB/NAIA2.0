@@ -57,6 +57,7 @@ export function createEventCompressWindow({
   reapplyTagFilter = () => false,  // Tag Filter [재적용] 과 같은 일 - 칩 조건으로 다시 걸어 원래 풀로(커밋 되돌리기)
   canReapply = () => false,        // 그 단추가 지금 쓸 수 있나(걸 조건이 있나)
   generationParams = () => ({}),   // 메인 Random · Generate 가 싣는 지금 화면의 파라미터(해상도 · 스텝 …)
+  poolToSearch = () => false,      // [↑↑풀링] - 커밋한 행을 검색 결과로(파켓 불러오기와 같은 답). 보냈으면 true
 } = {}) {
   let panel = null;
   let state = null;                // GET /state
@@ -81,7 +82,8 @@ export function createEventCompressWindow({
   let acTimer = 0;
   let ac = {items: [], index: -1, open: false};
   let open = '';                   // 펼친 이벤트 키
-  let busy = '';                   // 'commit' | 'random:<key>' | 'generate:<key>'
+  let busy = '';                   // 'commit' | 'pool' | 'random:<key>' | 'generate:<key>'
+  let poolTimer = 0;               // [↑↑풀링] 답(상태 알림)이 안 오면 단추를 다시 푸는 시계
   let waiting = false;             // 다시 세는 동안 창을 막는다
   let waitTimer = 0;
   let listSig = '';                // 목록을 다시 받을지 가르는 서명(풀 · 이벤트 수 · 켬)
@@ -440,6 +442,17 @@ export function createEventCompressWindow({
     const el = panel?.body.querySelector('[data-ecw-cmt]');
     if (!el) return;
     const scopeOk = !!state && state.scope === 'tag_filter' && !state.error;
+    const pooled = scopeOk ? Number(state.committed_rows) || 0 : 0;
+    const reapplyHtml = `<button type="button" class="ecw-reapply" data-ecw-reapply${canReapply() && !busy ? '' : ' disabled'}`
+      + ` title="Tag Filter [재적용] 과 같습니다 - 칩 조건으로 다시 걸어 원래 풀로 돌아갑니다(커밋 되돌리기)">↻ 재적용</button>`;
+    // 커밋한 뒤(지금 풀 = 커밋 결과) - [커밋] 자리가 [↑↑풀링] 으로(사용자 지시 2026-10-24).
+    if (pooled) {
+      const html = `<button type="button" class="ecw-commit is-pool" data-ecw-pool${busy ? ' disabled' : ''}`
+        + ` title="${escAttr(`커밋한 ${fmt(pooled)}행(Random 이 쓴 행 포함)을 검색 결과로 바꿉니다 - Parquet 로 저장했다 불러오는 것과 같습니다(재시작해도 유지). Tag Filter 칩은 이 풀에 다시 걸립니다. 원래 검색 결과로는 다시 검색해야 돌아갑니다`)}">`
+        + `↑↑풀링 · ${fmt(pooled)}행</button>` + reapplyHtml;
+      if (el._html !== html) { el._html = html; el.innerHTML = html; }
+      return;
+    }
     const ready = scopeOk && !state.paused && !state.computing && !state.stale && commitRows > 0 && !busy;
     const title = !scopeOk
       ? 'Tag Filter 가 걸려 있을 때만 커밋합니다'
@@ -447,9 +460,7 @@ export function createEventCompressWindow({
       ? `풀이 커서 ${fmt(sampleOf(state).used)}행 표본으로 셌습니다 - 커밋하면 Tag Filter 가 표본의 이벤트마다 1행으로 좁혀집니다`
       : '걸러진 이벤트(태그 수 컷 · 찾기)마다 1행으로 Tag Filter 를 좁힙니다. 다 쓰면 이 행들로 다시 채웁니다. [재적용] 으로 원래 풀로 돌아갑니다';
     const html = `<button type="button" class="ecw-commit" data-ecw-commit${ready ? '' : ' disabled'} title="${escAttr(title)}">`
-      + `커밋 · ${fmt(commitRows)}행</button>`
-      + `<button type="button" class="ecw-reapply" data-ecw-reapply${canReapply() && !busy ? '' : ' disabled'}`
-      + ` title="Tag Filter [재적용] 과 같습니다 - 칩 조건으로 다시 걸어 원래 풀로 돌아갑니다(커밋 되돌리기)">↻ 재적용</button>`;
+      + `커밋 · ${fmt(commitRows)}행</button>` + reapplyHtml;
     if (el._html !== html) { el._html = html; el.innerHTML = html; }
   }
 
@@ -528,6 +539,8 @@ export function createEventCompressWindow({
   function applyState(next) {
     state = next;
     onStateChange?.(state);
+    // 풀링이 끝나면 풀이 바뀌어 커밋 표시가 사라진다 - 그때 단추를 푼다.
+    if (busy === 'pool' && !(Number(state && state.committed_rows) > 0)) endPool();
     const sig = sigOf(state);
     // stale = PE 설정 · 풀이 바뀌어 다시 셀 차례. 꺼져 있으면 서버는 스스로 세지 않는다 - 목록을 청하면 센다.
     const relist = (sig !== listSig || !!state.stale) && !state.computing;
@@ -676,6 +689,25 @@ export function createEventCompressWindow({
     }
   }
 
+  /** [↑↑풀링] - 알림만(확인 창 없이 · 사용자 지시 2026-10-24). 서버가 파켓 불러오기와 같은 답을 이 탭에 보낸다. */
+  function pool() {
+    if (busy || waiting) return;
+    if (!poolToSearch()) { showToast('서버와 연결되어 있지 않습니다', 'error'); return; }
+    busy = 'pool';
+    renderCommit();
+    clearTimeout(poolTimer);
+    // 거절(커밋이 아님 등)은 상태가 안 바뀐다 - 서버 알림을 띄운 뒤 단추를 다시 쓸 수 있게.
+    poolTimer = win.setTimeout(endPool, 8000);
+  }
+
+  function endPool() {
+    clearTimeout(poolTimer);
+    poolTimer = 0;
+    if (busy !== 'pool') return;
+    busy = '';
+    renderCommit();
+  }
+
   function reapply() {
     if (busy || waiting || !canReapply()) return;
     if (!reapplyTagFilter()) { showToast('다시 걸 Tag Filter 조건이 없습니다', 'error'); return; }
@@ -706,6 +738,7 @@ export function createEventCompressWindow({
   function onClick(event) {
     if (waiting) return;
     if (event.target.closest('[data-ecw-commit]')) { void commit(); return; }
+    if (event.target.closest('[data-ecw-pool]')) { pool(); return; }
     if (event.target.closest('[data-ecw-reapply]')) { reapply(); return; }
     const acItem = event.target.closest('[data-ecw-ac-i]');
     if (acItem) { pickAc(Number(acItem.dataset.ecwAcI)); return; }

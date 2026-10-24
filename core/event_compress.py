@@ -633,6 +633,9 @@ class EventCompress:
                        "scope": identity[1] if remaining or dropped else "empty",
                        "pool_rows": remaining + dropped, "events": len(self.groups) if valid else 0,
                        "dropped": dropped, "remaining": remaining,
+                       # Rows of the event commit the live Tag Filter came from (0 = not a commit).
+                       # A plain re-apply replaces the snapshot, so it never reads as committed.
+                       "committed_rows": self._committed_rows(),
                        "pe": {"options": options, "auto_hide_count": len(auto_hide),
                               "hide_count": sum(len(v.get("hide") or []) for v in overrides.values() if isinstance(v, dict))}}
             if self.error:
@@ -716,6 +719,28 @@ class EventCompress:
             mask = masks.get(ref[0])
             return mask is not None and ref[1] not in mask[0] and ref[1] not in mask[1]
         return live
+
+    def _committed_rows(self):
+        # Called under the pool guard.
+        snapshot = getattr(self.context, "active_tag_filter_snapshot", None)
+        if (self._identity()[1] != "tag_filter" or not isinstance(snapshot, dict)
+                or not snapshot.get("_event_compress_commit")):
+            return 0
+        return len(snapshot.get("ids") or ())
+
+    def pool(self):
+        """[↑↑풀링] - make the committed rows the session search result, exactly like saving them as
+        a parquet and loading it back (user 2026-10-24: every committed row, consumed ones included)."""
+        with self.guard():
+            if not self._committed_rows():
+                raise CommitError("not_committed", "Commit the event selection first", 409)
+        # Same frame as [이 결과 저장]: the applied (immutable) commit set x active ratings.
+        frame, recipe = _runtime().export_condition_frame(self.context)
+        if frame is None or frame.empty:
+            raise CommitError("empty", "No committed rows to pool", 400)
+        recipe["event_compress"] = {"rows": int(len(frame))}
+        _runtime().install_custom_parquet_frame(self.context, frame, provenance=recipe)
+        return int(len(frame))
 
     def _commit_ids(self, groups):
         if not groups or self._identity()[1] != "tag_filter":

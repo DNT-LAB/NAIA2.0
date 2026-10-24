@@ -32620,6 +32620,9 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 }
 .ecw-commit { border-color: rgba(94,158,106,0.75); background: rgba(94,158,106,0.22); color: #c8f0cf; }
 .ecw-commit:hover:not(:disabled) { background: rgba(94,158,106,0.4); }
+/* [↑↑풀링] - 커밋 뒤 같은 자리. 커밋(초록)과 갈라지게 청록 */
+.ecw-commit.is-pool { border-color: rgba(64,170,170,0.8); background: rgba(64,170,170,0.22); color: #bff0ee; }
+.ecw-commit.is-pool:hover:not(:disabled) { background: rgba(64,170,170,0.4); }
 .ecw-reapply:hover:not(:disabled) { border-color: var(--accent-blue); }
 .ecw-commit:disabled, .ecw-reapply:disabled { opacity: 0.45; cursor: default; }
 

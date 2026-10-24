@@ -37,6 +37,7 @@ SEARCH_COMMAND_TYPES = {
     "merge_parquet",
     "search_parquet_action",
     "search_export_preview",
+    "event_compress_pool",
     "restore_snapshot",
     "tag_filter_search",
     "tag_filter_assign",
@@ -221,6 +222,27 @@ async def handle_search_command(
             str(command.get("filename") or ""),
             merge=command_type == "merge_parquet",
         )
+        await _send_json(ws, state)
+        await _send_json(ws, toast)
+        return True
+
+    if command_type == "event_compress_pool":
+        # 이벤트 압축 [↑↑풀링] - 커밋한 행을 검색 결과로. 파켓 불러오기와 같은 답(loaded)을 누른 탭에만 보낸다 -
+        # 그 탭의 Tag Filter 가 칩을 새 풀에 다시 건다(onPoolSwap).
+        def pool_event_compress():
+            from core.event_compress import CommitError, ensure_event_compress
+            try:
+                rows = ensure_event_compress(context).pool()
+            except CommitError as exc:
+                message = {"not_committed": "먼저 커밋하세요 - 커밋한 Tag Filter 만 풀링합니다",
+                           "empty": "풀링할 행이 없습니다"}.get(exc.code, str(exc))
+                return context.search_state_payload(), {"type": "toast", "message": message, "level": "error"}
+            state = context.search_state_payload()
+            state["loaded"] = "↑↑풀링"
+            return state, {"type": "toast", "message": f"↑↑풀링 - 검색 결과를 {rows:,}행으로 바꿨습니다",
+                           "level": "success"}
+
+        state, toast = await run_in_thread(pool_event_compress)
         await _send_json(ws, state)
         await _send_json(ws, toast)
         return True

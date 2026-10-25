@@ -624,7 +624,7 @@ export function createEventCompressWindow({
       // 다음 쪽도 같다: 빈 답을 목록 끝으로 읽으면 총수가 지금 길이로 줄어 스크롤이 거기서 멈춘다.
       if (body.computing) {
         state = {...(state || {}), computing: true, paused: !!body.paused};
-        if (!more) stopWaiting();
+        if (!more) settleWaiting();      // 기다림을 건 뒤의 새 상태일 때만 푼다(늦게 온 목록 답 - Codex 재리뷰)
         render();
         return;
       }
@@ -649,10 +649,10 @@ export function createEventCompressWindow({
       if (!more && open && !items.some(it => it.key === open)) open = '';
       // 목록을 청해서 서버가 다시 셌다 - 윗줄의 수도 새것으로(꺼져 있을 때는 WS 가 안 올 수 있다).
       if (!more && state && state.stale) void refreshState();
-      else if (!more) stopWaiting();
+      else if (!more) settleWaiting();
     } catch (error) {
       if (mine !== listSeq) return;
-      if (!more) { items = []; total = 0; stopWaiting(); }
+      if (!more) { items = []; total = 0; settleWaiting(); }
       showToast(error.message || String(error), 'error');
     } finally {
       if (mine === listSeq) {

@@ -191,7 +191,13 @@ export function createEventCompressWindow({
     // 검색 · Tag Filter 가 풀을 바꾸는 동안은 세지 않는다 - 끝나면 서버가 센다(검색이 먼저 - 사용자 제보 2026-10-24).
     else if (s.paused) count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> <span class="ecw-over">검색 중 — 끝나면 셉니다</span>`;
     // 아직 안 셌다(stale - 꺼진 채 처음 연 창 · PE 를 바꾼 뒤)도 '세는 중' - 목록을 청하면 서버가 센다.
-    else if (s.computing || s.stale) count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> <span class="ecw-dim">이벤트 세는 중…</span>`;
+    else if (s.computing || s.stale) {
+      // 한도를 넘는 풀은 세는 동안에도 표본으로 센다는 것을 미리 알린다(사용자 지시 2026-10-25) - 끝나면 (표본 n행).
+      const limit = Number(s.row_limit) || 0;
+      const sampling = limit && Number(s.pool_rows) > limit;
+      count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행 <span class="ecw-dim">→</span> `
+        + (sampling ? `<span class="ecw-over">${fmt(limit)}행 표본으로 세는 중…</span>` : `<span class="ecw-dim">이벤트 세는 중…</span>`);
+    }
     else {
       const sample = sampleOf(s);
       count = `<span class="ecw-dim">풀</span> ${fmt(s.pool_rows)}행`

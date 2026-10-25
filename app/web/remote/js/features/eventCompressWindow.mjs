@@ -86,6 +86,8 @@ export function createEventCompressWindow({
   let poolTimer = 0;               // [↑↑풀링] 답(상태 알림)이 안 오면 단추를 다시 푸는 시계
   let waiting = false;             // 다시 세는 동안 창을 막는다
   let waitTimer = 0;
+  let waitSig = '';                // 기다림을 건 순간의 상태 서명
+  let resyncPending = false;       // 돌아왔을 때 일하는 중이라 미룬 재동기화 - 끝나면 한 번
   let listSig = '';                // 목록을 다시 받을지 가르는 서명(풀 · 이벤트 수 · 켬)
   let commitRows = 0;              // 지금 컷 · 찾기로 커밋하면 Tag Filter 에 남을 행 수(서버가 센다)
   let eventsSig = '';              // 그 수를 센 분석의 서명 - 커밋 때 함께 보내 그사이 풀이 바뀌었으면 서버가 거절한다
@@ -179,8 +181,17 @@ export function createEventCompressWindow({
   function onDocPointerDown(event) {
     if (!panel || !panel.isOpen()) { focusInside = false; return; }
     const inside = panel.el.contains(event.target);
-    if (inside && !focusInside && !busy && !waiting) void refreshState();
+    if (inside && !focusInside) {
+      if (busy || waiting) resyncPending = true;   // 일이 끝나면 한 번 맞춘다(flushResync)
+      else void refreshState();
+    }
     focusInside = inside;
+  }
+
+  function flushResync() {
+    if (!resyncPending || busy || waiting || !panel || !panel.isOpen()) return;
+    resyncPending = false;
+    void refreshState();
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────────
@@ -522,6 +533,8 @@ export function createEventCompressWindow({
 
   // ── 다시 세는 동안 막기 ─────────────────────────────────────────────────────
   function startWaiting() {
+    // 기다림을 건 순간의 서명 - 이것과 같은 상태(그 전에 청한 늦은 답 포함)로는 풀지 않는다(Codex 리뷰 2026-10-25).
+    waitSig = sigOf(state);
     waiting = true;
     renderWait();
     clearTimeout(waitTimer);
@@ -534,6 +547,13 @@ export function createEventCompressWindow({
     clearTimeout(waitTimer);
     waitTimer = 0;
     renderWait();
+    flushResync();
+  }
+
+  /** 상태가 기다림을 풀어도 되나 - 기다림을 건 뒤의 새 상태여야 한다. */
+  function settleWaiting() {
+    if (waiting && sigOf(state) === waitSig) return;
+    stopWaiting();
   }
 
   // ── 서버 ─────────────────────────────────────────────────────────────────
@@ -566,9 +586,9 @@ export function createEventCompressWindow({
     const relist = (sig !== listSig || !!state.stale) && !state.computing;
     if (!state.computing) listSig = sig;
     render();
-    if (state.paused) { stopWaiting(); return; }   // 검색이 먼저 - 끝나면 서버가 세고 알린다(그때 목록을 청한다)
+    if (state.paused) { settleWaiting(); return; }   // 검색이 먼저 - 끝나면 서버가 세고 알린다(그때 목록을 청한다)
     if (relist) void loadList(false);
-    else if (!state.computing && !state.stale) stopWaiting();
+    else if (!state.computing && !state.stale) settleWaiting();
   }
 
   async function refreshState() {
@@ -708,13 +728,15 @@ export function createEventCompressWindow({
     } finally {
       busy = '';
       renderCommit();
+      flushResync();
     }
   }
 
   /** [↑↑풀링] - 알림만(확인 창 없이 · 사용자 지시 2026-10-24). 서버가 파켓 불러오기와 같은 답을 이 탭에 보낸다. */
   function pool() {
     if (busy || waiting) return;
-    if (!poolToSearch()) { showToast('서버와 연결되어 있지 않습니다', 'error'); return; }
+    // 보고 있는 커밋의 표 - 그사이 커밋이 바뀌었으면 서버가 거절한다(Codex 리뷰 2026-10-25).
+    if (!poolToSearch(String((state && state.commit_token) || ''))) { showToast('서버와 연결되어 있지 않습니다', 'error'); return; }
     busy = 'pool';
     renderCommit();
     clearTimeout(poolTimer);
@@ -728,6 +750,7 @@ export function createEventCompressWindow({
     if (busy !== 'pool') return;
     busy = '';
     renderCommit();
+    flushResync();
   }
 
   function reapply() {
@@ -754,6 +777,7 @@ export function createEventCompressWindow({
     } finally {
       busy = '';
       renderList();
+      flushResync();
     }
   }
 

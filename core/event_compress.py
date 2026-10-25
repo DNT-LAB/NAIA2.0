@@ -150,6 +150,7 @@ def ensure_event_compress(context):
         if service is None:
             service = EventCompress(context)
             context._event_compress = service
+            service._identity()  # Attach consumption hooks before the first draw.
         return service
 
 
@@ -165,6 +166,20 @@ def check_event_compress(context):
         service = ensure_event_compress(context)
         if service.is_stale() and not service.computing:
             service.request()
+
+
+def notify_event_compress_state(context, *, consumption=False):
+    """Notify an existing window only; never create a service or request analysis."""
+    service = getattr(context, "_event_compress", None)
+    if service is not None:
+        try:
+            if consumption:
+                service.notify_consumption()
+            else:
+                service._notify()
+        except Exception as exc:
+            print(f"[event_compress] state notification failed: {type(exc).__name__}: {exc}"
+                  .encode("ascii", "replace").decode("ascii"))
 
 
 class CommitError(ValueError):
@@ -208,6 +223,57 @@ class EventCompress:
         self.error = None
         self.sample = None
         self.per_row_rounds = set()
+        self._commit_counts_cache = None
+        self._rating_ids_cache = None
+        self._consumption_notify_lock = threading.Lock()
+        self._consumption_timer = None
+
+    def notify_consumption(self):
+        # A fixed trailing deadline coalesces bursts without starving the last update.
+        # The consumer never computes state or publishes while holding the pool guard.
+        with self._consumption_notify_lock:
+            if self._consumption_timer is None:
+                timer = threading.Timer(1.0, self._flush_consumption)
+                timer.daemon = True
+                self._consumption_timer = timer
+                try:
+                    timer.start()
+                except Exception:
+                    self._consumption_timer = None
+                    raise
+
+    def _flush_consumption(self):
+        with self._consumption_notify_lock:
+            self._consumption_timer = None
+        self._notify()
+
+    def _active_ratings(self):
+        return tuple(sorted(self.context.get_active_ratings()))
+
+    def _rating_ids(self, ids=None):
+        # Ids whose rating is active, bounded by the Tag Filter (the search snapshot can hold millions
+        # of rows - a set over all of them cost ~200 MB). With `ids` (an analysis capture: live +
+        # dropped) it is computed fresh and kept: listed members and commit candidates always come
+        # from the published analysis, so they are covered. Without `ids` the kept set is reused for
+        # the same frame/ratings; otherwise it is rebuilt from the applied + live ids.
+        ctx = self.context
+        frame = getattr(ctx, "search_results_snapshot", None)
+        ratings = self._active_ratings()
+        if ids is None:
+            cached = self._rating_ids_cache
+            if cached is not None and cached[0] is frame and cached[1] == ratings:
+                return cached[2]
+            snapshot = getattr(ctx, "active_tag_filter_snapshot", None)
+            active = getattr(ctx, "active_tag_filter", None)
+            ids = (set((snapshot.get("ids") if isinstance(snapshot, dict) else None) or ())
+                   | set(((active.get("ids") if isinstance(active, dict) else None)
+                          or getattr(ctx, "active_tag_filter_ids", None) or ())))
+        if frame is not None and "id" in frame and "rating" in frame and ids:
+            eligible = set(frame.loc[frame["rating"].isin(ratings) & frame["id"].isin(ids), "id"])
+        else:
+            eligible = set()
+        self._rating_ids_cache = (frame, ratings, eligible)
+        return eligible
 
     def guard(self):
         return _runtime().search_pool_state_guard(self.context)
@@ -219,15 +285,17 @@ class EventCompress:
             model._event_compress_guard = self.guard()
             model._event_compress_in_flight = lambda: self.computing
             model._event_compress_on_change = lambda: request_event_compress(ctx)
+            model._event_compress_on_consume = lambda: notify_event_compress_state(ctx, consumption=True)
         active = getattr(ctx, "active_tag_filter", None)
         ids = getattr(ctx, "active_tag_filter_ids", None)
         if not isinstance(active, dict) and ids is not None:
             active = {"ids": set(ids), "count": len(ids), "tags": [], "rating_counts": {}}
             ctx.active_tag_filter = active
         scope = "tag_filter" if isinstance(active, dict) or ids is not None else "search_pool"
-        return (_runtime().current_search_pool_generation(ctx), scope,
-                id(active) if isinstance(active, dict) else id(ids) if ids is not None else id(model),
-                0 if scope == "tag_filter" else getattr(model, "_event_compress_version", 0))
+        identity = (_runtime().current_search_pool_generation(ctx), scope,
+                    id(active) if isinstance(active, dict) else id(ids) if ids is not None else id(model),
+                    0 if scope == "tag_filter" else getattr(model, "_event_compress_version", 0))
+        return (*identity, self._active_ratings()) if scope == "tag_filter" else identity
 
     def is_stale(self):
         with self.guard():
@@ -254,6 +322,11 @@ class EventCompress:
 
     def pool_busy_changed(self):
         # Called under the same pool guard as worker start/publication.
+        # An OFF window may have explicitly requested a list; resume that work,
+        # but an idle service only announces stale/busy state for the window.
+        if not enabled(self.context) and not self.computing:
+            self._notify()
+            return
         if _runtime().is_pool_busy(self.context):
             if self.computing or self.is_stale():
                 self.request()
@@ -322,7 +395,7 @@ class EventCompress:
                 model.set_event_compress_dropped(set())
             self.dropped.clear()
             return
-        if self.identity != self._identity():
+        if self.identity is None or self.identity[:4] != self._identity()[:4]:
             self.dropped.clear()
             return
         if self.identity[1] == "tag_filter":
@@ -363,6 +436,10 @@ class EventCompress:
     def _capture(self):
         with self.guard():
             identity = self._identity()
+            if (self.dropped and self.identity is not None and identity != self.identity
+                    and identity[:4] == self.identity[:4] and identity[1] == "tag_filter"):
+                # Ratings changed on the same assignment: restore old masks before recounting.
+                self._restore()
             settings = pe_settings(self.context)
             stamp = (identity, self._revision(), settings[0], self.sequence)
             if identity != self.identity:
@@ -376,7 +453,8 @@ class EventCompress:
                 ratings = Counter((self.context.active_tag_filter or {}).get("rating_counts") or {})
                 for group in self.groups.values():
                     ratings[group["rating"]] += len(restored.intersection(group["members"]))
-                data = (frame, ids, model.event_compress_snapshot() if model is not None else [], ratings)
+                data = (frame, self._rating_ids(ids),
+                        model.event_compress_snapshot() if model is not None else [], ratings, ids)
             else:
                 model = getattr(self.context, "search_results", None)
                 data = model.event_compress_snapshot() if model is not None else []
@@ -400,7 +478,7 @@ class EventCompress:
         if tag_filter:
             candidates = np.fromiter(data[1], dtype=np.int64, count=rows)
             candidates.sort()
-            return (data[0], set(candidates[selected].tolist()), data[2], data[3]), {}, sample
+            return (data[0], set(candidates[selected].tolist()), data[2], data[3], data[4]), {}, sample
         positions, offset = {}, 0
         for bucket, frame, consumed, _ in data:
             count = len(frame) - len(consumed)
@@ -508,7 +586,7 @@ class EventCompress:
         if identity[1] == "tag_filter" and sampled_positions is None:
             # Only grouped duplicates may leave the pool. Delta accounting keeps
             # the previous per-rating contribution of every ungrouped live id.
-            kept = data[1] - dropped
+            kept = data[4] - dropped
             ratings = data[3].copy()
             for group in _cooperative(result.values(), checkpoint):
                 ratings[group["rating"]] -= len(group["members"]) - 1
@@ -622,7 +700,15 @@ class EventCompress:
 
     def _remaining(self):
         if self._identity()[1] == "tag_filter":
-            return len(self._live_ids())
+            active = self.context.active_tag_filter
+            counts = active.get("rating_counts")
+            if not counts and active.get("ids"):
+                # Legacy id-only assignments: initialize once, then consumption maintains it.
+                frame = getattr(self.context, "search_results_snapshot", None)
+                counts = (frame.loc[frame["id"].isin(active["ids"]), "rating"].value_counts().to_dict()
+                          if frame is not None and "id" in frame and "rating" in frame else {})
+                active["rating_counts"] = {r: int(counts.get(r, 0)) for r in "gsqe"}
+            return sum(int((counts or {}).get(r, 0)) for r in self._active_ratings())
         model = getattr(self.context, "search_results", None)
         return model.get_count() if model is not None else 0
 
@@ -645,6 +731,7 @@ class EventCompress:
                        # Rows of the event commit the live Tag Filter came from (0 = not a commit).
                        # A plain re-apply replaces the snapshot, so it never reads as committed.
                        "committed_rows": self._committed_rows(),
+                       "commit_token": self._commit_token(),
                        "analysis": self.analysis,
                        "pe": {"options": options, "auto_hide_count": len(auto_hide),
                               "hide_count": sum(len(v.get("hide") or []) for v in overrides.values() if isinstance(v, dict))}}
@@ -719,7 +806,8 @@ class EventCompress:
             ids = active.get("ids") if isinstance(active, dict) else getattr(
                 self.context, "active_tag_filter_ids", None)
             ids = ids or ()
-            return lambda ref: ref in ids
+            eligible = self._rating_ids()
+            return lambda ref: ref in ids and ref in eligible
         model = getattr(self.context, "search_results", None)
         if model is None:
             return lambda ref: False
@@ -736,15 +824,38 @@ class EventCompress:
         if (self._identity()[1] != "tag_filter" or not isinstance(snapshot, dict)
                 or not snapshot.get("_event_compress_commit")):
             return 0
-        return len(snapshot.get("ids") or ())
+        frame = getattr(self.context, "search_results_snapshot", None)
+        if frame is None or frame.empty:
+            frame = _runtime().search_base_frame(self.context)
+        record = snapshot["_event_compress_commit"]
+        cached = self._commit_counts_cache
+        if cached is None or cached[0] is not snapshot or cached[1] is not frame or cached[2] is not record:
+            counts = {}
+            if frame is not None and "rating" in frame:
+                selected = frame["rating"]
+                if "id" in frame:
+                    selected = selected.loc[frame["id"].isin(snapshot.get("ids") or ())]
+                counts = selected.value_counts().to_dict()
+            self._commit_counts_cache = (snapshot, frame, record, counts)
+        return sum(int(self._commit_counts_cache[3].get(r, 0)) for r in self._active_ratings())
 
-    def pool(self):
+    def _commit_token(self):
+        if not self._committed_rows():
+            return ""
+        record = self.context.active_tag_filter_snapshot["_event_compress_commit"]
+        # Persistence already gives each commit a UUID. Consumption never changes it.
+        key = record.get("token") or record.get("fingerprint") or str(id(record))
+        return hashlib.sha256(json.dumps([key, self._active_ratings()]).encode()).hexdigest()[:20]
+
+    def pool(self, expected_token=None):
         """[↑↑풀링] - make the committed rows the session search result, exactly like saving them as
         a parquet and loading it back (user 2026-10-24: every committed row, consumed ones included)."""
         # Check, export and install under ONE hold of the (reentrant) pool guard: otherwise another tab
         # can re-apply Tag Filter between the commit check and the export, and an uncommitted selection
         # would be installed (Codex review 2026-10-24).
         with self.guard():
+            if expected_token is not None and expected_token != self._commit_token():
+                raise CommitError("commit_changed", "Commit changed; reload the event window", 409)
             if not self._committed_rows():
                 raise CommitError("not_committed", "Commit the event selection first", 409)
             # Same frame as [이 결과 저장]: the applied (immutable) commit set x active ratings.
@@ -758,14 +869,14 @@ class EventCompress:
     def _commit_ids(self, groups):
         if not groups or self._identity()[1] != "tag_filter":
             return set()
-        live = self._live_ids()
+        live = self._live_predicate()
         ids = set()
         for group in groups:
             # Always ONE row per event (user 2026-10-23: commit count == event count; the live
             # "compress on" mode was removed from the window). The first member is the
             # representative; if it was consumed, fall back to another currently live member.
             for member in group["members"]:
-                if member in live:
+                if live(member):
                     ids.add(member)
                     break
         return ids

@@ -21,7 +21,11 @@ def _pool_locked(method):
                 changed = getattr(self, "_event_compress_on_change", None)
                 if changed is not None:
                     changed()
-            return result
+        if method.__name__.startswith("pop_") and result is not None:
+            consumed = getattr(self, "_event_compress_on_consume", None)
+            if consumed is not None:
+                consumed()
+        return result
     return call
 
 
@@ -151,10 +155,8 @@ class _SearchResultBucket:
         return "rating" in self.df.columns
 
     def remaining_count(self) -> int:
-        if not self.excluded_indices:
-            return len(self.df)
-        consumed_present = sum(1 for index in self.excluded_indices if index in self.df.index)
-        return max(0, len(self.df) - consumed_present)
+        # Both masks contain valid, disjoint positions (pops reject dropped rows).
+        return max(0, len(self.df) - len(self.consumed_indices) - len(self.dropped_indices))
 
     def is_empty(self) -> bool:
         return self.remaining_count() <= 0
@@ -359,6 +361,17 @@ class SearchResultModel:
         self.df = pd.DataFrame()
         if dataframe is not None:
             self.set_dataframe(dataframe, lazy_bucketize=lazy_bucketize)
+
+    def __deepcopy__(self, memo):
+        from copy import deepcopy
+        cloned = type(self).__new__(type(self))
+        memo[id(self)] = cloned
+        hooks = {"_event_compress_guard", "_event_compress_in_flight",
+                 "_event_compress_on_change", "_event_compress_on_consume"}
+        for key, value in self.__dict__.items():
+            if key not in hooks:
+                setattr(cloned, key, deepcopy(value, memo))
+        return cloned
 
     @classmethod
     def _candidate_tag_dirs(cls) -> list[Path]:
@@ -1092,7 +1105,8 @@ class SearchResultModel:
         for key, index in dropped:
             by_bucket.setdefault(key, set()).add(index)
         for key, bucket in self._buckets.items():
-            bucket.dropped_indices = by_bucket.get(key, set()) - bucket.consumed_indices
+            bucket.dropped_indices = {i for i in by_bucket.get(key, ())
+                                      if i in bucket.df.index and i not in bucket.consumed_indices}
             bucket.invalidate_caches()
         self._mark_bucket_data_changed()
         self._refresh_legacy_df_pointer()

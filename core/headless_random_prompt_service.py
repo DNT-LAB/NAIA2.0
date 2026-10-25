@@ -703,6 +703,8 @@ class HeadlessRandomPromptService:
             self.context._tag_filter_consumption = int(
                 getattr(self.context, "_tag_filter_consumption", 0) or 0
             ) + 1
+            from core.event_compress import notify_event_compress_state
+            notify_event_compress_state(self.context, consumption=True)
             return True
         except Exception as exc:
             safe_print(f"Headless Remote: tag filter consume update failed - {exc}", flush=True)
@@ -968,6 +970,7 @@ class HeadlessRandomPromptService:
         return lock
 
     def _ensure_search_results(self, settings: dict[str, Any], *, announce: bool = False) -> bool:
+        from core.event_compress import notify_event_compress_state
         if settings.get("wildcard_standalone", False):
             return True
 
@@ -977,6 +980,7 @@ class HeadlessRandomPromptService:
         snapshot = getattr(self.context, "search_results_snapshot", None)
         if snapshot is not None and not getattr(snapshot, "empty", True):
             self.context.search_results = SearchResultModel(snapshot.copy())
+            notify_event_compress_state(self.context)
             safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
             return True
 
@@ -993,6 +997,7 @@ class HeadlessRandomPromptService:
             snapshot = getattr(self.context, "search_results_snapshot", None)
             if snapshot is not None and not getattr(snapshot, "empty", True):
                 self.context.search_results = SearchResultModel(snapshot.copy())
+                notify_event_compress_state(self.context)
                 safe_print(f"🌐 Headless Remote: search_results restored from memory snapshot ({self.context.search_results.get_count()} rows)")
                 return True
 
@@ -1016,6 +1021,7 @@ class HeadlessRandomPromptService:
             progress, done = _new_progress()
             try:
                 if self.context.restore_last_search(progress=progress):
+                    notify_event_compress_state(self.context)
                     safe_print(f"🌐 Headless Remote: search_results restored from last-search cache ({self.context.search_results.get_count()} rows)")
                     # 옛 설치에서 가져온 마지막 검색이 먼저 채워졌다 - 사용자의 것이라 첫 실행 필터를 걸지 않고 끝낸다.
                     self._consume_first_run(apply=False)
@@ -1052,6 +1058,7 @@ class HeadlessRandomPromptService:
                     # 첫 설치의 첫 풀(태그 아카이브의 마지막 조각)이면 Tag Filter "1girl, solo" 를 건다 - **풀을 다
                     # 읽은 뒤**다(빈 풀에 칩만 걸면 아무 일도 없다). 거는 것은 get_search_state 의 재조립이 한다.
                     self._consume_first_run(apply="tag archive" in label)
+                    notify_event_compress_state(self.context)
                     return True
                 except Exception as exc:
                     safe_print(f"🌐 Headless Remote: search_results restore failed from {path} — {exc}")

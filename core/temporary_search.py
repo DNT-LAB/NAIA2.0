@@ -98,6 +98,8 @@ class TemporarySearch:
             ctx._tag_filter_cache = None
         ctx.mark_search_pool_replaced()
         ctx.mark_tag_filter_changed()
+        from core.event_compress import notify_event_compress_state
+        notify_event_compress_state(ctx)
 
     def payload(self, owner: str = "") -> dict[str, Any]:
         return {"type": "temporary_search_state", "active": self.active,

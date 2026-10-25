@@ -3384,7 +3384,7 @@ function paintEventCompressButton(state) {
   if (button) button.classList.toggle('is-on', !!(state && state.enabled));
 }
 function openEventCompressWindow() {
-  import('./js/features/eventCompressWindow.mjs?v=20261025-evcfocus1').then(({createEventCompressWindow}) => {
+  import('./js/features/eventCompressWindow.mjs?v=20261025-evcsync2').then(({createEventCompressWindow}) => {
     if (!eventCompressWindow) {
       eventCompressWindow = createEventCompressWindow({
         document, window, escHtml, showToast,
@@ -3406,9 +3406,9 @@ function openEventCompressWindow() {
         // [랜덤] [생성] 이 메인 Random · Generate 와 같은 파라미터를 싣게(해상도 · Rnd Res · Auto Res 포함).
         generationParams: () => _collectCurrentParams(),
         // [↑↑풀링] = 파켓 불러오기와 같은 WS 명령 - 답(search_state · loaded)이 Tag Filter 칩을 새 풀에 다시 건다.
-        poolToSearch: () => {
+        poolToSearch: (commitToken) => {
           if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-          ws.send(JSON.stringify({type: 'event_compress_pool'}));
+          ws.send(JSON.stringify({type: 'event_compress_pool', commit_token: commitToken || ''}));
           return true;
         },
       });

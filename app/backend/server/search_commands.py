@@ -232,10 +232,11 @@ async def handle_search_command(
         def pool_event_compress():
             from core.event_compress import CommitError, ensure_event_compress
             try:
-                rows = ensure_event_compress(context).pool()
+                rows = ensure_event_compress(context).pool(expected_token=command.get("commit_token"))
             except CommitError as exc:
                 message = {"not_committed": "먼저 커밋하세요 - 커밋한 Tag Filter 만 풀링합니다",
-                           "empty": "풀링할 행이 없습니다"}.get(exc.code, str(exc))
+                           "empty": "풀링할 행이 없습니다",
+                           "commit_changed": "커밋이 바뀌었습니다 - 창을 다시 확인한 뒤 풀링하세요"}.get(exc.code, str(exc))
                 return context.search_state_payload(), {"type": "toast", "message": message, "level": "error"}
             state = context.search_state_payload()
             state["loaded"] = "↑↑풀링"

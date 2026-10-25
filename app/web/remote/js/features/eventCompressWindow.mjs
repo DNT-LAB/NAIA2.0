@@ -169,7 +169,18 @@ export function createEventCompressWindow({
     panel.body.addEventListener('pointerdown', onPointerDown);
     panel.body.addEventListener('focusout', onFocusOut);
     panel.body.querySelector('[data-ecw-list]').addEventListener('scroll', onScroll, {passive: true});
+    doc.addEventListener('pointerdown', onDocPointerDown, true);
     return panel;
+  }
+
+  /** 다른 곳(Quick Filter · Search …)을 만지다 이 창으로 돌아오면 서버 상태를 다시 받는다 - 그사이 풀이 바뀌었으면
+   *  수 · 목록이 어긋난 채 남았다(사용자 지시 2026-10-25). 다르면 applyState 가 목록을 다시 청한다(어긋남 = 다시 셈). */
+  let focusInside = false;
+  function onDocPointerDown(event) {
+    if (!panel || !panel.isOpen()) { focusInside = false; return; }
+    const inside = panel.el.contains(event.target);
+    if (inside && !focusInside && !busy && !waiting) void refreshState();
+    focusInside = inside;
   }
 
   // ── 그리기 ────────────────────────────────────────────────────────────────

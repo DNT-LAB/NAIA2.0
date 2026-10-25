@@ -340,7 +340,11 @@ export function initAssist({ showToast, getApiMode, applyCharacters, bindTagAssi
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload ?? {}), cache: 'no-store',
     });
-    const data = await res.json().catch(() => ({}));
+    const raw = await res.json().catch(() => null);
+    const data = raw && typeof raw === 'object' ? raw : {};
+    // 본문이 JSON 이 아닌 실패(500 Internal Server Error)도 까닭을 싣는다 — 비면 '찾지 못했습니다' 로 보여 결과 없음과
+    // 갈리지 않았다(10-25: 포터블 전파 누락으로 나흘간 500)
+    if (!res.ok && !data.error) data.error = data.message || `서버 오류 (HTTP ${res.status})`;
     if ((!res.ok || data.ok === false) && !allowError) {
       const error = new Error(data.error || data.message || `HTTP ${res.status}`);
       error.status = res.status;

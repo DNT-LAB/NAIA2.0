@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import os
+import traceback
 import uuid
 from typing import Any, Awaitable, Callable
 
@@ -47,7 +49,16 @@ def register_assist_v2_routes(
             payload = await request.json()
         except Exception:
             return JSONResponse({"ok": False, "error": "JSON 요청이 아닙니다."}, status_code=400)
-        result = await run_in_thread(run_assist, context, payload)
+        try:
+            result = await run_in_thread(run_assist, context, payload)
+        except Exception as exc:
+            # 서버 결함은 까닭을 싣는다 — 빈 500 은 화면에서 '찾지 못했습니다' 로 보여 결과 없음과 갈리지 않았다
+            # (10-25: 포터블 전파 누락으로 refine_message 가 evidence 를 몰라 나흘간 TypeError)
+            frames = traceback.extract_tb(exc.__traceback__)
+            where = f" at {os.path.basename(frames[-1].filename)}:{frames[-1].lineno}" if frames else ""
+            print(f"Headless Remote: assist failed - {type(exc).__name__}{where}", flush=True)   # cp949 콘솔: ASCII 만
+            error = f"서버 오류로 찾지 못했습니다 — {type(exc).__name__}: {exc}"
+            return JSONResponse({"ok": False, "code": "server_error", "error": error[:300]}, status_code=500)
         return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
     @app.post("/api/assist/warm")

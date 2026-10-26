@@ -33094,3 +33094,5 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   font-family: var(--font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .thw-ab-prompt:hover { border-color: rgba(190,160,255,0.7); }
+.thw-card img[data-thw-insert] { cursor: pointer; }
+.thw-card img[data-thw-insert]:hover { filter: brightness(1.08); }

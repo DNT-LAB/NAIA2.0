@@ -3,7 +3,7 @@
  *
  *   머리줄: [태그 검색] [Bench]
  *   [ 분류 목록 | 소제목별 카드 격자 ]
- *   카드 = POS 1 썸네일 · 태그(누르면 프롬프트에 넣기 · 우클릭 = 복사) · [A|B]
+ *   카드 = POS 1 썸네일(누르면 프롬프트에 넣기) · 이름(누르면 복사 · 툴팁 = 전체 이름 · 우클릭 = 복사) · [A|B]
  *
  * 데이터 = /api/thumb/state · /api/thumb/category/<key> (data/taglist/style_meta_tags.json v3 - 2026-10-26 생성 실험).
  * 분류마다 생성 기준(base: 프리셋 / 맨바탕)이 다르다 - 상태 줄에 그 기준을 적는다.
@@ -106,9 +106,11 @@ export function createThumbWindow({
 
   function card(tag, url, single) {
     return `<article class="thw-card" data-thw-tag="${escAttr(tag)}">`
-      + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}">`
-      + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-insert="${escAttr(tag)}"`
-      + ` data-naia-title="${escAttr(tag)} · 누르면 프롬프트에 넣습니다 · 우클릭 = 복사">${escHtml(tag)}</button>`
+      // 그림 = 프롬프트에 넣기 · 이름 = 복사(툴팁에 전체 이름) - 사용자 지시 2026-10-26.
+      + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-insert="${escAttr(tag)}"`
+      + ` data-naia-title="누르면 프롬프트에 넣습니다: ${escAttr(tag)}">`
+      + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-copy="${escAttr(tag)}"`
+      + ` data-naia-title="${escAttr(tag)} · 누르면 복사">${escHtml(tag)}</button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
         : `<button type="button" class="thw-ab" data-thw-ab="${escAttr(tag)}" data-naia-title="GT 와 나란히 비교(준비 중)">A|B</button>`)
       + `</div></article>`;
@@ -184,6 +186,8 @@ export function createThumbWindow({
   function onClick(event) {
     const cat = event.target.closest('[data-thw-cat]');
     if (cat) { void select(cat.dataset.thwCat); return; }
+    const copy = event.target.closest('[data-thw-copy]');
+    if (copy) { void copyTag(copy.dataset.thwCopy); return; }
     const insert = event.target.closest('[data-thw-insert]');
     if (insert) {
       if (insertTag(insert.dataset.thwInsert)) showToast(`넣었습니다: ${insert.dataset.thwInsert}`, 'success');

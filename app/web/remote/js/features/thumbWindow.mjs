@@ -1,7 +1,8 @@
 /**
- * Thumb 창 - 오른쪽 탭 [Thumb] 을 누르면 뜨는 떠 있는 창(사용자 결정 2026-10-26 · Characters 창과 같은 탭 규칙).
+ * Thumb 창 - 오른쪽 탭 [Thumb] 을 누르면 뜨는 떠 있는 창(사용자 결정 2026-10-26). [Thumb] 은 창을 띄우거나 앞으로 가져오기만 한다 -
+ * 옛 Thumb 탭 화면으로는 가지 않는다(Bench 모드는 만들지 않기로 했다 · 사용자 결정 2026-10-26).
  *
- *   머리줄: [태그 검색] [Bench]
+ *   머리줄: [태그 검색]
  *   [ 분류 목록 | 소제목별 카드 격자 ]
  *   카드 = POS 1 썸네일(마우스를 올리면 큰 그림 세 장 UC 2.5(없으면 UC 1) | GT | POS +1 을 카드 위/아래에) · 이름(누르면 복사 · 툴팁 = 전체 이름 ·
  *   우클릭 = 복사) · [A|B]
@@ -12,7 +13,6 @@
  * 마지막에 본 분류(메모리만 - 저장하지 않는다).
  * [A|B] = 검은 반투명 배경의 비교 팝업(사용자 지시 2026-10-26): A = 기준 GT · B = 변형 그림을 단추 줄로
  * (빼기 붉은 계열 = UC · 그 줄 끝에 POS 음수 파란 계열 / 넣기 연두 계열 = POS 양수 · GT 는 A 에 있으니 생략 · 마우스를 올려도 바뀐다). 변형 그림은 HF 지연 다운로드 묶음(약 300MB · /api/thumb/variants) - 없으면 B 자리에서 [받기].
- * [Bench] 는 다음 단계(TODO) - 지금은 알림만.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
@@ -21,9 +21,6 @@ export function createThumbWindow({
   window: win = window,
   escHtml = value => String(value ?? ''),
   showToast = () => {},
-  // 메인 프롬프트 칸 · 작성 편집 알림 - 지금은 쓰지 않는다(그림 클릭 넣기를 뺐다 · 2026-10-26). Bench 모드에서 쓸 자리.
-  promptEdit = null,                  // eslint-disable-line no-unused-vars
-  onPromptEdit = null,                // eslint-disable-line no-unused-vars
 } = {}) {
   let panel = null;
   let state = null;                   // /api/thumb/state
@@ -46,16 +43,12 @@ export function createThumbWindow({
       initial: {right: 24, y: 80},
       escHtml,
     });
-    panel.slot.innerHTML = `<input class="thw-q" type="search" data-thw-q placeholder="태그 검색" spellcheck="false" autocomplete="off">`
-      + `<button type="button" class="thw-hb" data-thw-bench data-naia-title="Bench 모드 - 고정된 GT 와 캐릭터 프롬프트로 프롬프트를 깎는 화면(준비 중)">Bench</button>`;
+    panel.slot.innerHTML = `<input class="thw-q" type="search" data-thw-q placeholder="태그 검색" spellcheck="false" autocomplete="off">`;
     panel.body.innerHTML = `<div class="thw">`
       + `<nav class="thw-cats" data-thw-cats aria-label="스타일 분류"></nav>`
       + `<section class="thw-main"><div class="thw-status" data-thw-status>불러오는 중…</div>`
       + `<div class="thw-grid" data-thw-grid></div></section></div>`;
     panel.slot.addEventListener('input', event => { if (event.target.closest('[data-thw-q]')) paintGrid(); });
-    panel.slot.addEventListener('click', event => {
-      if (event.target.closest('[data-thw-bench]')) showToast('Bench 모드는 준비 중입니다', 'info');
-    });
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', onContextMenu);
     panel.body.addEventListener('mouseover', onPeekOver);
@@ -513,11 +506,6 @@ export function createThumbWindow({
   return {
     open,
     hidePeek,
-    /** 탭 단추 규칙(Characters · Artist 와 같다) - 창을 세웠으면 false(탭으로 가지 않는다), 이미 펴져 있으면 true(탭으로). */
-    requestTab() {
-      if (!panel || !panel.isOpen() || (panel.isCollapsed && panel.isCollapsed())) { void open(); return false; }
-      return true;
-    },
     isOpen: () => !!(panel && panel.isOpen()),
   };
 }

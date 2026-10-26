@@ -33117,8 +33117,8 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 /* A|B 팝업은 상하좌우 7% 씩 잘라 보이기(사용자 지시 2026-10-26) - 카드 · 큰 그림(10%)보다 덜 자른다. */
 .thw-ab-img img { object-view-box: inset(7%); }
 /* A|B 단추 줄(사용자 지시 2026-10-26 - 슬라이더 대신). 테두리 없음 · 빼기 = 붉은 계열 · 넣기 = 연두 계열 · 고른 것은 진하게. */
-.thw-ab-btns { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; margin-bottom: 8px; }
-.thw-ab-grp { display: flex; flex-wrap: wrap; gap: 4px; }
+.thw-ab-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
+.thw-ab-gap { flex: 1 1 12px; }
 .thw-ab-v {
   border: 0; border-radius: 5px; padding: 4px 9px; cursor: pointer; font-family: var(--font-mono); font-size: 11px;
 }
@@ -33128,3 +33128,6 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-ab-v.is-plus { background: rgba(151,196,89,0.16); color: #b8dc7f; }
 .thw-ab-v.is-plus:hover { background: rgba(151,196,89,0.28); }
 .thw-ab-v.is-plus.is-on { background: #6f9e33; color: #fff; }
+.thw-ab-v.is-neg { background: rgba(55,138,221,0.18); color: #8fc0f0; }
+.thw-ab-v.is-neg:hover { background: rgba(55,138,221,0.3); }
+.thw-ab-v.is-neg.is-on { background: #2f74bd; color: #fff; }

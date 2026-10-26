@@ -11,7 +11,7 @@
  * 'Novel AI 공식' 은 이 페이지에서 창을 처음 열 때 늘 맨 먼저 보인다(서버의 selected · 사용자 지시) - 그 뒤로는 이 세션에서
  * 마지막에 본 분류(메모리만 - 저장하지 않는다).
  * [A|B] = 검은 반투명 배경의 비교 팝업(사용자 지시 2026-10-26): A = 기준 GT · B = 변형 그림을 단추 줄로
- * (빼기 쪽 붉은 계열 = UC · POS 음수 / 넣기 쪽 연두 계열 = POS 양수 · GT 는 A 에 있으니 생략). 변형 그림은 HF 지연 다운로드 묶음(약 300MB · /api/thumb/variants) - 없으면 B 자리에서 [받기].
+ * (빼기 붉은 계열 = UC · 그 줄 끝에 POS 음수 파란 계열 / 넣기 연두 계열 = POS 양수 · GT 는 A 에 있으니 생략 · 마우스를 올려도 바뀐다). 변형 그림은 HF 지연 다운로드 묶음(약 300MB · /api/thumb/variants) - 없으면 B 자리에서 [받기].
  * [Bench] 는 다음 단계(TODO) - 지금은 알림만.
  */
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
@@ -279,15 +279,18 @@ export function createThumbWindow({
 
   // ── A|B 팝업 ──────────────────────────────────────────────────────────────
   // B 는 단추 줄로 고른다(사용자 지시 2026-10-26 - 슬라이더가 불편했다). GT 는 A 에 있으니 뺀다.
-  // 빼기 쪽(붉은 계열) = UC(큰 값부터) · POS 음수 / 넣기 쪽(연두 계열) = POS 양수(작은 값부터). 좌우 화살표로도 옮긴다.
+  // 첫 줄 = 빼기(붉은 계열 · UC 큰 값부터) ……… 맨 끝에 POS 음수(파란 계열) / 둘째 줄 = 넣기(연두 계열 · POS 양수 작은 값부터).
+  // 누르거나 마우스를 올리면 B 가 바뀐다 · 좌우 화살표로도 옮긴다.
   let ab = null;                      // {tag, data, steps, idx, el, poll, seq}
   let abSeq = 0;
 
   function abSteps(data) {
     const vs = data.variants || [];
-    const minus = [...vs.filter(v => v.place === 'uc'), ...vs.filter(v => v.place === 'pos' && Number(v.weight) < 0)];
+    const minus = vs.filter(v => v.place === 'uc');
+    const neg = vs.filter(v => v.place === 'pos' && Number(v.weight) < 0);
     const plus = vs.filter(v => v.place !== 'uc' && Number(v.weight) > 0);
-    return [...minus.map(v => ({...v, side: 'minus'})), ...plus.map(v => ({...v, side: 'plus'}))];
+    return [...minus.map(v => ({...v, side: 'minus'})), ...neg.map(v => ({...v, side: 'neg'})),
+      ...plus.map(v => ({...v, side: 'plus'}))];
   }
 
   function abClose() {
@@ -356,6 +359,11 @@ export function createThumbWindow({
       + `<div class="thw-ab-body"><figure class="thw-ab-pane"><div class="thw-ab-img"><img data-thw-ab-a alt="A - GT"></div>`
       + `<figcaption>A · GT (태그 없음)</figcaption></figure>`
       + `<figure class="thw-ab-pane"><div class="thw-ab-img" data-thw-ab-stage></div><figcaption data-thw-ab-ctl></figcaption></figure></div></div>`;
+    // 단추에 마우스를 올려도 B 를 바꾼다(사용자 지시 2026-10-26).
+    el.addEventListener('mouseover', event => {
+      const stepBtn = event.target.closest('[data-thw-ab-step]');
+      if (stepBtn && ab && Number(stepBtn.dataset.thwAbStep) !== ab.idx) abSet(Number(stepBtn.dataset.thwAbStep));
+    });
     el.addEventListener('click', event => {
       if (event.target === el || event.target.closest('[data-thw-ab-close]')) { abClose(); return; }
       const stepBtn = event.target.closest('[data-thw-ab-step]');
@@ -393,11 +401,10 @@ export function createThumbWindow({
     stage.innerHTML = `<img data-thw-ab-b alt="B">`;
     const btn = (step, i) => `<button type="button" class="thw-ab-v is-${step.side}" data-thw-ab-step="${i}"`
       + ` data-naia-title="${escAttr(abPromptText(step))}">${escHtml(step.label || step.col)}</button>`;
-    const minus = ab.steps.map((step, i) => [step, i]).filter(([step]) => step.side === 'minus');
-    const plus = ab.steps.map((step, i) => [step, i]).filter(([step]) => step.side === 'plus');
-    ctl.innerHTML = `<div class="thw-ab-btns">`
-      + `<span class="thw-ab-grp">${minus.map(([step, i]) => btn(step, i)).join('')}</span>`
-      + `<span class="thw-ab-grp">${plus.map(([step, i]) => btn(step, i)).join('')}</span></div>`
+    const side = name => ab.steps.map((step, i) => [step, i]).filter(([step]) => step.side === name)
+      .map(([step, i]) => btn(step, i)).join('');
+    ctl.innerHTML = `<div class="thw-ab-btns">${side('minus')}<span class="thw-ab-gap"></span>${side('neg')}</div>`
+      + `<div class="thw-ab-btns">${side('plus')}</div>`
       + `<div class="thw-ab-ctl"><b data-thw-ab-label></b>`
       + `<code class="thw-ab-prompt" data-thw-ab-prompt data-naia-title="${escAttr(abBaseNote())} · 누르면 복사"></code></div>`;
     abPaintB();

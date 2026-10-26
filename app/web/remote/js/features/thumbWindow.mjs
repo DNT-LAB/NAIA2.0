@@ -38,7 +38,8 @@ export function createThumbWindow({
       title: 'Thumb',
       variant: 'thw',
       storageKey: 'thumb-window',
-      width: 760, height: 620, minWidth: 460, minHeight: 320, maxWidth: 1600,
+      // 처음 크기 = 한 줄에 카드 3장(사용자 지시 2026-10-26) - 분류 목록 150 + 격자 약 420(카드 최소 128 · 간격 7).
+      width: 600, height: 620, minWidth: 460, minHeight: 320, maxWidth: 1600,
       resizable: true, collapsible: true,
       initial: {right: 24, y: 80},
       escHtml,
@@ -107,7 +108,7 @@ export function createThumbWindow({
     return `<article class="thw-card" data-thw-tag="${escAttr(tag)}">`
       + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}">`
       + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-insert="${escAttr(tag)}"`
-      + ` data-naia-title="누르면 프롬프트에 넣습니다 · 우클릭 = 복사">${escHtml(tag)}</button>`
+      + ` data-naia-title="${escAttr(tag)} · 누르면 프롬프트에 넣습니다 · 우클릭 = 복사">${escHtml(tag)}</button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
         : `<button type="button" class="thw-ab" data-thw-ab="${escAttr(tag)}" data-naia-title="GT 와 나란히 비교(준비 중)">A|B</button>`)
       + `</div></article>`;

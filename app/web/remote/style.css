@@ -33111,3 +33111,6 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-peek-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .thw-peek-img span { font-size: 11px; color: var(--text-dim); padding: 12px; }
 .thw-peek-cell figcaption { margin-top: 4px; text-align: center; font-size: 11px; color: var(--text-secondary); }
+/* 상하좌우 10% 씩 잘라 보이기(사용자 지시 2026-10-26) - 다시 굽지 않고 화면에서만(object-view-box · 크로미움).
+   그림 상자 크기는 그대로라 아래 이름 칸을 덮지 않는다. A|B 팝업은 원본 그대로. */
+.thw-card img[data-thw-peek], .thw-peek-img img { object-view-box: inset(10%); }

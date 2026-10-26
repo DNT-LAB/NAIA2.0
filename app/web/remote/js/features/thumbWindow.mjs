@@ -403,7 +403,7 @@ export function createThumbWindow({
       + ` data-naia-title="${escAttr(abPromptText(step))}">${escHtml(step.label || step.col)}</button>`;
     const side = name => ab.steps.map((step, i) => [step, i]).filter(([step]) => step.side === name)
       .map(([step, i]) => btn(step, i)).join('');
-    ctl.innerHTML = `<div class="thw-ab-btns">${side('minus')}<span class="thw-ab-gap"></span>${side('neg')}</div>`
+    ctl.innerHTML = `<div class="thw-ab-btns">${side('minus')}${side('neg')}</div>`
       + `<div class="thw-ab-btns">${side('plus')}</div>`
       + `<div class="thw-ab-ctl"><b data-thw-ab-label></b>`
       + `<code class="thw-ab-prompt" data-thw-ab-prompt data-naia-title="${escAttr(abBaseNote())} · 누르면 복사"></code></div>`;

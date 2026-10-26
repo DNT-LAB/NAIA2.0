@@ -33119,7 +33119,6 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-ab-img img[data-precropped] { object-view-box: none; }
 /* A|B 단추 줄(사용자 지시 2026-10-26 - 슬라이더 대신). 테두리 없음 · 빼기 = 붉은 계열 · 넣기 = 연두 계열 · 고른 것은 진하게. */
 .thw-ab-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-bottom: 6px; }
-.thw-ab-gap { flex: 1 1 12px; }
 .thw-ab-v {
   border: 0; border-radius: 5px; padding: 4px 9px; cursor: pointer; font-family: var(--font-mono); font-size: 11px;
 }

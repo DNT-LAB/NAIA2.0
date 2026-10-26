@@ -3,7 +3,7 @@
  *
  *   머리줄: [태그 검색] [Bench]
  *   [ 분류 목록 | 소제목별 카드 격자 ]
- *   카드 = POS 1 썸네일(마우스를 올리면 큰 그림 세 장 -1 | 0 | 1 을 카드 위/아래에) · 이름(누르면 복사 · 툴팁 = 전체 이름 ·
+ *   카드 = POS 1 썸네일(마우스를 올리면 큰 그림 세 장 UC 2.5(없으면 UC 1) | GT | POS +1 을 카드 위/아래에) · 이름(누르면 복사 · 툴팁 = 전체 이름 ·
  *   우클릭 = 복사) · [A|B]
  *
  * 데이터 = /api/thumb/state · /api/thumb/category/<key> (data/taglist/style_meta_tags.json v3 - 2026-10-26 생성 실험).
@@ -183,8 +183,8 @@ export function createThumbWindow({
   }
 
   // ── 큰 그림 세 장(마우스를 올리면) ─────────────────────────────────────────
-  // POS -1(복잡도는 -0.5) | GT | POS +1 을 나란히 - 카드가 화면 아래쪽이면 카드 위에, 위쪽이면 아래에(사용자 지시 2026-10-26).
-  // GT · POS 1 은 번들 썸네일, 음수 칸은 변형 묶음(없으면 '묶음 필요'). 데이터셋(단일)은 GT | 그 그림 두 장.
+  // 빼기 쪽(UC 2.5 · 없으면 UC 1) | GT | POS +1 을 나란히 - 카드가 화면 아래쪽이면 카드 위에, 위쪽이면 아래에(사용자 지시 2026-10-26).
+  // GT · POS 1 은 번들 썸네일, 빼기 칸은 변형 묶음(없으면 '묶음 필요'). 데이터셋(단일)은 GT | 그 그림 두 장.
   const variantCache = new Map();     // tag -> /api/thumb/variants 응답(Promise)
   let peekEl = null;
   let peekTimer = 0;
@@ -247,8 +247,14 @@ export function createThumbWindow({
       if (img.dataset.thwSingle) {
         cells = peekCell(gt, 'GT (태그 없음)') + peekCell(pos1, `${tag} (맨 앞)`);
       } else {
-        const neg = variants?.ready ? (variants.variants || []).find(v => v.place === 'pos' && Number(v.weight) < 0) : null;
-        cells = peekCell(neg?.url || '', neg ? neg.label : 'POS -1', variants?.ready ? '없음' : '변형 묶음 필요 ([A|B] 에서 받기)')
+        // 왼쪽 칸 = 빼기 쪽(사용자 지시 2026-10-26 - 태그마다 가중치 범위가 다르다): UC 2.5 가 있으면 그것,
+        // 없으면 UC 1(복잡도처럼 UC 가 1 까지인 태그), 그것도 없으면 POS 음수. POS -1 은 [A|B] 에서 본다.
+        const vs = variants?.ready ? variants.variants || [] : [];
+        const uc = w => vs.find(v => v.place === 'uc' && Number(v.weight) === w);
+        const neg = uc(2.5) || uc(1) || vs.find(v => v.place === 'pos' && Number(v.weight) < 0) || null;
+        // 응답 전(variants === null)은 '불러오는 중' - 서버가 막 켜졌으면 묶음 색인에 1~2초 걸린다.
+        const note = variants === null ? '불러오는 중…' : variants?.ready ? '없음' : '변형 묶음 필요 ([A|B] 에서 받기)';
+        cells = peekCell(neg?.url || '', neg ? neg.label : '빼기', note)
           + peekCell(gt, 'GT (0)') + peekCell(pos1, 'POS +1');
       }
       peekEl.innerHTML = `<div class="thw-peek-head">${escHtml(tag)}</div><div class="thw-peek-row">${cells}</div>`;
@@ -256,7 +262,7 @@ export function createThumbWindow({
       placePeek(img);
     };
     paint(null);
-    if (!img.dataset.thwSingle) paint(await variantsOf(tag));
+    if (!img.dataset.thwSingle) paint((await variantsOf(tag)) || {ready: false});   // 실패도 '응답 옴' 으로 그린다
   }
 
   function placePeek(img) {

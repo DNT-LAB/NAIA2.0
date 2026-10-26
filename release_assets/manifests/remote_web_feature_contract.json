@@ -453,6 +453,7 @@
         "core/character_search_index.py",
         "core/character_preview_index.py",
         "app/web/remote/js/features/thumbTab.mjs",
+        "app/web/remote/js/features/thumbWindow.mjs",
         "app/web/remote/js/features/characterViewerTab.mjs",
         "app/web/remote/character-viewer.html"
       ],

@@ -110,7 +110,7 @@ export function createThumbWindow({
       + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-copy="${escAttr(tag)}"`
       + ` data-naia-title="${escAttr(tag)} · 누르면 복사">${escHtml(tag)}</button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
-        : `<button type="button" class="thw-ab" data-thw-ab="${escAttr(tag)}" data-naia-title="GT 와 나란히 비교(준비 중)">A|B</button>`)
+        : `<button type="button" class="thw-ab" data-thw-ab="${escAttr(tag)}" data-naia-title="GT 와 나란히 비교">A|B</button>`)
       + `</div></article>`;
   }
 
@@ -277,7 +277,7 @@ export function createThumbWindow({
   // B 는 단추 줄로 고른다(사용자 지시 2026-10-26 - 슬라이더가 불편했다). GT 는 A 에 있으니 뺀다.
   // 첫 줄 = 빼기(붉은 계열 · UC 큰 값부터) ……… 맨 끝에 POS 음수(파란 계열) / 둘째 줄 = 넣기(연두 계열 · POS 양수 작은 값부터).
   // 누르거나 마우스를 올리면 B 가 바뀐다 · 좌우 화살표로도 옮긴다.
-  let ab = null;                      // {tag, data, steps, idx, el, poll, seq}
+  let ab = null;                      // 지금 팝업 {tag, base, data, steps, idx, el, poll, seq, dl, dlError}
   let abSeq = 0;
 
   function abSteps(data) {
@@ -410,17 +410,18 @@ export function createThumbWindow({
     abPaintB();
   }
 
-  async function abFetch() {
-    const mine = ab.seq;
-    const response = await fetch(`/api/thumb/variants?tag=${encodeURIComponent(ab.tag)}`, {cache: 'no-store'});
+  // ⚠️ 비동기 일은 시작할 때의 팝업(pop)을 붙잡고, 끝났을 때 그 팝업이 아직 지금 팝업인지(ab === pop) 본다 -
+  // 다른 태그로 바꿔 연 뒤 옛 응답이 새 팝업을 덮거나 새 폴링을 끊던 것(Codex 리뷰 2026-10-26 #1). 폴링 타이머도 그 팝업이 가진다.
+  async function abFetch(pop) {
+    const response = await fetch(`/api/thumb/variants?tag=${encodeURIComponent(pop.tag)}`, {cache: 'no-store'});
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || data.detail || `HTTP ${response.status}`);
-    if (!ab || ab.seq !== mine) return;
-    ab.data = data;
-    ab.base = data.base || ab.base;
-    ab.steps = data.ready ? abSteps(data) : [];
-    const p1 = ab.steps.findIndex(v => v.place === 'pos' && Number(v.weight) === 1);
-    ab.idx = p1 >= 0 ? p1 : Math.max(0, ab.steps.length - 1);
+    if (ab !== pop) return;
+    pop.data = data;
+    pop.base = data.base || pop.base;
+    pop.steps = data.ready ? abSteps(data) : [];
+    const p1 = pop.steps.findIndex(v => v.place === 'pos' && Number(v.weight) === 1);
+    pop.idx = p1 >= 0 ? p1 : Math.max(0, pop.steps.length - 1);
     abPaint();
   }
 
@@ -428,16 +429,19 @@ export function createThumbWindow({
     hidePeek();
     abClose();
     const base = cache.get(active)?.base || '';
-    ab = {tag, base, data: null, steps: [], idx: 0, el: null, poll: 0, seq: ++abSeq, dl: null, dlError: ''};
-    ab.el = abFrame(tag, base);
-    ab.el.querySelector('[data-thw-ab-stage]').innerHTML = '<div class="thw-ab-missing"><span>불러오는 중…</span></div>';
-    const a = ab.el.querySelector('[data-thw-ab-a]');
+    const pop = {tag, base, data: null, steps: [], idx: 0, el: null, poll: 0, seq: ++abSeq, dl: null, dlError: ''};
+    ab = pop;
+    pop.el = abFrame(tag, base);
+    pop.el.querySelector('[data-thw-ab-stage]').innerHTML = '<div class="thw-ab-missing"><span>불러오는 중…</span></div>';
+    const a = pop.el.querySelector('[data-thw-ab-a]');
     if (a) { a.src = state?.bases?.[base]?.gt_url || ''; a.setAttribute('data-precropped', ''); }
     try {
-      await abFetch();
-      if (ab && !ab.data?.ready) void abPollInstall(false);
+      await abFetch(pop);
+      if (ab === pop && !pop.data?.ready) void abPollInstall(pop, false);
     } catch (error) {
-      if (ab) ab.el.querySelector('[data-thw-ab-stage]').innerHTML = `<div class="thw-ab-missing"><span class="thw-ab-err">${escHtml(error.message || '불러오지 못했습니다')}</span></div>`;
+      if (ab === pop) {
+        pop.el.querySelector('[data-thw-ab-stage]').innerHTML = `<div class="thw-ab-missing"><span class="thw-ab-err">${escHtml(error.message || '불러오지 못했습니다')}</span></div>`;
+      }
     }
   }
 
@@ -451,29 +455,40 @@ export function createThumbWindow({
     return {ready: !!info.ready, active: !!(mine && dl.active), percent: mine ? dl.percent : 0, error: mine ? dl.error : ''};
   }
 
-  async function abPollInstall(force) {
-    if (!ab) return;
-    if (ab.poll && !force) return;
-    if (ab.poll) clearInterval(ab.poll);
+  /** 설치 상태를 본다. afterStart = [받기] 를 막 눌렀다 - 받기가 시작될 때까지 몇 번 기다려 준다.
+   *  받는 중이 아니게 되면(끝 · 실패 · 취소) 멈춘다(Codex 리뷰 #5: 실패해도 팝업을 닫을 때까지 1.5초마다 계속 물었다).
+   *  틱은 겹치지 않는다(응답이 늦으면 다음 틱을 건너뛴다). */
+  async function abPollInstall(pop, afterStart) {
+    if (ab !== pop) return;
+    if (pop.poll) clearInterval(pop.poll);
+    let busy = false;
+    let waits = afterStart ? 5 : 0;           // 받기 시작 전 '쉬는 중' 으로 보이는 틱을 몇 번까지 봐준다
+    let sawActive = false;
+    const stop = () => { clearInterval(timer); if (pop.poll === timer) pop.poll = 0; };
     const tick = async () => {
-      if (!ab) return;
+      if (ab !== pop) { stop(); return; }
+      if (busy) return;
+      busy = true;
       try {
         const st = await abInstallState();
-        if (!ab) return;
-        ab.dl = st;
-        if (st.error) ab.dlError = `받지 못했습니다 - ${st.error}`;
-        if (st.ready) { clearInterval(ab.poll); ab.poll = 0; ab.dlError = ''; await abFetch(); return; }
-        if (!st.active && !force) { clearInterval(ab.poll); ab.poll = 0; }
+        if (ab !== pop) { stop(); return; }
+        pop.dl = st;
+        if (st.error) pop.dlError = `받지 못했습니다 - ${st.error}`;
+        if (st.ready) { stop(); pop.dlError = ''; await abFetch(pop); return; }
+        if (st.active) sawActive = true;
+        else if (st.error || sawActive || waits-- <= 0) stop();
         abPaint();
-      } catch (_) { /* 다음 틱에 다시 */ }
+      } catch (_) { /* 다음 틱에 다시 */ } finally { busy = false; }
     };
-    ab.poll = setInterval(tick, 1500);
+    const timer = setInterval(tick, 1500);
+    pop.poll = timer;
     await tick();
   }
 
   async function abDownload() {
-    if (!ab) return;
-    ab.dlError = '';
+    const pop = ab;
+    if (!pop) return;
+    pop.dlError = '';
     try {
       const response = await fetch('/api/install-manager/style-variants/download', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
@@ -481,11 +496,12 @@ export function createThumbWindow({
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     } catch (error) {
-      ab.dlError = error.message || '받기를 시작하지 못했습니다';
+      if (ab !== pop) return;                 // 그 사이 닫았거나 다른 팝업을 열었다
+      pop.dlError = error.message || '받기를 시작하지 못했습니다';
       abPaint();
       return;
     }
-    await abPollInstall(true);
+    await abPollInstall(pop, true);
   }
 
   function onContextMenu(event) {
@@ -496,14 +512,20 @@ export function createThumbWindow({
   }
 
   // ── 바깥 ──────────────────────────────────────────────────────────────────
+  let rendered = false;                // 첫 분류를 한 번 그렸다 - 그 뒤 [Thumb] 은 창을 앞으로만(다시 그리지 않는다)
+
   async function open() {
     ensurePanel();
     if (panel.isOpen()) panel.raise(); else panel.open();
     if (panel.isCollapsed && panel.isCollapsed()) panel.expand();
+    // 이미 그려 둔 창(닫았다 다시 연 경우 포함)은 내용 · 스크롤을 그대로 둔다(Codex 리뷰 #4: 앞으로 가져올 때마다
+    // 격자를 다시 그려 스크롤이 맨 위로 갔다). 분류를 바꿀 때만 다시 그린다.
+    if (rendered) return;
     try {
       await loadState();
       paintCats();
       await select(active);
+      rendered = cache.has(active);
     } catch (error) {
       setStatus(error.message || '불러오지 못했습니다', 'error');
       showToast(error.message || 'Thumb 을 불러오지 못했습니다', 'error');

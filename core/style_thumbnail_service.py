@@ -9,7 +9,7 @@ from threading import RLock
 from typing import Any
 from urllib.parse import quote
 
-from core.style_variants import STYLE_VARIANTS_APPROX_MB, open_variants
+from core.style_variants import STYLE_VARIANTS_APPROX_MB, is_webp, open_variants
 
 
 class StyleThumbnailService:
@@ -66,13 +66,15 @@ class StyleThumbnailService:
             if tag not in metadata["index"]:
                 raise KeyError("Unknown style variants tag")
             info = metadata["index"][tag]
+            # 묶음 판 표시 - 파일 크기 · 수정 시각(받을 때마다 바뀐다).
+            ver = "".join(f"{n:x}" for n in (self._variants_signature or (0, 0)))
             payload.update(
                 ready=True, base=info["base"],
-                gt_url=f"/api/thumb/variant-image?gt={quote(info['base'], safe='')}",
+                gt_url=f"/api/thumb/variant-image?gt={quote(info['base'], safe='')}&v={ver}",
                 variants=[{
                     "col": v["col"], "place": v["place"], "weight": v["weight"],
                     "label": self._variant_label(v),
-                    "url": f"/api/thumb/variant-image?tag={quote(tag, safe='')}&col={quote(v['col'], safe='')}",
+                    "url": f"/api/thumb/variant-image?tag={quote(tag, safe='')}&col={quote(v['col'], safe='')}&v={ver}",
                 } for v in info["variants"]],
             )
             return payload
@@ -99,10 +101,20 @@ class StyleThumbnailService:
 
     def _variant_bytes(self, index, key: str) -> tuple[bytes, str]:
         try:
-            return base64.b64decode(index[key], validate=True), "image/webp"
+            image = base64.b64decode(index[key], validate=True)
         except (KeyError, ValueError, OSError):
+            image = None
+        if image is None or not is_webp(image):
+            # 깨진 묶음 - 손상 표시를 남겨 '준비 안 됨' 으로 돌린다(Codex 리뷰 #2: 404 만 내고 ready 로 남아 다시 받을 길이 없었다).
             self._variants_signature = self._variants_cache = None
-            raise FileNotFoundError("Style variant image not found") from None
+            if self.variants_path is not None:
+                try:
+                    self.variants_path.with_suffix(".corrupt").write_text(
+                        f"unreadable image: {key}\n", encoding="utf-8", newline="\n")
+                except OSError:
+                    pass
+            raise FileNotFoundError("Style variant image not found")
+        return image, "image/webp"
 
     def _load_json(self, path: Path) -> dict[str, Any]:
         if not path.exists():

@@ -1,6 +1,8 @@
 """Shared paths and bounded metadata validation for the optional Thumb A|B pack."""
 from __future__ import annotations
 
+import base64
+import io
 import json
 import math
 from pathlib import Path
@@ -41,8 +43,31 @@ def read_variants_metadata(path: Path) -> dict:
     raise ValueError("Invalid style variants metadata header")
 
 
+def is_webp(image: bytes) -> bool:
+    return len(image) >= 12 and image[:4] == b"RIFF" and image[8:12] == b"WEBP"
+
+
+def validate_variant_images(index: PreviewKeyIndex, keys) -> None:
+    """설치 때만: 모든 그림이 base64 로 풀리고 WebP 머리를 갖는지(Codex 리뷰 2026-10-26 #2 - 그림 하나가 깨져도
+    설치를 통과하고 '준비됨' 으로 남아 다시 받을 길이 막혔다). 한 장씩 읽어 메모리는 그림 한 장 분량만 쓴다."""
+    from PIL import Image
+
+    for key in sorted(keys):
+        try:
+            image = base64.b64decode(index[key], validate=True)
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Style variant image is not valid base64: {key}") from exc
+        if not is_webp(image):
+            raise ValueError(f"Style variant image is not WebP: {key}")
+        try:
+            with Image.open(io.BytesIO(image)) as decoded:
+                decoded.verify()
+        except Exception as exc:  # noqa: BLE001 - PIL 은 여러 종류를 던진다
+            raise ValueError(f"Style variant image is unreadable: {key}") from exc
+
+
 def open_variants(path: Path, *, cache_write: bool = True,
-                  cache_path: Path | None = None) -> tuple[dict, PreviewKeyIndex]:
+                  cache_path: Path | None = None, validate_images: bool = False) -> tuple[dict, PreviewKeyIndex]:
     metadata = read_variants_metadata(path)
     if type(metadata.get("version")) is not int or metadata["version"] != 1:
         raise ValueError("Unsupported style variants version")
@@ -74,4 +99,6 @@ def open_variants(path: Path, *, cache_write: bool = True,
                             extension=False, cache_write=cache_write)
     if not keys.issubset(index):
         raise ValueError("Style variants thumbnail keys are missing")
+    if validate_images:
+        validate_variant_images(index, keys)
     return metadata, index

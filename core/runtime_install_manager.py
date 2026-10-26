@@ -1092,7 +1092,7 @@ class RuntimeInstallManager:
             for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
                 digest.update(chunk)
         try:
-            _, index = open_variants(staging, cache_write=False)
+            _, index = open_variants(staging, cache_write=False, validate_images=True)
         except (ValueError, KeyError, TypeError):
             # Preserve rejected bytes for diagnosis; do not overwrite a valid old pack.
             staging.with_suffix(staging.suffix + ".corrupt").write_text(

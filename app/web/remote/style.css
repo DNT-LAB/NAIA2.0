@@ -33056,7 +33056,8 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 }
 .thw-card { border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
 .thw-card:hover { border-color: rgba(124,106,239,0.6); }
-.thw-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: rgba(0,0,0,0.25); }
+/* 카드 썸네일만 중앙을 6% 위로 · 14% 더 자른다(사용자 결정 2026-10-26 안 B) - 미리보기 · A|B 는 구운 그대로 */
+.thw-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; object-view-box: inset(1% 7% 13% 7%); background: rgba(0,0,0,0.25); }
 .thw-ft { display: flex; gap: 4px; padding: 4px; align-items: stretch; }
 .thw-tag {
   flex: 1; min-width: 0; height: 32px; padding: 3px 6px; border-radius: 5px; cursor: pointer; text-align: left;

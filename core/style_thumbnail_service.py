@@ -40,6 +40,8 @@ class StyleThumbnailService:
             self._variants_signature = self._variants_cache = None
             try:
                 loaded = open_variants(path)
+            except OSError:
+                return None   # 잠금 · 일시 I/O - 손상이 아니다. 다음 요청에서 다시 연다(재리뷰 N1)
             except (ValueError, KeyError, TypeError):
                 path.with_suffix(".corrupt").write_text(
                     "verification failed\n", encoding="utf-8", newline="\n")
@@ -103,10 +105,13 @@ class StyleThumbnailService:
         try:
             encoded = index[key]
         except (KeyError, OSError):
-            # 읽기 실패(파일 잠금 · 일시 I/O - 색인이 KeyError 로 바꿔 올린다)는 손상이 아니다. 이번 요청만 실패시키고
-            # 다음 요청에서 묶음을 다시 연다(재리뷰 N1: 여기서 손상 표시를 남겨 멀쩡한 묶음을 영영 못 쓰게 했다).
+            # 색인은 파일 잠금 · 묶음 교체 · 본문 손상(base64 · JSON)을 모두 KeyError 로 올린다. 잠금 · 교체는 손상이 아니고
+            # (재리뷰 N1: 손상 표시를 남겨 멀쩡한 묶음을 영영 못 쓰게 했다), 본문 손상은 표시해야 다시 받을 수 있다
+            # (3차 재리뷰 G1: 전부 일시 오류로 보내 깨진 묶음이 '준비됨' 으로 남았다) - 새로 열어 한 번 더 읽어 가른다.
             self._variants_signature = self._variants_cache = None
-            raise FileNotFoundError("Style variant image not readable now") from None
+            if self._unreadable_while_file_opens(key):
+                self._mark_variants_corrupt(f"unreadable entry: {key}")
+            raise FileNotFoundError("Style variant image not readable") from None
         try:
             image = base64.b64decode(encoded, validate=True)
         except ValueError:
@@ -115,14 +120,37 @@ class StyleThumbnailService:
             # 바이트는 읽었는데 그림이 아니다 = 깨진 묶음 - 손상 표시를 남겨 '준비 안 됨' 으로 돌린다
             # (Codex 리뷰 #2: 404 만 내고 ready 로 남아 다시 받을 길이 없었다).
             self._variants_signature = self._variants_cache = None
-            if self.variants_path is not None:
-                try:
-                    self.variants_path.with_suffix(".corrupt").write_text(
-                        f"unreadable image: {key}\n", encoding="utf-8", newline="\n")
-                except OSError:
-                    pass
+            self._mark_variants_corrupt(f"unreadable image: {key}")
             raise FileNotFoundError("Style variant image not found")
         return image, "image/webp"
+
+    def _unreadable_while_file_opens(self, key: str) -> bool:
+        """새로 연 색인으로도 못 읽는데 파일은 열린다 = 본문 손상. 다시 읽히면(교체 · 잠깐 잠금이 풀림) 손상이 아니고,
+        파일이 아예 안 열리면(잠금 · I/O) 손상인지 알 수 없으니 표시하지 않는다."""
+        path = self.variants_path
+        if path is None:
+            return False
+        try:
+            _, fresh = open_variants(path)
+            fresh[key]
+            return False
+        except OSError:
+            return False
+        except (KeyError, ValueError, TypeError):
+            pass
+        try:
+            with path.open("rb"):
+                return True
+        except OSError:
+            return False
+
+    def _mark_variants_corrupt(self, reason: str) -> None:
+        if self.variants_path is None:
+            return
+        try:
+            self.variants_path.with_suffix(".corrupt").write_text(f"{reason}\n", encoding="utf-8", newline="\n")
+        except OSError:
+            pass
 
     def _load_json(self, path: Path) -> dict[str, Any]:
         if not path.exists():

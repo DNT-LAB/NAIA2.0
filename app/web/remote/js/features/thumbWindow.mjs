@@ -29,9 +29,9 @@ export function createThumbWindow({
   const cache = new Map();            // 분류 키 -> 분류 응답
   let seq = 0;
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
-  // 썸네일 값 [+1 | +2](사용자 지시 2026-10-26) - 이 브라우저에 기억한다. 못 쓰면 이번 화면에서만.
+  // 썸네일 값 [+1 | +2](사용자 지시 2026-10-26) - 기본 +2(간이 딱 맞다 - 사용자). 고른 값은 이 브라우저에 기억한다.
   const POS_KEY = 'naia.thumbWindow.pos';
-  let posWeight = (() => { try { return win.localStorage?.getItem(POS_KEY) === '2' ? 2 : 1; } catch (_) { return 1; } })();
+  let posWeight = (() => { try { return win.localStorage?.getItem(POS_KEY) === '1' ? 1 : 2; } catch (_) { return 2; } })();
 
   function ensurePanel() {
     if (panel) return panel;

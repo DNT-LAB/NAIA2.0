@@ -33114,3 +33114,5 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 /* 상하좌우 10% 씩 잘라 보이기(사용자 지시 2026-10-26) - 다시 굽지 않고 화면에서만(object-view-box · 크로미움).
    그림 상자 크기는 그대로라 아래 이름 칸을 덮지 않는다. A|B 팝업은 원본 그대로. */
 .thw-card img[data-thw-peek], .thw-peek-img img { object-view-box: inset(10%); }
+/* A|B 팝업은 상하좌우 7% 씩 잘라 보이기(사용자 지시 2026-10-26) - 카드 · 큰 그림(10%)보다 덜 자른다. */
+.thw-ab-img img { object-view-box: inset(7%); }

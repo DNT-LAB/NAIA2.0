@@ -9,7 +9,10 @@
   thumb_v2_additions.json · e621_style_research/e621_only_final.json
 출력:
   data/taglist/style_meta_tags.json   version 3 - 'nai_official' 이 첫 분류(소제목 sections) · 아티스트/프랜차이즈 없음
-  data/taglist/style_thumbnails.json  태그 -> base64 JPEG(POS 1). 기준 GT 는 '__gt__:preset' · '__gt__:bare' 키.
+  data/taglist/style_thumbnails.json  태그 -> base64 WebP(POS 1) · '__minus__:<태그>' -> 빼기 그림(UC 2.5, 없으면 UC 1 -
+                                      라벨은 분류표의 minus_labels) · 기준 GT 는 '__gt__:preset' · '__gt__:bare' 키.
+                                      전부 원본에서 상하좌우 10% 를 미리 잘라 384px WebP q80 (사용자 지시 2026-10-26 -
+                                      화면은 130 ~ 260px 라 해상도가 안 보인다 · 묶음 없이도 큰 그림 세 장이 뜨게 빼기 그림을 담는다).
 
 사용자 결정(2026-10-26): 썸네일 = POS 1 · 아티스트/프랜차이즈 전부 버림 · Novel AI 공식 = 첫 분류 ·
 품질/미학 태그는 맨바탕에서만(프리셋 중복은 버림) · tachi-e -> character image(NAI 개명) · 기준이 둘이어도 상관없음.
@@ -17,7 +20,7 @@
 e621 고유 후보는 따로 분류를 두지 않고 기존 분류에 나눠 넣고(E621_PLACE), 조명 · 그림자는 효과/시각에서 떼어
 '조명/그림자' 분류로 모은다(사용자 지시 2026-10-26).
 
-  python tools/build_style_thumbnails.py [--src C:/VNR/DEV/261026] [--size 512] [--quality 86] [--dry-run]
+  python tools/build_style_thumbnails.py [--src C:/VNR/DEV/261026] [--size 384] [--quality 80] [--workers 8] [--dry-run]
 """
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ import json
 import re
 import subprocess
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from PIL import Image
@@ -70,20 +74,27 @@ def slug(tag: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", tag.lower()).strip("_")
 
 
-def encode(path: Path, size: int, quality: int) -> str:
+CROP = 0.10                                  # 상하좌우 10% 를 미리 잘라 굽는다(화면 쪽 object-view-box 는 뺐다)
+MINUS_COLS = [("uc2_5", "UC 2.5"), ("uc1", "UC 1")]   # 큰 그림 세 장의 왼쪽 칸 - 있는 것 중 앞의 것
+
+
+def encode(job: tuple[str, int, int]) -> str:
+    path, size, quality = job
     image = Image.open(path).convert("RGB")
-    if image.size != (size, size):
-        image = image.resize((size, size), Image.LANCZOS)
+    w, h = image.size
+    dx, dy = round(w * CROP), round(h * CROP)
+    image = image.crop((dx, dy, w - dx, h - dy)).resize((size, size), Image.LANCZOS)
     buffer = io.BytesIO()
-    image.save(buffer, "JPEG", quality=quality, optimize=True)
+    image.save(buffer, "WEBP", quality=quality, method=6)
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", default=r"C:\VNR\DEV\261026")
-    parser.add_argument("--size", type=int, default=512)
-    parser.add_argument("--quality", type=int, default=86)
+    parser.add_argument("--size", type=int, default=384)
+    parser.add_argument("--quality", type=int, default=80)
+    parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--base-rev", default="b01fc776", help="원래(v2) 분류표를 읽을 git 커밋")
     args = parser.parse_args()
@@ -170,11 +181,26 @@ def main() -> int:
             else:
                 missing.append(f"e621/{tag}")
 
+    # 5) 빼기 그림 - 같은 폴더의 UC 2.5(없으면 UC 1). 데이터셋(단일)은 없다.
+    single = {t for _, group, tags in NAI_SECTIONS if group == "dataset" for t in tags}
+    minus_labels: dict[str, str] = {}
+    for tag, path in list(images.items()):
+        if tag in single:
+            continue
+        for col, label in MINUS_COLS:
+            candidate = path.parent / f"{slug(tag)}__{col}.png"
+            if candidate.exists():
+                images[f"__minus__:{tag}"] = candidate
+                minus_labels[tag] = label
+                break
+        else:
+            missing.append(f"minus/{tag}")
+
     meta = {
         "version": 3,
         "description": old.get("description", ""),
         "generated": "2026-10-26 생성 실험(tools/build_style_thumbnails.py)",
-        "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · 512px JPEG",
+        "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · 빼기 = UC 2.5(없으면 UC 1) · 상하좌우 10% 잘라 384px WebP",
         "bases": {
             "preset": {"name": "프리셋", "gt": "__gt__:preset",
                        "note": "Standard 품질 태그 + Heavy UC · seed 1426599 · V5 Full · 18 steps · CFG 6.3 · 1024x1024"},
@@ -183,6 +209,7 @@ def main() -> int:
         },
         "sources": old.get("sources", []) + ["2026-10-26 thumb_run · thumb_run_bare · e621_style_research"],
         "categories": categories,
+        "minus_labels": minus_labels,
     }
     images["__gt__:preset"] = preset / "gt.png"
     images["__gt__:bare"] = bare / "gt.png"
@@ -192,7 +219,10 @@ def main() -> int:
     print("missing", len(missing), missing[:20])
     if args.dry_run:
         return 0
-    thumbs = {tag: encode(path, args.size, args.quality) for tag, path in images.items()}
+    keys = list(images)
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        encoded = list(pool.map(encode, [(str(images[k]), args.size, args.quality) for k in keys], chunksize=8))
+    thumbs = dict(zip(keys, encoded))
     META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
     THUMBS_PATH.write_text(json.dumps(thumbs, ensure_ascii=False), encoding="utf-8", newline="\n")
     print("wrote", META_PATH, THUMBS_PATH, f"{THUMBS_PATH.stat().st_size / 1e6:.1f}MB")

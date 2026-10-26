@@ -225,6 +225,9 @@ export function createThumbWindow({
     const base = data?.base || '';
     const gt = state?.bases?.[base]?.gt_url || '';
     const pos1 = img.getAttribute('src') || '';
+    // 빼기 그림은 번들에 있다(2026-10-26 - 상하좌우 10% 를 미리 잘라 구운 UC 2.5 · 없으면 UC 1). 그러면 묶음을 묻지 않는다.
+    const item = (data?.tags || []).find(row => row.tag === tag);
+    const bundled = item?.minus_url ? {url: item.minus_url, label: item.minus_label || '빼기'} : null;
     if (!peekEl) {
       peekEl = doc.createElement('div');
       peekEl.className = 'thw-peek';
@@ -244,7 +247,7 @@ export function createThumbWindow({
         // 없으면 UC 1(복잡도처럼 UC 가 1 까지인 태그), 그것도 없으면 POS 음수. POS -1 은 [A|B] 에서 본다.
         const vs = variants?.ready ? variants.variants || [] : [];
         const uc = w => vs.find(v => v.place === 'uc' && Number(v.weight) === w);
-        const neg = uc(2.5) || uc(1) || vs.find(v => v.place === 'pos' && Number(v.weight) < 0) || null;
+        const neg = bundled || uc(2.5) || uc(1) || vs.find(v => v.place === 'pos' && Number(v.weight) < 0) || null;
         // 응답 전(variants === null)은 '불러오는 중' - 서버가 막 켜졌으면 묶음 색인에 1~2초 걸린다.
         const note = variants === null ? '불러오는 중…' : variants?.ready ? '없음' : '변형 묶음 필요 ([A|B] 에서 받기)';
         cells = peekCell(neg?.url || '', neg ? neg.label : '빼기', note)
@@ -255,7 +258,7 @@ export function createThumbWindow({
       placePeek(img);
     };
     paint(null);
-    if (!img.dataset.thwSingle) paint((await variantsOf(tag)) || {ready: false});   // 실패도 '응답 옴' 으로 그린다
+    if (!img.dataset.thwSingle && !bundled) paint((await variantsOf(tag)) || {ready: false});   // 실패도 '응답 옴' 으로 그린다
   }
 
   function placePeek(img) {
@@ -376,7 +379,11 @@ export function createThumbWindow({
     const data = ab.data || {};
     const gtFallback = state?.bases?.[ab.base]?.gt_url || '';
     const a = box.querySelector('[data-thw-ab-a]');
-    if (a) a.src = data.ready && data.gt_url ? data.gt_url : gtFallback;
+    if (a) {
+      const fromPack = !!(data.ready && data.gt_url);
+      a.src = fromPack ? data.gt_url : gtFallback;
+      a.toggleAttribute('data-precropped', !fromPack);      // 번들 GT 는 미리 잘렸다 - 7% 를 또 자르지 않는다
+    }
     const stage = box.querySelector('[data-thw-ab-stage]');
     const ctl = box.querySelector('[data-thw-ab-ctl]');
     if (!data.ready) {
@@ -425,7 +432,7 @@ export function createThumbWindow({
     ab.el = abFrame(tag, base);
     ab.el.querySelector('[data-thw-ab-stage]').innerHTML = '<div class="thw-ab-missing"><span>불러오는 중…</span></div>';
     const a = ab.el.querySelector('[data-thw-ab-a]');
-    if (a) a.src = state?.bases?.[base]?.gt_url || '';
+    if (a) { a.src = state?.bases?.[base]?.gt_url || ''; a.setAttribute('data-precropped', ''); }
     try {
       await abFetch();
       if (ab && !ab.data?.ready) void abPollInstall(false);

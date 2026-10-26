@@ -22,6 +22,7 @@ class StyleThumbnailService:
         self.thumbnails_path = self.root / self.THUMBNAILS_PATH
         self._meta_cache: dict[str, Any] | None = None
         self._thumbnail_cache: dict[str, str] | None = None
+        self._thumbnail_version = '0'
         self.variants_path = Path(variants_path) if variants_path is not None else None
         self.variants_lock = RLock()
         self._variants_signature = None
@@ -120,8 +121,18 @@ class StyleThumbnailService:
             self._meta_cache = data
         return self._meta_cache
 
+    def _image_url(self, key: str) -> str:
+        """번들 썸네일 주소. 이미지 응답은 1시간 캐시라 파일이 바뀌면(업데이트 · 다시 굽기) 주소도 바뀌어야 한다 -
+        같은 주소면 브라우저가 옛 그림을 계속 보여 준다(2026-10-26 실측: 잘라 구운 새 판과 옛 판이 섞였다)."""
+        return f"/api/thumb/image?tag={quote(key, safe='')}&v={self._thumbnail_version}"
+
     def thumbnails(self) -> dict[str, str]:
         if self._thumbnail_cache is None:
+            try:
+                stat = self.thumbnails_path.stat()
+                self._thumbnail_version = f"{stat.st_size:x}{int(stat.st_mtime):x}"
+            except OSError:
+                self._thumbnail_version = "0"
             data = self._load_json(self.thumbnails_path)
             self._thumbnail_cache = {
                 str(key): str(value)
@@ -177,7 +188,7 @@ class StyleThumbnailService:
             payload[str(key)] = {
                 "name": str(info.get("name") or key),
                 "note": str(info.get("note") or ""),
-                "gt_url": f"/api/thumb/image?tag={quote(gt_key, safe='')}" if gt_key in thumbnail_keys else "",
+                "gt_url": self._image_url(gt_key) if gt_key in thumbnail_keys else "",
             }
         return payload
 
@@ -210,14 +221,19 @@ class StyleThumbnailService:
             "description": str(info.get("description") or ""),
             "base": str(info.get("base") or ""),
             "sections": sections,
-            "tags": [
-                {
-                    "tag": tag,
-                    "image_url": f"/api/thumb/image?tag={quote(tag, safe='')}",
-                }
-                for tag in tags
-            ],
+            "tags": [self._tag_item(tag, thumbnail_data) for tag in tags],
         }
+
+    def _tag_item(self, tag: str, thumbnail_data: dict[str, str]) -> dict[str, Any]:
+        """카드 한 장. 빼기 그림(`__minus__:<태그>` · UC 2.5 없으면 UC 1)이 번들에 있으면 그 주소와 라벨도 싣는다 -
+        큰 그림 세 장이 변형 묶음 없이도 뜬다(2026-10-26)."""
+        item = {"tag": tag, "image_url": self._image_url(tag)}
+        minus_key = f"__minus__:{tag}"
+        if minus_key in thumbnail_data:
+            labels = self.metadata().get("minus_labels", {})
+            item["minus_url"] = self._image_url(minus_key)
+            item["minus_label"] = str(labels.get(tag) or "") if isinstance(labels, dict) else ""
+        return item
 
     @staticmethod
     def media_type(image_bytes: bytes) -> str:

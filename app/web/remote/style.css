@@ -33053,15 +33053,19 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-card { border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
 .thw-card:hover { border-color: rgba(124,106,239,0.6); }
 .thw-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: rgba(0,0,0,0.25); }
-.thw-ft { display: flex; gap: 4px; padding: 4px; align-items: center; }
+.thw-ft { display: flex; gap: 4px; padding: 4px; align-items: stretch; }
 .thw-tag {
-  flex: 1; min-width: 0; height: 22px; padding: 0 6px; border-radius: 5px; cursor: pointer; text-align: left;
+  flex: 1; min-width: 0; height: 32px; padding: 3px 6px; border-radius: 5px; cursor: pointer; text-align: left;
   border: 1px solid rgba(255,255,255,0.12); background: transparent; color: var(--text-primary);
-  font-family: var(--font-mono); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--font-mono); font-size: 10.5px; overflow: hidden;
+}
+.thw-tag span {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  line-height: 13px; overflow-wrap: anywhere;
 }
 .thw-tag:hover { border-color: rgba(124,106,239,0.7); background: rgba(124,106,239,0.15); }
 .thw-ab {
-  flex: none; height: 22px; padding: 0 6px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10px;
+  flex: none; height: 32px; padding: 0 6px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10px;
   border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary);
 }
 .thw-ab:hover { color: var(--text-primary); border-color: rgba(217,130,59,0.8); }

@@ -129,7 +129,8 @@ export function createThumbWindow({
       + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-peek="${escAttr(tag)}"`
       + `${single ? ' data-thw-single="1"' : ` data-thw-w="${weight}"`}>`
       + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-copy="${escAttr(tag)}"`
-      + ` data-naia-title="${escAttr(tag)} · 누르면 복사">${escHtml(tag)}</button>`
+      // 이름은 2줄 고정 · 넘치면 … (사용자 지시 2026-10-26) - 줄 자르기는 단추가 아니라 안쪽 span 에 건다.
+      + ` data-naia-title="${escAttr(tag)} · 누르면 복사"><span>${escHtml(tag)}</span></button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
         : `<button type="button" class="thw-ab" data-thw-ab="${escAttr(tag)}" data-naia-title="GT 와 나란히 비교">A|B</button>`)
       + `</div></article>`;

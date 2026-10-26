@@ -20,7 +20,11 @@
 e621 고유 후보는 따로 분류를 두지 않고 기존 분류에 나눠 넣고(E621_PLACE), 조명 · 그림자는 효과/시각에서 떼어
 '조명/그림자' 분류로 모은다(사용자 지시 2026-10-26).
 
+태그 설명(meta['descriptions'])은 자동완성과 같은 출처 - 태그 사전 설명을 관계 팩의 검토된 한국어(`ko`)가 덮는다.
+Novel AI 공식 · 시대/연대 스타일은 넣지 않는다(사용자 지시 2026-10-26). 설명이 없는 태그는 빈칸(화면이 안 그린다).
+
   python tools/build_style_thumbnails.py [--src C:/VNR/DEV/261026] [--size 384] [--quality 80] [--workers 8] [--dry-run]
+  python tools/build_style_thumbnails.py --descriptions-only     # 그림은 그대로 · 분류표의 설명만 다시 쓴다
 """
 from __future__ import annotations
 
@@ -89,6 +93,32 @@ def encode(job: tuple[str, int, int]) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
+DESCRIPTION_SKIP = {"nai_official", "era_style"}     # 설명을 싣지 않는 분류(사용자 지시 2026-10-26)
+
+
+def tag_descriptions(categories: dict) -> dict[str, str]:
+    """자동완성 색인과 같은 설명 - autocomplete_commands.ensure_tag_search_index 와 같은 재료 · 같은 덮어쓰기."""
+    sys.path.insert(0, str(ROOT))
+    from core.kr_tag_loader import load_kr_tag_records
+    from core.tag_relation_pack import load_pack
+    from core.tag_search_index import TagSearchIndex
+
+    roots = [ROOT / "data"]
+    raw = load_kr_tag_records(ROOT, data_roots=roots).raw
+    ko = load_pack(roots).get("ko")
+    index = TagSearchIndex.from_raw_tag_records(raw, description_overrides=ko if isinstance(ko, dict) and ko else None)
+    out: dict[str, str] = {}
+    for key, info in categories.items():
+        if key in DESCRIPTION_SKIP:
+            continue
+        for tag in info.get("tags", []):
+            entry = index.entry_for(tag)
+            desc = str(getattr(entry, "desc", "") or "").strip() if entry is not None else ""
+            if desc:
+                out[tag] = desc
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--src", default=r"C:\VNR\DEV\261026")
@@ -97,7 +127,16 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--base-rev", default="b01fc776", help="원래(v2) 분류표를 읽을 git 커밋")
+    parser.add_argument("--descriptions-only", action="store_true", help="그림은 그대로 두고 분류표의 태그 설명만 다시 쓴다")
     args = parser.parse_args()
+    if args.descriptions_only:
+        meta = json.loads(META_PATH.read_text(encoding="utf-8"))
+        meta["descriptions"] = tag_descriptions(meta["categories"])
+        total = sum(len(v["tags"]) for k, v in meta["categories"].items() if k not in DESCRIPTION_SKIP)
+        print("descriptions", len(meta["descriptions"]), "/", total)
+        if not args.dry_run:
+            META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+        return 0
     src = Path(args.src)
     preset, bare = src / "thumb_run", src / "thumb_run_bare"
 
@@ -210,6 +249,7 @@ def main() -> int:
         "sources": old.get("sources", []) + ["2026-10-26 thumb_run · thumb_run_bare · e621_style_research"],
         "categories": categories,
         "minus_labels": minus_labels,
+        "descriptions": tag_descriptions(categories),
     }
     images["__gt__:preset"] = preset / "gt.png"
     images["__gt__:bare"] = bare / "gt.png"

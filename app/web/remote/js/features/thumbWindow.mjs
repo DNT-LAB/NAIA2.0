@@ -253,7 +253,9 @@ export function createThumbWindow({
         cells = peekCell(neg?.url || '', neg ? neg.label : '빼기', note)
           + peekCell(gt, 'GT (0)') + peekCell(pos1, 'POS +1');
       }
-      peekEl.innerHTML = `<div class="thw-peek-head">${escHtml(tag)}</div><div class="thw-peek-row">${cells}</div>`;
+      // 머리줄 = 태그 이름 + 설명(자동완성과 같은 출처 · Novel AI 공식 · 시대/연대는 설명 없음 - 사용자 지시 2026-10-26).
+      const desc = item?.desc ? `<span class="thw-peek-desc">${escHtml(item.desc)}</span>` : '';
+      peekEl.innerHTML = `<div class="thw-peek-head"><b>${escHtml(tag)}</b>${desc}</div><div class="thw-peek-row">${cells}</div>`;
       peekEl.hidden = false;
       placePeek(img);
     };

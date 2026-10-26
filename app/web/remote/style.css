@@ -33049,7 +33049,11 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-status[data-tone="error"] { color: #f09595; }
 .thw-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 12px; }
 .thw-sec { margin: 10px 0 6px; font-size: 11px; color: var(--text-secondary); }
-.thw-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 7px; }
+/* 3열을 유지한 채 카드를 키운다 - 카드가 288px 을 넘으면 열을 늘린다(번들 그림 384px 안에서 선명하게 · 사용자 2026-10-26) */
+.thw-cards {
+  display: grid; gap: 7px;
+  grid-template-columns: repeat(auto-fill, minmax(max(128px, min(calc((100% - 14px) / 3), 288px)), 1fr));
+}
 .thw-card { border-radius: 7px; overflow: hidden; border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.03); }
 .thw-card:hover { border-color: rgba(124,106,239,0.6); }
 .thw-card img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: rgba(0,0,0,0.25); }

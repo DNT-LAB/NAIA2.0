@@ -125,24 +125,37 @@ class StyleThumbnailService:
         return image, "image/webp"
 
     def _unreadable_while_file_opens(self, key: str) -> bool:
-        """새로 연 색인으로도 못 읽는데 파일은 열린다 = 본문 손상. 다시 읽히면(교체 · 잠깐 잠금이 풀림) 손상이 아니고,
-        파일이 아예 안 열리면(잠금 · I/O) 손상인지 알 수 없으니 표시하지 않는다."""
+        """그 그림 구간을 **직접** 읽어 본다(색인은 읽기 실패도 해석 실패도 KeyError 로 바꿔 올려서 못 가른다).
+        읽기가 실패하면(파일 · 구간 잠금 · 일시 I/O) 손상인지 알 수 없으니 표시하지 않는다 - 4차 재리뷰: 파일이 열린다는
+        것만 보고 손상으로 찍어, 구간 잠금이 풀린 뒤에도 멀쩡한 묶음을 못 썼다. 읽은 바이트가 JSON 문자열 · base64 ·
+        WebP 머리로 풀리지 않을 때만 손상이다. 새 색인으로 읽으므로 묶음이 바뀐 경우는 새 묶음에서 그대로 읽힌다."""
         path = self.variants_path
         if path is None:
             return False
         try:
             _, fresh = open_variants(path)
-            fresh[key]
-            return False
         except OSError:
             return False
         except (KeyError, ValueError, TypeError):
-            pass
+            return True                      # 머리(메타)부터 깨졌다 - _variants 와 같은 판정
+        span = fresh.offsets.get(key)
+        if span is None:
+            return True
+        begin, finish = span
         try:
-            with path.open("rb"):
-                return True
+            with path.open("rb") as handle:
+                handle.seek(begin)
+                body = handle.read(finish - begin)
         except OSError:
             return False
+        if len(body) != finish - begin:
+            return False                     # 그 사이 줄어든 파일 - 교체 중일 수 있다
+        try:
+            value = json.loads(body)
+            image = base64.b64decode(value, validate=True) if isinstance(value, str) else None
+        except ValueError:
+            image = None
+        return image is None or not is_webp(image)
 
     def _mark_variants_corrupt(self, reason: str) -> None:
         if self.variants_path is None:

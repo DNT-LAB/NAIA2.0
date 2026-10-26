@@ -2,7 +2,7 @@
   "version": 3,
   "description": "이미지 생성에 유의미한 변화를 줄 수 있는 메타/스타일/효과 태그",
   "generated": "2026-10-26 생성 실험(tools/build_style_thumbnails.py)",
-  "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · 빼기 = UC 2.5(없으면 UC 1) · 상하좌우 10% 잘라 384px WebP",
+  "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · POS 2 (2::tag ::) · 빼기 = UC 2.5(없으면 UC 1) · 상하좌우 10% 잘라 384px WebP",
   "bases": {
     "preset": {
       "name": "프리셋",

@@ -10,7 +10,8 @@
 출력:
   data/taglist/style_meta_tags.json   version 3 - 'nai_official' 이 첫 분류(소제목 sections) · 아티스트/프랜차이즈 없음
   data/taglist/style_thumbnails.json  태그 -> base64 WebP(POS 1) · '__minus__:<태그>' -> 빼기 그림(UC 2.5, 없으면 UC 1 -
-                                      라벨은 분류표의 minus_labels) · 기준 GT 는 '__gt__:preset' · '__gt__:bare' 키.
+                                      라벨은 분류표의 minus_labels) · '__pos2__:<태그>' -> POS 2(창의 [썸네일 +1 | +2]) ·
+                                      기준 GT 는 '__gt__:preset' · '__gt__:bare' 키.
                                       전부 원본에서 상하좌우 10% 를 미리 잘라 384px WebP q80 (사용자 지시 2026-10-26 -
                                       화면은 130 ~ 260px 라 해상도가 안 보인다 · 묶음 없이도 큰 그림 세 장이 뜨게 빼기 그림을 담는다).
 
@@ -235,11 +236,21 @@ def main() -> int:
         else:
             missing.append(f"minus/{tag}")
 
+    # 6) POS 2 - 같은 폴더의 pos_p2(2::tag :: · 사용자 지시 2026-10-26: 썸네일을 +1 | +2 중 고른다). 단일은 없다.
+    for tag, path in list(images.items()):
+        if tag.startswith("__") or tag in single:
+            continue
+        candidate = path.parent / f"{slug(tag)}__pos_p2.png"
+        if candidate.exists():
+            images[f"__pos2__:{tag}"] = candidate
+        else:
+            missing.append(f"pos2/{tag}")
+
     meta = {
         "version": 3,
         "description": old.get("description", ""),
         "generated": "2026-10-26 생성 실험(tools/build_style_thumbnails.py)",
-        "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · 빼기 = UC 2.5(없으면 UC 1) · 상하좌우 10% 잘라 384px WebP",
+        "thumbnail": "POS 1 (프롬프트 끝에 1::tag ::) · POS 2 (2::tag ::) · 빼기 = UC 2.5(없으면 UC 1) · 상하좌우 10% 잘라 384px WebP",
         "bases": {
             "preset": {"name": "프리셋", "gt": "__gt__:preset",
                        "note": "Standard 품질 태그 + Heavy UC · seed 1426599 · V5 Full · 18 steps · CFG 6.3 · 1024x1024"},

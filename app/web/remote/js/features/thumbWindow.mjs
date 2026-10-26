@@ -29,6 +29,9 @@ export function createThumbWindow({
   const cache = new Map();            // 분류 키 -> 분류 응답
   let seq = 0;
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
+  // 썸네일 값 [+1 | +2](사용자 지시 2026-10-26) - 이 브라우저에 기억한다. 못 쓰면 이번 화면에서만.
+  const POS_KEY = 'naia.thumbWindow.pos';
+  let posWeight = (() => { try { return win.localStorage?.getItem(POS_KEY) === '2' ? 2 : 1; } catch (_) { return 1; } })();
 
   function ensurePanel() {
     if (panel) return panel;
@@ -43,7 +46,21 @@ export function createThumbWindow({
       initial: {right: 24, y: 80},
       escHtml,
     });
-    panel.slot.innerHTML = `<input class="thw-q" type="search" data-thw-q placeholder="태그 검색" spellcheck="false" autocomplete="off">`;
+    panel.slot.innerHTML = `<input class="thw-q" type="search" data-thw-q placeholder="태그 검색" spellcheck="false" autocomplete="off">`
+      + `<span class="thw-pos" data-naia-title="썸네일로 보여 줄 가중치 - 프롬프트 끝에 1::태그 :: / 2::태그 ::">썸네일`
+      + `<span class="thw-seg">${[1, 2].map(w => `<button type="button" data-thw-pos="${w}">+${w}</button>`).join('')}</span></span>`;
+    paintPos();
+    panel.slot.addEventListener('click', event => {
+      const btn = event.target.closest('[data-thw-pos]');
+      if (!btn) return;
+      const w = Number(btn.dataset.thwPos) === 2 ? 2 : 1;
+      if (w === posWeight) return;
+      posWeight = w;
+      try { win.localStorage?.setItem(POS_KEY, String(w)); } catch (_) { /* 저장 못 해도 이번 화면은 바뀐다 */ }
+      paintPos();
+      hidePeek();
+      paintGrid();
+    });
     panel.body.innerHTML = `<div class="thw">`
       + `<nav class="thw-cats" data-thw-cats aria-label="스타일 분류"></nav>`
       + `<section class="thw-main"><div class="thw-status" data-thw-status>불러오는 중…</div>`
@@ -58,6 +75,10 @@ export function createThumbWindow({
   }
 
   const el = sel => panel?.el.querySelector(sel);
+
+  function paintPos() {
+    panel?.slot.querySelectorAll('[data-thw-pos]').forEach(btn => btn.classList.toggle('is-on', Number(btn.dataset.thwPos) === posWeight));
+  }
   const query = () => String(el('[data-thw-q]')?.value || '').trim().toLowerCase();
 
   // ── 서버 ──────────────────────────────────────────────────────────────────
@@ -102,11 +123,11 @@ export function createThumbWindow({
       + `<span>${escHtml(cat.name)}</span><span class="thw-n">${Number(cat.available || 0)}</span></button>`).join('');
   }
 
-  function card(tag, url, single) {
+  function card(tag, url, single, weight = 1) {
     return `<article class="thw-card" data-thw-tag="${escAttr(tag)}">`
       // 그림 = 마우스를 올리면 큰 그림 세 장(-1 | 0 | 1) · 이름 = 복사(툴팁에 전체 이름) - 사용자 지시 2026-10-26.
       + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-peek="${escAttr(tag)}"`
-      + `${single ? ' data-thw-single="1"' : ''}>`
+      + `${single ? ' data-thw-single="1"' : ` data-thw-w="${weight}"`}>`
       + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-copy="${escAttr(tag)}"`
       + ` data-naia-title="${escAttr(tag)} · 누르면 복사">${escHtml(tag)}</button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
@@ -119,7 +140,9 @@ export function createThumbWindow({
     const data = cache.get(active);
     if (!grid || !data) return;
     const q = query();
-    const urls = new Map((data.tags || []).map(item => [item.tag, item.image_url]));
+    // +2 를 골랐어도 POS 2 그림이 없는 태그(단일 등)는 +1 그림 그대로 - 카드에 실제 가중치를 적어 미리보기 라벨이 따른다.
+    const shownOf = item => (posWeight === 2 && item.pos2_url ? [item.pos2_url, 2] : [item.image_url, 1]);
+    const urls = new Map((data.tags || []).map(item => [item.tag, shownOf(item)]));
     const match = tag => !q || tag.toLowerCase().includes(q);
     // 소제목이 있는 분류(Novel AI 공식)는 묶음별로, 없으면 한 덩어리로.
     const groups = data.sections?.length
@@ -131,7 +154,7 @@ export function createThumbWindow({
       shown += tags.length;
       if (!tags.length) return '';
       const head = group.name ? `<div class="thw-sec">${escHtml(group.name)} · ${tags.length}</div>` : '';
-      return head + `<div class="thw-cards">${tags.map(tag => card(tag, urls.get(tag) || '', group.single)).join('')}</div>`;
+      return head + `<div class="thw-cards">${tags.map(tag => card(tag, urls.get(tag)?.[0] || '', group.single, urls.get(tag)?.[1] || 1)).join('')}</div>`;
     }).join('') || `<div class="thw-empty">맞는 태그가 없습니다</div>`;
     const base = state?.bases?.[data.base]?.name;
     setStatus(`${data.name} · ${shown}${q ? ` / ${(data.tags || []).length}` : ''}개${base ? ` · 기준: ${base}` : ''}`);
@@ -251,7 +274,7 @@ export function createThumbWindow({
         // 응답 전(variants === null)은 '불러오는 중' - 서버가 막 켜졌으면 묶음 색인에 1~2초 걸린다.
         const note = variants === null ? '불러오는 중…' : variants?.ready ? '없음' : '변형 묶음 필요 ([A|B] 에서 받기)';
         cells = peekCell(neg?.url || '', neg ? neg.label : '빼기', note)
-          + peekCell(gt, 'GT (0)') + peekCell(pos1, 'POS +1');
+          + peekCell(gt, 'GT (0)') + peekCell(pos1, `POS +${img.dataset.thwW || 1}`);
       }
       // 머리줄 = 태그 이름 + 설명(자동완성과 같은 출처 · Novel AI 공식 · 시대/연대는 설명 없음 - 사용자 지시 2026-10-26).
       const desc = item?.desc ? `<span class="thw-peek-desc">${escHtml(item.desc)}</span>` : '';

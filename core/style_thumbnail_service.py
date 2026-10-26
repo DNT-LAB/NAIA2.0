@@ -289,6 +289,9 @@ class StyleThumbnailService:
         """카드 한 장. 빼기 그림(`__minus__:<태그>` · UC 2.5 없으면 UC 1)이 번들에 있으면 그 주소와 라벨도 싣는다 -
         큰 그림 세 장이 변형 묶음 없이도 뜬다(2026-10-26)."""
         item = {"tag": tag, "image_url": self._image_url(tag)}
+        pos2_key = f"__pos2__:{tag}"
+        if pos2_key in thumbnail_data:
+            item["pos2_url"] = self._image_url(pos2_key)   # 창의 [썸네일 +1 | +2] (2026-10-26)
         descriptions = self.metadata().get("descriptions", {})
         desc = descriptions.get(tag) if isinstance(descriptions, dict) else None
         if isinstance(desc, str) and desc.strip():

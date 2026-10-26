@@ -15,8 +15,8 @@ from core.character_preview_index import PreviewKeyIndex
 
 
 STYLE_VARIANTS_NAME = "style_variants.json"
-# 311,249,091 bytes; the install manager reports MB in units of 1024**2.
-STYLE_VARIANTS_APPROX_MB = 297
+# 374,610,152 bytes (POS +2 포함 · 2026-10-26); the install manager reports MB in units of 1024**2.
+STYLE_VARIANTS_APPROX_MB = 357
 STYLE_VARIANTS_INDEX_NAME = "variants-key-index.json"
 
 

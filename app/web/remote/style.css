@@ -33018,6 +33018,15 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   width: 150px; min-width: 0; height: 22px; padding: 0 8px; border-radius: 5px; border: 1px solid rgba(255,255,255,0.14);
   background: rgba(0,0,0,0.3); color: var(--text-primary); font-family: var(--font-mono); font-size: 11px;
 }
+.thw-pos { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; font-size: 11px; color: var(--text-secondary); }
+.thw-seg { display: inline-flex; border: 1px solid rgba(255,255,255,0.16); border-radius: 5px; overflow: hidden; }
+.thw-seg button {
+  height: 20px; padding: 0 9px; border: 0; background: transparent; cursor: pointer;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--text-secondary);
+}
+.thw-seg button + button { border-left: 1px solid rgba(255,255,255,0.16); }
+.thw-seg button:hover { color: var(--text-primary); }
+.thw-seg button.is-on { background: rgba(124,106,239,0.35); color: var(--text-primary); }
 .thw-hb {
   height: 22px; padding: 0 9px; border-radius: 5px; cursor: pointer; font-family: var(--font-mono); font-size: 10.5px;
   border: 1px solid rgba(255,255,255,0.16); background: transparent; color: var(--text-secondary);

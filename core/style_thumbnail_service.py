@@ -101,11 +101,19 @@ class StyleThumbnailService:
 
     def _variant_bytes(self, index, key: str) -> tuple[bytes, str]:
         try:
-            image = base64.b64decode(index[key], validate=True)
-        except (KeyError, ValueError, OSError):
+            encoded = index[key]
+        except (KeyError, OSError):
+            # 읽기 실패(파일 잠금 · 일시 I/O - 색인이 KeyError 로 바꿔 올린다)는 손상이 아니다. 이번 요청만 실패시키고
+            # 다음 요청에서 묶음을 다시 연다(재리뷰 N1: 여기서 손상 표시를 남겨 멀쩡한 묶음을 영영 못 쓰게 했다).
+            self._variants_signature = self._variants_cache = None
+            raise FileNotFoundError("Style variant image not readable now") from None
+        try:
+            image = base64.b64decode(encoded, validate=True)
+        except ValueError:
             image = None
         if image is None or not is_webp(image):
-            # 깨진 묶음 - 손상 표시를 남겨 '준비 안 됨' 으로 돌린다(Codex 리뷰 #2: 404 만 내고 ready 로 남아 다시 받을 길이 없었다).
+            # 바이트는 읽었는데 그림이 아니다 = 깨진 묶음 - 손상 표시를 남겨 '준비 안 됨' 으로 돌린다
+            # (Codex 리뷰 #2: 404 만 내고 ready 로 남아 다시 받을 길이 없었다).
             self._variants_signature = self._variants_cache = None
             if self.variants_path is not None:
                 try:

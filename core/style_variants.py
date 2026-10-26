@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import base64
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 import io
 import json
 import math
+import os
 from pathlib import Path
 import re
 
@@ -47,23 +50,41 @@ def is_webp(image: bytes) -> bool:
     return len(image) >= 12 and image[:4] == b"RIFF" and image[8:12] == b"WEBP"
 
 
-def validate_variant_images(index: PreviewKeyIndex, keys) -> None:
-    """설치 때만: 모든 그림이 base64 로 풀리고 WebP 머리를 갖는지(Codex 리뷰 2026-10-26 #2 - 그림 하나가 깨져도
-    설치를 통과하고 '준비됨' 으로 남아 다시 받을 길이 막혔다). 한 장씩 읽어 메모리는 그림 한 장 분량만 쓴다."""
+def _decode_check(key: str, encoded: str) -> None:
     from PIL import Image
 
-    for key in sorted(keys):
-        try:
-            image = base64.b64decode(index[key], validate=True)
-        except (KeyError, ValueError) as exc:
-            raise ValueError(f"Style variant image is not valid base64: {key}") from exc
-        if not is_webp(image):
-            raise ValueError(f"Style variant image is not WebP: {key}")
-        try:
-            with Image.open(io.BytesIO(image)) as decoded:
-                decoded.verify()
-        except Exception as exc:  # noqa: BLE001 - PIL 은 여러 종류를 던진다
-            raise ValueError(f"Style variant image is unreadable: {key}") from exc
+    try:
+        image = base64.b64decode(encoded, validate=True)
+    except ValueError as exc:
+        raise ValueError(f"Style variant image is not valid base64: {key}") from exc
+    if not is_webp(image):
+        raise ValueError(f"Style variant image is not WebP: {key}")
+    try:
+        with Image.open(io.BytesIO(image)) as decoded:
+            decoded.load()
+    except Exception as exc:  # noqa: BLE001 - PIL 은 여러 종류를 던진다
+        raise ValueError(f"Style variant image is unreadable: {key}") from exc
+
+
+def validate_variant_images(index: PreviewKeyIndex, keys) -> None:
+    """설치 때만: 모든 그림이 base64 로 풀리고 WebP 로 **실제로 디코딩되는지**(Codex 리뷰 2026-10-26 #2 - 그림 하나가
+    깨져도 설치를 통과하고 '준비됨' 으로 남아 다시 받을 길이 막혔다). verify() 는 WebP 머리만 보고 픽셀은 안 읽어서
+    머리는 멀쩡하고 몸통이 깨진 그림을 통과시켰다(재리뷰 R1) - load() 로 끝까지 푼다.
+    2,184장을 한 줄로 풀면 30초 - 디코딩만 스레드 여럿에 나눈다(6초). 색인 읽기는 이 스레드에서만,
+    한 번에 떠 있는 그림은 몇십 장뿐이라 메모리는 그대로다."""
+    workers = max(1, min(8, os.cpu_count() or 1))
+    with ThreadPoolExecutor(workers, thread_name_prefix="style-variants-check") as pool:
+        pending = deque()
+        for key in sorted(keys):
+            try:
+                encoded = index[key]
+            except KeyError as exc:
+                raise ValueError(f"Style variant image is missing: {key}") from exc
+            pending.append(pool.submit(_decode_check, key, encoded))
+            if len(pending) >= workers * 4:
+                pending.popleft().result()
+        while pending:
+            pending.popleft().result()
 
 
 def open_variants(path: Path, *, cache_write: bool = True,

@@ -446,10 +446,13 @@ export function createThumbWindow({
   }
 
   // 묶음 받기 - 이벤트 맵과 같은 설치 관리자(루프백만 시작할 수 있다 · 단일 비행).
+  // 조회 실패(HTTP 오류 · JSON 아님 · 항목 없음)는 던진다 - 빈 응답을 '쉬는 중' 으로 읽어 받는 중에 폴링을 끊었다(재리뷰 N2).
   async function abInstallState() {
     const response = await fetch('/api/install-manager', {cache: 'no-store'});
-    const snap = await response.json().catch(() => ({}));
-    const info = snap.style_variants || {};
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const snap = await response.json();
+    const info = snap?.style_variants;
+    if (!info || typeof info !== 'object') throw new Error('설치 상태 없음');
     const dl = info.download || {};
     const mine = String(dl.phase || '') === 'style_variants';
     return {ready: !!info.ready, active: !!(mine && dl.active), percent: mine ? dl.percent : 0, error: mine ? dl.error : ''};
@@ -457,13 +460,17 @@ export function createThumbWindow({
 
   /** 설치 상태를 본다. afterStart = [받기] 를 막 눌렀다 - 받기가 시작될 때까지 몇 번 기다려 준다.
    *  받는 중이 아니게 되면(끝 · 실패 · 취소) 멈춘다(Codex 리뷰 #5: 실패해도 팝업을 닫을 때까지 1.5초마다 계속 물었다).
-   *  틱은 겹치지 않는다(응답이 늦으면 다음 틱을 건너뛴다). */
+   *  틱은 겹치지 않는다(응답이 늦으면 다음 틱을 건너뛴다).
+   *  조회가 실패하면 마지막 상태를 그대로 두고 다시 묻는다 - 연달아 MAX_FAILS 번 실패할 때만 멈춘다(재리뷰 N2).
+   *  다 받았으면 그림 목록을 받아 온 뒤에 멈춘다 - 목록 조회가 실패하면 다음 틱에 다시(재리뷰 A1: 먼저 멈춰서 99% 에 섰다). */
   async function abPollInstall(pop, afterStart) {
     if (ab !== pop) return;
     if (pop.poll) clearInterval(pop.poll);
     let busy = false;
     let waits = afterStart ? 5 : 0;           // 받기 시작 전 '쉬는 중' 으로 보이는 틱을 몇 번까지 봐준다
     let sawActive = false;
+    let fails = 0;
+    const MAX_FAILS = 20;                     // 1.5초 x 20 = 30초 동안 한 번도 못 물으면 멈춘다
     const stop = () => { clearInterval(timer); if (pop.poll === timer) pop.poll = 0; };
     const tick = async () => {
       if (ab !== pop) { stop(); return; }
@@ -472,13 +479,25 @@ export function createThumbWindow({
       try {
         const st = await abInstallState();
         if (ab !== pop) { stop(); return; }
+        if (st.ready) {
+          await abFetch(pop);                 // 실패하면 catch 로 - 타이머는 살아 있어 다음 틱에 다시
+          if (ab === pop) { stop(); pop.dlError = ''; abPaint(); }
+          return;
+        }
+        fails = 0;
         pop.dl = st;
         if (st.error) pop.dlError = `받지 못했습니다 - ${st.error}`;
-        if (st.ready) { stop(); pop.dlError = ''; await abFetch(pop); return; }
         if (st.active) sawActive = true;
         else if (st.error || sawActive || waits-- <= 0) stop();
         abPaint();
-      } catch (_) { /* 다음 틱에 다시 */ } finally { busy = false; }
+      } catch (_) {
+        if (ab !== pop) { stop(); return; }
+        if (++fails >= MAX_FAILS) {
+          stop();
+          pop.dlError = '받기 상태를 확인하지 못했습니다 - 창을 다시 열어 주세요';
+          abPaint();
+        }
+      } finally { busy = false; }
     };
     const timer = setInterval(tick, 1500);
     pop.poll = timer;

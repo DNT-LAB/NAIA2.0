@@ -7890,6 +7890,35 @@ function requestCharactersTab() {
   switchRightTab('characters');
 }
 
+// Thumb 창(사용자 결정 2026-10-26) - [Thumb] 탭은 Characters 와 같은 규칙: 창이 없거나 접혀 있으면 창부터,
+// 펴진 창에서 다시 누르면 옛 Thumb 탭(개편 예정 - Bench 모드로 다시 쓴다).
+let thumbWindow = null;
+let thumbWindowReady = null;
+function ensureThumbWindow() {
+  if (!thumbWindowReady) {
+    thumbWindowReady = import('./js/features/thumbWindow.mjs?v=20261026-thw1')
+      .then(({createThumbWindow}) => {
+        thumbWindow = createThumbWindow({
+          document, window, escHtml, showToast,
+          promptEdit,
+          onPromptEdit: onPromptAuthoredEdit,
+        });
+        return thumbWindow;
+      })
+      .catch(error => {
+        thumbWindowReady = null;
+        console.error('Failed to initialize thumb window module', error);
+        return null;
+      });
+  }
+  return thumbWindowReady;
+}
+function requestThumbTab() {
+  if (!thumbWindow) { void ensureThumbWindow().then(win => win?.open()); return; }
+  if (!thumbWindow.requestTab()) return;
+  switchRightTab('thumb');
+}
+
 function requestArtistsTab() {
   if (artistThumbControl && typeof artistThumbControl.requestArtistsTab === 'function') {
     if (!artistThumbControl.requestArtistsTab()) return;

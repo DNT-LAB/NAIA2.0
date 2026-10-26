@@ -7896,7 +7896,7 @@ let thumbWindow = null;
 let thumbWindowReady = null;
 function ensureThumbWindow() {
   if (!thumbWindowReady) {
-    thumbWindowReady = import('./js/features/thumbWindow.mjs?v=20261026-thw5')
+    thumbWindowReady = import('./js/features/thumbWindow.mjs?v=20261026-thw7')
       .then(({createThumbWindow}) => {
         thumbWindow = createThumbWindow({
           document, window, escHtml, showToast,

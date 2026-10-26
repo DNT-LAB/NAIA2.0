@@ -33094,5 +33094,20 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   font-family: var(--font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .thw-ab-prompt:hover { border-color: rgba(190,160,255,0.7); }
-.thw-card img[data-thw-insert] { cursor: pointer; }
-.thw-card img[data-thw-insert]:hover { filter: brightness(1.08); }
+/* Thumb 카드 큰 그림 세 장(사용자 지시 2026-10-26) - 마우스를 올리면 POS -1 | GT | POS +1 을 카드 위/아래에. */
+.thw-peek {
+  position: fixed; z-index: calc(var(--z-drag-panel, 10150) + 150); pointer-events: none;
+  padding: 8px; border-radius: 10px; background: #15151d; border: 1px solid rgba(255,255,255,0.14);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.55); font-family: var(--font-mono);
+}
+.thw-peek[hidden] { display: none !important; }
+.thw-peek-head { font-size: 12px; color: var(--text-primary); margin: 0 2px 6px; }
+.thw-peek-row { display: flex; gap: 6px; }
+.thw-peek-cell { margin: 0; width: min(260px, calc((100vw - 60px) / 3)); }
+.thw-peek-img {
+  aspect-ratio: 1; border-radius: 7px; overflow: hidden; background: rgba(0,0,0,0.35);
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 0;
+}
+.thw-peek-img img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.thw-peek-img span { font-size: 11px; color: var(--text-dim); padding: 12px; }
+.thw-peek-cell figcaption { margin-top: 4px; text-align: center; font-size: 11px; color: var(--text-secondary); }

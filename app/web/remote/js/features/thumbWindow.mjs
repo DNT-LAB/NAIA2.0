@@ -3,7 +3,8 @@
  *
  *   머리줄: [태그 검색] [Bench]
  *   [ 분류 목록 | 소제목별 카드 격자 ]
- *   카드 = POS 1 썸네일(누르면 프롬프트에 넣기) · 이름(누르면 복사 · 툴팁 = 전체 이름 · 우클릭 = 복사) · [A|B]
+ *   카드 = POS 1 썸네일(마우스를 올리면 큰 그림 세 장 -1 | 0 | 1 을 카드 위/아래에) · 이름(누르면 복사 · 툴팁 = 전체 이름 ·
+ *   우클릭 = 복사) · [A|B]
  *
  * 데이터 = /api/thumb/state · /api/thumb/category/<key> (data/taglist/style_meta_tags.json v3 - 2026-10-26 생성 실험).
  * 분류마다 생성 기준(base: 프리셋 / 맨바탕)이 다르다 - 상태 줄에 그 기준을 적는다.
@@ -20,8 +21,9 @@ export function createThumbWindow({
   window: win = window,
   escHtml = value => String(value ?? ''),
   showToast = () => {},
-  promptEdit = null,                  // 메인 프롬프트 칸 - 태그를 커서 자리에 넣는다
-  onPromptEdit = null,                // 넣은 뒤 부른다(작성 편집 알림)
+  // 메인 프롬프트 칸 · 작성 편집 알림 - 지금은 쓰지 않는다(그림 클릭 넣기를 뺐다 · 2026-10-26). Bench 모드에서 쓸 자리.
+  promptEdit = null,                  // eslint-disable-line no-unused-vars
+  onPromptEdit = null,                // eslint-disable-line no-unused-vars
 } = {}) {
   let panel = null;
   let state = null;                   // /api/thumb/state
@@ -56,6 +58,9 @@ export function createThumbWindow({
     });
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', onContextMenu);
+    panel.body.addEventListener('mouseover', onPeekOver);
+    panel.body.addEventListener('mouseout', onPeekOut);
+    panel.body.addEventListener('scroll', hidePeek, true);
     return panel;
   }
 
@@ -106,9 +111,9 @@ export function createThumbWindow({
 
   function card(tag, url, single) {
     return `<article class="thw-card" data-thw-tag="${escAttr(tag)}">`
-      // 그림 = 프롬프트에 넣기 · 이름 = 복사(툴팁에 전체 이름) - 사용자 지시 2026-10-26.
-      + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-insert="${escAttr(tag)}"`
-      + ` data-naia-title="누르면 프롬프트에 넣습니다: ${escAttr(tag)}">`
+      // 그림 = 마우스를 올리면 큰 그림 세 장(-1 | 0 | 1) · 이름 = 복사(툴팁에 전체 이름) - 사용자 지시 2026-10-26.
+      + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-peek="${escAttr(tag)}"`
+      + `${single ? ' data-thw-single="1"' : ''}>`
       + `<div class="thw-ft"><button type="button" class="thw-tag" data-thw-copy="${escAttr(tag)}"`
       + ` data-naia-title="${escAttr(tag)} · 누르면 복사">${escHtml(tag)}</button>`
       + (single ? `<span class="thw-single" data-naia-title="가중치 없이 한 장만 뽑은 태그입니다">단일</span>`
@@ -141,6 +146,7 @@ export function createThumbWindow({
 
   async function select(key) {
     if (!key) return;
+    hidePeek();
     active = key;
     paintCats();
     const mine = ++seq;
@@ -158,22 +164,6 @@ export function createThumbWindow({
   }
 
   // ── 동작 ──────────────────────────────────────────────────────────────────
-  function insertTag(tag) {
-    const target = promptEdit;
-    if (!target || !tag) return false;
-    const text = target.value || '';
-    const start = target.selectionStart != null ? target.selectionStart : text.length;
-    const end = target.selectionEnd != null ? target.selectionEnd : start;
-    const before = text.substring(0, start);
-    const after = text.substring(end);
-    const prefix = before.trim() ? (/[,\s]$/.test(before) ? '' : ', ') : '';
-    const insert = `${prefix}${tag}, `;
-    target.value = before + insert + after;
-    target.selectionStart = target.selectionEnd = before.length + insert.length;
-    if (onPromptEdit) onPromptEdit();
-    return true;
-  }
-
   async function copyTag(tag) {
     try {
       await win.navigator.clipboard.writeText(tag);
@@ -188,13 +178,97 @@ export function createThumbWindow({
     if (cat) { void select(cat.dataset.thwCat); return; }
     const copy = event.target.closest('[data-thw-copy]');
     if (copy) { void copyTag(copy.dataset.thwCopy); return; }
-    const insert = event.target.closest('[data-thw-insert]');
-    if (insert) {
-      if (insertTag(insert.dataset.thwInsert)) showToast(`넣었습니다: ${insert.dataset.thwInsert}`, 'success');
-      return;
-    }
     const ab = event.target.closest('[data-thw-ab]');
     if (ab) void openAb(ab.dataset.thwAb);
+  }
+
+  // ── 큰 그림 세 장(마우스를 올리면) ─────────────────────────────────────────
+  // POS -1(복잡도는 -0.5) | GT | POS +1 을 나란히 - 카드가 화면 아래쪽이면 카드 위에, 위쪽이면 아래에(사용자 지시 2026-10-26).
+  // GT · POS 1 은 번들 썸네일, 음수 칸은 변형 묶음(없으면 '묶음 필요'). 데이터셋(단일)은 GT | 그 그림 두 장.
+  const variantCache = new Map();     // tag -> /api/thumb/variants 응답(Promise)
+  let peekEl = null;
+  let peekTimer = 0;
+  let peekTag = '';
+
+  function variantsOf(tag) {
+    if (!variantCache.has(tag)) {
+      variantCache.set(tag, fetch(`/api/thumb/variants?tag=${encodeURIComponent(tag)}`, {cache: 'no-store'})
+        .then(r => (r.ok ? r.json() : null)).catch(() => null)
+        // 실패 · 묶음 없음은 남기지 않는다 - 다음에 올리면 다시 묻는다(그 사이 받았을 수 있다).
+        .then(data => { if (!data?.ready) variantCache.delete(tag); return data; }));
+    }
+    return variantCache.get(tag);
+  }
+
+  function hidePeek() {
+    clearTimeout(peekTimer);
+    peekTag = '';
+    if (peekEl) { peekEl.hidden = true; peekEl.dataset.tag = ''; }
+  }
+
+  function onPeekOut(event) {
+    const img = event.target.closest?.('[data-thw-peek]');
+    if (img && !img.contains(event.relatedTarget)) hidePeek();
+  }
+
+  function onPeekOver(event) {
+    const img = event.target.closest?.('[data-thw-peek]');
+    if (!img || img.dataset.thwPeek === peekTag) return;
+    clearTimeout(peekTimer);
+    // 격자 위를 훑고 지나갈 때 깜빡이지 않게 잠깐 머문 뒤에 띄운다.
+    peekTimer = setTimeout(() => void showPeek(img), 140);
+  }
+
+  function peekCell(src, label, note = '') {
+    return `<figure class="thw-peek-cell"><div class="thw-peek-img">`
+      + (src ? `<img src="${escAttr(src)}" alt="${escAttr(label)}">` : `<span>${escHtml(note || '없음')}</span>`)
+      + `</div><figcaption>${escHtml(label)}</figcaption></figure>`;
+  }
+
+  async function showPeek(img) {
+    const tag = img.dataset.thwPeek;
+    peekTag = tag;
+    const data = cache.get(active);
+    const base = data?.base || '';
+    const gt = state?.bases?.[base]?.gt_url || '';
+    const pos1 = img.getAttribute('src') || '';
+    if (!peekEl) {
+      peekEl = doc.createElement('div');
+      peekEl.className = 'thw-peek';
+      peekEl.hidden = true;
+      doc.body.appendChild(peekEl);
+    }
+    // 어떤 태그를 그렸는지는 미리보기 자신에 적는다 - 응답을 기다리는 사이 스크롤 등으로 peekTag 가 지워져도
+    // 미리보기가 그 태그로 떠 있으면 다시 그린다(처음 한 번 -1 칸이 '묶음 필요' 로 남던 것).
+    const paint = variants => {
+      if (variants && (peekEl.hidden || peekEl.dataset.tag !== tag)) return;
+      peekEl.dataset.tag = tag;
+      let cells;
+      if (img.dataset.thwSingle) {
+        cells = peekCell(gt, 'GT (태그 없음)') + peekCell(pos1, `${tag} (맨 앞)`);
+      } else {
+        const neg = variants?.ready ? (variants.variants || []).find(v => v.place === 'pos' && Number(v.weight) < 0) : null;
+        cells = peekCell(neg?.url || '', neg ? neg.label : 'POS -1', variants?.ready ? '없음' : '변형 묶음 필요 ([A|B] 에서 받기)')
+          + peekCell(gt, 'GT (0)') + peekCell(pos1, 'POS +1');
+      }
+      peekEl.innerHTML = `<div class="thw-peek-head">${escHtml(tag)}</div><div class="thw-peek-row">${cells}</div>`;
+      peekEl.hidden = false;
+      placePeek(img);
+    };
+    paint(null);
+    if (!img.dataset.thwSingle) paint(await variantsOf(tag));
+  }
+
+  function placePeek(img) {
+    const r = img.getBoundingClientRect();
+    const vw = win.innerWidth, vh = win.innerHeight;
+    const w = peekEl.offsetWidth, h = peekEl.offsetHeight;
+    const left = Math.max(8, Math.min(vw - w - 8, r.left + r.width / 2 - w / 2));
+    // 카드가 화면 아래쪽이면 위에, 위쪽이면 아래에 - 그래도 넘치면 화면 안으로 민다.
+    let top = r.top + r.height / 2 > vh / 2 ? r.top - h - 8 : r.bottom + 8;
+    top = Math.max(8, Math.min(vh - h - 8, top));
+    peekEl.style.left = `${Math.round(left)}px`;
+    peekEl.style.top = `${Math.round(top)}px`;
   }
 
   // ── A|B 팝업 ──────────────────────────────────────────────────────────────
@@ -344,6 +418,7 @@ export function createThumbWindow({
   }
 
   async function openAb(tag) {
+    hidePeek();
     abClose();
     const base = cache.get(active)?.base || '';
     ab = {tag, base, data: null, steps: [], idx: 0, neg: null, showNeg: false, el: null, poll: 0, seq: ++abSeq, dl: null, dlError: ''};
@@ -430,6 +505,7 @@ export function createThumbWindow({
 
   return {
     open,
+    hidePeek,
     /** 탭 단추 규칙(Characters · Artist 와 같다) - 창을 세웠으면 false(탭으로 가지 않는다), 이미 펴져 있으면 true(탭으로). */
     requestTab() {
       if (!panel || !panel.isOpen() || (panel.isCollapsed && panel.isCollapsed())) { void open(); return false; }

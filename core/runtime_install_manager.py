@@ -19,6 +19,10 @@ import zipfile
 
 from app.backend.runtime import RuntimePaths
 from core.character_preview_index import PreviewKeyIndex, character_pack_fingerprint
+from core.style_variants import (
+    STYLE_VARIANTS_APPROX_MB, STYLE_VARIANTS_INDEX_NAME, STYLE_VARIANTS_NAME,
+    open_variants, style_variants_path,
+)
 
 
 TAG_ARCHIVE_URL = "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/naia_tags.zip"
@@ -73,6 +77,11 @@ EVENT_MAP_INDEX_APPROX_MB = 879
 CHARACTER_PACK_URL = os.environ.get(
     "NAIA_CHARACTER_PACK_URL",
     "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/2026/NAIA_character_pack_261022.json",
+).strip()
+
+STYLE_VARIANTS_URL = os.environ.get(
+    "NAIA_STYLE_VARIANTS_URL",
+    "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/2026/NAIA_style_variants_261026.json",
 ).strip()
 
 
@@ -235,10 +244,17 @@ class RuntimeInstallManager:
         on_character_pack_complete: Callable[[], None] | None = None,
         character_pack_replace_guard: Callable[[], Any] | None = None,
         character_pack_lock: Callable[[], Any] | None = None,
+        style_variants_url: str | None = None,
+        style_variants_lock: Callable[[], Any] | None = None,
     ):
         self.runtime_paths = runtime_paths
         if character_pack_url is None:
             character_pack_url = CHARACTER_PACK_URL
+        if style_variants_url is None:
+            style_variants_url = STYLE_VARIANTS_URL
+        variants_lock = RLock()
+        self._style_variants_lock = style_variants_lock or (lambda: variants_lock)
+        self._style_variants_ready_cache = None
         self.tag_archive_url = tag_archive_url
         self.expected_tag_files = int(expected_tag_files or 0)
         self._on_tag_archive_complete = on_tag_archive_complete
@@ -323,6 +339,13 @@ class RuntimeInstallManager:
             "corpus_archive": on_corpus_archive_complete,
             "event_map": on_event_map_complete,
         }
+        self._specs["style_variants"] = ArchiveSpec(
+            key="style_variants", url=style_variants_url, subdir="style_variants",
+            suffixes=(".json",), label="스타일 변형 그림",
+            temp_name="style_variants_" + hashlib.sha256(style_variants_url.encode()).hexdigest()[:16] + ".download_tmp",
+            count_glob=STYLE_VARIANTS_NAME, required_names=(STYLE_VARIANTS_NAME,),
+            raw_name=STYLE_VARIANTS_NAME,
+        )
         self._lock = RLock()
         self._cancel = Event()
         self._thread: Thread | None = None
@@ -358,6 +381,8 @@ class RuntimeInstallManager:
         return spec
 
     def _archive_dir(self, spec: ArchiveSpec) -> Path:
+        if spec.key == "style_variants":
+            return style_variants_path(self.runtime_paths).parent
         return self.runtime_paths.data_dir / spec.subdir
 
     def _archive_file_count(self, spec: ArchiveSpec) -> int:
@@ -414,7 +439,38 @@ class RuntimeInstallManager:
                 pass
             return False
 
+    def _style_variants_ready(self, spec: ArchiveSpec, *, wait: bool) -> bool:
+        path = style_variants_path(self.runtime_paths)
+        try:
+            if path.with_suffix(".corrupt").exists():
+                return False
+            if path.with_suffix(".source").read_text(encoding="utf-8").strip() != spec.url:
+                return False
+            fingerprint = character_pack_fingerprint(path)
+            if fingerprint is None or not path.is_file():
+                return False
+            if not wait:
+                return True  # Polling never scans the large pack or waits for readers.
+            with self._style_variants_lock():
+                stat = path.stat()
+                generation = (fingerprint, stat.st_size, stat.st_mtime_ns, spec.url)
+                if self._style_variants_ready_cache != generation:
+                    open_variants(path)
+                    self._style_variants_ready_cache = generation
+            return True
+        except OSError:
+            return False  # Missing files/transient access failures are not corruption.
+        except (ValueError, KeyError, TypeError):
+            self._style_variants_ready_cache = None
+            try:
+                path.with_suffix(".corrupt").write_text("verification failed\n", encoding="utf-8", newline="\n")
+            except OSError:
+                pass
+            return False
+
     def _archive_ready(self, spec: ArchiveSpec, count: int | None = None, *, wait: bool = False) -> bool:
+        if spec.key == "style_variants":
+            return self._style_variants_ready(spec, wait=wait)
         if spec.key == "character_pack":
             # Same pure lock as service reads and installation; never invalidate
             # the service simply because a snapshot asks whether the pack is ready.
@@ -521,7 +577,7 @@ class RuntimeInstallManager:
         # 선택 화면 여부). 진행 상태는 하나뿐이라 확장 팩 체인이 여기 비치면 선택 화면이 사라지고 팩 오류가 태그 오류가 된다
         # (사용자 제보 2026-10-22). 확장 팩만 받는 체인이면 이 칸에는 쉬는 상태를 준다 - `character_pack` · `downloads` 는 그대로.
         tag_download = download
-        if set(download.get("chain") or [download.get("phase")]) == {"character_pack"}:
+        if set(download.get("chain") or [download.get("phase")]) in ({"character_pack"}, {"style_variants"}):
             tag_download = {"active": False, "phase": "idle", "percent": 0, "downloaded_mb": 0.0, "total_mb": 0.0,
                             "message": "", "error": "", "done": False, "updated_at": download.get("updated_at", "")}
         return {
@@ -563,6 +619,10 @@ class RuntimeInstallManager:
             },
             "bootstrap_data": dict(self._bootstrap_state),
             "character_pack": self._archive_snapshot(self._spec("character_pack"), download),
+            "style_variants": {
+                **self._archive_snapshot(self._spec("style_variants"), download),
+                "approx_mb": STYLE_VARIANTS_APPROX_MB,
+            },
             "downloads": self._downloads_snapshot(),
         }
 
@@ -589,6 +649,9 @@ class RuntimeInstallManager:
 
     def start_event_map_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("event_map", blocking=blocking)
+
+    def start_style_variants_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        return self.start_archive_download("style_variants", blocking=blocking)
 
     def auto_start_character_pack(self) -> dict[str, Any]:
         """화면이 다 뜬 뒤 한 번 부른다(사용자 지시 2026-10-22 - 앱 시작 경로에서 받지 않는다). 폴링이 다시 부르지 않는다."""
@@ -818,7 +881,7 @@ class RuntimeInstallManager:
         finally:
             try:
                 # Preserve interrupted extension downloads for the user's explicit retry.
-                if spec.key != "character_pack" or download_complete:
+                if spec.key not in {"character_pack", "style_variants"} or download_complete:
                     temp_zip.unlink(missing_ok=True)
             except Exception:
                 pass
@@ -915,6 +978,10 @@ class RuntimeInstallManager:
         if last_error is not None:
             raise last_error
         minimum = 1024 * 1024 if spec.raw_name else 1024
+        if spec.key == "style_variants":
+            # Structural validation below is authoritative. Even tiny error
+            # responses must be retained as marked staging files for diagnosis.
+            minimum = 0
         if not temp_zip.exists() or temp_zip.stat().st_size < minimum:
             raise ValueError(f"다운로드된 {spec.label} 파일이 너무 작습니다.")
 
@@ -979,7 +1046,9 @@ class RuntimeInstallManager:
             pass
         # downloads_dir 와 data_dir 가 다른 볼륨일 수 있다(사용자가 user-data 를 옮긴 경우).
         shutil.move(str(temp_file), str(staging))
-        if spec.key == "character_pack":
+        if spec.key == "style_variants":
+            self._install_style_variants(spec, staging, target)
+        elif spec.key == "character_pack":
             digest = hashlib.sha256()
             with staging.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
@@ -1016,6 +1085,39 @@ class RuntimeInstallManager:
             os.replace(staging, target)
         self._set_state(percent=99, message=f"{spec.label} 설치 중... 1/1")
         return 1
+
+    def _install_style_variants(self, spec: ArchiveSpec, staging: Path, target: Path) -> None:
+        digest = hashlib.sha256()
+        with staging.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
+                digest.update(chunk)
+        try:
+            _, index = open_variants(staging, cache_write=False)
+        except (ValueError, KeyError, TypeError):
+            # Preserve rejected bytes for diagnosis; do not overwrite a valid old pack.
+            staging.with_suffix(staging.suffix + ".corrupt").write_text(
+                "verification failed\n", encoding="utf-8", newline="\n")
+            raise
+        stat = staging.stat()
+        cache = target.parent / STYLE_VARIANTS_INDEX_NAME
+        cache_tmp = cache.with_suffix(".json.install_tmp")
+        index._save(cache_tmp, signature=[str(target.resolve()), stat.st_size, stat.st_mtime_ns], strict=True)
+        fingerprint = target.with_suffix(".sha256")
+        fingerprint_tmp = fingerprint.with_suffix(".sha256.install_tmp")
+        fingerprint_tmp.write_text(digest.hexdigest() + "\n", encoding="ascii", newline="\n")
+        source = target.with_suffix(".source")
+        source_tmp = source.with_suffix(".source.install_tmp")
+        source_tmp.write_text(spec.url + "\n", encoding="utf-8", newline="\n")
+        with self._style_variants_lock():
+            self._style_variants_ready_cache = None
+            fingerprint.unlink(missing_ok=True)
+            os.replace(staging, target)
+            os.replace(cache_tmp, cache)
+            os.replace(fingerprint_tmp, fingerprint)
+            os.replace(source_tmp, source)
+            target.with_suffix(".corrupt").unlink(missing_ok=True)
+            staging.with_suffix(staging.suffix + ".corrupt").unlink(missing_ok=True)
+            self._style_variants_ready_cache = (digest.hexdigest(), stat.st_size, stat.st_mtime_ns, spec.url)
 
     def _extract_archive(self, spec: ArchiveSpec, temp_zip: Path) -> int:
         self._set_state(percent=90, message=f"{spec.label} 압축 해제 중...")

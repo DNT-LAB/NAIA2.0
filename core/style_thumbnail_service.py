@@ -5,20 +5,103 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from threading import RLock
 from typing import Any
 from urllib.parse import quote
+
+from core.style_variants import STYLE_VARIANTS_APPROX_MB, open_variants
 
 
 class StyleThumbnailService:
     META_PATH = Path("data/taglist/style_meta_tags.json")
     THUMBNAILS_PATH = Path("data/taglist/style_thumbnails.json")
 
-    def __init__(self, root: Path | str):
+    def __init__(self, root: Path | str, variants_path: Path | None = None):
         self.root = Path(root)
         self.meta_path = self.root / self.META_PATH
         self.thumbnails_path = self.root / self.THUMBNAILS_PATH
         self._meta_cache: dict[str, Any] | None = None
         self._thumbnail_cache: dict[str, str] | None = None
+        self.variants_path = Path(variants_path) if variants_path is not None else None
+        self.variants_lock = RLock()
+        self._variants_signature = None
+        self._variants_cache = None
+
+    def _variants(self):
+        """Called under variants_lock; keep only metadata and byte offsets resident."""
+        path = self.variants_path
+        if path is None or not path.is_file() or path.with_suffix(".corrupt").exists():
+            self._variants_signature = self._variants_cache = None
+            return None
+        stat = path.stat()
+        signature = (stat.st_size, stat.st_mtime_ns)
+        if signature != self._variants_signature:
+            self._variants_signature = self._variants_cache = None
+            try:
+                loaded = open_variants(path)
+            except (ValueError, KeyError, TypeError):
+                path.with_suffix(".corrupt").write_text(
+                    "verification failed\n", encoding="utf-8", newline="\n")
+                return None
+            self._variants_cache = loaded
+            self._variants_signature = signature
+        return self._variants_cache
+
+    @staticmethod
+    def _variant_label(variant: dict) -> str:
+        place, weight = variant["place"], variant["weight"]
+        if place == "front":
+            return "단일"
+        return f"UC {weight:g}" if place == "uc" else f"POS {weight:+g}"
+
+    def variants_payload(self, tag: str) -> dict:
+        with self.variants_lock:
+            loaded = self._variants()
+            payload = {"ready": False, "tag": tag, "base": "", "gt_url": "",
+                       "variants": [], "download": {"approx_mb": STYLE_VARIANTS_APPROX_MB}}
+            if loaded is None:
+                return payload
+            metadata, _ = loaded
+            if tag not in metadata["index"]:
+                raise KeyError("Unknown style variants tag")
+            info = metadata["index"][tag]
+            payload.update(
+                ready=True, base=info["base"],
+                gt_url=f"/api/thumb/variant-image?gt={quote(info['base'], safe='')}",
+                variants=[{
+                    "col": v["col"], "place": v["place"], "weight": v["weight"],
+                    "label": self._variant_label(v),
+                    "url": f"/api/thumb/variant-image?tag={quote(tag, safe='')}&col={quote(v['col'], safe='')}",
+                } for v in info["variants"]],
+            )
+            return payload
+
+    def variant_image(self, tag: str, col: str) -> tuple[bytes, str]:
+        with self.variants_lock:
+            loaded = self._variants()
+            if loaded is not None:
+                metadata, index = loaded
+                info = metadata["index"].get(tag, {})
+                for variant in info.get("variants", []):
+                    if variant["col"] == col:
+                        return self._variant_bytes(index, variant["key"])
+            raise FileNotFoundError("Style variant image not found")
+
+    def variant_gt(self, base: str) -> tuple[bytes, str]:
+        with self.variants_lock:
+            loaded = self._variants()
+            if loaded is not None:
+                metadata, index = loaded
+                if base in metadata["bases"]:
+                    return self._variant_bytes(index, metadata["bases"][base]["gt"])
+            raise FileNotFoundError("Style variant GT not found")
+
+    def _variant_bytes(self, index, key: str) -> tuple[bytes, str]:
+        try:
+            return base64.b64decode(index[key], validate=True), "image/webp"
+        except (KeyError, ValueError, OSError):
+            self._variants_signature = self._variants_cache = None
+            raise FileNotFoundError("Style variant image not found") from None
 
     def _load_json(self, path: Path) -> dict[str, Any]:
         if not path.exists():

@@ -72,7 +72,7 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
         }
     sanitized.pop("samples", None)
     # 아카이브가 늘어날 때 여기를 빠뜨리면 절대 경로가 원격으로 샌다.
-    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack"):
+    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack", "style_variants"):
         archive = sanitized.get(key)
         if isinstance(archive, dict):
             archive = dict(archive)
@@ -83,7 +83,7 @@ def _sanitize_snapshot_for_remote(snapshot: Any) -> Any:
         for row in sanitized.get("downloads", []) if isinstance(row, dict)
     ]
     # Errors can contain a local path (e.g. an os.replace PermissionError).
-    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack"):
+    for key in ("tag_archive", "tag_archive_increment", "corpus_archive", "event_map", "character_pack", "style_variants"):
         archive = sanitized.get(key)
         if isinstance(archive, dict):
             for field in ("download", "last_download"):
@@ -184,6 +184,11 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
             if callable(notify):
                 notify()
 
+        def style_variants_lock():
+            from app.backend.server.style_thumbnail_routes import style_thumbnail_service
+
+            return style_thumbnail_service(context).variants_lock
+
         service = RuntimeInstallManager(
             runtime_paths,
             on_tag_archive_complete=refresh_tag_state,
@@ -192,6 +197,7 @@ def runtime_install_manager(context: WebSessionContext) -> RuntimeInstallManager
             on_character_pack_complete=refresh_character_pack_state,
             character_pack_replace_guard=character_pack_replace_guard,
             character_pack_lock=character_pack_lock,
+            style_variants_lock=style_variants_lock,
         )
         context.runtime_install_manager = service
     return service
@@ -332,6 +338,28 @@ def register_install_manager_routes(
             return await run_in_thread(manager.snapshot)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Corpus archive download cancel failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/style-variants/download")
+    async def api_install_manager_style_variants_download(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.start_style_variants_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Style variants download failed: {exc}"}, status_code=500)
+
+    @app.post("/api/install-manager/style-variants/download/cancel")
+    async def api_install_manager_style_variants_download_cancel(req: Request):
+        if not _is_local_request(req):
+            return _loopback_only_response()
+        try:
+            manager = runtime_install_manager(session_context)
+            await run_in_thread(manager.cancel_archive_download)
+            return await run_in_thread(manager.snapshot)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Style variants download cancel failed: {exc}"}, status_code=500)
 
     @app.post("/api/install-manager/event-map/download")
     async def api_install_manager_event_map_download(req: Request):

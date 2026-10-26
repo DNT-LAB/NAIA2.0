@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
 
 from core.style_thumbnail_service import StyleThumbnailService
+from core.style_variants import style_variants_path
 from core.web_session_context import WebSessionContext
 
 
@@ -15,7 +16,11 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 def style_thumbnail_service(context: WebSessionContext) -> StyleThumbnailService:
     service = getattr(context, "style_thumbnail_service", None)
     if service is None:
-        service = StyleThumbnailService(context.repo_root)
+        runtime_paths = getattr(context, "runtime_paths", None)
+        service = StyleThumbnailService(
+            context.repo_root,
+            variants_path=style_variants_path(runtime_paths) if runtime_paths is not None else None,
+        )
         context.style_thumbnail_service = service
     return service
 
@@ -26,6 +31,30 @@ def register_style_thumbnail_routes(
     *,
     run_in_thread: AsyncRunner,
 ) -> None:
+    @app.get("/api/thumb/variants")
+    async def api_thumb_variants(tag: str = ""):
+        try:
+            return await run_in_thread(style_thumbnail_service(session_context).variants_payload, tag)
+        except KeyError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception:
+            return JSONResponse({"error": "Thumb variants failed"}, status_code=500)
+
+    @app.get("/api/thumb/variant-image")
+    async def api_thumb_variant_image(tag: str = "", col: str = "", gt: str = ""):
+        try:
+            service = style_thumbnail_service(session_context)
+            image_bytes, media_type = await run_in_thread(
+                service.variant_gt if gt else service.variant_image,
+                *([gt] if gt else [tag, col]),
+            )
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception:
+            return JSONResponse({"error": "Thumb variant image failed"}, status_code=500)
+        return Response(content=image_bytes, media_type=media_type,
+                        headers={"Cache-Control": "public, max-age=3600"})
+
     @app.get("/api/thumb/state")
     async def api_thumb_state():
         try:

@@ -185,7 +185,9 @@
         {"method": "POST", "path": "/api/install-manager/character-pack/auto-start", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/character-pack/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/event-map/download", "smoke": "asset_runtime"},
-        {"method": "POST", "path": "/api/install-manager/event-map/download/cancel", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/install-manager/event-map/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/style-variants/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/install-manager/style-variants/download/cancel", "smoke": "state_mutation"}
       ]
     },
     {
@@ -445,6 +447,8 @@
         "app/backend/server/character_instant_routes.py",
         "core/character_instant_service.py",
         "app/backend/server/style_thumbnail_routes.py",
+        "core/style_thumbnail_service.py",
+        "core/style_variants.py",
         "core/character_viewer_service.py",
         "core/character_search_index.py",
         "core/character_preview_index.py",
@@ -457,6 +461,8 @@
         {"method": "GET", "path": "/api/thumb/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/thumb/category/{category_key}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/thumb/image", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/thumb/variants", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/thumb/variant-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/character-viewer.html", "smoke": "static"},
         {"method": "GET", "path": "/api/character-viewer/state", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/character-viewer/groups", "smoke": "asset_runtime"},
@@ -1139,6 +1145,13 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "thumb_character_viewer",
+      "description": "Optional Thumb A|B variants JSON (311249091 bytes). Explicit loopback download only, never auto-started. Metadata and PreviewKeyIndex offsets are loaded lazily from user-data and refreshed when the file changes.",
+      "paths": ["<user-data>/data/style_variants/style_variants.json", "<user-data>/data/style_variants/style_variants.source", "<user-data>/data/style_variants/style_variants.sha256", "<user-data>/data/style_variants/variants-key-index.json"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/style-variants/download"
+    },
     {
       "feature": "anima_managed_engine",
       "description": "Optional pinned 7.6 GB engine/model download outside the app; status is not_installed without a verified receipt. Registered model folders are read-only.",

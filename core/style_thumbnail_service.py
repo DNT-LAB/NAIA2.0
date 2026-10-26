@@ -80,7 +80,23 @@ class StyleThumbnailService:
             "categories": category_payload,
             "selected": selected,
             "total_available": sum(category["available"] for category in category_payload),
+            "bases": self._bases_payload(thumbnail_keys),
         }
+
+    def _bases_payload(self, thumbnail_keys: set[str]) -> dict[str, Any]:
+        """생성 기준(version 3) - 이름 · 설정 메모 · GT 이미지 주소. GT 는 썸네일 파일에 `__gt__:<기준>` 키로 들어 있다."""
+        bases = self.metadata().get("bases", {})
+        payload = {}
+        for key, info in (bases.items() if isinstance(bases, dict) else []):
+            if not isinstance(info, dict):
+                continue
+            gt_key = str(info.get("gt") or "")
+            payload[str(key)] = {
+                "name": str(info.get("name") or key),
+                "note": str(info.get("note") or ""),
+                "gt_url": f"/api/thumb/image?tag={quote(gt_key, safe='')}" if gt_key in thumbnail_keys else "",
+            }
+        return payload
 
     def category_payload(self, category_key: str) -> dict[str, Any]:
         key = str(category_key or "").strip()
@@ -96,10 +112,21 @@ class StyleThumbnailService:
             for tag in info.get("tags", [])
             if str(tag or "").strip() and str(tag) in thumbnail_data
         ]
+        # 소제목(version 3 · Novel AI 공식): 썸네일이 있는 태그만 남긴다. single = 가중치 없이 한 장만 뽑은 묶음.
+        sections = []
+        for section in info.get("sections", []) if isinstance(info.get("sections"), list) else []:
+            if not isinstance(section, dict):
+                continue
+            section_tags = [str(tag) for tag in section.get("tags", []) if str(tag) in thumbnail_data]
+            if section_tags:
+                sections.append({"name": str(section.get("name") or ""), "tags": section_tags,
+                                 "single": bool(section.get("single"))})
         return {
             "key": key,
             "name": str(info.get("name") or key),
             "description": str(info.get("description") or ""),
+            "base": str(info.get("base") or ""),
+            "sections": sections,
             "tags": [
                 {
                     "tag": tag,

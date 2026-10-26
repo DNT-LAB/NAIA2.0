@@ -242,6 +242,26 @@ export function createThumbWindow({
     if (range) { range.value = String(ab.idx); range.disabled = ab.showNeg; }
     const neg = box.querySelector('[data-thw-ab-neg]');
     if (neg) neg.classList.toggle('is-on', ab.showNeg);
+    const prompt = box.querySelector('[data-thw-ab-prompt]');
+    if (prompt && step) {
+      const text = abPromptText(step);
+      prompt.textContent = text;
+      prompt.dataset.copy = step.gt ? '' : text.replace(/^(UC|프롬프트 맨 앞:|프롬프트) \+? ?/, '');
+    }
+  }
+
+  /** B 그림이 실제로 어떻게 만들어졌는가 - 기준 프롬프트/UC 에 덧붙인 것만(사용자 지시 2026-10-26). */
+  function abPromptText(step) {
+    if (step.gt) return '태그 없음 (기준 그대로)';
+    const w = String(Number(step.weight));
+    if (step.place === 'uc') return `UC + ${w}::${ab.tag} ::`;
+    if (step.place === 'front') return `프롬프트 맨 앞: ${ab.tag}`;
+    return `프롬프트 + ${w}::${ab.tag} ::`;
+  }
+
+  function abBaseNote() {
+    const info = state?.bases?.[ab?.base];
+    return info ? `기준 ${info.name}: ${info.note}` : '';
   }
 
   function abFrame(tag, base) {
@@ -257,7 +277,9 @@ export function createThumbWindow({
     el.addEventListener('click', event => {
       if (event.target === el || event.target.closest('[data-thw-ab-close]')) { abClose(); return; }
       if (event.target.closest('[data-thw-ab-neg]') && ab?.neg) { ab.showNeg = !ab.showNeg; abPaintB(); return; }
-      if (event.target.closest('[data-thw-ab-get]')) void abDownload();
+      if (event.target.closest('[data-thw-ab-get]')) { void abDownload(); return; }
+      const prompt = event.target.closest('[data-thw-ab-prompt]');
+      if (prompt?.dataset.copy) void copyTag(prompt.dataset.copy);
     });
     el.addEventListener('input', event => {
       if (event.target.closest('[data-thw-ab-range]')) abSet(Number(event.target.value));
@@ -293,7 +315,8 @@ export function createThumbWindow({
     ctl.innerHTML = `<div class="thw-ab-ctl"><span class="thw-ab-end">${escHtml(ab.steps[0]?.label || '')}</span>`
       + `<input type="range" min="0" max="${last}" step="1" data-thw-ab-range>`
       + `<span class="thw-ab-end">${escHtml(ab.steps[last]?.label || '')}</span></div>`
-      + `<div class="thw-ab-ctl"><b data-thw-ab-label></b><span class="thw-ab-fill"></span>`
+      + `<div class="thw-ab-ctl"><b data-thw-ab-label></b>`
+      + `<code class="thw-ab-prompt" data-thw-ab-prompt data-naia-title="${escAttr(abBaseNote())} · 누르면 복사"></code>`
       + (ab.neg ? `<button type="button" class="thw-hb" data-thw-ab-neg data-naia-title="프롬프트에 ${escAttr(ab.neg.label)} (음수 가중치) - 한 번 더 누르면 슬라이더로">${escHtml(ab.neg.label)} 확인</button>` : '')
       + `</div>`;
     abPaintB();

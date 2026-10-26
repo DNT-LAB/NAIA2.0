@@ -33088,3 +33088,9 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .thw-ab-bar { width: 70%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .thw-ab-bar i { display: block; height: 100%; background: #7c6aef; }
 .thw-ab-err { color: #f09595; }
+.thw-ab-prompt {
+  flex: 1; min-width: 0; padding: 4px 8px; border-radius: 5px; cursor: copy; text-align: center;
+  background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.1); color: #c9b8ff;
+  font-family: var(--font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.thw-ab-prompt:hover { border-color: rgba(190,160,255,0.7); }

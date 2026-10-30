@@ -665,7 +665,7 @@ def delete_randomized_slot(mode: str | None, slot: str, *, save_root: str | Path
 
 
 # 성공한 본 파일만 보관한다. 같은 프로세스의 저장/이름 변경/삭제도 이 잠금으로 무효화한다.
-_preset_data_cache: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
+_preset_data_cache: dict[Path, tuple[tuple[int, int, int, int], dict[str, Any]]] = {}
 _preset_data_cache_lock = threading.Lock()
 
 
@@ -701,7 +701,8 @@ def read_preset_data(
             except ValueError:  # 인코딩 불가/잘못된 경로도 종전 Path.exists()와 같은 처리.
                 _preset_data_cache.pop(path, None)
                 continue
-            signature = (stat.st_mtime_ns, stat.st_size)
+            # 파일 ID 까지 본다 - 수정 시각을 보존하는 복원/동기화로 같은 길이 파일이 바뀌어도 새로 읽게(Codex 리뷰 P2 2026-10-30).
+            signature = (stat.st_mtime_ns, stat.st_size, stat.st_ino, stat.st_dev)
             cached = _preset_data_cache.get(path)
             if cached is not None and cached[0] == signature:
                 return copy.deepcopy(cached[1])

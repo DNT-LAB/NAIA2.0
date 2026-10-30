@@ -107,7 +107,8 @@ LIVE_DISPATCH_TYPES = {"tag_filter_search", "event_corpus_query"}
 # 2026-10-30: get_search_state 뒤 Quick Preset 응답이 실측 37초 대기했다.
 # 다른 소켓은 풀 복원 중에도 실행되므로, 이 연결에서 검색에 의존하는 명령만 lane 으로 기다린다.
 # 검색 의존 = handle_json_command 의 scoped + 임시 검색 + 생성 시작 명령 + live + text.
-# 비검색 명령은 검색 의존 항목을 추월하되, 먼저 큐에 든 비검색 항목은 추월하지 않는다(FIFO).
+# 비검색 명령은 검색 복원(get_search_state)만 추월한다. 큐에 든 다른 검색 의존 항목은 조회(HEAVY_LANE_BYPASS)만
+# 추월하고, 먼저 큐에 든 비검색 항목은 추월하지 않는다(FIFO).
 # 인라인 실행은 모든 대기 항목을 추월할 수 있을 때만. bootstrap_random 은 기존 사전 조회만 우회한다.
 HEAVY_DISPATCH_TYPES = {"get_search_state", "bootstrap_random"}
 HEAVY_LANE_BYPASS = {
@@ -148,11 +149,16 @@ def _is_search_dependent(command: dict[str, Any] | str) -> bool:
 def _may_overtake(command: dict[str, Any], pending: dict[str, Any] | str) -> bool:
     if _is_search_dependent(command):
         return False
-    if isinstance(pending, dict) and str(pending.get("type") or "").strip() == "bootstrap_random":
-        ctype = str(command.get("type") or "").strip()
-        e621_read = ctype == "autocomplete" and str(command.get("source") or "") == "e621"
+    ctype = str(command.get("type") or "").strip()
+    e621_read = ctype == "autocomplete" and str(command.get("source") or "") == "e621"
+    ptype = str(pending.get("type") or "").strip() if isinstance(pending, dict) else ""
+    if ptype == "bootstrap_random":
         return ctype in HEAVY_LANE_BYPASS and not e621_read
-    return _is_search_dependent(pending)
+    if ptype in HEAVY_DISPATCH_TYPES:
+        return True
+    # 사용자가 보낸 검색 의존 명령(생성 · 검색 · 텍스트)은 순서를 지킨다 - 뒤의 set_mode 가 큐의 generate 를
+    # 앞지르면 다른 제공자로 생성이 나간다(Codex 리뷰 P1 2026-10-30). 상태를 안 바꾸는 조회만 앞지른다.
+    return _is_search_dependent(pending) and ctype in HEAVY_LANE_BYPASS and not e621_read
 
 
 async def _run_lane_command(

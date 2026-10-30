@@ -248,8 +248,8 @@ def read_cache(cache_dir, key: Fingerprint):
         index._metadata_term_to_tags = None
         index._metadata_terms_by_tag = {}
         index._metadata_text_by_tag = {}
-        # 세션 내내 사는 색인이다 - 영구 세대로 옮겨 이후 GC 가 다시 훑지 않게(이름 색인 1.1 -> 0.4초).
-        gc.freeze()
+        # gc.freeze() 는 쓰지 않는다 - 그 순간 살아 있는 모든 객체(열린 WS 연결 등)까지 영구 세대로 묶여 끊긴 뒤에도
+        # 회수되지 않는다(Codex 리뷰 P2 2026-10-30). 새로 만든 색인과 같은 GC 대우를 받는다.
         return raw, index
     except Exception:
         return None

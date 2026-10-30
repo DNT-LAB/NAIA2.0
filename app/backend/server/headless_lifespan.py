@@ -11,7 +11,11 @@ from app.backend.server.autocomplete_commands import build_tag_index
 from app.backend.server.generation_commands import random_service
 from app.backend.server.interactive_assets_routes import interactive_assets_service
 from app.backend.server.search_runtime import save_runner_parquet
-from app.backend.server.startup_work import apply_switch_interval_policy, background_cpu_slot
+from app.backend.server.startup_work import (
+    apply_switch_interval_policy,
+    background_cpu_slot,
+    restore_switch_interval_after_startup,
+)
 from core.search_pool_writer import search_pool_writer
 from core.extension_runtime import load_extensions
 from core.web_session_context import WebSessionContext
@@ -86,6 +90,9 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         if character_task is None or character_task.done():
             context.headless_character_index_warmup_task = asyncio.create_task(
                 _after_startup_gate(gate, _run_character_index_warmup, context, run_in_thread))
+        # 0.9ms GIL 간격은 시작 예열 동안만 - 끝나면 원래 값으로(세션 중 CPU 작업이 겹칠 때의 손해를 피한다).
+        context.headless_switch_interval_restore_task = asyncio.create_task(
+            restore_switch_interval_after_startup(context))
         # ⚠️ 캐릭터 확장 팩은 시작 경로에서 받지 않는다(사용자 지시 2026-10-22) - 시작 경로에서 받기를 걸었더니 포터블의
         #    install-manager/initialize 가 시간 초과로 죽었다. 화면이 다 뜬 뒤 app.js 가 한 번 요청하고(로컬 화면),
         #    원격 화면만 쓰는 경우를 위해 서버도 첫 initialize(또는 지연) 뒤 20초에 한 번 스스로 시작한다(뒤쪽 작업 - 시작을 막지 않는다).

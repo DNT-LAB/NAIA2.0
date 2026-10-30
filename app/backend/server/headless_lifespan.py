@@ -213,6 +213,15 @@ async def _after_startup_gate(gate: asyncio.Event, warmup, context: WebSessionCo
         until = loop.time() + 20.0
         while not getattr(context, "headless_first_client_ready", False) and loop.time() < until:
             await asyncio.sleep(0.2)
+        # init 뒤 첫 모듈 상태 요청까지 답한 뒤 예열한다. 2026-10-30 실측: 겹치면 PE 상태 11.4초,
+        # 이벤트 루프 정지 11.3초. 구형 화면/원격 전용은 첫 client 준비 시각부터 짧은 상한만 기다린다.
+        try:
+            batch_wait = max(0.0, float(os.environ.get("NAIA_STARTUP_UI_BATCH_WAIT", "3.0") or 0))
+        except ValueError:
+            batch_wait = 3.0
+        until = getattr(context, "headless_first_client_ready_at", loop.time()) + batch_wait
+        while not getattr(context, "headless_first_ui_batch_done", False) and loop.time() < until:
+            await asyncio.sleep(0.2)
     await warmup(context, run_in_thread)
 
 

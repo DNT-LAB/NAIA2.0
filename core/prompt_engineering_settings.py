@@ -1,8 +1,10 @@
 import copy
+import errno
 import json
 import os
+import threading
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from core.safe_json_file import backup_path, read_json_safely, write_json_safely
 
@@ -662,6 +664,18 @@ def delete_randomized_slot(mode: str | None, slot: str, *, save_root: str | Path
     return True
 
 
+# 성공한 본 파일만 보관한다. 같은 프로세스의 저장/이름 변경/삭제도 이 잠금으로 무효화한다.
+_preset_data_cache: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
+_preset_data_cache_lock = threading.Lock()
+
+
+def _preset_read_paths(relative: Path, save_root: str | Path | None) -> Iterator[Path]:
+    # 기본 저장소가 있으면 legacy 경로 탐색도 생략한다. cwd가 달라도 캐시 키가 겹치지 않게 절대 경로를 쓴다.
+    yield (_coerce_save_root(save_root) / relative).absolute()
+    for root in _save_read_roots(save_root)[1:]:
+        yield (root / relative).absolute()
+
+
 def read_preset_data(
     preset_name: str,
     mode: str | None = None,
@@ -672,12 +686,37 @@ def read_preset_data(
     if not name:
         return {}
     mode_key = normalize_prompt_engineering_mode(mode)
-    path = _existing_save_file(Path("presets") / mode_key / f"{name}.json", save_root)
-    if not path.exists():
-        return {}
-    # 지금 쓰는 프리셋은 파라미터를 바꿀 때마다 다시 쓰인다 - 전원이 끊겨 깨졌으면 .bak 에서 되살린다
-    data = read_json_safely(path)
-    return data if isinstance(data, dict) else {}
+    relative = Path("presets") / mode_key / f"{name}.json"
+    with _preset_data_cache_lock:
+        for path in _preset_read_paths(relative, save_root):
+            try:
+                stat = path.stat()
+            except OSError as exc:
+                # Path.exists()가 없다고 보던 오류만 건너뛴다. 접근 권한 오류는 종전처럼 호출자에게 돌려준다.
+                if (exc.errno not in {errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP}
+                        and getattr(exc, "winerror", None) not in {21, 123, 1921}):
+                    raise
+                _preset_data_cache.pop(path, None)
+                continue
+            except ValueError:  # 인코딩 불가/잘못된 경로도 종전 Path.exists()와 같은 처리.
+                _preset_data_cache.pop(path, None)
+                continue
+            signature = (stat.st_mtime_ns, stat.st_size)
+            cached = _preset_data_cache.get(path)
+            if cached is not None and cached[0] == signature:
+                return copy.deepcopy(cached[1])
+            _preset_data_cache.pop(path, None)
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                # 손상 복구는 기존 경로 그대로. .bak 결과는 본 파일 검증을 통과한 값이 아니므로 캐시하지 않는다.
+                data = read_json_safely(path)
+                return data if isinstance(data, dict) else {}
+            if isinstance(data, dict):
+                _preset_data_cache[path] = (signature, data)
+                return copy.deepcopy(data)
+            return {}
+    return {}
 
 
 def preset_preview_file(context: Any, preset_name: str, mode_key: str = "") -> Path | None:
@@ -833,7 +872,9 @@ def write_preset_data(
     if isinstance(payload.get("main_settings"), dict):
         payload["main_settings"] = normalize_preset_main_settings(payload["main_settings"])
     path = preset_dir(mode, save_root=save_root) / f"{name}.json"
-    write_json_safely(path, payload)
+    with _preset_data_cache_lock:
+        _preset_data_cache.pop(path.absolute(), None)
+        write_json_safely(path, payload)
 
 
 def merge_settings(base: dict[str, Any], updates: dict[str, Any] | None) -> dict[str, Any]:
@@ -1422,9 +1463,11 @@ class PromptEngineeringHeadlessStore:
         path = preset_dir(mode_key, save_root=self._save_root) / f"{name}.json"
         if not path.exists():
             return False, f"프리셋을 찾을 수 없습니다: {name}"
-        path.unlink()
-        # 지운 프리셋의 정상본 사본도 치운다 - 같은 이름으로 새로 만들면 남의 옛 내용이 되살아날 수 있다
-        backup_path(path).unlink(missing_ok=True)
+        with _preset_data_cache_lock:
+            _preset_data_cache.pop(path.absolute(), None)
+            path.unlink()
+            # 지운 프리셋의 정상본 사본도 치운다 - 같은 이름으로 새로 만들면 남의 옛 내용이 되살아날 수 있다
+            backup_path(path).unlink(missing_ok=True)
         if mode_key == "NAI":
             self._propagate_quick_favorite(name)
         self.refresh(mode_key)
@@ -1485,7 +1528,10 @@ class PromptEngineeringHeadlessStore:
             else:
                 os.replace(src, dst)
 
-        move(old_path, new_path)
+        with _preset_data_cache_lock:
+            _preset_data_cache.pop(old_path.absolute(), None)
+            _preset_data_cache.pop(new_path.absolute(), None)
+            move(old_path, new_path)
         old_backup, new_backup = backup_path(old_path), backup_path(new_path)
         if old_backup.exists():
             move(old_backup, new_backup)

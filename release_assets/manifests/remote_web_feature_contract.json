@@ -942,6 +942,7 @@
         {"method": "WEBSOCKET", "path": "/ws", "smoke": "non_destructive"}
       ],
       "websocket_commands": [
+        "startup_ui_batch_end",
         "sync",
         "set_mode",
         "set_param",

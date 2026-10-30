@@ -474,8 +474,10 @@ async def send_startup_messages(
     ):
         await ws.send_text(json.dumps(message, ensure_ascii=False))
     await ws.send_text(json.dumps({"type": "lazy_indices_ready"}))
-    # 첫 화면이 첫 상태를 다 받았다 - 미뤄 둔 무거운 색인 예열이 이걸 기다린다(headless_lifespan._after_startup_gate ·
-    # 사용자 제보 2026-10-22: 화면이 빨리 뜬 뒤 예열과 겹쳐 첫 상태가 늦게 와 UI 가 '날아간' 것처럼 보였다).
+    # init 묶음 송신 시각. 뒤따르는 첫 모듈 상태 요청의 완료는 startup_ui_batch_end로 따로 기다린다.
+    # 재접속이 예열 대기 상한을 뒤로 밀지 않도록 첫 연결 시각만 남긴다(headless_lifespan._after_startup_gate).
+    if not getattr(context, "headless_first_client_ready", False):
+        context.headless_first_client_ready_at = asyncio.get_running_loop().time()
     context.headless_first_client_ready = True
 
 
@@ -483,6 +485,10 @@ async def handle_json_command(
     ws, context, clients, client_host, command, *, run_in_thread, broadcast_json, start_generation_runner,
 ) -> None:
     kind = str(command.get("type") or "").strip()
+    if kind == "startup_ui_batch_end":
+        # receive 루프의 일반 FIFO를 거친 표식이다. 검색 전환 중에도 응답 없이 기록만 한다.
+        context.headless_first_ui_batch_done = True
+        return
     if kind in TEMPORARY_SEARCH_COMMAND_TYPES:
         await handle_temporary_search_command(ws, context, clients, command,
             run_in_thread=run_in_thread, broadcast_json=broadcast_json)

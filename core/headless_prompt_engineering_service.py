@@ -390,8 +390,12 @@ class HeadlessPromptEngineeringService:
         from core.prompt_engineering_settings import preset_thumbnail_url_map
 
         current_mode_key = preset_mode
-        current_thumbs = preset_thumbnail_url_map(context, list(preset_options), current_mode_key)
-        webui_thumbs = preset_thumbnail_url_map(context, list(webui_presets), "WEBUI")
+        # WEBUI이면 같은 썸네일 디렉터리를 두 번 읽지 않는다. fresh 목록과 캐시된 옵션의 차이는 보존한다.
+        thumb_names = (list(dict.fromkeys([*preset_options, *webui_presets]))
+                       if current_mode_key == "WEBUI" else list(preset_options))
+        current_thumbs = preset_thumbnail_url_map(context, thumb_names, current_mode_key)
+        webui_thumbs = (current_thumbs if current_mode_key == "WEBUI"
+                        else preset_thumbnail_url_map(context, list(webui_presets), "WEBUI"))
         # 랜덤 칸이 여럿이다(사용자 지정 2026-10-04). 풀 · Inject 는 **지금 보는 칸**의 것을 싣는다 - 랜덤 칸을
         # 고른 채로만 관리 화면이 열리므로 화면이 본 칸과 같다(고르지 않았으면 기본 칸).
         randomized = store.randomized_view()

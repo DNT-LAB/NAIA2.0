@@ -5113,6 +5113,8 @@ function onInitComplete() {
   scheduleInitialStateRefresh();
   const cachedPe = moduleStateCache.get('prompt_engineering');
   if (cachedPe) refreshHiresPresetSwapOptions(cachedPe);
+  // 첫 동기 상태 요청들 뒤에서만 무거운 색인 예열을 허용한다. 재연결 때 다시 보내도 무해하다.
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'startup_ui_batch_end'}));
 }
 
 function afterWsJsonMessage(m) {

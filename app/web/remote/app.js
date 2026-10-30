@@ -2064,6 +2064,10 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
     }, 15000);
   })
   .catch(error => console.error('Failed to initialize download dock module', error));
+// 모바일 전체화면(사용자 지시 2026-10-30) - 히스토리 머리줄의 ⛶. 랜덤 · 생성 · 자동은 진짜 단추의 거울이다.
+import('./js/features/mobileFullscreen.mjs?v=20261030-mfs1')
+  .then(({createMobileFullscreen}) => createMobileFullscreen({document, window}))
+  .catch(error => console.error('Failed to initialize mobile fullscreen module', error));
 const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261023-peq5')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({

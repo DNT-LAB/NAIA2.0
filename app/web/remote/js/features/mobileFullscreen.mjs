@@ -25,6 +25,7 @@
 const STYLE_ID = 'mobileFullscreenStyle';
 const POS_KEY = 'naia.mobileFullscreen.fabPos';
 const SCALE_KEY = 'naia.mobileFullscreen.fabScale';
+const HIDE_AUTO_KEY = 'naia.mobileFullscreen.hideAuto';
 const EDGE = 8;   // 단추판이 화면 끝에서 떨어지는 최소 거리
 // 단추판 크기(사용자 지시 2026-10-30) - 오른쪽 아래 꺾쇠로 끈다. 이 값보다 작으면 글자가 R / G / A 로 줄고
 // A 는 체크 상자 **안에** 겹친다(상자를 더 줄이려고 - 사용자 지정).
@@ -63,18 +64,25 @@ const CSS = `
 .mfs-fab {
   --s: 1;
   position: absolute; width: calc(${BASE_WIDTH}px * var(--s));
-  padding: max(4px, calc(6px * var(--s))) max(5px, calc(8px * var(--s))) max(6px, calc(8px * var(--s)));
+  /* 아래 16px 은 크기 꺾쇠 자리 - 단추와 겹치면 작은 판의 A 를 누르기 어려웠다(사용자 제보 2026-10-30). */
+  padding: max(4px, calc(6px * var(--s))) max(5px, calc(8px * var(--s))) 16px;
   display: flex; flex-direction: column; gap: max(4px, calc(6px * var(--s)));
   background: rgba(20,20,30,0.86); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px;
   user-select: none; touch-action: none;
 }
-.mfs-grip { height: max(12px, calc(18px * var(--s))); display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; }
+/* 손잡이도 <button> - 아래 꺾쇠와 같은 이유(작은 판에서 바로 아래 R 이 터치를 가져간다). */
+.mfs-grip {
+  height: max(12px, calc(18px * var(--s))); width: 100%; padding: 0; margin: 0; background: none; border: none;
+  display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none;
+}
 .mfs-grip::before { content: ''; width: min(30px, 60%); height: 4px; border-radius: 2px; background: rgba(255,255,255,0.32); }
 .mfs-fab.dragging .mfs-grip { cursor: grabbing; }
 .mfs-resize {
-  position: absolute; right: -1px; bottom: -1px; width: 24px; height: 24px; padding: 3px;
+  /* ⚠️ <button> 이어야 한다 - 터치는 브라우저가 가까운 '누를 수 있는' 요소로 옮겨 준다(touch adjustment).
+     <div> 였을 때 꺾쇠를 눌러도 바로 위 A 단추가 터치를 가져갔다(실측 2026-10-30). */
+  position: absolute; right: -1px; bottom: -1px; width: 28px; height: 16px; padding: 0 3px 3px; margin: 0;
   display: flex; align-items: flex-end; justify-content: flex-end;
-  cursor: nwse-resize; touch-action: none;
+  background: none; border: none; cursor: nwse-resize; touch-action: none;
 }
 .mfs-resize::before {
   content: ''; width: 9px; height: 9px; border-bottom-right-radius: 3px;
@@ -104,15 +112,45 @@ const CSS = `
 .mfs-auto.on .mfs-auto-box { background: #6a5ad8; border-color: #6a5ad8; }
 .mfs-auto.on .mfs-auto-box::after { content: '\\2713'; }
 .mfs-auto.pending { opacity: 0.6; }
-/* 작은 판: 체크 상자 하나가 단추 전체다 - A 를 상자 안에 겹치고, 켜지면 상자가 채워진다(체크 표시 없음). */
-.mfs-fab.compact .mfs-auto { justify-content: center; padding: 0; border: none; }
+/* 손가락으로 누른 뒤 남는 흰 초점 테두리는 지운다 - 키보드 초점(:focus-visible)은 그대로 보인다. */
+.mfs-overlay button:focus:not(:focus-visible) { outline: none; }
+/* 작은 판: 체크 상자 하나가 단추 전체다 - A 를 상자 안에 겹치고, 켜지면 상자가 채워진다(체크 표시 없음).
+   상자는 R / G 와 같은 폭 · 높이로 줄을 다 채운다 - 작은 상자는 손가락으로 누르기 어려웠다. */
+.mfs-fab.compact .mfs-auto { height: max(30px, calc(40px * var(--s))); justify-content: center; padding: 0; border: none; }
+/* 작은 판의 A 는 **투명 단추**다(사용자 지정 2026-10-30) - 꺼지면 흐린 테두리 · 켜지면 연한 흰색으로 찬다.
+   보라색으로 채우면 바로 위 G 와 같은 단추로 읽혔다. */
 .mfs-fab.compact .mfs-auto-box {
-  width: max(24px, calc(28px * var(--s))); height: max(24px, calc(28px * var(--s)));
-  border-radius: 6px; border-width: 1.5px; font-size: 13px; font-weight: 700; color: #bbb;
+  width: 100%; height: 100%; background: transparent;
+  border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.28);
+  font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6);
 }
 .mfs-fab.compact .mfs-auto-letter { display: inline; }
-.mfs-fab.compact .mfs-auto.on .mfs-auto-box { color: #fff; }
+.mfs-fab.compact .mfs-auto.on .mfs-auto-box {
+  background: rgba(255,255,255,0.24); border-color: rgba(255,255,255,0.62); color: #fff;
+}
 .mfs-fab.compact .mfs-auto.on .mfs-auto-box::after { content: none; }
+.mfs-fab.hide-auto .mfs-auto { display: none; }
+/* 길게 누르기 - 휴대폰의 복사 · 선택 메뉴가 뜨지 않게 한다. */
+.mfs-overlay, .mfs-overlay * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.mfs-settings {
+  position: absolute; width: 240px; max-width: calc(100% - 16px); padding: 10px;
+  display: none; flex-direction: column; gap: 2px;
+  background: rgba(24,24,34,0.97); border: 1px solid rgba(255,255,255,0.18); border-radius: 12px;
+  color: #ddd; font-size: 13px;
+}
+.mfs-settings.open { display: flex; }
+.mfs-settings-head { display: flex; align-items: center; justify-content: space-between; margin: 0 2px 6px; color: #aaa; font-size: 12px; }
+.mfs-settings-x { width: 28px; height: 28px; padding: 0; background: none; border: none; color: #ccc; font-size: 18px; cursor: pointer; }
+.mfs-set-row {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 8px;
+  background: none; border: none; border-radius: 8px; color: #ddd; font-size: 13px; text-align: left; cursor: pointer;
+}
+.mfs-set-row:active { background: rgba(255,255,255,0.08); }
+.mfs-set-row:disabled { opacity: 0.4; cursor: default; }
+.mfs-set-row .mfs-auto-box { flex: none; }
+.mfs-set-row.on .mfs-auto-box { background: #6a5ad8; border-color: #6a5ad8; }
+.mfs-set-row.on .mfs-auto-box::after { content: '\\2713'; }
+.mfs-settings-foot { margin: 4px 6px 0; color: #999; font-size: 11px; line-height: 1.5; }
 `;
 
 /** 진짜 단추의 보이는 글자 - 단축키 힌트 · Anlas 칩을 뺀 나머지. 칩 글자는 따로 돌려준다. */
@@ -148,13 +186,22 @@ export function createMobileFullscreen({document: doc = document, window: win = 
     <img class="mfs-image" alt="">
     <button type="button" class="mfs-close" aria-label="전체화면 닫기">&times;</button>
     <div class="mfs-fab">
-      <div class="mfs-grip" aria-hidden="true"></div>
+      <button type="button" class="mfs-grip" tabindex="-1" aria-label="단추판 옮기기"></button>
       <button type="button" class="mfs-btn rnd"><span class="mfs-full"></span><span class="mfs-short">R</span></button>
       <button type="button" class="mfs-btn gen"><span class="mfs-full"></span><span class="mfs-short">G</span></button>
       <button type="button" class="mfs-auto" aria-pressed="false" aria-label="자동">
         <span class="mfs-auto-box" aria-hidden="true"><span class="mfs-auto-letter">A</span></span><span class="mfs-auto-label">자동</span>
       </button>
-      <div class="mfs-resize" role="slider" aria-label="단추판 크기" aria-valuemin="45" aria-valuemax="125"></div>
+      <button type="button" class="mfs-resize" tabindex="-1" aria-label="단추판 크기 조절"></button>
+    </div>
+    <div class="mfs-settings" role="dialog" aria-label="단추판 설정">
+      <div class="mfs-settings-head"><span>단추판 설정</span>
+        <button type="button" class="mfs-settings-x" aria-label="설정 닫기">&times;</button></div>
+      <button type="button" class="mfs-set-row" data-set="generate_on_random" aria-pressed="false">
+        <span class="mfs-auto-box" aria-hidden="true"></span>랜덤을 누를 때 생성</button>
+      <button type="button" class="mfs-set-row" data-set="hide_auto" aria-pressed="false">
+        <span class="mfs-auto-box" aria-hidden="true"></span>자동(A) 단추 숨기기</button>
+      <div class="mfs-settings-foot">랜덤 시 생성은 확장 기능(⚙)의 같은 옵션입니다 · Auto Gen 이 꺼져 있을 때만 작동합니다</div>
     </div>`;
   doc.body.appendChild(overlay);
 
@@ -293,7 +340,7 @@ export function createMobileFullscreen({document: doc = document, window: win = 
     scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, value));
     fab.style.setProperty('--s', String(scale));
     fab.classList.toggle('compact', scale < COMPACT_BELOW);
-    resize.setAttribute('aria-valuenow', String(Math.round(scale * 100)));
+    resize.title = `크기 ${Math.round(scale * 100)}%`;
   }
 
   let sizing = null;
@@ -326,7 +373,122 @@ export function createMobileFullscreen({document: doc = document, window: win = 
   resize.addEventListener('pointercancel', endSizing);
   resize.addEventListener('lostpointercapture', endSizing);
 
-  const onResize = () => { if (isOpen()) placeFab(loadPos()); };
+  const onResize = () => { if (isOpen()) { placeFab(loadPos()); closeSettings(); } };
+
+  // ---- 길게 누르기 -> 단추판 설정(사용자 지시 2026-10-30) ----
+  // 단추판 어디든(꺾쇠 빼고) LONG_PRESS_MS 동안 움직이지 않고 누르면 설정 창이 뜬다. 뜬 뒤 손을 떼도 그 단추는
+  // 눌리지 않는다(suppressClick). 손잡이를 끌기 시작하면(MOVE_SLOP 넘게 움직이면) 길게 누르기는 취소된다.
+  const settings = overlay.querySelector('.mfs-settings');
+  const LONG_PRESS_MS = 500;
+  const MOVE_SLOP = 8;
+  let press = null;
+  let suppressClick = false;
+
+  function cancelPress() {
+    if (press) win.clearTimeout(press.timer);
+    press = null;
+  }
+  fab.addEventListener('pointerdown', event => {
+    if (event.target.closest('.mfs-resize')) return;
+    if (event.button !== undefined && event.button !== 0) return;
+    cancelPress();
+    const timer = win.setTimeout(() => {
+      press = null;
+      suppressClick = true;
+      win.setTimeout(() => { suppressClick = false; }, 800);   // 클릭이 안 오는 경우(끌다 놓침)에도 풀린다
+      if (drag) { drag = null; fab.classList.remove('dragging'); }   // 손잡이를 쥐고 있었다 - 옮기지 않고 끝낸다
+      openSettings();
+    }, LONG_PRESS_MS);
+    press = {id: event.pointerId, x: event.clientX, y: event.clientY, timer};
+  }, true);
+  fab.addEventListener('pointermove', event => {
+    if (!press || event.pointerId !== press.id) return;
+    if (Math.hypot(event.clientX - press.x, event.clientY - press.y) > MOVE_SLOP) cancelPress();
+  }, true);
+  for (const type of ['pointerup', 'pointercancel']) {
+    fab.addEventListener(type, event => { if (press && event.pointerId === press.id) cancelPress(); }, true);
+  }
+  // 길게 누른 뒤 떼면서 오는 클릭은 삼킨다 - 거울 단추가 진짜 단추를 누르지 않게.
+  fab.addEventListener('click', event => {
+    if (!suppressClick) return;
+    suppressClick = false;
+    event.stopPropagation();
+    event.preventDefault();
+  }, true);
+  overlay.addEventListener('contextmenu', event => event.preventDefault());
+
+  // '랜덤을 누를 때 생성' 은 확장 기능(⚙) 팝업의 줄을 그대로 누른다 - 옵션 통로가 그 줄에 있다(optionExtras.mjs).
+  const realExtraRow = () => doc.querySelector('.opt-extras-popup [data-option="generate_on_random"]');
+  const setRow = key => settings.querySelector(`[data-set="${key}"]`);
+  let settingsObserver = null;
+
+  function loadHideAuto() {
+    try { return win.localStorage.getItem(HIDE_AUTO_KEY) === '1'; } catch (_) { return false; }
+  }
+  function applyHideAuto(hidden) {
+    fab.classList.toggle('hide-auto', hidden);
+    const row = setRow('hide_auto');
+    row.classList.toggle('on', hidden);
+    row.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+  }
+  function syncSettings() {
+    const real = realExtraRow();
+    const row = setRow('generate_on_random');
+    const on = real?.dataset.checked === 'true';
+    row.disabled = !real;
+    row.classList.toggle('on', on);
+    row.setAttribute('aria-pressed', on ? 'true' : 'false');
+    applyHideAuto(fab.classList.contains('hide-auto'));
+  }
+  function placeSettings() {
+    const f = fab.getBoundingClientRect();
+    const o = overlay.getBoundingClientRect();
+    const w = settings.offsetWidth;
+    const h = settings.offsetHeight;
+    // 단추판 위에 연다 - 모자라면 아래, 그것도 모자라면 화면 안 아무 데나.
+    let top = f.top - o.top - h - 8;
+    if (top < EDGE) top = f.bottom - o.top + 8;
+    if (top + h > o.height - EDGE) top = Math.max(EDGE, o.height - h - EDGE);
+    const left = Math.min(o.width - w - EDGE, Math.max(EDGE, f.left - o.left + f.width / 2 - w / 2));
+    settings.style.left = `${Math.round(left)}px`;
+    settings.style.top = `${Math.round(top)}px`;
+  }
+  function isSettingsOpen() { return settings.classList.contains('open'); }
+  function openSettings() {
+    syncSettings();
+    settings.classList.add('open');
+    placeSettings();
+    const real = realExtraRow();
+    if (real && !settingsObserver) {
+      settingsObserver = new MutationObserver(syncSettings);
+      settingsObserver.observe(real, {attributes: true, attributeFilter: ['data-checked', 'class']});
+    }
+  }
+  function closeSettings() {
+    settings.classList.remove('open');
+    settingsObserver?.disconnect();
+    settingsObserver = null;
+  }
+
+  settings.addEventListener('click', event => {
+    if (event.target.closest('.mfs-settings-x')) { closeSettings(); return; }
+    const row = event.target.closest('[data-set]');
+    if (!row || row.disabled) return;
+    if (row.dataset.set === 'generate_on_random') {
+      realExtraRow()?.click();   // 서버 echo 가 오면 observer 가 칠한다
+    } else if (row.dataset.set === 'hide_auto') {
+      const hidden = !fab.classList.contains('hide-auto');
+      try { win.localStorage.setItem(HIDE_AUTO_KEY, hidden ? '1' : '0'); } catch (_) { /* 기억만 못 한다 */ }
+      applyHideAuto(hidden);
+      // 판 높이가 바뀌었다 - 아래로 넘치면 안으로 밀어 넣는다.
+      const maxY = overlay.clientHeight - fab.offsetHeight - EDGE;
+      if ((parseFloat(fab.style.top) || 0) > maxY) fab.style.top = `${Math.round(Math.max(EDGE, maxY))}px`;
+    }
+  });
+  // 설정 창 바깥을 누르면 닫는다(누른 것은 그대로 동작한다).
+  overlay.addEventListener('pointerdown', event => {
+    if (isSettingsOpen() && !settings.contains(event.target)) closeSettings();
+  }, true);
 
   // ---- 열기 · 닫기 ----
   function isOpen() { return overlay.classList.contains('open'); }
@@ -335,6 +497,7 @@ export function createMobileFullscreen({document: doc = document, window: win = 
     syncAll();
     watch();
     applyScale(loadScale());
+    applyHideAuto(loadHideAuto());
     overlay.classList.add('open');
     placeFab(loadPos());
     win.addEventListener('resize', onResize);
@@ -343,6 +506,8 @@ export function createMobileFullscreen({document: doc = document, window: win = 
   function close() {
     if (!isOpen()) return;
     overlay.classList.remove('open');
+    closeSettings();
+    cancelPress();
     unwatch();
     win.removeEventListener('resize', onResize);
     entry?.focus?.({preventScroll: true});
@@ -350,7 +515,9 @@ export function createMobileFullscreen({document: doc = document, window: win = 
 
   overlay.querySelector('.mfs-close').addEventListener('click', close);
   overlay.addEventListener('keydown', event => {
-    if (event.key === 'Escape') { event.stopPropagation(); close(); }
+    if (event.key !== 'Escape') return;
+    event.stopPropagation();
+    if (isSettingsOpen()) closeSettings(); else close();
   });
   entry?.addEventListener('click', open);
 

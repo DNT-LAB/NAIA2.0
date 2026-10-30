@@ -333,6 +333,10 @@ def register_websocket_session(
             task.add_done_callback(lane_tasks.pop)
             task.add_done_callback(_forget_finished_predecessor)
 
+        def lane_busy() -> bool:
+            # 꼬리만 보면 안 된다 - 취소된 꼬리는 done 이어도 그 앞 항목이 아직 돌 수 있다(Codex 재리뷰 3 2026-10-30).
+            return any(not task.done() for task in lane_tasks)
+
         # 커맨드 계열별 최신 in-flight task. 새 요청이 오면 이전 것을 취소해 적재를 막는다.
         live_by_type: dict[str, asyncio.Task] = {}
         # Latest-search ownership is per websocket. A search typed in another
@@ -426,7 +430,7 @@ def register_websocket_session(
                             # **결과**를 본다. 안 바뀌었으면 비용은 조회 한 번이다.
                             refresh_usage_if_model_changed(context, clients)
                     else:
-                        if lane_tail is not None and not lane_tail.done():
+                        if lane_busy():
                             enqueue_lane(data)
                             continue
                         await handle_text_command(
@@ -439,7 +443,7 @@ def register_websocket_session(
                             start_generation_runner=start_generation_runner,
                         )
                 else:
-                    if lane_tail is not None and not lane_tail.done():
+                    if lane_busy():
                         enqueue_lane(data)
                         continue
                     await handle_text_command(

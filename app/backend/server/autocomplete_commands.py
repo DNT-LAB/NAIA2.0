@@ -15,6 +15,7 @@ from app.backend.server.preset_services import (
     expression_preset_service,
 )
 from app.backend.server.prompt_tools_routes import tag_lookup_info
+from app.backend.server.startup_work import background_cpu_slot
 from core.web_session_context import WebSessionContext
 from utils.translator import english_to_korean, korean_to_english
 
@@ -203,7 +204,8 @@ def warm_tag_index_in_background(context: WebSessionContext) -> bool:
 
 def _warm_quietly(context: WebSessionContext) -> None:
     try:
-        build_tag_index(context)
+        with background_cpu_slot(context):
+            build_tag_index(context)
     except Exception as exc:  # noqa: BLE001 - 뒤에서 도는 준비가 앱을 죽이면 안 된다
         print(f"Headless Remote: tag index warm failed - {ascii(str(exc))}", flush=True)
     finally:
@@ -286,7 +288,8 @@ def ensure_tag_search_index(context: WebSessionContext):
                 try:
                     from core.tag_index_disk_cache import schedule_write
 
-                    schedule_write(context, context._tag_cache_fingerprint, raw, index)
+                    schedule_write(context, context._tag_cache_fingerprint, raw, index,
+                                   partial(background_cpu_slot, context))
                 except Exception:
                     pass
             return index

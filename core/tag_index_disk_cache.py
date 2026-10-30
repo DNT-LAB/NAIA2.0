@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 
 from core.kr_tag_loader import DICT_SOURCES, TAG_LOADER_OPTIONS, _unique_data_roots, enumerate_tag_inputs
@@ -307,7 +308,7 @@ def write_cache(cache_dir, key: Fingerprint, raw: dict, index: TagSearchIndex) -
                 pass
 
 
-def _delayed_write(context, key, raw, index):
+def _delayed_write(context, key, raw, index, slot=None):
     try:
         while not getattr(context, "headless_tag_index_warmup_done", False):
             time.sleep(0.25)
@@ -315,19 +316,21 @@ def _delayed_write(context, key, raw, index):
         deadline = time.monotonic() + WRITE_DELAY_SECONDS
         while (remaining := deadline - time.monotonic()) > 0:
             time.sleep(remaining)
-        if context.kr_tags_raw is raw and context.tag_search_index is index:
-            write_cache(context.runtime_paths.cache_dir, key, raw, index)
+        with slot() if slot is not None else nullcontext():
+            # 슬롯 대기 중 재설치로 색인이 바뀔 수 있어 획득 뒤에 확인한다.
+            if context.kr_tags_raw is raw and context.tag_search_index is index:
+                write_cache(context.runtime_paths.cache_dir, key, raw, index)
     except Exception:
         pass
 
 
-def schedule_write(context, key, raw, index):
+def schedule_write(context, key, raw, index, slot=None):
     """호출자는 context의 tag-index 잠금을 보유한다. context당 pending write는 하나다."""
     try:
         thread = getattr(context, "_tag_cache_write_thread", None)
         if thread is not None and thread.is_alive():
             return
-        thread = threading.Thread(target=_delayed_write, args=(context, key, raw, index),
+        thread = threading.Thread(target=_delayed_write, args=(context, key, raw, index, slot),
                                   daemon=True, name="naia-tag-index-cache-write")
         context._tag_cache_write_thread = thread
         thread.start()

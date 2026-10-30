@@ -18,6 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+from app.backend.server.startup_work import background_cpu_slot
+
 ASSIST_LEASE_SECONDS = 600.0
 MIN_POOL = 20                 # Random 풀 최소 게시물(사용자 결정 2026-09-23) — 1건 풀은 매번 같은 것을 뽑는다
 # 등급 게이트: 고른 등급(G·S)의 게시물 비중이 이보다 낮은 태그는 뺀다(0.2% = 500건에 1건 미만). 실측 09-24 G 비중:
@@ -251,7 +253,8 @@ def _warm_korean_async(context: Any) -> None:
 
     def _run() -> None:
         try:
-            korean_layer(context).warm()
+            with background_cpu_slot(context):
+                korean_layer(context).warm()
         except Exception:
             pass
         finally:

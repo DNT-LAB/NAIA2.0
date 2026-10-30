@@ -11,6 +11,7 @@ from app.backend.server.autocomplete_commands import build_tag_index
 from app.backend.server.generation_commands import random_service
 from app.backend.server.interactive_assets_routes import interactive_assets_service
 from app.backend.server.search_runtime import save_runner_parquet
+from app.backend.server.startup_work import apply_switch_interval_policy, background_cpu_slot
 from core.search_pool_writer import search_pool_writer
 from core.extension_runtime import load_extensions
 from core.web_session_context import WebSessionContext
@@ -22,6 +23,7 @@ RunInThread = Callable[..., Awaitable[Any]]
 def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunInThread):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        apply_switch_interval_policy()
         # 메인 이벤트 루프 핸들 — 코어(임의 스레드)에서 WS 브로드캐스트를 예약하는
         # 브릿지(확장 토스트 등)가 call_soon_threadsafe 대상으로 쓴다.
         context.headless_main_loop = asyncio.get_running_loop()
@@ -147,10 +149,14 @@ async def _run_random_warmup(context: WebSessionContext, run_in_thread: RunInThr
 
 
 async def _run_tag_index_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    def _build() -> None:
+        with background_cpu_slot(context):
+            build_tag_index(context)
+
     try:
         # 만드는 동안 들어온 자동완성은 '준비 중' 으로 곧바로 답을 받는다(autocomplete_commands._pending_reply) -
         # 잠금을 기다리며 그 창의 명령 흐름을 붙잡지 않는다.
-        await run_in_thread(build_tag_index, context)
+        await run_in_thread(_build)
         print(
             f"Headless Remote: tag autocomplete index ready ({len(getattr(context, 'kr_tags_raw', {}) or {}):,} tags)",
             flush=True,
@@ -226,9 +232,19 @@ async def _after_startup_gate(gate: asyncio.Event, warmup, context: WebSessionCo
 
 
 async def _run_character_index_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    # 베일이 기다리는 태그 예열부터 끝낸다 - 슬롯을 잡은 채 태그 task를 기다리면 안 된다.
+    tag_task = getattr(context, "headless_tag_index_warmup_task", None)
+    if tag_task is not None:
+        # wait 는 태그 쪽 실패/취소를 올리지 않고, 이 task 자신의 취소(종료)는 그대로 올린다.
+        await asyncio.wait((tag_task,))
     try:
         from app.backend.server.character_viewer_routes import character_viewer_service
-        await run_in_thread(character_viewer_service(context).warm_search_index)
+
+        def _warm() -> None:
+            with background_cpu_slot(context):
+                character_viewer_service(context).warm_search_index()
+
+        await run_in_thread(_warm)
     except Exception as exc:
         context.headless_character_index_warmup_error = str(exc)
         print(f"Headless Remote: character search index warmup failed - {exc}", flush=True)

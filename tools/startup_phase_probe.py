@@ -36,6 +36,7 @@ TARGETS = {
     "core.headless_prompt_engineering_service": ["HeadlessPromptEngineeringService.state"],
     "core.kr_tag_loader": ["load_kr_tag_records"],
     "core.tag_search_index": ["TagSearchIndex.from_raw_tag_records", "TagSearchIndex.__init__"],
+    "core.tag_index_disk_cache": ["fingerprint", "read_cache", "write_cache"],
     "core.named_entity_aliases": ["ensure_named_entity_index"],
     "core.assist_korean": ["build_vocab", "KoreanLayer.warm"],
     "app.backend.server.assist_v2_service": ["korean_layer"],

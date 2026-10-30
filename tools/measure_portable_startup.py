@@ -64,7 +64,20 @@ def copy_file(source, target, manifest):
     manifest.append({"source": str(source), "target": str(target), "bytes": source.stat().st_size})
 
 
-def prepare(portable, output, pool, saved_ui=False):
+def prepare(portable, output, pool, saved_ui=False, reuse_fixture=None):
+    if reuse_fixture is not None:
+        if pool is not None:
+            raise ValueError("--reuse-fixture cannot be combined with --pool")
+        previous = reuse_fixture.resolve()
+        target = previous / "user-data"
+        run = previous / "run.json"
+        if run.is_file():
+            target = Path(json.loads(run.read_text(encoding="utf-8"))["user_data"]).resolve()
+        if not target.is_dir() or not (previous / "fixture.json").is_file():
+            raise ValueError("--reuse-fixture requires a previous measurement fixture")
+        (output / "fixture.json").write_text(
+            json.dumps({"reused_from": str(previous), "user_data": str(target)}), encoding="utf-8")
+        return target, prepare_injection(output)
     source, target = portable / "user-data", output / "user-data"
     manifest = []
     # Only selected noncredential state. Extensions, tokens, output, external
@@ -92,11 +105,15 @@ def prepare(portable, output, pool, saved_ui=False):
     if pool:
         copy_file(pool, target / "cache/naia_last_search.parquet", manifest)
     (output / "fixture.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return target, prepare_injection(output)
+
+
+def prepare_injection(output):
     inject = output / "inject"
     inject.mkdir()
     shutil.copy2(Path(__file__).with_name("startup_phase_probe.py"), inject / "startup_phase_probe.py")
     (inject / "sitecustomize.py").write_text("import startup_phase_probe\nstartup_phase_probe.install()\n", encoding="utf-8")
-    return target, inject
+    return inject
 
 
 def chrome_check(output, port, cdp_port):
@@ -182,6 +199,8 @@ def main():
     parser.add_argument("--portable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--pool", type=Path)
+    parser.add_argument("--reuse-fixture", type=Path,
+                        help="Reuse a previous output's user-data in place, without copying")
     parser.add_argument("--duration", type=float, default=90)
     parser.add_argument("--port", type=int, default=7363)
     parser.add_argument("--cdp-port", type=int, default=9343)
@@ -197,7 +216,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     if args.chrome_check and socket_listens("127.0.0.1", args.cdp_port + 1):
         raise SystemExit("Chrome verification port occupied")
-    user_data, inject = prepare(portable, output, args.pool, args.saved_ui_state)
+    user_data, inject = prepare(portable, output, args.pool, args.saved_ui_state, args.reuse_fixture)
     env = dict(os.environ, NAIA_USER_DATA_DIR=str(user_data), NAIA_BACKEND_PORT=str(args.port),
                NAIA_BACKEND_BIND_HOST="127.0.0.1", NAIA_ELECTRON_REMOTE_DEBUGGING_PORT=str(args.cdp_port),
                NAIA_STARTUP_PROBE_LOG=str(output / "phases.jsonl"), NAIA_STARTUP_PROBE_OFFLINE="1",
@@ -208,6 +227,7 @@ def main():
     started = time.time() * 1000
     meta = {"started_epoch_ms": started, "exe":str(exe), "backend":str(portable / "resources/naia-backend"),
             "user_data":str(user_data), "pool_override":str(args.pool) if args.pool else None,
+            "reuse_fixture": str(args.reuse_fixture.resolve()) if args.reuse_fixture else None,
             "isolation":"selected data only; no credentials/extensions; optional pack autostart disabled",
             "saved_mode_and_prompts":args.saved_ui_state,
             "exe_sha256":hashlib.sha256(exe.read_bytes()).hexdigest()}

@@ -32,7 +32,7 @@ def find_pack(data_roots: Iterable[Path | str]) -> Path | None:
     return None
 
 
-def load_pack(data_roots: Iterable[Path | str]) -> dict[str, Any]:
+def load_pack(data_roots: Iterable[Path | str], *, force_reload: bool = False) -> dict[str, Any]:
     """팩을 한 번 읽어 둔다. 파일을 갈아 끼우면(크기·시각이 바뀌면) 다시 읽는다."""
     path = find_pack(data_roots)
     if path is None:
@@ -40,16 +40,26 @@ def load_pack(data_roots: Iterable[Path | str]) -> dict[str, Any]:
     try:
         st = path.stat()
     except OSError:
+        if force_reload:
+            with _lock:
+                _cache.update(key=None, pack=None)
+            raise
         return {}
     key = (str(path), st.st_mtime_ns, st.st_size)
     with _lock:
-        if _cache["key"] == key:
+        if not force_reload and _cache["key"] == key:
             return _cache["pack"]
         try:
             pack = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            if force_reload:
+                _cache.update(key=key, pack={})
+                raise
             pack = {}
         if not isinstance(pack, dict) or pack.get("schema") != SCHEMA or not isinstance(pack.get("seeds"), dict):
+            if force_reload:
+                _cache.update(key=key, pack={})
+                raise ValueError("Invalid tag relation pack")
             print(f"Remote: tag relation pack ignored ({path.name}: unknown schema)")
             pack = {}
         _cache["key"] = key

@@ -85,7 +85,44 @@ def _tag_index_lock(context):
 def _ensure_kr_raw(context: WebSessionContext) -> dict[str, Any]:
     # Fast Search sources and autocomplete can arrive together on a cold session.
     with _tag_index_lock(context):
-        return _load_kr_raw_once(context)
+        raw = getattr(context, "kr_tags_raw", None)
+        if isinstance(raw, dict) and raw:
+            return raw
+        _warming_step(context, +1)
+        try:
+            _try_restore_tag_cache_locked(context)
+            return _load_kr_raw_once(context)
+        finally:
+            _warming_step(context, -1)
+
+
+def _try_restore_tag_cache_locked(context) -> None:
+    """raw-first/검색-first가 같은 probe를 쓴다. 검증 전에는 context에 게시하지 않는다."""
+    if (getattr(context, "kr_tags_raw", None) or getattr(context, "runtime_paths", None) is None
+            or getattr(context, "_tag_cache_attempted", False)):
+        return
+    context._tag_cache_attempted = True
+    skip_read = getattr(context, "_tag_cache_skip_read", False)
+    context._tag_cache_skip_read = False
+    try:
+        from core.tag_index_disk_cache import fingerprint, read_cache
+        from core.named_entity_aliases import NamedEntityIndex
+
+        key = fingerprint(context.repo_root, _tag_data_roots(context))
+        context._tag_cache_fingerprint = key
+        if key is None or skip_read:
+            return
+        restored = read_cache(context.runtime_paths.cache_dir, key)
+        if restored is None:
+            return
+        raw, index = restored
+        named = NamedEntityIndex(raw)
+        context.kr_tags_raw = raw
+        context.autocomplete_state.kr_tags_loaded = bool(raw)
+        context.named_entity_index = named
+        context.tag_search_index = index
+    except Exception:
+        pass
 
 
 def _load_kr_raw_once(context: WebSessionContext) -> dict[str, Any]:
@@ -98,11 +135,13 @@ def _load_kr_raw_once(context: WebSessionContext) -> dict[str, Any]:
     raw = getattr(context, "kr_tags_raw", None)
     if isinstance(raw, dict) and raw:
         return raw
-    from core.kr_tag_loader import load_kr_tag_records
+    from core.kr_tag_loader import TAG_LOADER_OPTIONS, load_kr_tag_records
 
-    result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context))
+    result = load_kr_tag_records(context.repo_root, data_roots=_tag_data_roots(context), **TAG_LOADER_OPTIONS)
     context.kr_tags_raw = result.raw
     context.autocomplete_state.kr_tags_loaded = bool(result.raw)
+    if getattr(context, "_tag_cache_fingerprint", None) is not None:
+        context._tag_cache_raw = result.raw if result.raw and not getattr(result, "warnings", []) else None
     return result.raw if isinstance(result.raw, dict) else {}
 
 
@@ -179,6 +218,10 @@ def reset_tag_index(context: WebSessionContext) -> None:
     with _tag_index_lock(context):
         context.tag_search_index = None
         context.kr_tags_raw = {}
+        context._tag_cache_skip_read = True
+        context._tag_cache_attempted = False
+        context._tag_cache_fingerprint = None
+        context._tag_cache_raw = None
         state = getattr(context, "autocomplete_state", None)
         if state is not None:
             state.kr_tags_loaded = False
@@ -227,14 +270,31 @@ def ensure_tag_search_index(context: WebSessionContext):
 
     with _tag_index_lock(context):
         index = getattr(context, "tag_search_index", None)
-        if index is None:
+        if index is not None:
+            return index
+        _warming_step(context, +1)
+        try:
             raw = _ensure_kr_raw(context)
-            index = TagSearchIndex.from_raw_tag_records(raw, description_overrides=_reviewed_descriptions(context))
+            index = getattr(context, "tag_search_index", None)
+            if index is not None:
+                return index
+            cacheable = getattr(context, "_tag_cache_raw", None) is raw
+            descriptions = _reviewed_descriptions(context, force_reload=cacheable)
+            index = TagSearchIndex.from_raw_tag_records(raw, description_overrides=descriptions)
             context.tag_search_index = index
-        return index
+            if raw and getattr(context, "_tag_cache_raw", None) is raw:
+                try:
+                    from core.tag_index_disk_cache import schedule_write
+
+                    schedule_write(context, context._tag_cache_fingerprint, raw, index)
+                except Exception:
+                    pass
+            return index
+        finally:
+            _warming_step(context, -1)
 
 
-def _reviewed_descriptions(context: WebSessionContext) -> dict[str, str] | None:
+def _reviewed_descriptions(context: WebSessionContext, *, force_reload: bool = False) -> dict[str, str] | None:
     """태그 카드와 같은 대표 한국어 설명(관계 팩의 `ko`, Codex 검토판)을 검색 색인에도 쓴다(사용자 지정 2026-09-27).
 
     실측(2026-09-27): 자동완성은 기존 한국어 키워드 top6 298/300 그대로, 설명만으로 끼는 결과도 늘지 않았다.
@@ -244,8 +304,10 @@ def _reviewed_descriptions(context: WebSessionContext) -> dict[str, str] | None:
     try:
         from core.tag_relation_pack import load_pack
 
-        ko = load_pack(_tag_data_roots(context)).get("ko")
+        ko = load_pack(_tag_data_roots(context), force_reload=force_reload).get("ko")
     except Exception:
+        if force_reload:
+            context._tag_cache_raw = None
         return None
     return ko if isinstance(ko, dict) and ko else None
 

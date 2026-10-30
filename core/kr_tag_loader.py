@@ -24,6 +24,42 @@ from core.tag_knowledge import (
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# 로더와 디스크 캐시가 같은 입력 선언을 쓴다. 새 입력은 여기에 먼저 추가한다.
+TAG_DATA_FILES = {
+    "interactive": "interactive_tags.json",
+    "e621": "e621_data",
+    "kr_parquet": "KR_tags.parquet",
+    "e621_parquet": "e621_KR_tags.parquet",
+    "overrides": "tag_index/tag_translation_overrides.json",
+    "counts": "danbooru_tag_counts_by_rating.json",
+    "aliases": "tag_index/korean_alias_supplement.json",
+    "keywords": "tag_index/korean_keyword_supplement.json",
+    "slang": "tag_index/korean_slang_supplement.json",
+    "names": "tag_index/named_entity_aliases.json",
+}
+LEGACY_INTERACTIVE = "ui/interactive/interactive"
+FILTER_SOURCES = (
+    ("characteristic_list.txt", 3, "\ud2b9\uc9d5"),
+    ("clothes_list.txt", 4, "\uc758\uc0c1"),
+    ("taglist/expression_tags.json", 5, "\ud45c\uc815"),
+    ("taglist/pose_action_tags.json", 6, "\uc790\uc138/\ud589\ub3d9"),
+    ("taglist/location_tags.json", 7, "\uc7a5\uc18c"),
+    ("taglist/meta_tags.json", 8, "\uba54\ud0c0"),
+    ("taglist/object_tags.json", 9, "\ubb3c\uccb4"),
+    ("color.txt", 10, "\uc0c9\uc0c1"),
+)
+DICT_SOURCES = (
+    ("artist_dictionary", "artist_dict", 11, "artist"),
+    ("danbooru_character", "character_dict_count", 12, "character"),
+    ("result_dict_copyright", "copyright_dict", 13, "copyright"),
+)
+TAG_LOADER_OPTIONS = {
+    "include_korean_supplement": True,
+    "include_korean_keyword_supplement": True,
+    "include_korean_slang_supplement": True,
+    "include_named_entity_aliases": True,
+}
+
 
 @dataclass
 class KrTagLoadResult:
@@ -94,6 +130,29 @@ def _first_existing(data_roots: list[Path], relative: str | Path) -> Path:
     return data_roots[0] / relative
 
 
+def enumerate_tag_inputs(repo_root: Path, data_roots=None) -> list[tuple[Path, bool]]:
+    """모든 후보와 실제 선택 여부. 색인 생성/지연 검색의 로더 밖 입력도 포함한다."""
+    from core import tag_axis_registry, tag_search_index
+    from core.tag_relation_pack import PACK_FILENAME, find_pack
+
+    roots = _unique_data_roots(repo_root, data_roots)
+    inputs = []
+    for relative in sorted({*TAG_DATA_FILES.values(), *(row[0] for row in FILTER_SOURCES)}):
+        selected = _first_existing(roots, relative)
+        inputs.extend((root / relative, root / relative == selected) for root in roots)
+    interactive = _first_existing(roots, TAG_DATA_FILES["interactive"])
+    inputs.append((repo_root / LEGACY_INTERACTIVE, not interactive.exists()))
+    inputs.extend((repo_root / f"{row[0]}.py", True) for row in DICT_SOURCES)
+    pack = find_pack(roots)
+    inputs.extend((root / PACK_FILENAME, root / PACK_FILENAME == pack) for root in roots)
+    inputs.extend((path, True) for path in (
+        tag_axis_registry.DEFAULT_AXIS_OVERRIDES_PATH,
+        tag_search_index.KR_METADATA_SEARCH_RULES_PATH,
+        tag_search_index.KR_METADATA_FALLBACK_INDEX_PATH,
+    ))
+    return inputs
+
+
 def load_kr_tag_records(
     root: str | Path | None = None,
     *,
@@ -118,9 +177,9 @@ def load_kr_tag_records(
     # 사라져서, future02 에서는 relations 가 **0건**이 되어 TagRelationRanker 가 죽어 있었다.
     # 이제 data/ 로 옮겼고 runtime data_dir -> repo data 순으로 찾는다(다른 데이터 접근과 동일).
     # 구 레이아웃 경로는 마지막 폴백으로만 남긴다.
-    interactive_path = _first_existing(resolved_data_roots, "interactive_tags.json")
+    interactive_path = _first_existing(resolved_data_roots, TAG_DATA_FILES["interactive"])
     if not interactive_path.exists():
-        legacy_path = repo_root / "ui" / "interactive" / "interactive"
+        legacy_path = repo_root / LEGACY_INTERACTIVE
         if legacy_path.exists():
             interactive_path = legacy_path
     if interactive_path.exists():
@@ -146,7 +205,7 @@ def load_kr_tag_records(
     # Parse the native research dictionary once. Its exact shared-allowlist
     # result bounds E621 Parquet rows, while the research repository continues
     # to load the complete native vocabulary and translation table separately.
-    e621_data_path = _first_existing(resolved_data_roots, "e621_data")
+    e621_data_path = _first_existing(resolved_data_roots, TAG_DATA_FILES["e621"])
     e621_candidates: dict[str, dict[str, Any]] = {}
     e621_research_stats = merge_e621_research_records(
         e621_candidates,
@@ -159,8 +218,8 @@ def load_kr_tag_records(
     parquet_stats = merge_parquet_tag_records(
         raw,
         [
-            (_first_existing(resolved_data_roots, "KR_tags.parquet"), 1),
-            (_first_existing(resolved_data_roots, "e621_KR_tags.parquet"), 2),
+            (_first_existing(resolved_data_roots, TAG_DATA_FILES["kr_parquet"]), 1),
+            (_first_existing(resolved_data_roots, TAG_DATA_FILES["e621_parquet"]), 2),
         ],
         source_allowlists=e621_allowlist,
     )
@@ -183,27 +242,14 @@ def load_kr_tag_records(
 
     override_stats = apply_translation_overrides(
         raw,
-        _first_existing(resolved_data_roots, Path("tag_index") / "tag_translation_overrides.json"),
+        _first_existing(resolved_data_roots, TAG_DATA_FILES["overrides"]),
     )
     for error in parquet_stats.errors + override_stats.errors:
         _warn(warnings, f"tag metadata merge warning - {error}", warn)
 
-    filter_sources = [
-        ("data/characteristic_list.txt", 3, "\ud2b9\uc9d5"),
-        ("data/clothes_list.txt", 4, "\uc758\uc0c1"),
-        ("data/taglist/expression_tags.json", 5, "\ud45c\uc815"),
-        ("data/taglist/pose_action_tags.json", 6, "\uc790\uc138/\ud589\ub3d9"),
-        ("data/taglist/location_tags.json", 7, "\uc7a5\uc18c"),
-        ("data/taglist/meta_tags.json", 8, "\uba54\ud0c0"),
-        ("data/taglist/object_tags.json", 9, "\ubb3c\uccb4"),
-        ("data/color.txt", 10, "\uc0c9\uc0c1"),
-    ]
     filter_count = 0
-    for relative_path, source_key, group_name in filter_sources:
-        clean_relative = str(relative_path)
-        if clean_relative.startswith("data/"):
-            clean_relative = clean_relative[len("data/"):]
-        path = _first_existing(resolved_data_roots, clean_relative)
+    for relative_path, source_key, group_name in FILTER_SOURCES:
+        path = _first_existing(resolved_data_roots, relative_path)
         if not path.exists():
             continue
         try:
@@ -232,13 +278,8 @@ def load_kr_tag_records(
     if root_str not in sys.path:
         sys.path.insert(0, root_str)
 
-    dict_sources = [
-        ("artist_dictionary", "artist_dict", 11, "artist"),
-        ("danbooru_character", "character_dict_count", 12, "character"),
-        ("result_dict_copyright", "copyright_dict", 13, "copyright"),
-    ]
     dict_count = 0
-    for module_name, variable_name, source_key, category in dict_sources:
+    for module_name, variable_name, source_key, category in DICT_SOURCES:
         try:
             module = importlib.import_module(module_name)
             records = getattr(module, variable_name, {})
@@ -266,7 +307,7 @@ def load_kr_tag_records(
 
     rating_count_stats = merge_rating_count_records(
         raw,
-        _first_existing(resolved_data_roots, "danbooru_tag_counts_by_rating.json"),
+        _first_existing(resolved_data_roots, TAG_DATA_FILES["counts"]),
     )
     for error in rating_count_stats.errors:
         _warn(warnings, f"tag count merge warning - {error}", warn)
@@ -278,7 +319,7 @@ def load_kr_tag_records(
     supplement_stats = None
     if include_korean_supplement:
         supplement_stats = apply_korean_alias_supplement(
-            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_alias_supplement.json"),
+            raw, _first_existing(resolved_data_roots, TAG_DATA_FILES["aliases"]),
             index=supplement_index)
         for error in supplement_stats["errors"]:
             _warn(warnings, f"Korean alias supplement warning - {error}", warn)
@@ -289,7 +330,7 @@ def load_kr_tag_records(
             raw,
             _first_existing(
                 resolved_data_roots,
-                Path("tag_index") / "korean_keyword_supplement.json",
+                TAG_DATA_FILES["keywords"],
             ),
             index=supplement_index,
         )
@@ -300,7 +341,7 @@ def load_kr_tag_records(
     slang_supplement_stats = None
     if include_korean_slang_supplement:
         slang_supplement_stats = apply_korean_slang_supplement(
-            raw, _first_existing(resolved_data_roots, Path("tag_index") / "korean_slang_supplement.json"),
+            raw, _first_existing(resolved_data_roots, TAG_DATA_FILES["slang"]),
             index=supplement_index)
         for error in slang_supplement_stats["errors"]:
             _warn(warnings, f"Korean slang supplement warning - {error}", warn)
@@ -308,7 +349,7 @@ def load_kr_tag_records(
     from core.named_entity_aliases import apply_named_entity_aliases
 
     named_entity_stats = (apply_named_entity_aliases(
-        raw, _first_existing(resolved_data_roots, Path('tag_index') / 'named_entity_aliases.json'))
+        raw, _first_existing(resolved_data_roots, TAG_DATA_FILES["names"]))
         if include_named_entity_aliases else {'errors': []})
     for error in named_entity_stats['errors']:
         _warn(warnings, f'Named entity aliases warning - {error}', warn)

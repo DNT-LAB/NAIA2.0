@@ -24,7 +24,14 @@
 
 const STYLE_ID = 'mobileFullscreenStyle';
 const POS_KEY = 'naia.mobileFullscreen.fabPos';
+const SCALE_KEY = 'naia.mobileFullscreen.fabScale';
 const EDGE = 8;   // 단추판이 화면 끝에서 떨어지는 최소 거리
+// 단추판 크기(사용자 지시 2026-10-30) - 오른쪽 아래 꺾쇠로 끈다. 이 값보다 작으면 글자가 R / G / A 로 줄고
+// A 는 체크 상자 **안에** 겹친다(상자를 더 줄이려고 - 사용자 지정).
+const SCALE_MIN = 0.45;
+const SCALE_MAX = 1.25;
+const COMPACT_BELOW = 0.75;
+const BASE_WIDTH = 124;
 
 const CSS = `
 .viewer-fs-btn { display: none; }
@@ -54,35 +61,58 @@ const CSS = `
   color: #fff; font-size: 22px; line-height: 1; cursor: pointer;
 }
 .mfs-fab {
-  position: absolute; width: 124px; padding: 6px 8px 8px;
-  display: flex; flex-direction: column; gap: 6px;
+  --s: 1;
+  position: absolute; width: calc(${BASE_WIDTH}px * var(--s));
+  padding: max(4px, calc(6px * var(--s))) max(5px, calc(8px * var(--s))) max(6px, calc(8px * var(--s)));
+  display: flex; flex-direction: column; gap: max(4px, calc(6px * var(--s)));
   background: rgba(20,20,30,0.86); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px;
   user-select: none; touch-action: none;
 }
-.mfs-grip { height: 18px; display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; }
-.mfs-grip::before { content: ''; width: 30px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.32); }
+.mfs-grip { height: max(12px, calc(18px * var(--s))); display: flex; align-items: center; justify-content: center; cursor: grab; touch-action: none; }
+.mfs-grip::before { content: ''; width: min(30px, 60%); height: 4px; border-radius: 2px; background: rgba(255,255,255,0.32); }
 .mfs-fab.dragging .mfs-grip { cursor: grabbing; }
+.mfs-resize {
+  position: absolute; right: -1px; bottom: -1px; width: 24px; height: 24px; padding: 3px;
+  display: flex; align-items: flex-end; justify-content: flex-end;
+  cursor: nwse-resize; touch-action: none;
+}
+.mfs-resize::before {
+  content: ''; width: 9px; height: 9px; border-bottom-right-radius: 3px;
+  border-right: 2px solid rgba(255,255,255,0.5); border-bottom: 2px solid rgba(255,255,255,0.5);
+}
 .mfs-btn {
-  height: 40px; padding: 0 6px; border: none; border-radius: 8px;
-  color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+  height: max(30px, calc(40px * var(--s))); padding: 0 4px; border: none; border-radius: 8px;
+  color: #fff; font-size: max(13px, calc(13px * var(--s))); font-weight: 600; cursor: pointer;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.mfs-short, .mfs-auto-letter { display: none; }
+.mfs-fab.compact .mfs-full, .mfs-fab.compact .mfs-auto-label { display: none; }
+.mfs-fab.compact .mfs-short { display: inline; }
 .mfs-btn.rnd { background: #a0659a; }
 .mfs-btn.gen { background: #6a5ad8; }
 .mfs-btn.gen.generating { background: #4a3fa0; }
 .mfs-btn:disabled { opacity: 0.4; cursor: default; }
 .mfs-auto {
-  height: 34px; padding: 0 8px; display: flex; align-items: center; gap: 8px;
+  height: max(28px, calc(34px * var(--s))); padding: 0 8px; display: flex; align-items: center; gap: 8px;
   background: transparent; border: 1px solid rgba(255,255,255,0.16); border-radius: 8px;
   color: #ddd; font-size: 13px; cursor: pointer;
 }
 .mfs-auto-box {
-  width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid #aaa;
+  width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid #aaa; flex: none;
   display: flex; align-items: center; justify-content: center; font-size: 11px; color: #fff;
 }
 .mfs-auto.on .mfs-auto-box { background: #6a5ad8; border-color: #6a5ad8; }
 .mfs-auto.on .mfs-auto-box::after { content: '\\2713'; }
 .mfs-auto.pending { opacity: 0.6; }
+/* 작은 판: 체크 상자 하나가 단추 전체다 - A 를 상자 안에 겹치고, 켜지면 상자가 채워진다(체크 표시 없음). */
+.mfs-fab.compact .mfs-auto { justify-content: center; padding: 0; border: none; }
+.mfs-fab.compact .mfs-auto-box {
+  width: max(24px, calc(28px * var(--s))); height: max(24px, calc(28px * var(--s)));
+  border-radius: 6px; border-width: 1.5px; font-size: 13px; font-weight: 700; color: #bbb;
+}
+.mfs-fab.compact .mfs-auto-letter { display: inline; }
+.mfs-fab.compact .mfs-auto.on .mfs-auto-box { color: #fff; }
+.mfs-fab.compact .mfs-auto.on .mfs-auto-box::after { content: none; }
 `;
 
 /** 진짜 단추의 보이는 글자 - 단축키 힌트 · Anlas 칩을 뺀 나머지. 칩 글자는 따로 돌려준다. */
@@ -119,9 +149,12 @@ export function createMobileFullscreen({document: doc = document, window: win = 
     <button type="button" class="mfs-close" aria-label="전체화면 닫기">&times;</button>
     <div class="mfs-fab">
       <div class="mfs-grip" aria-hidden="true"></div>
-      <button type="button" class="mfs-btn rnd"></button>
-      <button type="button" class="mfs-btn gen"></button>
-      <button type="button" class="mfs-auto" aria-pressed="false"><span class="mfs-auto-box" aria-hidden="true"></span>자동</button>
+      <button type="button" class="mfs-btn rnd"><span class="mfs-full"></span><span class="mfs-short">R</span></button>
+      <button type="button" class="mfs-btn gen"><span class="mfs-full"></span><span class="mfs-short">G</span></button>
+      <button type="button" class="mfs-auto" aria-pressed="false" aria-label="자동">
+        <span class="mfs-auto-box" aria-hidden="true"><span class="mfs-auto-letter">A</span></span><span class="mfs-auto-label">자동</span>
+      </button>
+      <div class="mfs-resize" role="slider" aria-label="단추판 크기" aria-valuemin="45" aria-valuemax="125"></div>
     </div>`;
   doc.body.appendChild(overlay);
 
@@ -140,9 +173,12 @@ export function createMobileFullscreen({document: doc = document, window: win = 
   function syncButton(mirror, real) {
     const {label, chip} = buttonLabel(real);
     const text = chip ? `${label} · ${chip}` : label;
-    if (mirror.textContent !== text) mirror.textContent = text;
+    const full = mirror.querySelector('.mfs-full');
+    if (full.textContent !== text) full.textContent = text;
+    // 작은 판은 R / G 만 보이므로 진짜 글자(EV Random · 경과 초 등)는 aria-label 과 툴팁으로 남긴다.
+    mirror.setAttribute('aria-label', text);
     mirror.disabled = real.disabled;
-    mirror.title = real.title || '';
+    mirror.title = real.title || text;
     mirror.classList.toggle('generating', real.classList.contains('generating'));
   }
   function syncAuto() {
@@ -243,6 +279,53 @@ export function createMobileFullscreen({document: doc = document, window: win = 
   grip.addEventListener('pointercancel', endDrag);
   grip.addEventListener('lostpointercapture', endDrag);
 
+  // ---- 단추판 크기 ----
+  const resize = overlay.querySelector('.mfs-resize');
+  let scale = 1;
+  function loadScale() {
+    try {
+      const v = Number(win.localStorage.getItem(SCALE_KEY));
+      if (Number.isFinite(v) && v > 0) return Math.min(SCALE_MAX, Math.max(SCALE_MIN, v));
+    } catch (_) { /* 기본 크기 */ }
+    return 1;
+  }
+  function applyScale(value) {
+    scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, value));
+    fab.style.setProperty('--s', String(scale));
+    fab.classList.toggle('compact', scale < COMPACT_BELOW);
+    resize.setAttribute('aria-valuenow', String(Math.round(scale * 100)));
+  }
+
+  let sizing = null;
+  resize.addEventListener('pointerdown', event => {
+    if (event.button !== undefined && event.button !== 0) return;
+    // 왼쪽 위 모서리는 그 자리에 두고 판만 커지고 줄게 - 끄는 동안 위치 비율을 다시 계산하지 않는다.
+    sizing = {id: event.pointerId, x: event.clientX, scale};
+    try { resize.setPointerCapture(event.pointerId); } catch (_) { /* 잡지 못해도 된다 */ }
+    event.preventDefault();
+    event.stopPropagation();
+  });
+  resize.addEventListener('pointermove', event => {
+    if (!sizing || event.pointerId !== sizing.id) return;
+    // 화면 밖으로 커지지 않게 - 지금 왼쪽 자리에서 오른쪽 끝까지가 한계다.
+    const left = parseFloat(fab.style.left) || EDGE;
+    const room = (overlay.clientWidth - left - EDGE) / BASE_WIDTH;
+    const next = sizing.scale + (event.clientX - sizing.x) / BASE_WIDTH;
+    applyScale(Math.min(next, Math.max(SCALE_MIN, room)));
+  });
+  const endSizing = event => {
+    if (!sizing || (event && event.pointerId !== sizing.id)) return;
+    sizing = null;
+    try { win.localStorage.setItem(SCALE_KEY, String(Math.round(scale * 100) / 100)); } catch (_) { /* 기억만 못 한다 */ }
+    // 커져서 아래로 넘쳤으면 안으로 밀어 넣고 그 자리를 기억한다.
+    const maxY = overlay.clientHeight - fab.offsetHeight - EDGE;
+    if ((parseFloat(fab.style.top) || 0) > maxY) fab.style.top = `${Math.round(Math.max(EDGE, maxY))}px`;
+    savePos(currentRatio());
+  };
+  resize.addEventListener('pointerup', endSizing);
+  resize.addEventListener('pointercancel', endSizing);
+  resize.addEventListener('lostpointercapture', endSizing);
+
   const onResize = () => { if (isOpen()) placeFab(loadPos()); };
 
   // ---- 열기 · 닫기 ----
@@ -251,6 +334,7 @@ export function createMobileFullscreen({document: doc = document, window: win = 
     if (isOpen()) return;
     syncAll();
     watch();
+    applyScale(loadScale());
     overlay.classList.add('open');
     placeFab(loadPos());
     win.addEventListener('resize', onResize);

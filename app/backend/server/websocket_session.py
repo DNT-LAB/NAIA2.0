@@ -4,6 +4,7 @@ import asyncio
 from functools import partial
 import json
 import uuid
+import weakref
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -161,6 +162,27 @@ def _may_overtake(command: dict[str, Any], pending: dict[str, Any] | str) -> boo
     return _is_search_dependent(pending) and ctype in HEAVY_LANE_BYPASS and not e621_read
 
 
+# lane task -> 그 앞 항목. 취소된 앞 항목 대신 그 앞을 기다리는 데 쓴다.
+_LANE_PREDECESSOR: weakref.WeakKeyDictionary[asyncio.Task, asyncio.Task | None] = weakref.WeakKeyDictionary()
+
+
+def _forget_finished_predecessor(task: asyncio.Task) -> None:
+    # 끝난 항목은 앞을 붙들 이유가 없다 - 남기면 연결 동안의 lane task 가 사슬로 전부 살아 있다. 취소된 것만 남긴다.
+    if not task.cancelled():
+        _LANE_PREDECESSOR.pop(task, None)
+
+
+async def _wait_lane_predecessor(after: asyncio.Task | None) -> None:
+    """앞 항목이 끝날 때까지 기다린다. 취소된 앞 항목은 그 앞을 대신 기다린다 - 취소를 물려받으면 이 연결의
+    lane 이 통째로 끊기고(shield 시절 · Codex 재리뷰 2026-10-30), 그냥 지나가면 앞의 앞을 앞지른다.
+    wait 는 앞 항목의 결과를 올리지 않고, 이 task 자신의 취소(연결 종료)는 그대로 올린다."""
+    while after is not None:
+        await asyncio.wait((after,))
+        if not after.cancelled():
+            return
+        after = _LANE_PREDECESSOR.get(after)
+
+
 async def _run_lane_command(
     ws: WebSocket,
     context: WebSessionContext,
@@ -175,8 +197,7 @@ async def _run_lane_command(
 ) -> None:
     """앞서 큐에 들어온 lane 항목 뒤에 실행하고, 실패해도 다음 항목은 진행한다."""
     try:
-        if after is not None:
-            await asyncio.shield(after)
+        await _wait_lane_predecessor(after)
         if isinstance(command, dict):
             await handle_json_command(
                 ws,
@@ -228,9 +249,8 @@ async def _run_live_command(
     """백그라운드 태스크로 라이브 명령을 실행. 예외가 receive 루프로 새지 않도록 격리하고
     실패 시 토스트로 알린다(create_task 라 호출부 try/except 가 잡지 못함)."""
     try:
-        if after is not None:
-            # 최신 live 요청의 취소가 공유 lane 작업까지 취소하면 안 된다.
-            await asyncio.shield(after)
+        # 최신 live 요청의 취소가 공유 lane 작업까지 취소하면 안 되고, lane 쪽 취소를 물려받아도 안 된다.
+        await _wait_lane_predecessor(after)
         await handle_json_command(
             ws,
             context,
@@ -308,8 +328,10 @@ def register_websocket_session(
                 after=lane_tail,
             ))
             lane_tasks[task] = command
+            _LANE_PREDECESSOR[task] = lane_tail
             lane_tail = task
             task.add_done_callback(lane_tasks.pop)
+            task.add_done_callback(_forget_finished_predecessor)
 
         # 커맨드 계열별 최신 in-flight task. 새 요청이 오면 이전 것을 취소해 적재를 막는다.
         live_by_type: dict[str, asyncio.Task] = {}

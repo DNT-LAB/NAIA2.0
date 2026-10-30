@@ -14,6 +14,7 @@ from app.backend.server.search_runtime import save_runner_parquet
 from app.backend.server.startup_work import (
     apply_switch_interval_policy,
     background_cpu_slot,
+    restore_switch_interval,
     restore_switch_interval_after_startup,
 )
 from core.search_pool_writer import search_pool_writer
@@ -91,6 +92,8 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
             context.headless_character_index_warmup_task = asyncio.create_task(
                 _after_startup_gate(gate, _run_character_index_warmup, context, run_in_thread))
         # 0.9ms GIL 간격은 시작 예열 동안만 - 끝나면 원래 값으로(세션 중 CPU 작업이 겹칠 때의 손해를 피한다).
+        # 지난 lifespan 의 waiter 가 남았으면 버린다 - 옛 예열 task 를 보고 새 예열 도중에 되돌리면 안 된다.
+        _cancel_task(getattr(context, "headless_switch_interval_restore_task", None))
         context.headless_switch_interval_restore_task = asyncio.create_task(
             restore_switch_interval_after_startup(context))
         # ⚠️ 캐릭터 확장 팩은 시작 경로에서 받지 않는다(사용자 지시 2026-10-22) - 시작 경로에서 받기를 걸었더니 포터블의
@@ -103,6 +106,9 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         try:
             yield
         finally:
+            # 예열이 안 끝난 채 닫혀도 0.9ms 를 남기지 않는다 - waiter 가 첫 실행 전에 취소되면 그 finally 도 안 돈다.
+            _cancel_task(getattr(context, "headless_switch_interval_restore_task", None))
+            restore_switch_interval()
             try:
                 from core.anima_engine.runtime import stop_all
                 await run_in_thread(stop_all)
@@ -139,6 +145,11 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
                 print(f"Headless Remote: interactive sweep owner release failed - {exc}", flush=True)
 
     return lifespan
+
+
+def _cancel_task(task) -> None:
+    if task is not None and not task.done():
+        task.cancel()
 
 
 async def _run_random_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:

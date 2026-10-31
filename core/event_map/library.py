@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import uuid
@@ -32,6 +33,54 @@ def _text(value, label, limit, required=False):
     return value.strip()
 
 
+def normalize_terms(value, *, required=False):
+    """Quick Filter chip grammar, with staging limits and lowercase storage."""
+    if isinstance(value, str):
+        value = [value]
+    if not isinstance(value, list) or any(not isinstance(v, str) for v in value):
+        raise MapQueryError("bad_request", "찾기 토큰 목록을 확인해주세요.")
+    terms = []
+    for item in value:
+        for raw in re.split(r"[,\n]", item):
+            raw = raw.strip()
+            negate = raw.startswith("-")
+            clean = raw.lstrip("-").replace("_", " ").strip()
+            exact = clean.startswith("*")
+            clean = clean.lstrip("*").strip().lower() if exact else clean.lower()
+            if not clean:
+                continue
+            token = ("-" if negate else "") + ("*" if exact else "") + clean
+            if len(token) > 160:
+                raise MapQueryError("bad_request", "찾기 토큰은 160자까지입니다.")
+            terms.append(token)
+            if len(terms) > 16:
+                raise MapQueryError("bad_request", "찾기 토큰은 16개까지입니다.")
+    if required and not terms:
+        raise MapQueryError("bad_request", "찾기 조건을 입력해주세요.")
+    return terms
+
+
+def normalize_filters(value):
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise MapQueryError("bad_request", "찾기 조건 목록을 확인해주세요.")
+    if len(value) > 8:
+        raise MapQueryError("bad_request", "찾기 조건은 8개까지입니다")
+    groups = []
+    for group in value:
+        if not isinstance(group, dict) or not isinstance(group.get("invert", False), bool):
+            raise MapQueryError("bad_request", "찾기 조건을 확인해주세요.")
+        terms = normalize_terms(group.get("terms", []))
+        if terms:
+            groups.append({"terms": terms, "invert": group.get("invert", False)})
+    return groups
+
+
+def filter_fingerprint(groups):
+    return tuple(sorted((tuple(sorted(set(g["terms"]))), g["invert"]) for g in groups))
+
+
 def selection(value):
     if not isinstance(value, dict):
         raise MapQueryError("bad_request", "저장할 조합이 없습니다.")
@@ -47,6 +96,9 @@ def selection(value):
         raise MapQueryError("bad_request", "인원을 하나 이상 선택해주세요.")
     if set(result["pins"]) & set(result["exclude"]):
         raise MapQueryError("bad_request", "같은 태그를 포함과 제외에 함께 저장할 수 없습니다.")
+    filters = normalize_filters(value.get("filters"))
+    if filters:
+        result["filters"] = filters
     return result
 
 
@@ -184,8 +236,9 @@ class EventMapLibrary:
 
     @staticmethod
     def _fingerprint(selected):
-        return tuple(tuple(sorted({normalize_tag(v) if k in ("pins", "exclude") else v for v in selected[k]}))
+        base = tuple(tuple(sorted({normalize_tag(v) if k in ("pins", "exclude") else v for v in selected[k]}))
                      for k in ("pins", "exclude", "ratings", "persons"))
+        return base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
 
     def _write(self, items):
         encoded = json.dumps({"schema": SCHEMA, "items": items, "categories": self._categories}, ensure_ascii=False, indent=2)

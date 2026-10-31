@@ -47,7 +47,7 @@ AsyncRunner = Callable[..., Awaitable[Any]]
 
 # `code` -> HTTP 상태. 나머지는 400.
 STATUS_BY_CODE = {"unavailable": 503, "internal_error": 500, "library_error": 500, "duplicate": 409, "not_found": 404,
-                  "tree_unavailable": 503}
+                  "tree_unavailable": 503, "preset_error": 500}
 
 
 def _no_store() -> dict[str, str]:
@@ -294,6 +294,19 @@ def register_event_map_routes(
         return JSONResponse(state, headers=_no_store())
 
     # -- 스테이징(사용자 지시 2026-10-14) ---------------------------------------------------
+    def _presets_store():
+        from core.event_map.staging_presets import EventMapStagingPresets
+        return EventMapStagingPresets(session_context._save_path("event_map", "staging_presets.json"))
+
+    async def _presets_summary(items):
+        try:
+            listed = await run_in_thread(_presets_store().list, items)
+        except MapQueryError:
+            return None
+        active = next((r for r in listed["items"] if r["id"] == listed["active"]), None)
+        return {"active": listed["active"], "name": active["name"] if active else None,
+                "dirty": listed["dirty"], "count": len(listed["items"])}
+
     async def _staging_counts(items):
         """조합마다 게시물 수 + 전체(겹침 제외). 색인이 없으면 None(화면은 수를 비워 둔다)."""
         if not items:
@@ -325,7 +338,7 @@ def register_event_map_routes(
             await _broadcast({"type": "event_map_random_link", **unlinked})
         await _broadcast({"type": "event_map_staging", "count": sum(1 for r in items if r.get("enabled", True)),
                           "total": len(items), **({"same_counts": True} if same_counts else {})})
-        reply = {**data, "random_link": link_state(session_context)}
+        reply = {**data, "random_link": link_state(session_context), "presets": await _presets_summary(items)}
         if with_counts:
             reply["counts"] = await _staging_counts(items)
         return JSONResponse(reply, headers=_no_store())
@@ -337,10 +350,65 @@ def register_event_map_routes(
             data = await run_in_thread(staging_store(session_context).list)
         except MapQueryError as exc:
             return _error(exc)
-        reply = {**data, "random_link": link_state(session_context)}
+        reply = {**data, "random_link": link_state(session_context), "presets": await _presets_summary(data["items"])}
         if counts:
             reply["counts"] = await _staging_counts(data["items"])
         return JSONResponse(reply, headers=_no_store())
+
+    @app.post("/api/event-map/staging/search")
+    async def api_event_map_staging_search(req: Request):
+        body = await _read_json(req)
+        try:
+            items = (await run_in_thread(staging_store(session_context).list))["items"]
+            found = await run_in_thread(ensure_event_map_service(session_context).count_search,
+                                        [r["selection"] for r in items], [r["enabled"] for r in items],
+                                        body.get("terms", []))
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse({"ok": True, **found, "per": {r["id"]: n for r, n in zip(items, found["per"])}},
+                            headers=_no_store())
+
+    @app.get("/api/event-map/staging/presets")
+    async def api_event_map_staging_presets():
+        try:
+            items = (await run_in_thread(staging_store(session_context).list))["items"]
+            listed = await run_in_thread(_presets_store().list, items)
+        except MapQueryError as exc:
+            return _error(exc)
+        return JSONResponse(listed, headers=_no_store())
+
+    @app.post("/api/event-map/staging/presets")
+    async def api_event_map_staging_presets_change(req: Request):
+        body = await _read_json(req)
+        action = body.get("action")
+        presets, store = _presets_store(), staging_store(session_context)
+        unlinked = None
+        try:
+            async with staging_gate:
+                current = await run_in_thread(store.list)
+                items = current["items"]
+                if action == "save_new":
+                    await run_in_thread(presets.save_new, body.get("name"), items)
+                elif action == "save":
+                    await run_in_thread(presets.save, body.get("id"), items)
+                elif action == "load":
+                    rows = await run_in_thread(presets.load, body.get("id"))
+                    data = await run_in_thread(store.replace_all, rows)
+                    items = data["items"]
+                    unlinked = _unlink_if_empty(data)
+                elif action == "rename":
+                    await run_in_thread(presets.rename, body.get("id"), body.get("name"))
+                elif action == "delete":
+                    await run_in_thread(presets.delete, body.get("id"))
+                else:
+                    raise MapQueryError("bad_request", "지원하지 않는 프리셋 작업입니다.")
+                listed = await run_in_thread(presets.list, items)
+        except MapQueryError as exc:
+            return _error(exc)
+        await _broadcast({"type": "event_map_staging_presets"})
+        if action == "load":
+            return await _staging_reply(data, unlinked=unlinked)
+        return JSONResponse({"ok": True, "presets": listed}, headers=_no_store())
 
     @app.post("/api/event-map/staging")
     async def api_event_map_staging_change(req: Request):
@@ -362,7 +430,8 @@ def register_event_map_routes(
                     "enabled": [r.get("enabled", True) for r in items],    # 켜고 끈 상태도(사용자 지정 2026-10-15)
                     "extras": [r.get("extra") for r in items],             # 추가 프롬프트도(사용자 지정 2026-10-19)
                     "extra": listed["extra"]})
-                return JSONResponse({**saved, "items": items, "saved": saved["items"]}, headers=_no_store())
+                return JSONResponse({**saved, "items": items, "saved": saved["items"],
+                                     "presets": await _presets_summary(items)}, headers=_no_store())
             if action == "stage_saved":
                 row = await run_in_thread(library.find, str(body.get("id") or ""))
                 if row is None:
@@ -373,6 +442,20 @@ def register_event_map_routes(
                 elif action == "stage_saved":
                     data = await run_in_thread(store.add_many, row.get("selections") or [row["selection"]],
                                                row.get("enabled"), row.get("extras"), row.get("extra"))
+                elif action in ("split", "narrow"):
+                    listed = await run_in_thread(store.list)
+                    row = next((r for r in listed["items"] if r["id"] == body.get("id")), None)
+                    if row is None:
+                        raise MapQueryError("not_found", "이미 빠졌거나 없는 조합입니다.")
+                    service = ensure_event_map_service(session_context)
+                    found = await run_in_thread(service.count_search, [row["selection"]], [True], body.get("terms", []))
+                    m = found["per"][0]
+                    if m == 0:
+                        raise MapQueryError("bad_request", "맞는 게시물이 없습니다")
+                    counts = await run_in_thread(service.count_selections, [row["selection"]])
+                    if m == counts["per"][0]:
+                        raise MapQueryError("bad_request", "모두 맞습니다 - 나누거나 남길 것이 없습니다")
+                    data = await run_in_thread(getattr(store, action), row["id"], found["terms"])
                 elif action == "toggle":
                     data = await run_in_thread(store.toggle, str(body.get("id") or ""), body.get("enabled") is not False)
                 elif action == "extra":    # 줄의 추가 프롬프트(사용자 지시 2026-10-19)
@@ -463,13 +546,13 @@ def register_event_map_routes(
 
     @app.get("/api/event-map/sample")
     async def api_event_map_sample(pins: str = "", exclude: str = "", ratings: str = "",
-                                   persons: str = "", n: int = 5, seed: str = ""):
+                                   persons: str = "", n: int = 5, seed: str = "", filters: str | None = None):
         """뽑힌 조합의 `prompt` 가 프롬프트에 넣거나 복사할 문자열이다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.sample, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, n=n, seed=seed, permanent=True)
+                persons=persons, n=n, seed=seed, permanent=True, **({"filters": filters} if filters is not None else {}))
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

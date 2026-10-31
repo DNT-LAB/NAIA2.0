@@ -1615,13 +1615,15 @@ import('./js/features/eventMapPanel.mjs?v=20261018-resttip1')
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
 // S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
-import('./js/features/eventMapStaging.mjs?v=20261019-extraac1')
+import('./js/features/eventMapStaging.mjs?v=20261031-stgv2')
   .then(({initEventMapStaging}) => {
     window.eventStaging = initEventMapStaging({
       showToast,
       getPromptText: () => (promptEdit ? promptEdit.value : ''),
       generateNow: () => generateAction(),
-      confirmDialog: message => showConfirmDialog(message),
+      // 프리셋 바꾸기의 세 갈래(저장하고 · 저장하지 않고 · 취소) = choices · 프리셋 이름 = 입력 창(사용자 지시 2026-10-31)
+      confirmDialog: (message, options) => showConfirmDialog(message, options),
+      promptDialog: (message, options) => showPromptDialog(message, options),
       isTabHidden: () => getOptionChecked('hide_staging_button'),
     });
   })
@@ -5124,6 +5126,7 @@ function onInitComplete() {
 function afterWsJsonMessage(m) {
   if (m.type === 'event_map_random_link') { window.eventMap?.receiveRandomLink?.(m); window.eventStaging?.paint?.(); }
   if (m.type === 'event_map_staging') window.eventStaging?.receiveCount?.(m);
+  if (m.type === 'event_map_staging_presets') window.eventStaging?.receivePresets?.();
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
     if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);

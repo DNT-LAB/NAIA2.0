@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.event_map.extra_prompt import clean_mode, clean_text, common_of, extra_of
-from core.event_map.library import EventMapLibrary, selection
+from core.event_map.library import EventMapLibrary, normalize_terms, selection
 from core.event_map.service import MapQueryError
 
 _LOCK = threading.RLock()
@@ -129,6 +129,60 @@ class EventMapStaging:
                 rev += 1
                 self._write(items, rev)
             return self._reply(items, rev, added=added, common_adopted=adopted)
+
+    def split(self, item_id, terms, counts_fn=None) -> dict:
+        return self._refine(item_id, terms, split=True)
+
+    def narrow(self, item_id, terms) -> dict:
+        return self._refine(item_id, terms, split=False)
+
+    def _refine(self, item_id, terms, *, split):
+        terms = normalize_terms(terms, required=True)
+        with _LOCK:
+            items, rev = self._load()
+            at = next((i for i, r in enumerate(items) if r["id"] == item_id), None)
+            if at is None:
+                raise MapQueryError("not_found", "이미 빠졌거나 없는 조합입니다.")
+            if split and len(items) >= MAX_ITEMS:
+                raise MapQueryError("bad_request", f"스테이징은 {MAX_ITEMS}개까지입니다.")
+            row = items[at]
+            # 같은 찾기를 또 걸면 게시물은 그대로인데 칩만 늘어난다 - 받지 않는다
+            key = tuple(sorted(set(terms)))
+            if any(tuple(sorted(set(g["terms"]))) == key for g in row["selection"].get("filters", [])):
+                raise MapQueryError("bad_request", "이미 같은 찾기가 걸려 있습니다")
+            seen = {EventMapLibrary._fingerprint(r["selection"]) for r in items if r["id"] != item_id}
+            replacements = []
+            for invert in ([False, True] if split else [False]):
+                selected = selection({**row["selection"], "filters": [*row["selection"].get("filters", []),
+                                      {"terms": terms, "invert": invert}]})
+                if EventMapLibrary._fingerprint(selected) in seen:
+                    raise MapQueryError("duplicate", "이미 같은 조합이 스테이징에 있습니다")
+                replacements.append({**row, "id": str(uuid.uuid4()) if split else row["id"],
+                                     "selection": selected, "extra": dict(row["extra"])})
+            items[at:at + 1] = replacements
+            self._write(items, rev + 1)
+            return self._reply(items, rev + 1)
+
+    def replace_all(self, rows) -> dict:
+        if not isinstance(rows, list) or len(rows) > MAX_ITEMS:
+            raise MapQueryError("bad_request", f"스테이징은 {MAX_ITEMS}개까지입니다.")
+        items, seen = [], set()
+        for row in rows:
+            if not isinstance(row, dict):
+                raise MapQueryError("bad_request", "조합 목록을 확인해주세요.")
+            selected = selection(row.get("selection"))
+            if not selected["pins"]:
+                raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
+            key = EventMapLibrary._fingerprint(selected)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append({"id": str(uuid.uuid4()), "selection": selected, "enabled": row.get("enabled") is not False,
+                          "extra": extra_of(row.get("extra")), "added_at": datetime.now(timezone.utc).isoformat()})
+        with _LOCK:
+            _, rev = self._load()
+            self._write(items, rev + 1)
+            return self._reply(items, rev + 1)
 
     def remove(self, item_id: str) -> dict:
         with _LOCK:

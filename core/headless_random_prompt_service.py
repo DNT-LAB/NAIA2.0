@@ -197,6 +197,8 @@ class HeadlessRandomPromptService:
         random.shuffle(items)
         for item in items:
             combo = {k: list(item["selection"].get(k) or []) for k in ("pins", "exclude", "ratings", "persons")}
+            if item["selection"].get("filters"):
+                combo["filters"] = item["selection"]["filters"]
             try:
                 body = service.sample(**combo, n=1, permanent=True)
             except MapQueryError as exc:

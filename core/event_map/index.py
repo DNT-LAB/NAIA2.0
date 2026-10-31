@@ -288,6 +288,8 @@ class EventMapIndex:
         # 점수 계산은 태그 수만큼 한 번에 돈다 - 파이썬 반복문 대신 배열로 든다.
         size = len(rows)
         self.n_tags = size
+        self._filter_masks = {}
+        self._filter_names = [self.by_id[t].lower() for t in range(size)]
         self.obs_arr = np.array([self.observed[t] for t in range(size)], dtype=np.int64)
         self.usable_arr = np.array([self.eligible[t] for t in range(size)], dtype=bool)
         self.color_arr = np.array([self.color[t] for t in range(size)], dtype=bool)
@@ -390,7 +392,48 @@ class EventMapIndex:
             acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
         return acc
 
-    def posts_for(self, pins, *, exclude=None, ratings=None, persons=None, block=None) -> np.ndarray:
+    def filter_posts(self, rids, groups) -> np.ndarray:
+        """AND chip groups over gathered post bodies; never union tag postings."""
+        if not groups or not rids.size:
+            return rids
+        starts = self.offsets[rids].astype(np.int64)
+        lengths = self.offsets[rids + 1].astype(np.int64) - starts
+        before = np.zeros(rids.size, dtype=np.int64)
+        np.cumsum(lengths[:-1], out=before[1:])
+        picks = np.repeat(starts - before, lengths) + np.arange(int(lengths.sum()), dtype=np.int64)
+        gathered = self.body[picks]
+        nonempty = lengths > 0
+        reduce_at = before[nonempty]
+        keep = np.ones(rids.size, dtype=bool)
+        for group in groups:
+            matched = np.ones(rids.size, dtype=bool)
+            for token in group["terms"]:
+                negate = token.startswith("-")
+                clean = token[1:] if negate else token
+                exact = clean.startswith("*")
+                clean = clean[1:] if exact else clean
+                key = (clean, exact)
+                tidmask = self._filter_masks.get(key)
+                if tidmask is None:
+                    tidmask = np.zeros(self.n_tags, dtype=bool)
+                    if exact:
+                        tid = self.resolve(clean)
+                        if tid is not None:
+                            tidmask[tid] = True
+                    else:
+                        tidmask = np.fromiter((clean in name for name in self._filter_names),
+                                              dtype=bool, count=self.n_tags)
+                    if len(self._filter_masks) >= 256:
+                        self._filter_masks.clear()
+                    self._filter_masks[key] = tidmask
+                hit = np.zeros(rids.size, dtype=bool)
+                if gathered.size:
+                    hit[nonempty] = np.logical_or.reduceat(tidmask[gathered], reduce_at)
+                matched &= ~hit if negate else hit
+            keep &= ~matched if group.get("invert", False) else matched
+        return rids[keep]
+
+    def posts_for(self, pins, *, exclude=None, ratings=None, persons=None, block=None, filters=None) -> np.ndarray:
         """이 조합(핀 전부 · 제외 없음 · 고른 분면 · 영구 제외 밖)에 맞는 게시물 rid(오름차순). 스테이징의 수 세기용."""
         wanted, unknown = self._resolve_many(pins)
         if unknown or not wanted:
@@ -398,7 +441,7 @@ class EventMapIndex:
         excluded, _ = self._resolve_many(exclude)
         excluded = [t for t in excluded if t not in wanted]
         rids = self._without(self._matching_posts(wanted, self._partition_filter(ratings, persons)), excluded)
-        return self._unblocked(rids, block)
+        return self.filter_posts(self._unblocked(rids, block), filters)
 
     def _matching_posts_relaxed(self, tids: list[int], parts: set[int] | None) -> np.ndarray:
         """핀 n개 중 **n-1개 이상**이 달린 게시물([-1 허용], 사용자 지시 2026-09-13).
@@ -769,7 +812,7 @@ class EventMapIndex:
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
 
     def sample(self, pins, *, exclude=None, ratings=None, persons=None, n=5,
-               include_color=False, seed=None, block=None) -> dict:
+               include_color=False, seed=None, block=None, filters=None) -> dict:
         """핀 전부를 포함하는 **실제 게시물**을 무작위로 골라 그 게시물의 태그 전체를 준다.
 
         Dev0714 Interactive 창 Quick Search 의 랜덤 프롬프트와 같은 동작이다. 돌려주는
@@ -808,7 +851,7 @@ class EventMapIndex:
             return out
         parts = self._partition_filter(ratings, persons)
         pool = self._matching_posts(wanted, parts) if wanted else self._live_posts(parts)
-        rids = self._unblocked(self._without(pool, excluded), block)
+        rids = self.filter_posts(self._unblocked(self._without(pool, excluded), block), filters)
         out["observed_posts"] = int(rids.size)
         if rids.size == 0:
             out["status"] = "no_match"

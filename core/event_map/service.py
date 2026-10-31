@@ -542,16 +542,20 @@ class EventMapService:
         if cache is None or cache.get("_idx") is not idx or cache.get("_text") != text:
             cache = {"_idx": idx, "_text": text}
             self._count_cache = cache
-        keys = [json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")])
-                for s in selections]
+        from core.event_map.library import filter_fingerprint, normalize_filters
+        groups = [normalize_filters(s.get("filters")) for s in selections]
+        keys = [json.dumps([sorted(s.get(k) or []) for k in ("pins", "exclude", "ratings", "persons")]
+                           + ([filter_fingerprint(g)] if g else []))
+                for s, g in zip(selections, groups)]
         on = [True] * len(selections) if active is None else [bool(a) for a in active]
         whole = ("total", tuple(sorted(k for k, a in zip(keys, on) if a)))   # 전체 = 켜진 조합만
         per, arrays = [], []
-        for key, s, a in zip(keys, selections, on):
+        for key, s, a, filters in zip(keys, selections, on, groups):
             rids = cache.get(key)
             if rids is None:
                 rids = idx.posts_for(s.get("pins") or [], exclude=s.get("exclude") or [],
-                                     ratings=set(s.get("ratings") or []), persons=set(s.get("persons") or []), block=block)
+                                     ratings=set(s.get("ratings") or []), persons=set(s.get("persons") or []), block=block,
+                                     **({"filters": filters} if filters else {}))
                 if len(cache) > 512:
                     cache.clear()
                     cache.update({"_idx": idx, "_text": text})
@@ -571,6 +575,24 @@ class EventMapService:
                 total = 0
             cache[whole] = total
         return {"per": per, "total": total, "sum": int(sum(n for n, a in zip(per, on) if a))}
+
+    def count_search(self, selections, active, terms) -> dict[str, Any]:
+        from core.event_map.library import normalize_terms, selection
+        terms = normalize_terms(terms, required=True)
+        selected = [selection(s) for s in selections]
+        idx = self.index()
+        block = self.permanent_block(idx, self.permanent_text())
+        on = [True] * len(selected) if active is None else active
+        mask = np.zeros(int(idx.offsets.size), dtype=bool)
+        per = []
+        for s, enabled in zip(selected, on):
+            rids = idx.posts_for(**s, block=block)
+            rids = idx.filter_posts(rids, [{"terms": terms, "invert": False}])
+            per.append(int(rids.size))
+            if enabled:
+                mask[rids] = True
+        return {"per": per, "total": int(np.count_nonzero(mask)),
+                "sum": int(sum(n for n, enabled in zip(per, on) if enabled)), "terms": terms}
 
     def permanent_state(self) -> dict[str, Any]:
         """영구 제외 글 + 색인에서 걸리는 태그(화면이 '걸린 태그 n개' 를 보여 준다). 색인이 없어도 글은 준다."""
@@ -917,12 +939,20 @@ class EventMapService:
             ]
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
-               persons: Any = None, n: Any = 5, seed: Any = None, permanent: bool = False) -> dict[str, Any]:
+               persons: Any = None, n: Any = 5, seed: Any = None, permanent: bool = False,
+               filters: Any = None) -> dict[str, Any]:
         """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다.
 
         핀이 없으면 분면(인원·등급) 전체에서 뽑는다([랜덤 프롬프트 할당] - 사용자 지정 2026-09-12 밤).
         `permanent` = 영구 제외를 건다(이벤트 맵 화면 · 랜덤 버튼 연결). Assist 는 걸지 않는다.
         """
+        from core.event_map.library import normalize_filters
+        if isinstance(filters, str):
+            try:
+                filters = json.loads(filters)
+            except ValueError as exc:
+                raise MapQueryError("bad_request", "찾기 조건 JSON을 확인해주세요.") from exc
+        filters = normalize_filters(filters)
         idx = self.index()
         wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
         excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="제외 태그",
@@ -936,7 +966,8 @@ class EventMapService:
             result = idx.sample(
                 wanted, exclude=excluded, ratings=want_r, persons=want_p,
                 n=self._count(n, 5, MAX_SAMPLES), include_color=False,
-                seed=seed_value, block=self.permanent_block(idx) if permanent else None)
+                seed=seed_value, block=self.permanent_block(idx) if permanent else None,
+                **({"filters": filters} if filters else {}))
         except ValueError as exc:
             raise MapQueryError("bad_request", str(exc)) from exc
         result["ok"] = True

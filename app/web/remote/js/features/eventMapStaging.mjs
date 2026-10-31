@@ -82,7 +82,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   const FIND_ENABLED = false;
   // 줄 검색(사용자 결정 2026-10-31): 펼친 줄의 [찾기] 로 여는 포함 · 제외 칩 칸 - 한 번에 한 줄.
   // rf = {id, inc, exc, m, seq, err} · rfOpen = 칸이 열린 줄 · rfText = 치던 글(다시 그려도 남게).
-  let rf = null, rfOpen = '', rfText = { inc: '', exc: '' };
+  let rf = null, rfOpen = '', rfText = { inc: '', exc: '' }, rfMenu = '';   // rfMenu = 퍼펙트 매칭 메뉴가 열린 칩 'inc:0'
   let acEl = null, acItems = [], acActive = -1, acFor = '', acTimer = 0, acSeq = 0;
   const rfFor = id => (rf && rf.id === id ? rf : null);
   const rfTerms = () => (rf ? [...rf.inc, ...rf.exc.map(t => `-${t}`)] : []);
@@ -118,17 +118,26 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     multiple_girls_multiple_boys: ['여다수 남다수', 'x'],
     '1boy_solo': ['남1 단독', 'm'], '1boy': ['남1', 'm'], '2boys': ['남2', 'm'], multiple_boys: ['남다수', 'm'], other: ['기타', 'o'],
   };
-  const metaHtml = s => {
+  const metaHtml = (s, withFilters = true) => {
     const ps = s.persons.map(p => { const [label, kind] = PERSON[p] || [p.replaceAll('_', ' '), 'o'];
       return `<span class="st-chip st-p-${kind}">${esc(label)}</span>`; }).join('');
     const rs = ['g', 's', 'q', 'e'].filter(r => s.ratings.includes(r))
       .map(r => `<span class="st-chip st-r-${r}">${r.toUpperCase()}</span>`).join('');
     // 분할로 얹힌 조건(사용자 지시 2026-10-31): 찾기 = 맞는 게시물만 · 빼기 = 맞는 게시물을 뺀 나머지.
-    const fs = (s.filters || []).map(g => g.invert
+    const fs = !withFilters ? '' : (s.filters || []).map(g => g.invert
       ? `<span class="st-chip st-f-out" title="이 조건에 맞는 게시물을 뺀 나머지(분할의 나머지 쪽)">빼기 ${esc((g.terms || []).join(', '))}</span>`
       : `<span class="st-chip st-f-in" title="이 조건에 맞는 게시물만(분할 · 만 남기기)">찾기 ${esc((g.terms || []).join(', '))}</span>`).join('');
     return `<span class="st-chips">${ps}${rs}${fs}</span>${s.exclude.length ? `<span class="st-ex">제외 ${esc(s.exclude.join(', '))}</span>` : ''}`;
   };
+  // 스테이징 줄은 분할 조건을 이름 뒤에 잇는다(사용자 지시 2026-10-31): 포함 = 하늘색 tag · 빼기 = 빨간 -tag.
+  // 뒤집힌 묶음은 한 태그면 부호만 바꾸고, 여럿이면 -(…) 로 통째 뺀다는 뜻을 남긴다.
+  const filterSuffix = filters => (filters || []).map(g => {
+    const terms = g.terms || [];
+    const one = (t, out) => `<span class="st-nf${out ? ' is-out' : ''}">${esc(out ? `-${t}` : t)}</span>`;
+    if (!g.invert) return terms.map(t => (t.startsWith('-') ? one(t.slice(1), true) : one(t, false))).join('');
+    if (terms.length === 1) return terms[0].startsWith('-') ? one(terms[0].slice(1), false) : one(terms[0], true);
+    return `<span class="st-nf is-out" title="이 조건 전체에 맞는 게시물을 뺀 나머지">-(${esc(terms.join(', '))})</span>`;
+  }).join('');
   // 접힌 줄에서도 추가 프롬프트가 있는 줄을 알아보게(켜져 있고 글이 있을 때만).
   const extraChip = (ex, label = '+ 추가') => (ex?.on && ex.text
     ? `<span class="st-chip st-xp" title="추가 프롬프트: ${esc(ex.text)}">${label}</span>` : '');
@@ -164,6 +173,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-find-hint { flex: 0 0 auto; padding: 2px 10px 6px; border-bottom: 1px solid var(--border-dim); font-size: 9.5px; color: var(--text-dim); }
 .st-count .st-hit, .st-total b.st-find-b { color: #7fd3ff; }
 .st-pick.is-miss .st-bd { opacity: 0.42; }
+.st-nf { margin-left: 6px; color: #8fd3ff; }
+.st-nf.is-out { color: #ff8fa3; }
+.st-rf-chip.is-exact { font-weight: 700; box-shadow: inset 0 0 0 1px currentColor; }
+.st-window .st-rf-chip button.st-rf-pm { margin-left: 4px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 8px; font-size: 9.5px; }
+.st-rf-chip[data-st-rf-chip] { cursor: pointer; }
 .st-chip.st-f-in { color: #9fd8ff; border-color: rgba(100,180,240,0.5); background: rgba(40,110,170,0.18); }
 .st-chip.st-f-out { color: #f2a9b8; border-color: rgba(240,130,150,0.5); background: rgba(170,50,80,0.16); }
 .st-window button.st-split { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
@@ -389,8 +403,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         aria-expanded="${openRow === r.id}" title="${openRow === r.id ? '' : '눌러서 랜덤 · 랜덤+생성 · 맵에서 열기 · 제외 · 추가 프롬프트'}">
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
-        <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}</span>${countHtml(r)}</div>
-        <div class="st-meta">${metaHtml(r.selection)}${extraChip(r.extra)}</div>
+        <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}${filterSuffix(r.selection.filters)}</span>${countHtml(r)}</div>
+        <div class="st-meta">${metaHtml(r.selection, false)}${extraChip(r.extra)}</div>
         </div>
         ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
       </div>`).join('')
@@ -604,6 +618,16 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     const rx = t.closest('[data-st-rf-x]');
     if (rx && rf?.id === id) { const [kind, i] = rx.dataset.stRfX.split(':'); rf[kind].splice(Number(i), 1); rfChanged(); return; }
+    const pm = t.closest('[data-st-rf-exact]');
+    if (pm && rf?.id === id) {
+      const [kind, i] = pm.dataset.stRfExact.split(':'), cur = rf[kind][Number(i)] || '';
+      const next = cur.startsWith('*') ? cur.slice(1) : `*${cur}`;
+      if (rf[kind].includes(next)) rf[kind].splice(Number(i), 1); else rf[kind][Number(i)] = next;   // 이미 있는 짝이면 하나로
+      rfChanged();
+      return;
+    }
+    const chipEl = t.closest('[data-st-rf-chip]');
+    if (chipEl && rf?.id === id) { rfMenu = rfMenu === chipEl.dataset.stRfChip ? '' : chipEl.dataset.stRfChip; paintBody(); return; }
     if (t.closest('.st-rf-inp') && !t.closest('button')) { t.closest('.st-rf-inp').querySelector('input')?.focus(); return; }
     const rfRand = t.closest('[data-st-rf-random], [data-st-rf-random-gen]');
     if (rfRand && stagedRow && rf?.id === id && rfTerms().length) {
@@ -681,8 +705,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   // 맞음 줄의 [랜덤] · [랜덤+생성] 은 줄을 바꾸지 않고 그 조건으로 뽑기만 한다.
   function rfHtml(r) {
     const s = rfFor(r.id) || { inc: [], exc: [], m: null, err: '' }, n = counts?.per?.[r.id];
-    const chips = (list, kind) => list.map((tag, i) => `<span class="st-rf-chip${kind === 'exc' ? ' is-ex' : ''}">${esc(tag)}<button type="button"
-      data-st-rf-x="${kind}:${i}" aria-label="${esc(tag)} 지우기">×</button></span>`).join('');
+    // 칩을 누르면 [퍼펙트 매칭 적용 · 해제] - Quick Filter 칩과 같은 손버릇(*tag = 그 태그와 정확히 같을 때만)
+    const chips = (list, kind) => list.map((tag, i) => {
+      const key = `${kind}:${i}`, exact = tag.startsWith('*');
+      return `<span class="st-rf-chip${kind === 'exc' ? ' is-ex' : ''}${exact ? ' is-exact' : ''}" data-st-rf-chip="${key}"
+        title="${exact ? '퍼펙트 매칭 - 눌러서 해제' : '눌러서 퍼펙트 매칭(*) - 이름에 들어 있으면 맞는 지금 대신 정확히 같은 태그만'}">${esc(tag)}${rfMenu === key
+        ? `<button type="button" class="st-rf-pm" data-st-rf-exact="${key}">${exact ? '퍼펙트 매칭 해제' : '퍼펙트 매칭 적용'}</button>` : ''}<button type="button"
+        data-st-rf-x="${key}" aria-label="${esc(tag)} 지우기">×</button></span>`;
+    }).join('');
     const bar = (kind, label, ph) => `<div class="st-rf-bar"><span class="st-rf-lb">${label}</span><div class="st-rf-inp">${chips(s[kind], kind)}<input
       data-st-rf-in="${kind}" placeholder="${ph}" spellcheck="false" autocomplete="off" aria-label="${label}할 태그"></div></div>`;
     const has = s.inc.length + s.exc.length > 0, m = s.m;
@@ -714,6 +744,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   }
   function rfChanged() {
     if (!rf) return;
+    rfMenu = '';   // 칩 순서가 바뀌었을 수 있다
     rf.m = null; rf.err = '';
     paintBody();
     void runRowFind();

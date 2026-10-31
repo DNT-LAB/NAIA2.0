@@ -581,7 +581,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 
   async function onClick(event) {
     const t = event.target;
-    if (temp && !t.closest('.st-tmp')) return;   // 임시 분할 중에는 커밋 · 버림 · 남길 쪽 고르기만
+    if (temp && !t.closest('.st-tmp')) return;   // 임시 분할 중에는 커밋 · 취소 · 남길 쪽 고르기만
     const tb = t.closest('[data-st-tab]');
     if (tb) { tab = tb.dataset.stTab; renaming = ''; openRow = ''; closeMenu(); closeOpt(); paint(); return; }
     if (t.closest('[data-st-opt]')) { if (optOpen) closeOpt(); else openOpt(t.closest('[data-st-opt]')); return; }
@@ -721,7 +721,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const msg = !tp.a && !tp.b ? '하나는 켜야 커밋할 수 있습니다' : tp.a && tp.b ? '커밋하면 두 줄로 나뉩니다' : `커밋하면 ${fmtN(keep)} / ${fmtN(n)}`;
     return `<div class="st-tmp">${sub('a', `찾기 ${label}`, tp.m)}${sub('b', '나머지', n - tp.m)}
       <div class="st-tmp-bar"><span>${esc(msg)}</span><button type="button" class="is-primary" data-st-tmp-commit ${tp.a || tp.b ? '' : 'disabled'}>커밋</button><button
-        type="button" data-st-tmp-drop title="분할 전 그대로 둡니다">버림</button></div></div>`;
+        type="button" data-st-tmp-drop title="줄은 그대로 두고 검색 칸으로 돌아갑니다(칩은 남습니다)">취소</button></div></div>`;
   }
   async function commitTemp() {
     const tp = temp, label = tp.terms.join(', ');

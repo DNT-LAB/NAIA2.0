@@ -82,8 +82,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   const FIND_ENABLED = false;
   // 줄 검색(사용자 결정 2026-10-31): 펼친 줄의 [찾기] 로 여는 포함 · 제외 칩 칸 - 한 번에 한 줄.
   // rf = {id, inc, exc, m, seq, err} · rfOpen = 칸이 열린 줄 · rfText = 치던 글(다시 그려도 남게).
-  // temp = [분할] · [제거] 의 임시 상태 {id, terms, m, n, sel: 고른 갈래 'a'(찾기) | 'b'(나머지) | null, fp} - 화면에만 있고 서버에 쓰지 않는다.
-  let rf = null, rfOpen = '', rfText = { inc: '', exc: '' }, temp = null;
+  let rf = null, rfOpen = '', rfText = { inc: '', exc: '' };
   let acEl = null, acItems = [], acActive = -1, acFor = '', acTimer = 0, acSeq = 0;
   const rfFor = id => (rf && rf.id === id ? rf : null);
   const rfTerms = () => (rf ? [...rf.inc, ...rf.exc.map(t => `-${t}`)] : []);
@@ -169,7 +168,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-chip.st-f-out { color: #f2a9b8; border-color: rgba(240,130,150,0.5); background: rgba(170,50,80,0.16); }
 .st-window button.st-split { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
 .st-window button.st-rf-btn.is-on { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
-.st-rf, .st-tmp { flex: 1 0 100%; margin-top: 7px; padding-top: 7px; border-top: 1px dashed rgba(139,118,255,0.32); cursor: default; }
+.st-rf { flex: 1 0 100%; margin-top: 7px; padding-top: 7px; border-top: 1px dashed rgba(139,118,255,0.32); cursor: default; }
 .st-rf-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 .st-rf-lb { flex: 0 0 26px; font-size: 9.5px; color: var(--text-dim); }
 .st-rf-inp { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 24px; box-sizing: border-box;
@@ -181,22 +180,12 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   color: #9fd8ff; background: rgba(40,110,170,0.22); border: 1px solid rgba(100,180,240,0.45); }
 .st-rf-chip.is-ex { color: #f2a9b8; background: rgba(170,50,80,0.18); border-color: rgba(240,130,150,0.45); }
 .st-window .st-rf-chip button { height: auto; min-height: 0; padding: 0 4px; border: 0; background: transparent; color: inherit; font-size: 11px; line-height: 1; }
-.st-rf-sum, .st-tmp-bar { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 10.5px; }
-.st-rf-sum > span, .st-tmp-bar > span { flex: 1; min-width: 0; color: var(--text-dim); }
-.st-rf-sum b { color: #7fd3ff; font-family: var(--font-mono); font-weight: 600; }
-.st-rf-sum i { margin-left: 6px; font-style: normal; }
-.st-tmp-row { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border: 1px solid transparent; border-radius: 5px; font-size: 11px; cursor: pointer; }
-.st-tmp-row:hover { background: rgba(255,255,255,0.04); }
-.st-tmp-row.is-sel { background: rgba(141,123,214,0.16); border-color: rgba(141,123,214,0.6); }
-.st-window button.st-tmp-discard { color: #f0a0a0; border-color: rgba(240,130,150,0.55); }
-.st-tmp-tag { flex: 0 0 auto; font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 3px; color: #1a1a1a; background: #f5dc8a; }
-.st-tmp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: #f5dc8a; }
-.st-tmp-n { flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
-.st-tmp-bar { padding-top: 6px; border-top: 1px dashed rgba(245,220,138,0.4); }
-.st-tmp-bar > span { color: #f5dc8a; }
-.st-temp-mode .st-link, .st-temp-mode .st-presets, .st-temp-mode .st-tabs, .st-temp-mode .st-foot,
-.st-temp-mode .st-pick:not(.is-temp-row) { opacity: 0.38; pointer-events: none; }
-.st-temp-mode .st-pick.is-temp-row > .st-sw { opacity: 0.4; pointer-events: none; }`;
+.st-rf-br { display: flex; align-items: center; gap: 5px; margin-top: 5px; font-size: 10.5px; }
+.st-rf-bn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.st-rf-bn code { font-family: var(--font-mono); color: #f5dc8a; }
+.st-rf-br b { min-width: 46px; text-align: right; color: #7fd3ff; font-family: var(--font-mono); font-weight: 600; }
+.st-rf-why { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); }
+`;
     document.head.append(style);
   }
 
@@ -246,7 +235,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', event => {
       const chip = event.target.closest('[data-st-preset]');
-      if (!chip || temp) return;
+      if (!chip) return;
       event.preventDefault();
       openPresetMenu(chip.dataset.stPreset, chip);
     });
@@ -365,7 +354,6 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   function paintBody() {
     const body = panel.body.querySelector('.st-body'), foot = panel.body.querySelector('.st-foot');
     panel.body.inert = busy > 0;
-    panel.body.classList.toggle('st-temp-mode', !!temp && tab === 'stage');   // 임시 분할 중 = 다른 줄 · 프리셋 · 탭 · 발줄 잠금
     if (tab === 'stage') { paintStage(body, foot); return; }
     paintSavedTab(body, foot);
   }
@@ -385,7 +373,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     // 줄 검색 칸은 다시 그리면 새 칸이다 - 치던 칸이면 다 그린 뒤 초점 · 글을 돌려준다.
     const rfFocusKind = document.activeElement?.matches?.('[data-st-rf-in]') ? document.activeElement.dataset.stRfIn : '';
     // 줄 검색의 맞는 수는 칸이 열린 줄(또는 임시 분할 중인 줄)에만 - 접은 줄에 남은 수는 헷갈린다.
-    const hit = r => findResult?.per?.[r.id] ?? ((rfOpen === r.id || temp?.id === r.id) ? (rfFor(r.id)?.m ?? undefined) : undefined);
+    const hit = r => findResult?.per?.[r.id] ?? (rfOpen === r.id ? (rfFor(r.id)?.m ?? undefined) : undefined);
     const countHtml = r => {
       const n = counts?.per?.[r.id], m = hit(r);
       if (n == null && m == null) return '';
@@ -397,14 +385,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       return `<button type="button" class="st-rf-btn${lit ? ' is-on' : ''}" data-st-rf aria-expanded="${rfOpen === r.id}"
         title="이 조합 안에서 태그로 찾아 [제거] · [분할] 합니다">찾기 ${rfOpen === r.id ? '▴' : '▾'}</button>`;
     };
-    const rowsHtml = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}${hit(r) === 0 ? ' is-miss' : ''}${temp?.id === r.id ? ' is-temp-row' : ''}" data-st-id="${esc(r.id)}" data-st-pick
+    const rowsHtml = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}${hit(r) === 0 ? ' is-miss' : ''}" data-st-id="${esc(r.id)}" data-st-pick
         aria-expanded="${openRow === r.id}" title="${openRow === r.id ? '' : '눌러서 랜덤 · 랜덤+생성 · 맵에서 열기 · 제외 · 추가 프롬프트'}">
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
         <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}</span>${countHtml(r)}</div>
         <div class="st-meta">${metaHtml(r.selection)}${extraChip(r.extra)}</div>
         </div>
-        ${openRow !== r.id ? '' : temp?.id === r.id ? tempHtml() : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
+        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
       </div>`).join('')
       : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
     // 하단 = 공통 추가 프롬프트(켜기 · 끄기 - 꺼도 글은 남는다) + [통째로 저장] [비우기] ...... [옵션]
@@ -580,7 +568,6 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 
   async function onClick(event) {
     const t = event.target;
-    if (temp && !t.closest('.st-tmp')) return;   // 임시 분할 중에는 갈래 고르기 · 분할 · 버림 · 취소만
     const tb = t.closest('[data-st-tab]');
     if (tb) { tab = tb.dataset.stTab; renaming = ''; openRow = ''; closeMenu(); closeOpt(); paint(); return; }
     if (t.closest('[data-st-opt]')) { if (optOpen) closeOpt(); else openOpt(t.closest('[data-st-opt]')); return; }
@@ -618,19 +605,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const rx = t.closest('[data-st-rf-x]');
     if (rx && rf?.id === id) { const [kind, i] = rx.dataset.stRfX.split(':'); rf[kind].splice(Number(i), 1); rfChanged(); return; }
     if (t.closest('.st-rf-inp') && !t.closest('button')) { t.closest('.st-rf-inp').querySelector('input')?.focus(); return; }
-    const rfAct = t.closest('[data-st-rf-split], [data-st-rf-remove]');
-    if (rfAct && stagedRow && rf?.id === id && rf.m != null) {
-      const split = rfAct.hasAttribute('data-st-rf-split');
-      // [분할] = 아무것도 안 고른 채 · [제거] = 찾기 쪽을 고른 채(곧 [버림]) - 같은 임시 화면(사용자 결정 2026-10-31)
-      temp = { id, terms: rfTerms(), m: rf.m, n: counts?.per?.[id], sel: split ? null : 'a', fp: fingerprint(stagedRow.selection) };
-      closeAc(); paint();
+    const rfRand = t.closest('[data-st-rf-random], [data-st-rf-random-gen]');
+    if (rfRand && stagedRow && rf?.id === id && rfTerms().length) {
+      // 맞음 줄 랜덤 = 그 줄 조합 + 지금 칩(찾기 한 묶음) · 추가 프롬프트는 그 줄 것(사용자 결정 2026-10-31)
+      const sel = { ...stagedRow.selection, filters: [...(stagedRow.selection.filters || []), { terms: rfTerms(), invert: false }] };
+      await run(() => randomFrom(sel, rfRand.hasAttribute('data-st-rf-random-gen'), { stagingId: id }), { readsExtras: true });
       return;
     }
-    const pickPart = t.closest('[data-st-tmp-pick]');
-    if (pickPart && temp) { const k = pickPart.dataset.stTmpPick; temp.sel = temp.sel === k ? null : k; paintBody(); return; }
-    if (t.closest('[data-st-tmp-drop]') && temp) { temp = null; paint(); return; }
-    if (t.closest('[data-st-tmp-split]') && temp) { await commitTemp('split'); return; }
-    if (t.closest('[data-st-tmp-discard]') && temp) { await commitTemp('discard'); return; }
+    if (t.closest('[data-st-rf-split]') && stagedRow && rf?.id === id && rf.m != null) { await splitRow(id); return; }
     if (t.closest('[data-st-toggle]') && stagedRow) {
       await run(async () => applyStaging(await request('/api/event-map/staging',
         { action: 'toggle', id, enabled: stagedRow.enabled === false })));
@@ -677,7 +659,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     // 스테이징 줄 펼치기 · 접기(단추 · 추가 프롬프트 칸을 누른 것이 아닐 때)
     const pick = t.closest('[data-st-pick]');
-    if (pick && !t.closest('button, input, .st-extra, .st-rf, .st-tmp')) {
+    if (pick && !t.closest('button, input, .st-extra, .st-rf')) {
       openRow = openRow === id ? '' : id;
       if (tab === 'saved') { closeMenu(); paintSavedList(); } else paintBody();
       return;
@@ -693,9 +675,10 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       if (menuFor === id) closeMenu(); else openMenu(savedRow, t.closest('[data-st-more]'));
     }
   }
-  // ── 줄 검색 · 임시 분할(사용자 결정 2026-10-31) ─────────────────────────────
-  // Quick Filter 처럼 포함 · 제외 칩. 칩이 바뀌면 그 줄만 서버에 센다. [제거] · [분할] 은 곧바로 바꾸지 않고
-  // 임시 두 갈래(찾기 / 나머지)를 보여 준 뒤 [분할] = 두 줄 · 하나를 골라 [버림] = 그쪽을 뺀다(이 둘만 서버에 쓴다) · [취소] = 그대로.
+  // ── 줄 검색 · 분할(사용자 결정 2026-10-31) ─────────────────────────────────
+  // Quick Filter 처럼 포함 · 제외 칩. 칩이 바뀌면 그 줄만 서버에 센다. 아래 두 갈래(맞음 / 나머지)를 늘 보여 주고
+  // 서버에 쓰는 것은 [분할](두 줄) 하나뿐 - 필요 없는 쪽은 사용자가 줄 스위치 · [제외] 로 정리한다(버림 · 남기기는 없앴다).
+  // 맞음 줄의 [랜덤] · [랜덤+생성] 은 줄을 바꾸지 않고 그 조건으로 뽑기만 한다.
   function rfHtml(r) {
     const s = rfFor(r.id) || { inc: [], exc: [], m: null, err: '' }, n = counts?.per?.[r.id];
     const chips = (list, kind) => list.map((tag, i) => `<span class="st-rf-chip${kind === 'exc' ? ' is-ex' : ''}">${esc(tag)}<button type="button"
@@ -707,47 +690,27 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const why = !has ? '태그를 넣으면 이 조합 안에서 셉니다 - 쉼표 · Enter 로 칩'
       : s.err ? `찾지 못했습니다 — ${s.err}` : m == null ? '세는 중…' : m === 0 ? '맞는 게시물이 없습니다'
         : n != null && m === n ? '모두 맞습니다 - 나눌 것이 없습니다' : '';
-    return `<div class="st-rf">${bar('inc', '포함', '태그 - 자동완성 · *정확히')}${bar('exc', '제외', '태그')}
-      <div class="st-rf-sum"><span>${has && m != null && !s.err ? `맞음 <b>${fmtN(m)}</b>${n != null ? ` / ${fmtN(n)}` : ''}` : ''}${why ? `<i>${esc(why)}</i>` : ''}</span>
-      <button type="button" data-st-rf-remove ${can ? '' : 'disabled'} title="찾기 쪽을 고른 임시 화면을 엽니다 - [버림] 해야 바뀝니다">제거</button>
-      <button type="button" data-st-rf-split ${can ? '' : 'disabled'} title="맞는 것 / 나머지 두 갈래를 임시로 보여 줍니다 - [분할] · [버림] 해야 바뀝니다">분할</button></div></div>`;
+    const shown = has && m != null && !s.err;
+    const branches = !shown ? '' : `<div class="st-rf-br"><span class="st-rf-bn">맞음 <code>${esc(rfTerms().join(', '))}</code></span><b>${fmtN(m)}</b><button
+        type="button" data-st-rf-random ${m > 0 ? '' : 'disabled'} title="맞는 게시물에서 하나를 뽑아 프롬프트에 넣습니다 - 줄은 그대로">랜덤</button><button
+        type="button" class="is-primary" data-st-rf-random-gen ${m > 0 ? '' : 'disabled'}>랜덤+생성</button></div>
+      <div class="st-rf-br"><span class="st-rf-bn">나머지</span><b>${n != null ? fmtN(n - m) : '…'}</b><button type="button" data-st-rf-split ${can ? '' : 'disabled'}
+        title="맞음 / 나머지 두 줄로 나눕니다 - 필요 없는 쪽은 스위치로 끄거나 [제외]">분할</button></div>`;
+    return `<div class="st-rf">${bar('inc', '포함', '태그 - 자동완성 · *정확히')}${bar('exc', '제외', '태그')}${branches}
+      ${why ? `<div class="st-rf-why">${esc(why)}</div>` : ''}</div>`;
   }
-  function tempHtml() {
-    // 줄은 한 번에 하나만 고른다(사용자 결정 2026-10-31). [분할] = 두 줄로 · [버림] = 고른 쪽을 빼고 다른 쪽만 남김 · [취소] = 그대로.
-    const tp = temp, label = tp.terms.join(', '), n = tp.n ?? tp.m;
-    const sub = (k, name, count) => `<div class="st-tmp-row${tp.sel === k ? ' is-sel' : ''}" data-st-tmp-pick="${k}" role="option"
-      aria-selected="${tp.sel === k}" title="눌러서 고르기 - 고른 쪽을 [버림] 할 수 있습니다"><span class="st-tmp-tag">임시</span><span
-      class="st-tmp-name">${esc(name)}</span><span class="st-tmp-n">${fmtN(count)}</span></div>`;
-    const left = tp.sel === 'a' ? n - tp.m : tp.m;
-    const msg = !tp.sel ? '줄을 고르면 [버림] - 고른 쪽을 빼고 다른 쪽만 남깁니다'
-      : `버림: ${tp.sel === 'a' ? `찾기 ${label}` : '나머지'} 를 빼면 ${fmtN(left)} / ${fmtN(n)}`;
-    return `<div class="st-tmp" role="listbox">${sub('a', `찾기 ${label}`, tp.m)}${sub('b', '나머지', n - tp.m)}
-      <div class="st-tmp-bar"><span>${esc(msg)}</span><button type="button" class="is-primary" data-st-tmp-split title="찾기 / 나머지 두 줄로 나눕니다">분할</button><button
-        type="button" class="st-tmp-discard" data-st-tmp-discard ${tp.sel ? '' : 'disabled'} title="고른 쪽을 빼고 다른 쪽만 남깁니다">버림</button><button
-        type="button" data-st-tmp-drop title="줄은 그대로 두고 검색 칸으로 돌아갑니다(칩은 남습니다)">취소</button></div></div>`;
-  }
-  /** how = 'split'(두 줄) | 'discard'(고른 쪽을 뺀다 - 찾기를 고르면 맞는 것을 빼고, 나머지를 고르면 맞는 것만 남긴다). */
-  async function commitTemp(how) {
-    const tp = temp, label = tp.terms.join(', ');
-    if (how === 'discard' && !tp.sel) return;
-    const body = how === 'split' ? { action: 'split', id: tp.id, terms: tp.terms }
-      : { action: 'narrow', id: tp.id, terms: tp.terms, invert: tp.sel === 'a' };
+  async function splitRow(id) {
+    const terms = rfTerms(), label = terms.join(', ');
     await run(async () => {
-      const data = await request('/api/event-map/staging', body);
-      temp = null; rf = null; rfOpen = ''; rfText = { inc: '', exc: '' };
-      if (body.action === 'split') openRow = '';
+      const data = await request('/api/event-map/staging', { action: 'split', id, terms });
+      rf = null; rfOpen = ''; rfText = { inc: '', exc: '' }; openRow = ''; closeAc();
       applyStaging(data);
-      toast(body.action === 'split' ? `두 줄로 나눴습니다 - '${label}' 맞는 것 / 나머지`
-        : tp.sel === 'b' ? `'${label}' 에 맞는 것만 남겼습니다` : `'${label}' 에 맞는 것을 뺐습니다`, 'success');
+      toast(`두 줄로 나눴습니다 - '${label}' 맞는 것 / 나머지`, 'success');
     });
   }
-  /** 목록을 새로 받았다 - 줄이 없어졌거나 조건이 바뀌었으면 검색 · 임시 분할을 내려놓는다. */
+  /** 목록을 새로 받았다 - 줄이 없어졌으면 검색을 내려놓는다. */
   function syncRowFind() {
     if (rf && !staged.some(r => r.id === rf.id)) { rf = null; rfOpen = ''; rfText = { inc: '', exc: '' }; closeAc(); }
-    if (temp) {
-      const row = staged.find(r => r.id === temp.id);
-      if (!row || fingerprint(row.selection) !== temp.fp) { temp = null; toast('조합이 바뀌어 임시 분할을 버렸습니다', 'info'); }
-    }
   }
   function rfChanged() {
     if (!rf) return;

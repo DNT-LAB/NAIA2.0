@@ -785,7 +785,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (acEl && !acEl.hidden && acFor === kind && acItems.length) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        acActive = (acActive + (event.key === 'ArrowDown' ? 1 : -1) + acItems.length) % acItems.length;
+        acActive = acActive < 0 ? (event.key === 'ArrowDown' ? 0 : acItems.length - 1)
+          : (acActive + (event.key === 'ArrowDown' ? 1 : -1) + acItems.length) % acItems.length;
         paintAc(el);
         return;
       }
@@ -806,7 +807,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       try {
         const body = await request(`/api/event-map/suggest?${new URLSearchParams({ q, limit: '8' })}`);
         if (mine !== acSeq) return;
-        acItems = body.items || []; acActive = acItems.length ? 0 : -1; acFor = kind;
+        // 처음엔 아무것도 고르지 않는다 - Enter 는 친 글자 그대로(사용자 제보 2026-10-31: boy -> boy on top). 화살표로 골라야 후보.
+        acItems = body.items || []; acActive = -1; acFor = kind;
       } catch { if (mine === acSeq) { acItems = []; acActive = -1; } }
       const live = panel?.body.querySelector(`[data-st-rf-in="${kind}"]`);
       if (live && document.activeElement === live) paintAc(live); else closeAc();

@@ -82,7 +82,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   const FIND_ENABLED = false;
   // 줄 검색(사용자 결정 2026-10-31): 펼친 줄의 [찾기] 로 여는 포함 · 제외 칩 칸 - 한 번에 한 줄.
   // rf = {id, inc, exc, m, seq, err} · rfOpen = 칸이 열린 줄 · rfText = 치던 글(다시 그려도 남게).
-  // temp = [분할] · [제거] 의 임시 상태 {id, terms, m, n, a: 찾기 남김, b: 나머지 남김, fp} - 화면에만 있고 서버에 쓰지 않는다.
+  // temp = [분할] · [제거] 의 임시 상태 {id, terms, m, n, sel: 고른 갈래 'a'(찾기) | 'b'(나머지) | null, fp} - 화면에만 있고 서버에 쓰지 않는다.
   let rf = null, rfOpen = '', rfText = { inc: '', exc: '' }, temp = null;
   let acEl = null, acItems = [], acActive = -1, acFor = '', acTimer = 0, acSeq = 0;
   const rfFor = id => (rf && rf.id === id ? rf : null);
@@ -185,11 +185,10 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-rf-sum > span, .st-tmp-bar > span { flex: 1; min-width: 0; color: var(--text-dim); }
 .st-rf-sum b { color: #7fd3ff; font-family: var(--font-mono); font-weight: 600; }
 .st-rf-sum i { margin-left: 6px; font-style: normal; }
-.st-tmp-row { display: flex; align-items: center; gap: 7px; padding: 3px 0 3px 4px; font-size: 11px; }
-.st-tmp-row.is-off .st-tmp-name, .st-tmp-row.is-off .st-tmp-n { opacity: 0.4; text-decoration: line-through; }
-.st-window button.st-tmp-dot { flex: 0 0 auto; width: 12px; height: 12px; min-height: 0; padding: 0; border-radius: 50%;
-  border: 1px solid rgba(139,118,255,0.85); background: rgba(139,118,255,0.85); }
-.st-window button.st-tmp-dot[aria-pressed="false"] { background: transparent; }
+.st-tmp-row { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border: 1px solid transparent; border-radius: 5px; font-size: 11px; cursor: pointer; }
+.st-tmp-row:hover { background: rgba(255,255,255,0.04); }
+.st-tmp-row.is-sel { background: rgba(141,123,214,0.16); border-color: rgba(141,123,214,0.6); }
+.st-window button.st-tmp-discard { color: #f0a0a0; border-color: rgba(240,130,150,0.55); }
 .st-tmp-tag { flex: 0 0 auto; font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 3px; color: #1a1a1a; background: #f5dc8a; }
 .st-tmp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); color: #f5dc8a; }
 .st-tmp-n { flex: 0 0 auto; font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); }
@@ -581,7 +580,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 
   async function onClick(event) {
     const t = event.target;
-    if (temp && !t.closest('.st-tmp')) return;   // 임시 분할 중에는 커밋 · 취소 · 남길 쪽 고르기만
+    if (temp && !t.closest('.st-tmp')) return;   // 임시 분할 중에는 갈래 고르기 · 분할 · 버림 · 취소만
     const tb = t.closest('[data-st-tab]');
     if (tb) { tab = tb.dataset.stTab; renaming = ''; openRow = ''; closeMenu(); closeOpt(); paint(); return; }
     if (t.closest('[data-st-opt]')) { if (optOpen) closeOpt(); else openOpt(t.closest('[data-st-opt]')); return; }
@@ -622,15 +621,16 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const rfAct = t.closest('[data-st-rf-split], [data-st-rf-remove]');
     if (rfAct && stagedRow && rf?.id === id && rf.m != null) {
       const split = rfAct.hasAttribute('data-st-rf-split');
-      // [분할] = 찾기 쪽만 켠 채 · [제거] = 나머지 쪽만 켠 채 - 같은 임시 화면(사용자 결정 2026-10-31)
-      temp = { id, terms: rfTerms(), m: rf.m, n: counts?.per?.[id], a: split, b: !split, fp: fingerprint(stagedRow.selection) };
+      // [분할] = 아무것도 안 고른 채 · [제거] = 찾기 쪽을 고른 채(곧 [버림]) - 같은 임시 화면(사용자 결정 2026-10-31)
+      temp = { id, terms: rfTerms(), m: rf.m, n: counts?.per?.[id], sel: split ? null : 'a', fp: fingerprint(stagedRow.selection) };
       closeAc(); paint();
       return;
     }
-    const dot = t.closest('[data-st-tmp]');
-    if (dot && temp) { temp[dot.dataset.stTmp] = !temp[dot.dataset.stTmp]; paintBody(); return; }
+    const pickPart = t.closest('[data-st-tmp-pick]');
+    if (pickPart && temp) { const k = pickPart.dataset.stTmpPick; temp.sel = temp.sel === k ? null : k; paintBody(); return; }
     if (t.closest('[data-st-tmp-drop]') && temp) { temp = null; paint(); return; }
-    if (t.closest('[data-st-tmp-commit]') && temp) { await commitTemp(); return; }
+    if (t.closest('[data-st-tmp-split]') && temp) { await commitTemp('split'); return; }
+    if (t.closest('[data-st-tmp-discard]') && temp) { await commitTemp('discard'); return; }
     if (t.closest('[data-st-toggle]') && stagedRow) {
       await run(async () => applyStaging(await request('/api/event-map/staging',
         { action: 'toggle', id, enabled: stagedRow.enabled === false })));
@@ -695,7 +695,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   }
   // ── 줄 검색 · 임시 분할(사용자 결정 2026-10-31) ─────────────────────────────
   // Quick Filter 처럼 포함 · 제외 칩. 칩이 바뀌면 그 줄만 서버에 센다. [제거] · [분할] 은 곧바로 바꾸지 않고
-  // 임시 두 갈래(찾기 / 나머지)를 보여 준 뒤 [커밋] 때 서버에 쓴다 - 찾기만 = 남기기 · 나머지만 = 빼기 · 둘 다 = 두 줄.
+  // 임시 두 갈래(찾기 / 나머지)를 보여 준 뒤 [분할] = 두 줄 · 하나를 골라 [버림] = 그쪽을 뺀다(이 둘만 서버에 쓴다) · [취소] = 그대로.
   function rfHtml(r) {
     const s = rfFor(r.id) || { inc: [], exc: [], m: null, err: '' }, n = counts?.per?.[r.id];
     const chips = (list, kind) => list.map((tag, i) => `<span class="st-rf-chip${kind === 'exc' ? ' is-ex' : ''}">${esc(tag)}<button type="button"
@@ -709,31 +709,36 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         : n != null && m === n ? '모두 맞습니다 - 나눌 것이 없습니다' : '';
     return `<div class="st-rf">${bar('inc', '포함', '태그 - 자동완성 · *정확히')}${bar('exc', '제외', '태그')}
       <div class="st-rf-sum"><span>${has && m != null && !s.err ? `맞음 <b>${fmtN(m)}</b>${n != null ? ` / ${fmtN(n)}` : ''}` : ''}${why ? `<i>${esc(why)}</i>` : ''}</span>
-      <button type="button" data-st-rf-remove ${can ? '' : 'disabled'} title="맞는 게시물을 뺀 모습을 임시로 보여 줍니다 - 커밋해야 바뀝니다">제거</button>
-      <button type="button" data-st-rf-split ${can ? '' : 'disabled'} title="맞는 것 / 나머지 두 갈래를 임시로 보여 줍니다 - 커밋해야 바뀝니다">분할</button></div></div>`;
+      <button type="button" data-st-rf-remove ${can ? '' : 'disabled'} title="찾기 쪽을 고른 임시 화면을 엽니다 - [버림] 해야 바뀝니다">제거</button>
+      <button type="button" data-st-rf-split ${can ? '' : 'disabled'} title="맞는 것 / 나머지 두 갈래를 임시로 보여 줍니다 - [분할] · [버림] 해야 바뀝니다">분할</button></div></div>`;
   }
   function tempHtml() {
+    // 줄은 한 번에 하나만 고른다(사용자 결정 2026-10-31). [분할] = 두 줄로 · [버림] = 고른 쪽을 빼고 다른 쪽만 남김 · [취소] = 그대로.
     const tp = temp, label = tp.terms.join(', '), n = tp.n ?? tp.m;
-    const sub = (k, name, count) => `<div class="st-tmp-row${tp[k] ? '' : ' is-off'}"><button type="button" class="st-tmp-dot" data-st-tmp="${k}"
-      aria-pressed="${tp[k]}" aria-label="${esc(name)} 남기기" title="${tp[k] ? '커밋하면 남습니다 - 눌러서 빼기' : '커밋하면 빠집니다 - 눌러서 남기기'}"></button><span
-      class="st-tmp-tag">임시</span><span class="st-tmp-name">${esc(name)}</span><span class="st-tmp-n">${fmtN(count)}</span></div>`;
-    const keep = (tp.a ? tp.m : 0) + (tp.b ? n - tp.m : 0);
-    const msg = !tp.a && !tp.b ? '하나는 켜야 커밋할 수 있습니다' : tp.a && tp.b ? '커밋하면 두 줄로 나뉩니다' : `커밋하면 ${fmtN(keep)} / ${fmtN(n)}`;
-    return `<div class="st-tmp">${sub('a', `찾기 ${label}`, tp.m)}${sub('b', '나머지', n - tp.m)}
-      <div class="st-tmp-bar"><span>${esc(msg)}</span><button type="button" class="is-primary" data-st-tmp-commit ${tp.a || tp.b ? '' : 'disabled'}>커밋</button><button
+    const sub = (k, name, count) => `<div class="st-tmp-row${tp.sel === k ? ' is-sel' : ''}" data-st-tmp-pick="${k}" role="option"
+      aria-selected="${tp.sel === k}" title="눌러서 고르기 - 고른 쪽을 [버림] 할 수 있습니다"><span class="st-tmp-tag">임시</span><span
+      class="st-tmp-name">${esc(name)}</span><span class="st-tmp-n">${fmtN(count)}</span></div>`;
+    const left = tp.sel === 'a' ? n - tp.m : tp.m;
+    const msg = !tp.sel ? '줄을 고르면 [버림] - 고른 쪽을 빼고 다른 쪽만 남깁니다'
+      : `버림: ${tp.sel === 'a' ? `찾기 ${label}` : '나머지'} 를 빼면 ${fmtN(left)} / ${fmtN(n)}`;
+    return `<div class="st-tmp" role="listbox">${sub('a', `찾기 ${label}`, tp.m)}${sub('b', '나머지', n - tp.m)}
+      <div class="st-tmp-bar"><span>${esc(msg)}</span><button type="button" class="is-primary" data-st-tmp-split title="찾기 / 나머지 두 줄로 나눕니다">분할</button><button
+        type="button" class="st-tmp-discard" data-st-tmp-discard ${tp.sel ? '' : 'disabled'} title="고른 쪽을 빼고 다른 쪽만 남깁니다">버림</button><button
         type="button" data-st-tmp-drop title="줄은 그대로 두고 검색 칸으로 돌아갑니다(칩은 남습니다)">취소</button></div></div>`;
   }
-  async function commitTemp() {
+  /** how = 'split'(두 줄) | 'discard'(고른 쪽을 뺀다 - 찾기를 고르면 맞는 것을 빼고, 나머지를 고르면 맞는 것만 남긴다). */
+  async function commitTemp(how) {
     const tp = temp, label = tp.terms.join(', ');
-    const body = tp.a && tp.b ? { action: 'split', id: tp.id, terms: tp.terms }
-      : { action: 'narrow', id: tp.id, terms: tp.terms, invert: !tp.a };
+    if (how === 'discard' && !tp.sel) return;
+    const body = how === 'split' ? { action: 'split', id: tp.id, terms: tp.terms }
+      : { action: 'narrow', id: tp.id, terms: tp.terms, invert: tp.sel === 'a' };
     await run(async () => {
       const data = await request('/api/event-map/staging', body);
       temp = null; rf = null; rfOpen = ''; rfText = { inc: '', exc: '' };
       if (body.action === 'split') openRow = '';
       applyStaging(data);
       toast(body.action === 'split' ? `두 줄로 나눴습니다 - '${label}' 맞는 것 / 나머지`
-        : tp.a ? `'${label}' 에 맞는 것만 남겼습니다` : `'${label}' 에 맞는 것을 뺐습니다`, 'success');
+        : tp.sel === 'b' ? `'${label}' 에 맞는 것만 남겼습니다` : `'${label}' 에 맞는 것을 뺐습니다`, 'success');
     });
   }
   /** 목록을 새로 받았다 - 줄이 없어졌거나 조건이 바뀌었으면 검색 · 임시 분할을 내려놓는다. */

@@ -289,7 +289,8 @@ class EventMapIndex:
         size = len(rows)
         self.n_tags = size
         self._filter_masks = {}
-        self._filter_names = [self.by_id[t].lower() for t in range(size)]
+        # 소문자 이름표는 문자열 찾기를 처음 할 때 만든다 - 색인을 열 때마다 태그 전체를 돌지 않는다(사용자 지시 2026-10-31)
+        self._filter_names = None
         self.obs_arr = np.array([self.observed[t] for t in range(size)], dtype=np.int64)
         self.usable_arr = np.array([self.eligible[t] for t in range(size)], dtype=bool)
         self.color_arr = np.array([self.color[t] for t in range(size)], dtype=bool)
@@ -421,6 +422,8 @@ class EventMapIndex:
                         if tid is not None:
                             tidmask[tid] = True
                     else:
+                        if self._filter_names is None:
+                            self._filter_names = [self.by_id[t].lower() for t in range(self.n_tags)]
                         tidmask = np.fromiter((clean in name for name in self._filter_names),
                                               dtype=bool, count=self.n_tags)
                     if len(self._filter_masks) >= 256:

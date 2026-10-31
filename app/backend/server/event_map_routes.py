@@ -360,6 +360,11 @@ def register_event_map_routes(
         body = await _read_json(req)
         try:
             items = (await run_in_thread(staging_store(session_context).list))["items"]
+            # id 를 주면 그 줄만 센다(S 창 줄 검색 - 사용자 결정 2026-10-31: 전체가 아니라 줄 하나)
+            if body.get("id"):
+                items = [r for r in items if r["id"] == body.get("id")]
+                if not items:
+                    raise MapQueryError("not_found", "이미 빠졌거나 없는 조합입니다.")
             found = await run_in_thread(ensure_event_map_service(session_context).count_search,
                                         [r["selection"] for r in items], [r["enabled"] for r in items],
                                         body.get("terms", []))
@@ -455,7 +460,10 @@ def register_event_map_routes(
                     counts = await run_in_thread(service.count_selections, [row["selection"]])
                     if m == counts["per"][0]:
                         raise MapQueryError("bad_request", "모두 맞습니다 - 나누거나 남길 것이 없습니다")
-                    data = await run_in_thread(getattr(store, action), row["id"], found["terms"])
+                    if action == "split":
+                        data = await run_in_thread(store.split, row["id"], found["terms"])
+                    else:   # invert = 맞는 것을 뺀다
+                        data = await run_in_thread(store.narrow, row["id"], found["terms"], body.get("invert") is True)
                 elif action == "toggle":
                     data = await run_in_thread(store.toggle, str(body.get("id") or ""), body.get("enabled") is not False)
                 elif action == "extra":    # 줄의 추가 프롬프트(사용자 지시 2026-10-19)

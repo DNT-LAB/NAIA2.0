@@ -133,10 +133,11 @@ class EventMapStaging:
     def split(self, item_id, terms, counts_fn=None) -> dict:
         return self._refine(item_id, terms, split=True)
 
-    def narrow(self, item_id, terms) -> dict:
-        return self._refine(item_id, terms, split=False)
+    def narrow(self, item_id, terms, invert=False) -> dict:
+        """줄 하나에 찾기를 건다 - invert = 맞는 것을 뺀다(줄 검색의 [제거] · 분할에서 '나머지' 만 켜고 커밋)."""
+        return self._refine(item_id, terms, split=False, invert=bool(invert))
 
-    def _refine(self, item_id, terms, *, split):
+    def _refine(self, item_id, terms, *, split, invert=False):
         terms = normalize_terms(terms, required=True)
         with _LOCK:
             items, rev = self._load()
@@ -152,7 +153,7 @@ class EventMapStaging:
                 raise MapQueryError("bad_request", "이미 같은 찾기가 걸려 있습니다")
             seen = {EventMapLibrary._fingerprint(r["selection"]) for r in items if r["id"] != item_id}
             replacements = []
-            for invert in ([False, True] if split else [False]):
+            for invert in ([False, True] if split else [invert]):
                 selected = selection({**row["selection"], "filters": [*row["selection"].get("filters", []),
                                       {"terms": terms, "invert": invert}]})
                 if EventMapLibrary._fingerprint(selected) in seen:

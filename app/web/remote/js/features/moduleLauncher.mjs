@@ -60,6 +60,17 @@ const MODULE_REGISTRY = {
     category: 'prompt_tools',
     action: 'module',
   },
+  // Wire-Flow · 조건부 와일드카드(사용자 지시 2026-10-31) - 노드 그래프 창(wireFlowWindow) + 줄 끝 [켜기] = 모드.
+  // 모드가 켜지면 조건부 프롬프트 · E · S 가 일시 해제된다.
+  wire_flow: {
+    label: 'Wire-Flow (조건부 와일드카드)',
+    title: 'Wire-Flow · 조건부 와일드카드 - 노드를 선으로 잇는 워크플로우',
+    category: 'prompt_tools',
+    action: 'wire_flow',
+    badgeId: 'badgeWireFlow',
+    categoryBadgeLabel: '',
+    categoryBadgeClass: 'wire-flow',
+  },
   event_stream: {
     label: '이벤트 스트림 설정',
     title: '이벤트 스트림 설정',
@@ -221,7 +232,7 @@ const CATEGORY_REGISTRY = [
     //    ⚠️ 옛 `chunkPanel.mjs` 은 이제 **열리는 길이 없다**. 우클릭 › [Add to Chunk] 도
     //    새 창으로 가게 바꿔서(`onAddToChunkWindow`), 그 파일은 지금 사실상 죽은 코드다.
     //    지우는 것은 별도 작업으로 둔다(31KB · 배선이 여러 곳).
-    moduleIds: ['event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
+    moduleIds: ['wire_flow', 'event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },
@@ -271,6 +282,11 @@ export function createModuleLauncher({
   // 구도 / 시점 제어 창 열기(다시 누르면 닫힌다) · 열려 있나.
   openViewpointControl = null,
   isViewpointControlOpen = () => false,
+  // Wire-Flow 창 열기(다시 누르면 닫힌다) · 열려 있나 · 모드가 켜져 있나 · 모드 바꾸기.
+  openWireFlow = null,
+  isWireFlowOpen = () => false,
+  isWireFlowOn = () => false,
+  setWireFlowMode = null,
   getComfyUiWorkflowState,
   switchComfyUiWorkflowDefault,
   uploadComfyUiWorkflow,
@@ -457,6 +473,20 @@ export function createModuleLauncher({
         </div>
       `;
     }
+    if (moduleId === 'wire_flow') {
+      const tooltip = tooltipAttr(config.title);
+      return `
+        <div class="module-wire-flow-row" data-module-wire-flow>
+          <button type="button" class="module-btn module-menu-item" data-module="wire_flow" aria-label="${tooltip}" data-module-tooltip="${tooltip}" data-module-static-disabled="0">
+            <span>${config.label}</span><span class="module-badge hidden" id="badgeWireFlow"></span>
+          </button>
+          <label class="module-wire-flow-toggle" data-module-tooltip="켜면 조건부 프롬프트 · E · S 가 일시 해제되고 W 가 뜹니다">
+            <input type="checkbox" data-wire-flow-toggle aria-label="Wire-Flow 모드">
+            <span>켜기</span>
+          </label>
+        </div>
+      `;
+    }
     if (moduleId === 'event_stream') {
       const tooltip = tooltipAttr(config.title);
       return `
@@ -565,6 +595,8 @@ export function createModuleLauncher({
       openDanbooruBrowser?.();
     } else if (config.action === 'viewpoint_control') {
       openViewpointControl?.();
+    } else if (config.action === 'wire_flow') {
+      openWireFlow?.();
     } else if (config.action === 'comfyui_workflow_default') {
       switchComfyUiWorkflowDefault?.();
     } else if (config.action === 'comfyui_workflow_upload') {
@@ -663,6 +695,7 @@ export function createModuleLauncher({
     if (moduleId === 'chunk') return isChunkOpen();
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
     if (MODULE_REGISTRY[moduleId]?.action === 'viewpoint_control') return Boolean(isViewpointControlOpen());
+    if (MODULE_REGISTRY[moduleId]?.action === 'wire_flow') return Boolean(isWireFlowOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;
@@ -690,6 +723,17 @@ export function createModuleLauncher({
       button.disabled = blocked;
       button.classList.toggle('active', visible && moduleIsActive(moduleId));
     });
+    const wireFlowOn = Boolean(isWireFlowOn());
+    const wfBadge = document.getElementById('badgeWireFlow');
+    if (wfBadge) {
+      wfBadge.textContent = wireFlowOn ? 'W' : '';
+      wfBadge.classList.toggle('hidden', !wireFlowOn);
+    }
+    root.querySelectorAll('[data-module-wire-flow]').forEach(row => {
+      row.classList.toggle('active', wireFlowOn);
+      const checkbox = row.querySelector('[data-wire-flow-toggle]');
+      if (checkbox && checkbox.checked !== wireFlowOn) checkbox.checked = wireFlowOn;
+    });
     root.querySelectorAll('[data-module-event-stream]').forEach(row => {
       row.classList.toggle('active', Boolean(eventStreamState.active));
       const checkbox = row.querySelector('[data-event-stream-toggle]');
@@ -712,6 +756,7 @@ export function createModuleLauncher({
       const allBlocked = visibleModules.length > 0 && visibleModules.every(isBlocked);
       const hasStatus = visibleModules.some(moduleId => {
         if (moduleId === 'event_stream' && eventStreamState.active) return true;
+        if (moduleId === 'wire_flow' && isWireFlowOn()) return true;
         const leaf = root.querySelector(`.module-btn[data-module="${moduleId}"]`);
         return leaf?.classList.contains('auto-active')
           || leaf?.classList.contains('char-active')
@@ -757,7 +802,7 @@ export function createModuleLauncher({
   function bind() {
     if (!root) return;
     root.addEventListener('click', event => {
-      if (event.target.closest('[data-event-stream-toggle]')) return;
+      if (event.target.closest('[data-event-stream-toggle], [data-wire-flow-toggle]')) return;
       const categoryToggle = event.target.closest('[data-category-toggle]');
       if (categoryToggle && root.contains(categoryToggle)) {
         event.preventDefault();
@@ -781,6 +826,12 @@ export function createModuleLauncher({
       }
     });
     root.addEventListener('change', event => {
+      const wfToggle = event.target.closest('[data-wire-flow-toggle]');
+      if (wfToggle && root.contains(wfToggle)) {
+        event.preventDefault();
+        setWireFlowMode?.(Boolean(wfToggle.checked));
+        return;
+      }
       const toggle = event.target.closest('[data-event-stream-toggle]');
       if (!toggle || !root.contains(toggle)) return;
       event.preventDefault();

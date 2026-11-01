@@ -29,6 +29,7 @@ from app.backend.server.interactive_reference_routes import (
 from app.backend.server.generation_commands import register_generation_rest_routes
 from app.backend.server.inpaint_sequence_routes import register_inpaint_sequence_routes
 from app.backend.server.sequence_preset_routes import register_sequence_preset_routes
+from app.backend.server.wireflow_routes import register_wireflow_routes
 from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
@@ -298,6 +299,9 @@ def register_headless_routes(
     register_interactive_reference_routes(app, context, run_in_thread=run_in_thread)
     register_v5_scene_routes(app, context, run_in_thread=run_in_thread)
     register_snapshot_routes(app, context, run_in_thread=run_in_thread)
+    # Wire-Flow(조건부 와일드카드) 워크플로우 목록 · 저장 · 모드(2026-10-31).
+    register_wireflow_routes(app, context, run_in_thread=run_in_thread,
+                             clients=clients, broadcast_json=broadcast_json)
     register_character_viewer_routes(
         app,
         context,

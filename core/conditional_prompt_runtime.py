@@ -1016,6 +1016,11 @@ class ConditionalPromptHeadlessHook:
         return override if isinstance(override, dict) else None
 
     def _active_settings(self, mode: str | None = None) -> dict[str, Any] | None:
+        # Wire-Flow 모드가 켜져 있으면 조건부 프롬프트는 일시 해제(사용자 지시 2026-10-31) - 생성 · 직접 네거티브 모두.
+        from core.wireflow_store import wireflow_mode_on
+
+        if wireflow_mode_on(self.app_context):
+            return None
         override = self._session_override()
         if override is not None:
             if not override.get("enabled"):

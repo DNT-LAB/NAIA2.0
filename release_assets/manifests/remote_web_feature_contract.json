@@ -33,7 +33,8 @@
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py",
     "app/backend/server/websocket_session.py",
-    "app/backend/server/web_shell_routes.py"
+    "app/backend/server/web_shell_routes.py",
+    "app/backend/server/wireflow_routes.py"
   ],
   "legacy_dependency_policy": {
     "none": "Feature is implemented by the headless backend without desktop imports.",
@@ -1047,6 +1048,27 @@
         {"method": "POST", "path": "/api/assist/apply", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/assist/status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/assist/kiwi/install", "smoke": "external_live"}
+      ]
+    },
+    {
+      "id": "wire_flow",
+      "name": "Wire-Flow conditional wildcard workflows (node graph window, shared list, one active, mode suspends the conditional prompt)",
+      "window": "Shared draggable window: node palette (left), canvas (right), collapsible workflow list (top right). [Prompt tools] > Wire-Flow row opens it; its checkbox toggles the mode. While the mode is on the result edge hides E and S and shows W, and ConditionalPromptHeadlessHook returns no settings. Draft stage: generation does not execute graphs yet. POST /api/wireflow/test runs the canvas graph once (core/wireflow_runner.py, same condition evaluator and wildcard processor as the conditional prompt) and returns per-node probes, shown only in the window's debug mode.",
+      "source_files": [
+        "app/backend/server/wireflow_routes.py",
+        "core/wireflow_store.py",
+        "core/wireflow_runner.py",
+        "core/conditional_prompt_runtime.py",
+        "app/web/remote/js/features/wireFlowWindow.mjs",
+        "app/web/remote/js/features/moduleLauncher.mjs",
+        "app/web/remote/js/features/draggablePanel.mjs"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/wireflow", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/wireflow/workflow", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/wireflow/test", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/wireflow", "smoke": "state_mutation"}
       ]
     },
     {

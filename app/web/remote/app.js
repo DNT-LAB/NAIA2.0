@@ -1628,6 +1628,25 @@ import('./js/features/eventMapStaging.mjs?v=20261031-stgv8')
     });
   })
   .catch(error => console.error('Failed to initialize Staging', error));
+// Wire-Flow · 조건부 와일드카드(사용자 지시 2026-10-31) - 노드 그래프 창 + 모드. 모드가 켜지면 조건부 프롬프트 · E · S 가
+// 일시 해제되고 결과 가장자리에 W 가 뜬다(W 단추 · 상태 읽기 때문에 처음부터 싣는다 - 창은 처음 열 때 만든다).
+let wireFlowControl = null;
+const wireFlowReady = import('./js/features/wireFlowWindow.mjs?v=20261101-wf7')
+  .then(({installWireFlow}) => {
+    wireFlowControl = installWireFlow({
+      document,
+      window,
+      showToast,
+      confirmDialog: (message, options) => showConfirmDialog(message, options),
+      promptDialog: (message, options) => showPromptDialog(message, options),
+      // [테스트 실행] 의 기본 입력 - 지금 메인 · 네거티브 칸(캐릭터는 서버가 지금 캐릭터 설정에서).
+      getPromptText: () => (promptEdit ? promptEdit.value : ''),
+      getNegativeText: () => (negEdit ? negEdit.value : ''),
+      onChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+    });
+    window.wireFlow = wireFlowControl;
+  })
+  .catch(error => console.error('Failed to initialize Wire-Flow', error));
 // Ctrl+O Assist - 말로 찾는 한국어 어시스트(docs/ASSIST_V2_DESIGN_2026_09_23.md). [생성] 은 가상 프롬프트로 뽑아
 // 메인·캐릭터 칸을 **건드리지 않는다**(서버 /api/assist/generate). 칸에 넣는 것은 [프롬프트에 넣기] 를 눌렀을 때만 -
 // 메인은 이벤트 맵 [적용] 과 같은 Random 파이프라인, 캐릭터 칸은 기존을 **비활성으로** 보내고 덧붙인다(아무것도
@@ -5097,6 +5116,7 @@ function onInitComplete() {
   if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) requestModuleState('conditional_prompt');
   if (e621Window && e621Window.isOpen()) requestModuleState('e621_event');
   if (promptEngineeringWindow && promptEngineeringWindow.isOpen()) requestModuleState('prompt_engineering');
+  window.wireFlow?.reload?.();
   // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
   // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
   for (const naiToolId of ['character', 'character_reference', 'vibe_transfer']) {
@@ -5127,6 +5147,7 @@ function afterWsJsonMessage(m) {
   if (m.type === 'event_map_random_link') { window.eventMap?.receiveRandomLink?.(m); window.eventStaging?.paint?.(); }
   if (m.type === 'event_map_staging') window.eventStaging?.receiveCount?.(m);
   if (m.type === 'event_map_staging_presets') window.eventStaging?.receivePresets?.();
+  if (m.type === 'wireflow_state') window.wireFlow?.reload?.();
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
     if (searchPanelControl) searchPanelControl.updatePromptGeneratedCount(m);
@@ -12010,7 +12031,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261023-peq2')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261031-wf1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -12024,6 +12045,10 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261023-
       openDanbooruBrowser: openDanbooruBrowserTool,
       openViewpointControl: openViewpointControlTool,
       isViewpointControlOpen: () => Boolean(viewpointControl && viewpointControl.isOpen()),
+      openWireFlow: () => { wireFlowReady.then(() => wireFlowControl?.toggle()); },
+      isWireFlowOpen: () => Boolean(wireFlowControl?.isOpen()),
+      isWireFlowOn: () => Boolean(wireFlowControl?.isModeOn()),
+      setWireFlowMode: on => { wireFlowReady.then(() => wireFlowControl?.setMode(on)); },
       getComfyUiWorkflowState: () => comfyuiWorkflowState,
       switchComfyUiWorkflowDefault,
       uploadComfyUiWorkflow,

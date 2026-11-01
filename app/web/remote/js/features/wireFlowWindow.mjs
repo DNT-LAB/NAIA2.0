@@ -49,6 +49,11 @@ const NODE_TYPES = {
     fields: [{key: 'op', kind: 'select', label: '동작', options: [['add', '추가'], ['replace', '바꾸기'], ['remove', '빼기']], def: 'add'},
       {key: 'tags', kind: 'text', label: '태그', placeholder: 'indoors', def: ''},
       {key: 'with', kind: 'text', label: '바꿀 태그', placeholder: '(바꾸기만)', def: ''}]},
+  // 글칸에서 한 줄을 뽑아 변수에만 담는다 - 프롬프트는 그대로(사용자 결정 2026-11-01). Switch 가 줄마다 이 변수를 고를 수 있다.
+  var_draw: {group: '처리', label: '변수 뽑기', tone: 'var', ins: ['in'], outs: [['out', '']],
+    note: '프롬프트는 그대로 · 변수에만 담음',
+    fields: [{key: 'name', kind: 'text', label: '변수', placeholder: 'rating', def: ''},
+      {key: 'lines', kind: 'lines', label: '후보', placeholder: 'sensitive\nquestionable\nexplicit', def: ''}]},
   var_set: {group: '처리', label: '변수 저장', tone: 'var', ins: ['in'], outs: [['out', '']],
     fields: [{key: 'var', kind: 'text', label: '변수', placeholder: 'wet', def: ''},
       {key: 'op', kind: 'select', label: '동작', options: [['set', '= 넣기'], ['add', '+ 더하기']], def: 'set'},
@@ -82,6 +87,23 @@ function portColor(port) {
 }
 // Switch 의 조건 줄 - 첫 줄 = if · 나머지 = elif (서버 wireflow_store.switch_rows 와 같다)
 function switchRows(node) { return String(node.params.conds ?? '').replace(/\r/g, '').split('\n'); }
+const SWITCH_MODES = [['eq', '일치'], ['has', '포함'], ['ne', '불일치'], ['nothas', '미포함']];
+// 줄마다 [조건, 입력('' = 흘러온 프롬프트 · 그 밖 = 변수 이름), 비교] - 서버 wireflow_store.switch_row_fields 와 같다.
+function switchFields(node) {
+  const rows = switchRows(node);
+  const column = key => {
+    const values = String(node.params[key] ?? '').replace(/\r/g, '').split('\n');
+    return rows.map((_, i) => values[i] ?? '');
+  };
+  const subjects = column('subjects').map(s => s.trim());
+  const modes = column('modes').map(m => (SWITCH_MODES.some(([v]) => v === m.trim()) ? m.trim() : 'has'));
+  return rows.map((cond, i) => ({cond, subject: subjects[i], mode: modes[i]}));
+}
+function writeSwitchFields(node, fields) {
+  node.params.conds = fields.map(f => f.cond).join('\n');
+  node.params.subjects = fields.map(f => f.subject).join('\n');
+  node.params.modes = fields.map(f => f.mode).join('\n');
+}
 
 function esc(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -326,14 +348,32 @@ export function installWireFlow({
     applyView();
   }
 
+  // 이 워크플로우의 변수 이름 - 변수 뽑기 · 변수 저장에 적힌 것(Switch 의 '입력' 목록)
+  function variableNames() {
+    const names = graph.nodes.map(n => (n.type === 'var_draw' ? n.params.name : n.type === 'var_set' ? n.params.var : ''))
+      .map(name => String(name || '').trim()).filter(Boolean);
+    return [...new Set(names)];
+  }
+
+  function subjectOptions(current) {
+    const names = variableNames();
+    if (current && !names.includes(current)) names.push(current);      // 지운 변수도 고른 값은 보여 준다
+    return [['', '프롬프트'], ...names.map(name => [name, name])]
+      .map(([v, label]) => `<option value="${esc(v)}"${v === current ? ' selected' : ''}>${esc(label)}</option>`).join('');
+  }
+
   function branchesHtml(node) {
-    const rows = switchRows(node);
-    const port = (name, cls) => `<span class="wf-port wf-out ${cls}" data-wf-port="${name}" data-wf-dir="out" title="끌어서 다음 노드의 왼쪽 점에 놓기"></span>`;
-    return `<div class="wf-branches">${rows.map((cond, i) => `<div class="wf-br">
+    const rows = switchFields(node);
+    const port = (name, cls) => `<span class="wf-port wf-out ${cls}" data-wf-port="${name}" data-wf-dir="out" title="끌어서 다음 노드의 왼쪽 점에 놓기 · 선이 없으면 이 줄은 꺼짐"></span>`;
+    return `<div class="wf-branches">${rows.map(({cond, subject, mode}, i) => `<div class="wf-br" data-wf-row="${i + 1}">
         <span class="wf-br-kw">${i ? 'elif' : 'if'}</span>
-        <input type="text" data-wf-branch="${i}" value="${esc(cond)}" placeholder="${esc(i ? 'outdoors' : 'outdoors & rain · %wet >= 1')}" spellcheck="false" aria-label="${i ? 'elif' : 'if'} 조건">
+        <select data-wf-subject="${i}" aria-label="${i ? 'elif' : 'if'} 입력" title="이 줄이 볼 것 - 흘러온 프롬프트 또는 변수">${subjectOptions(subject)}</select>
+        <input type="text" data-wf-branch="${i}" value="${esc(cond)}" placeholder="${esc(subject ? 'explicit · a | b · >= 2' : (i ? 'outdoors' : 'outdoors & rain'))}" spellcheck="false" aria-label="${i ? 'elif' : 'if'} 조건">
         ${rows.length > 1 ? `<button type="button" class="wf-br-x" data-wf-branch-del="${i}" aria-label="이 줄 지우기" title="이 줄 지우기">×</button>` : '<span></span>'}
-        ${port(`b${i + 1}`, 'wf-p-branch')}</div>`).join('')}
+        ${port(`b${i + 1}`, 'wf-p-branch')}
+        <div class="wf-br-modes">${SWITCH_MODES.map(([v, label]) =>
+          `<button type="button" data-wf-mode="${v}" data-wf-mode-row="${i}" class="${v === mode ? 'is-on' : ''}" aria-pressed="${v === mode}">${label}</button>`).join('')}</div>
+      </div>`).join('')}
       <button type="button" class="wf-br-add" data-wf-branch-add>+ elif</button>
       <div class="wf-br wf-br-else"><span class="wf-br-kw wf-p-else">else</span><span class="wf-br-dim">나머지</span><span></span>${port('else', 'wf-p-else')}</div>
     </div>`;
@@ -368,7 +408,7 @@ export function installWireFlow({
     const outs = t.outs.map(([port, label]) => `<div class="wf-out-row">${label ? `<span class="wf-out-label wf-p-${port}">${esc(label)}</span>` : ''}
       <span class="wf-port wf-out wf-p-${port}" data-wf-port="${port}" data-wf-dir="out" title="끌어서 다음 노드의 왼쪽 점에 놓기"></span></div>`).join('');
     const unreached = debug && result && !resultStale && !result.visits?.[node.id];
-    return `<div class="wf-node wf-tone-${t.tone}${isSel ? ' is-sel' : ''}${unreached ? ' is-unreached' : ''}" data-wf-node="${node.id}" style="left:${node.x}px;top:${node.y}px">
+    return `<div class="wf-node wf-tone-${t.tone} wf-k-${node.type}${isSel ? ' is-sel' : ''}${unreached ? ' is-unreached' : ''}" data-wf-node="${node.id}" style="left:${node.x}px;top:${node.y}px">
       <div class="wf-node-head" data-wf-grab>${ins}<b>${esc(t.label)}</b>
         <button type="button" class="wf-node-x" data-wf-del aria-label="노드 지우기" title="지우기 (Delete)">×</button></div>
       ${t.note ? `<div class="wf-node-note">${esc(t.note)}</div>` : ''}
@@ -514,6 +554,13 @@ export function installWireFlow({
     }
     if (temp) parts.push(`<path class="wf-wire is-temp" d="${curve(temp.a, temp.b)}" stroke="${portColor(temp.port)}"></path>`);
     els.wires.innerHTML = parts.join('');
+    for (const node of graph.nodes) {
+      if (node.type !== 'switch') continue;
+      nodeEl(node.id)?.querySelectorAll('[data-wf-row]').forEach(row => {
+        const port = `b${row.dataset.wfRow}`;
+        row.classList.toggle('is-off', !graph.edges.some(e => e.from.node === node.id && e.from.port === port));
+      });
+    }
   }
 
   function select(next) {
@@ -670,15 +717,30 @@ export function installWireFlow({
       paintWires();    // 노드 높이가 바뀌면 출력 점도 움직인다
       return;
     }
+    const modeBtn = event.target.closest('[data-wf-mode]');
+    if (modeBtn) {
+      const node = graph.nodes.find(n => n.id === modeBtn.closest('[data-wf-node]')?.dataset.wfNode);
+      if (!node) return;
+      const rows = switchFields(node);
+      rows[Number(modeBtn.dataset.wfModeRow)].mode = modeBtn.dataset.wfMode;
+      writeSwitchFields(node, rows);
+      modeBtn.parentElement.querySelectorAll('[data-wf-mode]').forEach(b => {
+        b.classList.toggle('is-on', b === modeBtn);
+        b.setAttribute('aria-pressed', String(b === modeBtn));
+      });
+      markDirty();
+      return;
+    }
     const add = event.target.closest('[data-wf-branch-add]');
     const drop = event.target.closest('[data-wf-branch-del]');
     if (add || drop) {
       const nodeId = (add || drop).closest('[data-wf-node]')?.dataset.wfNode;
       const node = graph.nodes.find(n => n.id === nodeId);
       if (!node) return;
-      const rows = switchRows(node);
+      const rows = switchFields(node);
       if (add) {
-        rows.push('');
+        const last = rows[rows.length - 1];
+        rows.push({cond: '', subject: last?.subject || '', mode: last?.mode || 'has'});   // 윗줄의 입력 · 비교를 이어받는다
       } else {
         // 줄을 지우면 그 줄의 선도 지우고, 아래 줄의 선은 한 칸씩 올린다(b3 -> b2) - 선이 제 조건을 따라간다.
         const gone = Number(drop.dataset.wfBranchDel) + 1;
@@ -689,7 +751,7 @@ export function installWireFlow({
             return n > gone ? {...e, from: {...e.from, port: `b${n - 1}`}} : e;
           });
       }
-      node.params.conds = rows.join('\n');
+      writeSwitchFields(node, rows);
       markDirty();
       paintNodes();
       if (add) nodeEl(nodeId)?.querySelector(`[data-wf-branch="${rows.length - 1}"]`)?.focus();
@@ -703,13 +765,23 @@ export function installWireFlow({
   }
 
   function onFieldInput(event) {
-    const branch = event.target.closest('[data-wf-branch]');
+    const branch = event.target.closest('[data-wf-branch], [data-wf-subject]');
     if (branch) {
       const node = graph.nodes.find(n => n.id === branch.closest('[data-wf-node]')?.dataset.wfNode);
       if (!node) return;
-      const rows = switchRows(node);
-      rows[Number(branch.dataset.wfBranch)] = branch.value.replace(/[\r\n]+/g, ' ');
-      node.params.conds = rows.join('\n');
+      const rows = switchFields(node);
+      if (branch.dataset.wfSubject != null) {
+        const row = rows[Number(branch.dataset.wfSubject)];
+        // 프롬프트 -> 변수로 처음 바꾸면 '포함' 대신 '일치'(값 하나를 고르는 일이 대부분)
+        if (!row.subject && branch.value && row.mode === 'has') row.mode = 'eq';
+        row.subject = branch.value;
+        writeSwitchFields(node, rows);
+        markDirty();
+        paintNodes();
+        return;
+      }
+      rows[Number(branch.dataset.wfBranch)].cond = branch.value.replace(/[\r\n]+/g, ' ');
+      writeSwitchFields(node, rows);
       markDirty();
       return;
     }
@@ -719,6 +791,9 @@ export function installWireFlow({
     if (!node) return;
     const key = input.dataset.wfField;
     node.params[key] = input.type === 'number' ? (Number(input.value) || 0) : input.value;
+    if ((node.type === 'var_draw' && key === 'name') || (node.type === 'var_set' && key === 'var')) {
+      els.nodes.querySelectorAll('[data-wf-subject]').forEach(select => { select.innerHTML = subjectOptions(select.value); });
+    }
     if (input.tagName === 'TEXTAREA') {
       const count = input.closest('.wf-field')?.querySelector('[data-wf-count]');
       if (count) count.textContent = `${input.value.split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).length}줄`;
@@ -1006,7 +1081,14 @@ body[data-wireflow="on"] .dragpanel.cpw .dragpanel-body::before{content:"Wire-Fl
 .wf-p-branch{color:#5dcaa5}
 .wf-p-else{color:#f0997b}
 .wf-branches{padding:4px 0 6px}
-.wf-br{display:grid;grid-template-columns:28px minmax(0,1fr) 14px 11px;align-items:center;gap:4px;padding:2px 0 2px 8px;min-height:20px}
+.wf-node.wf-k-switch{width:264px}
+.wf-br{display:grid;grid-template-columns:26px 74px minmax(0,1fr) 14px 11px;align-items:center;gap:4px;padding:3px 0 3px 8px;min-height:20px}
+.wf-br select{width:100%;min-width:0;box-sizing:border-box;background:var(--bg-input,#101019);border:1px solid var(--border-dim);border-radius:3px;color:#b5d4f4;font:inherit;font-size:10px;padding:1px 2px}
+.wf-br-modes{grid-column:2 / 4;display:flex;gap:2px}
+.wf-br-modes button{flex:1;border:1px solid var(--border-dim);border-radius:3px;background:transparent;color:var(--text-dim);font:inherit;font-size:9.5px;padding:0 2px;cursor:pointer}
+.wf-br-modes button.is-on{background:rgba(127,119,221,.25);border-color:#7f77dd;color:var(--text-primary)}
+.wf-br.is-off > :not(.wf-port){opacity:.4}
+.wf-br-else{grid-template-columns:26px minmax(0,1fr) 14px 11px}
 .wf-br-kw{font-family:ui-monospace,Consolas,monospace;font-size:10px;color:#afa9ec}
 .wf-br input{width:100%;min-width:0;box-sizing:border-box;background:var(--bg-input,#101019);border:1px solid var(--border-dim);border-radius:3px;color:var(--text-primary);font:inherit;font-size:10.5px;padding:2px 4px}
 .wf-br-x{border:0;background:transparent;color:var(--text-dim);cursor:pointer;padding:0;font-size:12px;line-height:1}

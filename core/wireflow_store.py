@@ -37,6 +37,7 @@ NODE_PORTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "output_negative": (("in",), ("out",)),
     "concat": (("in",), ("out",)),
     "instant_wildcard": (("in",), ("out",)),   # 노드 안 글칸에서 한 줄 - 흘러온 줄기에 끼운다
+    "var_draw": (("in",), ("out",)),           # 글칸에서 한 줄을 뽑아 변수에만 담는다(프롬프트는 그대로)
     "final_prompt": (("in",), ()),          # 끝 노드 - PE 선행/후행을 붙여 메인 프롬프트를 대치한다
 }
 
@@ -46,7 +47,8 @@ MAX_EDGES = 600
 MAX_NAME = 60
 MAX_PARAM_TEXT = 2000
 MAX_LINES_TEXT = 20000      # 인스턴트 와일드카드 글칸 · Switch 조건 줄(줄 하나 = 후보 / 갈래 하나)
-_LONG_TEXT_KEYS = {"lines", "conds"}
+_LONG_TEXT_KEYS = {"lines", "conds", "subjects", "modes"}
+SWITCH_MODES = ("eq", "has", "ne", "nothas")       # 일치 · 포함 · 불일치 · 미포함
 _BRANCH_PORT = re.compile(r"^b([1-9]\d*)$")
 _OLD_SWITCH_PORTS = {"yes": "b1", "no": "else"}
 MAX_PARAMS = 12
@@ -83,6 +85,18 @@ def switch_rows(params: Any) -> list[str]:
     """Switch 의 조건 줄 - 첫 줄 = if · 나머지 = elif. 빈 줄도 한 갈래다(줄이 곧 포트)."""
     text = params.get("conds") if isinstance(params, dict) else ""
     return str(text or "").replace("\r", "").split("\n")
+
+
+def switch_row_fields(params: Any) -> list[tuple[str, str, str]]:
+    """Switch 줄마다 (조건, 입력, 비교). 입력 '' = 흘러온 프롬프트 · 그 밖 = 변수 이름. 비교 기본 = 포함.
+    조건 · 입력 · 비교는 줄 순서가 같은 세 글칸(conds · subjects · modes)이다 - 짧으면 기본값으로 채운다."""
+    rows = switch_rows(params)
+    params = params if isinstance(params, dict) else {}
+    def column(key: str) -> list[str]:
+        values = str(params.get(key) or "").replace("\r", "").split("\n")
+        return [*values, *([""] * len(rows))][:len(rows)]
+    modes = [mode.strip() if mode.strip() in SWITCH_MODES else "has" for mode in column("modes")]
+    return [(cond, subject.strip(), mode) for cond, subject, mode in zip(rows, column("subjects"), modes)]
 
 
 def out_ports(kind: str, params: Any) -> tuple[str, ...]:

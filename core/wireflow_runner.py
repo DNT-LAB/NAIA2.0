@@ -10,6 +10,10 @@
   변수 비교 `%wet >= 1`(`%wet` 만 = 0 이 아님 · `~%wet` = 아님)를 더한다. 섞어 쓸 수 있다(`outdoors & %wet >= 1`).
 - Switch = if / elif / else - 위에서부터 **처음 맞는 줄 하나**의 포트(b1 · b2 …)로 나간다. 아무것도 안 맞으면 else.
   빈 줄은 건너뛴다(맞지 않음). 사용자 지시 2026-11-01.
+  줄마다 **입력**을 고른다 - 흘러온 프롬프트 또는 변수(이름은 그냥 글자 · 화면은 목록에서 고른다) - 와
+  **비교**(일치 · 포함 · 불일치 · 미포함). 나가는 점에 **선이 없는 줄은 꺼진 줄**이라 건너뛴다(사용자 결정).
+- 변수 = 숫자(변수 저장) 또는 글(변수 뽑기). 변수 뽑기 = 글칸에서 한 줄을 뽑아 변수에만 담는다(프롬프트는 그대로) ·
+  같은 이름의 뽑기(`@이름`)로도 남아 Concat 이 다시 쓸 수 있다.
 - 와일드카드 전개도 조건부 동작과 같은 처리기(WildcardProcessor) - 이번 실행 하나 동안만 순차 카운터가 이어진다.
 - 고리(loop)는 허용 - 대신 단계 한도(MAX_STEPS)에서 멈추고 그렇게 적는다.
 - Concat = 글 · 와일드카드 · `@뽑기이름` 을 전개해 한 구역 앞/뒤에 붙이거나 비우고 넣는다.
@@ -32,10 +36,11 @@ from typing import Any
 
 from core.conditional.expr_utils import split_by_operator, strip_redundant_outer_parens
 from core.conditional_tag_split import split_tags_bracket_aware
-from core.wireflow_store import NODE_PORTS, clean_graph, switch_rows
+from core.wireflow_store import NODE_PORTS, clean_graph, switch_row_fields
 
 MAX_STEPS = 200
 _VAR_COMPARE = re.compile(r"^%\s*([^\s<>=!]+)\s*(>=|<=|==|!=|>|<|=)\s*(-?\d+(?:\.\d+)?)$")
+_NUM_COMPARE = re.compile(r"^(>=|<=|==|!=|>|<|=)\s*(-?\d+(?:\.\d+)?)$")
 _VAR_BARE = re.compile(r"^%\s*([^\s<>=!]+)$")
 _WEIGHT_PATTERN = re.compile(r"^(\d+):(?!:)(.*)")     # 와일드카드 파일과 같은 가중치(`30:줄` · `0.5::x` 는 아님)
 MAX_VISITS_KEPT = 20
@@ -104,6 +109,9 @@ class WireFlowTestRun:
         self.notes: list[str] = []
         self.final: dict[str, Any] | None = None     # Final Prompt 가 붙인 PE 선행/후행
         self.stream = "main"                         # 지금 흐르는 줄기 - 시작한 입력 노드의 구역
+        self.out_edges: dict[tuple[str, str], list[str]] = {}
+        for edge in self.graph["edges"]:
+            self.out_edges.setdefault((edge["from"]["node"], edge["from"]["port"]), []).append(edge["to"]["node"])
         self._engine = None
         self._prompt_context = None
         characters = test_input.get("characters")
@@ -212,9 +220,32 @@ class WireFlowTestRun:
         match = _VAR_COMPARE.match(expr)
         if match:
             name, op, value = match.groups()
-            return _COMPARE.get("==" if op == "=" else op, operator.eq)(self.vars.get(name, 0), float(value))
+            have = self.vars.get(name, 0)
+            if not isinstance(have, (int, float)):
+                return op == "!="                    # 글 변수와 숫자 비교 - 같을 수 없다
+            return _COMPARE.get("==" if op == "=" else op, operator.eq)(have, float(value))
         match = _VAR_BARE.match(expr)
         return bool(match) and self.vars.get(match.group(1), 0) != 0
+
+    def _row_hit(self, cond: str, subject: str, mode: str, tags: list[str]) -> bool:
+        """Switch 한 줄. 불일치 · 미포함 = 일치 · 포함의 반대."""
+        negate = mode in ("ne", "nothas")
+        exact = mode in ("eq", "ne")
+        if not subject:
+            hit = self._condition(_exactify(cond) if exact else cond, tags)
+            return hit != negate
+        value = self.vars.get(subject)
+        number = _NUM_COMPARE.match(cond.strip())
+        if number and isinstance(value, (int, float)):
+            op, limit = number.groups()
+            hit = _COMPARE.get("==" if op == "=" else op, operator.eq)(value, float(limit))
+            return hit != negate
+        if value is None:
+            return negate                              # 아직 없는 변수 - 일치 · 포함은 아니다
+        text = _norm(_fmt(value))
+        alts = [_norm(alt) for alt in split_by_operator(cond, "|") if _norm(alt)]
+        hit = (text in alts) if exact else any(alt in text for alt in alts)
+        return hit != negate
 
     def _scope_tags(self, stream: str) -> list[str]:
         """조건이 보는 태그 - 캐릭터 줄기는 그 슬롯, 메인 줄기는 앞 · 메인 · 뒤."""
@@ -288,13 +319,18 @@ class WireFlowTestRun:
         if kind == "switch":
             tags = self._scope_tags(self.stream)
             trail: list[str] = []
-            for n, cond in enumerate(switch_rows(p), 1):
+            for n, (cond, subject, mode) in enumerate(switch_row_fields(p), 1):
                 word, cond = ("if" if n == 1 else "elif"), cond.strip()
                 if not cond:
                     trail.append(f"{word} (빈 줄)")
                     continue
-                hit = self._condition(cond, tags)
-                trail.append(f"{word} {cond} {'✓' if hit else '✗'}")
+                label = f"{subject}({_fmt(self.vars[subject]) if subject in self.vars else '없음'}) " if subject else ""
+                label += f"{_MODE_WORD[mode]} {cond}" if subject or mode != "has" else cond   # 프롬프트 · 포함 = 예전 그대로
+                if (node["id"], f"b{n}") not in self.out_edges:
+                    trail.append(f"{word} {label} (선 없음 · 꺼짐)")
+                    continue
+                hit = self._row_hit(cond, subject, mode, tags)
+                trail.append(f"{word} {label} {'✓' if hit else '✗'}")
                 if hit:
                     return f"b{n}", f"{_area_name(self.stream)}: {' · '.join(trail)} → 갈래 {n}", None
             return "else", f"{_area_name(self.stream)}: {' · '.join(trail)} → else", None
@@ -353,7 +389,8 @@ class WireFlowTestRun:
                     return "out", f"조건 {when} 아님 - 그대로", None
             value = float(p.get("value") or 0)
             if str(p.get("op") or "set") == "add":
-                self.vars[name] = self.vars.get(name, 0) + value
+                have = self.vars.get(name, 0)
+                self.vars[name] = (have if isinstance(have, (int, float)) else 0) + value   # 글 변수엔 더할 수 없다 - 0 부터
             else:
                 self.vars[name] = value
             return "out", f"%{name} = {_fmt(self.vars[name])}", None
@@ -383,6 +420,20 @@ class WireFlowTestRun:
                 self.captures[capture] = list(tags)
             where = f"{_area_name(area)} " + {"front": "앞에", "replace": "비우고"}.get(pos, "뒤에")
             return "out", f"{where} → {', '.join(tags) or '(빈 것)'}{lack}", tags
+        if kind == "var_draw":
+            name = str(p.get("name") or "").strip()
+            if not name:
+                return "out", "변수 이름이 비어 있음", None
+            lines = instant_lines(p.get("lines"))
+            if not lines:
+                return "out", "후보가 비어 있음", None
+            weights, bodies = zip(*lines)
+            tags, missing = self._concat_source(random.choices(bodies, weights=weights, k=1)[0])
+            lack = f" · 못 찾음: {', '.join(missing)}" if missing else ""
+            self.vars[name] = ", ".join(tags)
+            self.captures[name] = list(tags)
+            self.last_roll = tags
+            return "out", f"{name} = {self.vars[name] or '(빈 값)'} · {len(lines)}줄 중{lack}", tags
         if kind == "instant_wildcard":
             lines = instant_lines(p.get("lines"))
             if not lines:
@@ -424,9 +475,7 @@ class WireFlowTestRun:
             rows.append(visit)
 
     def run(self) -> dict[str, Any]:
-        out_edges: dict[tuple[str, str], list[str]] = {}
-        for edge in self.graph["edges"]:
-            out_edges.setdefault((edge["from"]["node"], edge["from"]["port"]), []).append(edge["to"]["node"])
+        out_edges = self.out_edges
         starts = self._starts()
         if not starts:
             self.notes.append("입력 노드가 없어 흐름이 시작되지 않았습니다.")
@@ -474,6 +523,21 @@ class WireFlowTestRun:
             "stopped": stopped,
             "notes": self.notes,
         }
+
+
+_MODE_WORD = {"eq": "일치", "has": "포함", "ne": "불일치", "nothas": "미포함"}
+
+
+def _exactify(expr: str) -> str:
+    """'일치' 로 프롬프트를 볼 때 - 접두 없는 잎을 `*잎`(정확히 같은 태그)으로. `~` `!` `*` `%` 잎은 그대로."""
+    expr = strip_redundant_outer_parens(str(expr or "").strip())
+    for op in ("|", "&"):
+        parts = split_by_operator(expr, op)
+        if len(parts) > 1:
+            return f" {op} ".join(f"({_exactify(part)})" for part in parts)
+    if not expr or expr[0] in "*~!%(":
+        return expr
+    return f"*{expr}"
 
 
 def _area_name(area: str) -> str:

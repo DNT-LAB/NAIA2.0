@@ -1631,7 +1631,7 @@ import('./js/features/eventMapStaging.mjs?v=20261031-stgv8')
 // Wire-Flow · 조건부 와일드카드(사용자 지시 2026-10-31) - 노드 그래프 창 + 모드. 모드가 켜지면 조건부 프롬프트 · E · S 가
 // 일시 해제되고 결과 가장자리에 W 가 뜬다(W 단추 · 상태 읽기 때문에 처음부터 싣는다 - 창은 처음 열 때 만든다).
 let wireFlowControl = null;
-const wireFlowReady = import('./js/features/wireFlowWindow.mjs?v=20261101-wf7')
+const wireFlowReady = import('./js/features/wireFlowWindow.mjs?v=20261101-wf8')
   .then(({installWireFlow}) => {
     wireFlowControl = installWireFlow({
       document,

@@ -243,6 +243,26 @@ class EventMapStaging:
             self._write(items, rev + 1)
             return self._reply(items, rev + 1)
 
+    def set_compress(self, item_id: str, compress, compress_cut=None, compress_output=None) -> dict:
+        """줄의 압축 설정(S 줄 [압축] · [압축 관리] · [압축 해제] - 사용자 결정 2026-11-02). compress 가 비면 해제.
+        찾기 조건(filters) · 켜짐 · 추가 프롬프트는 그대로 - 압축은 줄의 설정이고 정체(같은 조합 검사)에 안 든다."""
+        with _LOCK:
+            items, rev = self._load()
+            row = next((r for r in items if r["id"] == item_id), None)
+            if row is None:
+                raise MapQueryError("not_found", "이미 빠졌거나 없는 조합입니다.")
+            from core.event_map.compress import COMPRESS_GROUPS, normalize_compress
+            if len(normalize_compress(compress)) == len(COMPRESS_GROUPS):
+                raise MapQueryError("bad_request", "기준 축을 하나 이상 남겨주세요.")
+            base = {k: v for k, v in row["selection"].items() if k not in ("compress", "compress_cut", "compress_output")}
+            selected = selection({**base, "compress": compress or [], "compress_cut": compress_cut,
+                                  "compress_output": compress_output})
+            if EventMapLibrary._fingerprint(selected) == EventMapLibrary._fingerprint(row["selection"]):
+                return self._reply(items, rev)
+            row["selection"] = selected
+            self._write(items, rev + 1)
+            return self._reply(items, rev + 1)
+
     def set_common(self, on=None, text=None, mode=None) -> dict:
         """공통 추가 프롬프트 · 방식. 준 것만 바꾼다(None = 그대로)."""
         patch = {}

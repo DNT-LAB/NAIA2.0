@@ -431,7 +431,7 @@ def register_event_map_routes(
 
     @app.post("/api/event-map/staging")
     async def api_event_map_staging_change(req: Request):
-        """add(selection) · stage_saved(저장된 조합 id - 묶음이면 전부) · remove(id) · clear ·
+        """add(selection) · stage_saved(저장된 조합 id - 묶음이면 전부) · remove(id) · clear · compress(id - 줄의 압축) ·
         save_bundle(지금 스테이징을 통째로 저장된 조합의 묶음으로)."""
         from core.event_map.library import EventMapLibrary
         body = await _read_json(req)
@@ -483,6 +483,9 @@ def register_event_map_routes(
                 elif action == "extra":    # 줄의 추가 프롬프트(사용자 지시 2026-10-19)
                     data = await run_in_thread(store.set_extra, str(body.get("id") or ""), body.get("on"),
                                                body.get("text", ""))
+                elif action == "compress":   # 줄의 압축 설정 - 빈 compress = 해제(찾기 조건은 남는다 · 사용자 결정 2026-11-02)
+                    data = await run_in_thread(store.set_compress, str(body.get("id") or ""), body.get("compress"),
+                                               body.get("compress_cut"), body.get("compress_output"))
                 elif action == "common":   # 공통 추가 프롬프트 · 방식 - 준 것만 바꾼다
                     data = await run_in_thread(store.set_common, body.get("on"), body.get("text"), body.get("mode"))
                 elif action == "remove":

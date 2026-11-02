@@ -25,6 +25,7 @@
  * 서버가 다 한다(/api/event-map/staging · library · sample · apply). 여기서는 그리기와 단추뿐이다.
  */
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
+import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=20261102-stc1';
 
 export function initEventMapStaging({ showToast, getPromptText, generateNow, confirmDialog, promptDialog,
                                       getEventMap = () => window.eventMap, isTabHidden = () => false } = {}) {
@@ -109,6 +110,17 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (!res.ok || data.ok === false) throw Object.assign(new Error(data.message || `HTTP ${res.status}`), { code: data.code });
     return data;
   }
+  // 줄 안 압축 판(사용자 결정 2026-11-02 - stagingRowCompress.mjs). 판은 펼친 줄에만 · 적용 = 서버 staging action 'compress'.
+  const rowCmp = createRowCompress({
+    request, getParent: () => panel,
+    getRow: id => staged.find(r => r.id === id),
+    repaint: () => { if (panel && open && tab === 'stage') paintBody(); },
+    apply: (id, patch, message) => run(async () => {
+      applyStaging(await request('/api/event-map/staging', { action: 'compress', id, ...patch }));
+      toast(message, 'success');
+    }),
+    draw: (id, sel, andGenerate) => run(() => randomFrom(sel, andGenerate, { stagingId: id }), { readsExtras: true }),
+  });
   // 서버의 지문(library._fingerprint · normalize_tag)과 같은 뜻: 태그는 소문자 · 밑줄 = 빈칸 · 빈칸 접기, 네 목록 모두 순서 무시.
   const norm = t => String(t || '').trim().toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
   const filtersKey = s => (s.filters || []).map(g => (g.invert ? '!' : '') + [...new Set((g.terms || []).map(norm))].sort().join(',')).sort();
@@ -150,12 +162,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (terms.length === 1) return terms[0].startsWith('-') ? one(terms[0].slice(1), false) : one(terms[0], true);
     return `<span class="st-nf is-out" title="이 조건 전체에 맞는 게시물을 뺀 나머지">-(${esc(terms.join(', '))})</span>`;
   }).join('');
-  // 압축한 줄 = [압축 · 기준 축] 칩(사용자 지시 2026-11-02). 축 이름은 수와 함께 서버가 싣는다 - 아직 모르면 '압축' 만.
-  const compressChip = r => {
-    if (!r.selection.compress?.length) return '';
-    const axes = counts?.events?.[r.id]?.axes || [];
-    const out = r.selection.compress_output === 'axes' ? '선택한 축만' : '프롬프트 전체';
-    return `<span class="st-chip st-cmp" title="압축 - 기준 ${esc(axes.join(' · ') || '…')} · 출력 ${out}">압축${axes.length ? ` · ${esc(axes.join(' · '))}` : ''}</span>`;
+  // 압축한 줄 = 숫자 옆 [압축됨](사용자 결정 2026-11-02 - 칩 줄의 [압축 · 기준 축] 칩을 대신한다). 기준 축 · 출력 · 컷은 툴팁.
+  const compressBadge = r => {
+    const s = r.selection;
+    if (!s.compress?.length) return '';
+    const axes = counts?.events?.[r.id]?.axes || rowCmp.axesText(s.compress);
+    const tip = [`기준 ${axes.join(' · ')}`, `출력 ${s.compress_output === 'axes' ? '선택한 축만' : '프롬프트 전체'}`, cutSummary(s.compress_cut)]
+      .filter(Boolean).join(' · ');
+    return `<span class="st-cmp-badge" title="압축 - ${esc(tip)}">압축됨</span>`;
   };
   // 접힌 줄에서도 추가 프롬프트가 있는 줄을 알아보게(켜져 있고 글이 있을 때만).
   const extraChip = (ex, label = '+ 추가') => (ex?.on && ex.text
@@ -164,7 +178,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   function extraHtml(r) {
     const on = r.extra?.on === true;
     return `<div class="st-extra">
-      <label class="st-extra-on"><input type="checkbox" data-st-extra-on ${on ? 'checked' : ''}>추가 프롬프트</label>
+      <div class="st-extra-row"><label class="st-extra-on"><input type="checkbox" data-st-extra-on ${on ? 'checked' : ''}>추가 프롬프트</label>
+        <span class="st-cmp-btns">${rowCmp.buttonsHtml(r)}</span></div>
       ${on ? `<textarea class="st-extra-text" data-st-extra-text rows="2" maxlength="2000" spellcheck="false" aria-label="이 조합의 추가 프롬프트"
         placeholder="이 조합이 뽑혔을 때 뒤에 붙일 태그 - 예: from behind, sweat, __outfit__">${esc(extraText(r.id, r.extra))}</textarea>` : ''}
     </div>`;
@@ -211,7 +226,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-rf-chip[data-st-rf-chip] { cursor: pointer; }
 .st-chip.st-f-in { color: #9fd8ff; border-color: rgba(100,180,240,0.5); background: rgba(40,110,170,0.18); }
 .st-chip.st-f-out { color: #f2a9b8; border-color: rgba(240,130,150,0.5); background: rgba(170,50,80,0.16); }
-.st-chip.st-cmp { color: #ffd99a; border-color: rgba(230,168,74,0.5); background: rgba(230,168,74,0.14); }
+.st-cmp-badge { flex: 0 0 auto; margin-left: 5px; padding: 0 5px; border-radius: 4px; font-size: 9.5px; line-height: 14px;
+  color: #ffd99a; border: 1px solid rgba(230,168,74,0.55); background: rgba(230,168,74,0.14); }
+.st-extra-row { display: flex; align-items: center; gap: 6px; }
+.st-cmp-btns { display: flex; gap: 4px; margin-left: auto; }
+.st-window .st-cmp-btns button.st-cmp-btn { color: #ffd99a; border-color: rgba(230,168,74,0.55); }
+.st-window .st-cmp-btns button.st-cmp-btn.is-on { background: rgba(230,168,74,0.18); }
+.st-window .em-compress-panel.st-cmp-panel { flex: 1 0 100%; margin-top: 6px; padding: 8px; border: 1px solid rgba(230,168,74,0.3); border-radius: 6px;
+  background: rgba(0,0,0,0.18); cursor: default; }
 .st-count.st-count-ev { color: #ffd99a; }
 .st-window button.st-split { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
 .st-window button.st-rf-btn.is-on { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
@@ -320,8 +342,10 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.addEventListener('focusout', event => {
       if (event.target.matches?.('[data-st-extra-text], [data-st-common-text]')) commitText(event.target);
     });
+    panel.body.addEventListener('pointerdown', event => { rowCmp.onPointerDown(event, panel.body); });
     panel.body.addEventListener('keydown', event => {
       event.stopPropagation();
+      if (rowCmp.onKeyDown(event, panel.body)) return;   // 압축 판 슬라이더 손잡이 ← →
       // Ctrl+Enter = 칸을 떠나며 저장(Enter 는 줄바꿈 그대로)
       if (event.target.matches('.st-extra-text') && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault(); event.target.blur(); return;
@@ -422,15 +446,16 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     // 펼친 줄 맨 아래 = [추가 프롬프트] 체크(켜면 칸이 열린다 - 사용자 지시 2026-10-19).
     // 줄 검색 칸은 다시 그리면 새 칸이다 - 치던 칸이면 다 그린 뒤 초점 · 글을 돌려준다.
     const rfFocusKind = document.activeElement?.matches?.('[data-st-rf-in]') ? document.activeElement.dataset.stRfIn : '';
+    rowCmp.sync(openRow);   // 접힌 줄 · 사라진 줄의 압축 판은 닫는다
     // 줄 검색의 맞는 수는 칸이 열린 줄(또는 임시 분할 중인 줄)에만 - 접은 줄에 남은 수는 헷갈린다.
     const hit = r => findResult?.per?.[r.id] ?? (rfOpen === r.id ? (rfFor(r.id)?.m ?? undefined) : undefined);
     const countHtml = r => {
       const n = counts?.per?.[r.id], m = hit(r), ev = counts?.events?.[r.id];
       // 압축한 줄 = 남은 이벤트 수(랜덤은 이 안에서 - 사용자 지시 2026-11-02). 줄 찾기 중이면 게시물 수 그대로.
-      if (ev && m == null) return `<span class="st-count st-count-ev" title="압축으로 남은 이벤트 수 - 랜덤은 이 안에서 뽑습니다 · 게시물 ${Number(n || 0).toLocaleString('en-US')}">이벤트 ${Number(ev.n).toLocaleString('en-US')}</span>`;
-      if (n == null && m == null) return '';
+      if (ev && m == null) return `<span class="st-count st-count-ev" title="압축으로 남은 이벤트 수 - 랜덤은 이 안에서 뽑습니다 · 게시물 ${Number(n || 0).toLocaleString('en-US')}">이벤트 ${Number(ev.n).toLocaleString('en-US')}</span>${compressBadge(r)}`;
+      if (n == null && m == null) return compressBadge(r);
       return `<span class="st-count" title="${m != null ? '찾기에 맞는 게시물 / ' : ''}이 조합에 맞는 게시물(프롬프트) 수">${m != null
-        ? `<span class="st-hit">${Number(m).toLocaleString('en-US')}</span>${n != null ? ' / ' : ''}` : ''}${n != null ? Number(n).toLocaleString('en-US') : ''}</span>`;
+        ? `<span class="st-hit">${Number(m).toLocaleString('en-US')}</span>${n != null ? ' / ' : ''}` : ''}${n != null ? Number(n).toLocaleString('en-US') : ''}</span>${compressBadge(r)}`;
     };
     const rfBtn = r => {
       const s = rfFor(r.id), lit = rfOpen === r.id || (s && s.inc.length + s.exc.length > 0);
@@ -442,9 +467,9 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
         <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}${filterSuffix(r.selection.filters)}</span>${countHtml(r)}</div>
-        <div class="st-meta">${metaHtml(r.selection, false)}${compressChip(r)}${extraChip(r.extra)}</div>
+        <div class="st-meta">${metaHtml(r.selection, false)}${extraChip(r.extra)}</div>
         </div>
-        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
+        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}${rowCmp.panelHtml(r)}`}
       </div>`).join('')
       : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
     // 하단 = 공통 추가 프롬프트(켜기 · 끄기 - 꺼도 글은 남는다) + [통째로 저장] [비우기] ...... [옵션]
@@ -477,7 +502,14 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       keepRow.title = freshRow.title;
       keepRow.setAttribute('aria-expanded', freshRow.getAttribute('aria-expanded'));
       [...keepRow.children].forEach(child => { if (child !== liveExtra) child.remove(); });
-      [...freshRow.children].forEach(child => { if (!child.classList.contains('st-extra')) liveExtra.before(child); });
+      const freshExtra = freshRow.querySelector(':scope > .st-extra');
+      let after = false;
+      [...freshRow.children].forEach(child => {
+        if (child === freshExtra) { after = true; return; }
+        if (after) keepRow.append(child); else liveExtra.before(child);
+      });
+      const btns = liveExtra.querySelector('.st-cmp-btns'), freshBtns = freshExtra?.querySelector('.st-cmp-btns');
+      if (btns && freshBtns) btns.innerHTML = freshBtns.innerHTML;
       // 나머지 줄: 산 줄 앞뒤로 새것
       [...body.children].forEach(child => { if (child !== keepRow) child.remove(); });
       const at = fresh.indexOf(freshRow);
@@ -650,6 +682,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     const id = t.closest('[data-st-id]')?.dataset.stId;
     const stagedRow = staged.find(r => r.id === id), savedRow = saved.find(r => r.id === id);
+    if (stagedRow && t.closest('[data-stc-manage], [data-stc-release], .st-cmp-panel')) { await rowCmp.onClick(t, stagedRow); return; }
     if (t.closest('[data-st-random]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, false, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-random-gen]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, true, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-open]') && stagedRow) { await run(() => openInMap(stagedRow.selection)); return; }
@@ -732,7 +765,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     // 스테이징 줄 펼치기 · 접기(단추 · 추가 프롬프트 칸을 누른 것이 아닐 때)
     const pick = t.closest('[data-st-pick]');
-    if (pick && !t.closest('button, input, .st-extra, .st-rf')) {
+    if (pick && !t.closest('button, input, .st-extra, .st-rf, .st-cmp-panel')) {
       openRow = openRow === id ? '' : id;
       if (tab === 'saved') { closeMenu(); paintSavedList(); } else paintBody();
       return;

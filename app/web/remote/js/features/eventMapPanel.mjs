@@ -2542,6 +2542,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     refineDraft[kind] = rest;
     const live = cveilEl?.querySelector(`[data-emr-in="${kind}"]`);
     if (live) live.value = rest;
+    // 찾기 묶음은 8개까지(서버) - 고정 묶음이 다 차 있으면 칩 묶음을 새로 만들지 않는다(Codex 재리뷰)
+    if (!refineTerms().length && refineKeep.length >= 8) { toast('고정 조건이 8개라 칩을 더할 수 없습니다 - 고정 조건을 하나 지워주세요', 'info'); return; }
     let changed = false;
     for (const raw of String(text || '').split(',')) {
       let tag = raw.trim().replace(/_/g, ' ').replace(/\s+/g, ' ').toLowerCase(), k = kind;

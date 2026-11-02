@@ -910,18 +910,18 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   }
 
   /** [랜덤 프롬프트 할당] - 고른 분면(핀·제외가 있으면 그 안)에서 게시물 하나 → [적용] 과 같은 길. */
-  async function randomAssign(btn, andGenerate = false) {
-    const group = btn?.closest('.em-actions');
+  async function randomAssign(btn, andGenerate = false, cp = compressParams()) {
+    const group = btn?.closest('.em-actions, .emc-rand');
     group?.querySelectorAll('button').forEach(b => { b.disabled = true; });
     try {
       const fp = filterParams();
       const body = await getJson('/api/event-map/sample', {
         pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: Date.now() % 1000003,
-        ratings: fp.ratings, persons: fp.persons, ...compressParams(),
+        ratings: fp.ratings, persons: fp.persons, ...cp,
       });
       const s = (body.samples || [])[0];
       if (!s || !s.tags?.length) { toast(body.status === 'no_match' ? '이 조건에 맞는 게시물이 없습니다' : '뽑지 못했습니다', 'error'); return; }
-      const where = String(s.partition || '').replace(/_/g, ' ') + (compress.length ? ` · 압축 이벤트 ${fmt(body.events_in ?? body.events)}개 중` : '');
+      const where = String(s.partition || '').replace(/_/g, ' ') + (cp.compress ? ` · 압축 이벤트 ${fmt(body.events_in ?? body.events)}개 중` : '');
       if (andGenerate) {
         await applyThenGenerate(s.tags, String(s.partition || 's').slice(0, 1));
         toast(`랜덤 프롬프트를 적용하고 생성을 눌렀습니다 (${where})`, 'success');
@@ -2615,6 +2615,13 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const out = t.closest('[data-emc-out]');
     if (out) { setOutput(out.dataset.emcOut); return; }
     if (t.closest('[data-emc-browse]')) { toggleBrowse(); return; }
+    const draw = t.closest('[data-emc-random]');
+    if (draw && compressDraft && usable(compressDraft)) {
+      const src = browseSource();   // 판의 것(살펴보기와 같은 규칙)
+      void randomAssign(draw, draw.dataset.emcRandom === 'generate', { compress: src.groups.join(','),
+        ...(cutText(src.cut) ? { compress_cut: cutText(src.cut) } : {}), ...(src.output === 'axes' ? { compress_output: 'axes' } : {}) });
+      return;
+    }
     if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
     if (t.closest('[data-emc-apply]') && compressDraft && pinAxesKnown()) {
       const draft = compressDraft.filter(id => !lockedAxes().includes(id));
@@ -2918,9 +2925,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const same = on && compressDraft.join(',') === compress.join(',') && cutText(draftCut) === cutText(compressCut);
     if (!panelEl.querySelector('[data-emc-cut]')) {
       panelEl.innerHTML = `<div class="emc-hint">기준 축 - 이 축들의 태그가 같은 게시물끼리 이벤트 하나로 묶습니다</div>
-        <div class="emc-grid"></div><div class="emc-sum"></div><div class="ecw-cut emc-cut" data-emc-cut></div>
-        <div class="emc-act"><span class="emc-act-l"><button type="button" data-emc-browse title="랜덤과 같은 규칙으로 뽑은 이벤트를 따로 창에서 봅니다">살펴보기</button><span
-          class="emc-out-slot"></span></span><span class="emc-act-r"></span></div>`;
+        <div class="emc-grid"></div><div class="emc-sum-row"><div class="emc-sum"></div><button type="button" data-emc-browse
+          title="랜덤과 같은 규칙으로 뽑은 이벤트를 따로 창에서 봅니다">살펴보기</button></div><div class="ecw-cut emc-cut" data-emc-cut></div>
+        <div class="emc-act"><span class="emc-act-l"><span class="emc-out-slot"></span></span><span class="emc-act-r"></span></div>`;
     }
     const locked = lockedAxes();
     panelEl.querySelector('.emc-grid').innerHTML = COMPRESS_IDS.map(id => {
@@ -2935,7 +2942,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const browseOn = Boolean(browsePanel?.isOpen());
     panelEl.querySelector('[data-emc-browse]').classList.toggle('is-on', browseOn);
     panelEl.querySelector('[data-emc-browse]').setAttribute('aria-pressed', String(browseOn));
-    panelEl.querySelector('.emc-act-r').innerHTML = `<button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
+    // [랜덤 선택] [랜덤+생성] = 판에서 고른 압축(적용 전)으로 뽑는다 - 적용하지 않고 시험해 본다(사용자 지시 2026-11-02)
+    const canDraw = usable(compressDraft) ? '' : 'disabled';
+    panelEl.querySelector('.emc-act-r').innerHTML = `<span class="emc-rand"><button type="button" data-emc-random="select" ${canDraw}
+      title="판에서 고른 기준 축 · 슬라이더 · 출력으로 이벤트 하나를 뽑아 메인 프롬프트에(압축은 아직 적용하지 않습니다)">랜덤 선택</button><button
+      type="button" data-emc-random="generate" ${canDraw} title="랜덤 선택 뒤 바로 Generate">랜덤+생성</button></span><button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
       ${usable(compressDraft) && pinAxesKnown() && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
     fitHeight?.();
   }

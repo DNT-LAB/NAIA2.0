@@ -181,7 +181,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // compressPending = 타이머가 기다리는 숫자 줄 열쇠 · compressView = 마지막으로 그린 조건(핀 · 제외 · 등급 · 인원 · 영구 제외).
   let compressPending = '', compressView = '';
   // peEnabled = 지금 켜진 PE 특징 제거 라운드(Set · 모르면 null) - 압축 중 막이 그 칸을 그린다. cveilEl = 그 막.
-  let peEnabled = null, peSeq = 0, cveilEl = null, veilOn = false;
+  // roomyHeight = 손으로 잡은 높이(압축 중엔 창을 줄였다가 풀면 돌려준다).
+  let peEnabled = null, peSeq = 0, cveilEl = null, veilOn = false, roomyHeight = '';
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -1087,6 +1088,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // ── 그리기 ───────────────────────────────────────────────────────────────
   function setStatus(text, kind, title) {
     if (!statusEl) return;
+    if (compress.length && kind !== 'busy' && kind !== 'error') {   // 압축 중 = 남은 이벤트 수만(사용자 지시 2026-11-02)
+      const info = compressInfo?.key === fullKey(compress, compressCut) ? compressInfo : null;
+      text = info ? `이벤트 ${fmt(info.eventsIn)}` : '이벤트 …';
+      kind = info ? 'ok' : '';
+      title = '압축으로 남은 이벤트 수 - 랜덤 · 스테이징은 이 안에서 뽑습니다';
+    }
     statusEl.textContent = text || '';
     statusEl.title = title || '';
     statusEl.className = `em-status${kind ? ` is-${kind}` : ''}`;
@@ -1913,7 +1920,6 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       if (event.target.closest('[data-em-cveil-release]')) setCompress([]);
     });
     cveilEl.addEventListener('change', onVeilPeChange);
-    if (typeof ResizeObserver === 'function') new ResizeObserver(() => positionVeil()).observe(bodyEl);
     footEl = overlay.querySelector('.em-foot');
     ttabsEl = overlay.querySelector('.emt-tabs');
     actsEl = overlay.querySelector('.emt-acts');
@@ -2285,7 +2291,16 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const need = Math.min(panelMinimumWidth(), window.innerWidth - 16);
     if (rect.width < need - 0.5) overlay.style.width = `${need}px`;
     // 접혀 있으면 높이를 내용에 맞추지 않는다 - 맞추면 접은 창이 곧바로 다시 커진다(공용 창이 높이를 비워 접는다)
-    if (manualSize || !bodyEl || panel?.isCollapsed()) return;
+    if (!bodyEl || panel?.isCollapsed()) return;
+    if (cveilEl && !cveilEl.hidden) {   // 압축 중 = 막 내용만큼 줄인다(사용자 지시 2026-11-02 - 경고 줄만 높이를 더한다)
+      const end = cveilEl.lastElementChild;
+      const content = end ? Math.ceil(end.getBoundingClientRect().bottom - cveilEl.getBoundingClientRect().top + cveilEl.scrollTop) : 0;
+      const room = Math.max(EM_MIN_HEIGHT, window.innerHeight - Math.max(8, rect.top) - 12);
+      const want = Math.round(Math.min(room, overlay.offsetHeight - cveilEl.clientHeight + content));
+      if (Math.abs(overlay.offsetHeight - want) > 1) overlay.style.height = `${want}px`;
+      return;
+    }
+    if (manualSize) return;
     const last = bodyEl.lastElementChild;
     const bodyRect = bodyEl.getBoundingClientRect();
     // 3단 지도의 왼쪽 목록은 몸통 높이에 묶여 있다(sticky) - 그 높이로 재면 잴 때마다 창이 자란다.
@@ -2310,7 +2325,6 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     fitWindow();
     panel.refit();
     if (bodyEl) bodyEl.style.setProperty('--emt-h', `${Math.max(120, bodyEl.clientHeight - 10)}px`);
-    positionVeil();
     const z = Number(overlay.style.zIndex) + 1;
     for (const el of [subEl, sideEl, personPopup, document.querySelector('.em-saved-panel')]) {
       if (el) el.style.zIndex = String(z);
@@ -2889,8 +2903,10 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (on) {
       const info = compressInfo?.key === fullKey(compress, compressCut) ? compressInfo : null;
       const cutNote = cutSummary(compressCut);
-      stateEl.innerHTML = `<span class="emc-on" title="${esc(`기준 ${axesOf(compress).map(groupLabel).join(' · ')}${cutNote ? ` · ${cutNote}` : ''}`)}">압축 중 · 기준 ${esc(axesOf(compress).map(groupLabel).join(' · '))}${cutNote ? ` · ${esc(cutNote)}` : ''}${info ? ` · 이벤트 <b>${fmt(info.eventsIn)}</b>` : ''}</span>${outputSeg()}<button
+      // 상태 줄 = 남은 이벤트 수만 · 기준 축 · 컷은 툴팁(사용자 지시 2026-11-02)
+      stateEl.innerHTML = `<span class="emc-on" title="${esc(`기준 ${axesOf(compress).map(groupLabel).join(' · ')}${cutNote ? ` · ${cutNote}` : ''}`)}">압축 중 · 이벤트 ${info ? `<b>${fmt(info.eventsIn)}</b>` : '…'}</span>${outputSeg()}<button
         type="button" data-em-compress-manage aria-expanded="${editing}">압축 관리</button>`;
+      if (!statusEl?.classList.contains('is-busy')) setStatus('');   // 머리줄도 같은 수로
       if (!info && !editing) scheduleCompressInfo();
     }
     panelEl.hidden = !editing;
@@ -2965,13 +2981,6 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     paintVeil();
     setTimeout(() => { void loadPeEnabled(); }, 400);
   }
-  /** 막은 목록 자리만 덮는다 - 갈래 탭(3단 지도)은 CSS 로 흐리기만(그 사이 핀 줄 · 압축 상태 줄은 그대로 눌린다).
-   *  창 몸통 안의 절대 위치라 몸통이 움직이면 다시 잰다. */
-  function positionVeil() {
-    if (!cveilEl || cveilEl.hidden || !bodyEl) return;
-    cveilEl.style.top = `${bodyEl.offsetTop}px`;
-    cveilEl.style.height = `${bodyEl.offsetHeight}px`;
-  }
   function veilWarnings() {
     if (compressOutput !== 'axes' || !peEnabled) return [];
     return axesOf(compress).flatMap(axis => Object.entries(AXIS_PE[axis] || {}).filter(([key]) => peEnabled.has(key))
@@ -2984,7 +2993,15 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     input.disabled = on;
     input.placeholder = on ? '압축 중에는 태그를 찾지 않습니다 - [압축 해제] 뒤에' : '태그 찾기…';
     cveilEl.hidden = !on;
-    if (on && !veilOn) void loadPeEnabled();   // 막이 처음 덮일 때마다 지금 PE 를 묻는다(PE 창에서 바꿨을 수 있다)
+    if (on && !veilOn) {
+      void loadPeEnabled();   // 막이 처음 덮일 때마다 지금 PE 를 묻는다(PE 창에서 바꿨을 수 있다)
+      roomyHeight = manualSize ? overlay.style.height : '';
+    } else if (!on && veilOn) {
+      if (roomyHeight) overlay.style.height = roomyHeight;
+      roomyHeight = '';
+      const n = pins.length && result?.status === 'matched' ? Number(result.observed_posts) || 0 : 0;
+      if (!statusEl?.classList.contains('is-busy')) setStatus(n ? `${fmt(n)}건` : '', n ? 'ok' : '');
+    }
     veilOn = on;
     if (!on) return;
     if (!cveilEl.firstChild) {
@@ -3001,8 +3018,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const warn = cveilEl.querySelector('.em-cveil-warn');
     const lines = veilWarnings();
     warn.hidden = !lines.length;
-    warn.innerHTML = lines.map(line => `<div>${esc(line)}</div>`).join('');
-    positionVeil();
+    const warnHtml = lines.map(line => `<div>${esc(line)}</div>`).join('');
+    if (warn.innerHTML !== warnHtml) {
+      warn.innerHTML = warnHtml;
+      queueMicrotask(fitHeight);   // 경고 줄이 생기거나 빠지면 창 높이를 다시 맞춘다(막 안에서 스크롤되지 않게)
+    }
   }
 
   /** S 창의 [맵에서 열기] - 저장 · 스테이징된 조합을 이 창에 그대로 편다(저장된 조합 불러오기와 같은 길). */

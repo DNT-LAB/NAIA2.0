@@ -574,7 +574,36 @@ class EventMapService:
             else:
                 total = 0
             cache[whole] = total
-        return {"per": per, "total": total, "sum": int(sum(n for n, a in zip(per, on) if a))}
+        events, axes = self._count_events(idx, block, cache, keys, selections, groups)
+        return {"per": per, "total": total, "sum": int(sum(n for n, a in zip(per, on) if a)),
+                "events": events, "axes": axes}
+
+    def _count_events(self, idx, block, cache, keys, selections, groups) -> tuple[list, list]:
+        """압축한 조합 = 남은 이벤트 수(슬라이더 안 · 랜덤이 고르는 수) + 기준 축 이름. 압축 아닌 조합은 None.
+        게시물 수 `per` · 전체 `total` 은 그대로 둔다(사용자 결정 2026-11-02 - 전체는 게시물 기준)."""
+        from core.event_map.compress import COMPRESS_GROUPS, compressed, normalize_compress, normalize_cut
+        labels = {g["id"]: g["label"] for g in (self._group_rows or [])}
+        events, axes = [], []
+        for key, s, filters in zip(keys, selections, groups):
+            off = normalize_compress(s.get("compress"))
+            if not off:
+                events.append(None)
+                axes.append(None)
+                continue
+            cut = normalize_cut(s.get("compress_cut"))
+            ekey = json.dumps(["events", key, off, cut], sort_keys=True)
+            n = cache.get(ekey)
+            if n is None:
+                want_r, want_p = self._filters(idx, s.get("ratings"), s.get("persons"))
+                n = int(compressed(self, idx, pins=self._tags(s.get("pins"), cap=MAX_PINS, what="핀", code="too_many_pins"),
+                                   exclude=self._tags(s.get("exclude"), cap=MAX_EXCLUDE, what="제외 태그",
+                                                      code="too_many_exclude"),
+                                   ratings=want_r, persons=want_p, block=block, filters=filters or None,
+                                   groups=off, cut=cut)["events_in"])
+                cache[ekey] = n
+            events.append(n)
+            axes.append([labels.get(g, g) for g in COMPRESS_GROUPS if g not in off])
+        return events, axes
 
     def count_search(self, selections, active, terms) -> dict[str, Any]:
         from core.event_map.library import normalize_terms, selection

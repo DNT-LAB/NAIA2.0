@@ -146,6 +146,13 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (terms.length === 1) return terms[0].startsWith('-') ? one(terms[0].slice(1), false) : one(terms[0], true);
     return `<span class="st-nf is-out" title="이 조건 전체에 맞는 게시물을 뺀 나머지">-(${esc(terms.join(', '))})</span>`;
   }).join('');
+  // 압축한 줄 = [압축 · 기준 축] 칩(사용자 지시 2026-11-02). 축 이름은 수와 함께 서버가 싣는다 - 아직 모르면 '압축' 만.
+  const compressChip = r => {
+    if (!r.selection.compress?.length) return '';
+    const axes = counts?.events?.[r.id]?.axes || [];
+    const out = r.selection.compress_output === 'axes' ? '선택한 축만' : '프롬프트 전체';
+    return `<span class="st-chip st-cmp" title="압축 - 기준 ${esc(axes.join(' · ') || '…')} · 출력 ${out}">압축${axes.length ? ` · ${esc(axes.join(' · '))}` : ''}</span>`;
+  };
   // 접힌 줄에서도 추가 프롬프트가 있는 줄을 알아보게(켜져 있고 글이 있을 때만).
   const extraChip = (ex, label = '+ 추가') => (ex?.on && ex.text
     ? `<span class="st-chip st-xp" title="추가 프롬프트: ${esc(ex.text)}">${label}</span>` : '');
@@ -200,6 +207,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-rf-chip[data-st-rf-chip] { cursor: pointer; }
 .st-chip.st-f-in { color: #9fd8ff; border-color: rgba(100,180,240,0.5); background: rgba(40,110,170,0.18); }
 .st-chip.st-f-out { color: #f2a9b8; border-color: rgba(240,130,150,0.5); background: rgba(170,50,80,0.16); }
+.st-chip.st-cmp { color: #ffd99a; border-color: rgba(230,168,74,0.5); background: rgba(230,168,74,0.14); }
+.st-count.st-count-ev { color: #ffd99a; }
 .st-window button.st-split { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
 .st-window button.st-rf-btn.is-on { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
 .st-rf { flex: 1 0 100%; margin-top: 7px; padding-top: 7px; border-top: 1px dashed rgba(139,118,255,0.32); cursor: default; }
@@ -412,7 +421,9 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     // 줄 검색의 맞는 수는 칸이 열린 줄(또는 임시 분할 중인 줄)에만 - 접은 줄에 남은 수는 헷갈린다.
     const hit = r => findResult?.per?.[r.id] ?? (rfOpen === r.id ? (rfFor(r.id)?.m ?? undefined) : undefined);
     const countHtml = r => {
-      const n = counts?.per?.[r.id], m = hit(r);
+      const n = counts?.per?.[r.id], m = hit(r), ev = counts?.events?.[r.id];
+      // 압축한 줄 = 남은 이벤트 수(랜덤은 이 안에서 - 사용자 지시 2026-11-02). 줄 찾기 중이면 게시물 수 그대로.
+      if (ev && m == null) return `<span class="st-count st-count-ev" title="압축으로 남은 이벤트 수 - 랜덤은 이 안에서 뽑습니다 · 게시물 ${Number(n || 0).toLocaleString('en-US')}">이벤트 ${Number(ev.n).toLocaleString('en-US')}</span>`;
       if (n == null && m == null) return '';
       return `<span class="st-count" title="${m != null ? '찾기에 맞는 게시물 / ' : ''}이 조합에 맞는 게시물(프롬프트) 수">${m != null
         ? `<span class="st-hit">${Number(m).toLocaleString('en-US')}</span>${n != null ? ' / ' : ''}` : ''}${n != null ? Number(n).toLocaleString('en-US') : ''}</span>`;
@@ -427,7 +438,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
         <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}${filterSuffix(r.selection.filters)}</span>${countHtml(r)}</div>
-        <div class="st-meta">${metaHtml(r.selection, false)}${extraChip(r.extra)}</div>
+        <div class="st-meta">${metaHtml(r.selection, false)}${compressChip(r)}${extraChip(r.extra)}</div>
         </div>
         ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
       </div>`).join('')

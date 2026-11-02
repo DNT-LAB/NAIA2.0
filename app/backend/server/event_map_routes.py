@@ -317,7 +317,11 @@ def register_event_map_routes(
                                          [r["selection"] for r in items], [r.get("enabled", True) for r in items])
         except MapQueryError:
             return None
-        return {"per": {r["id"]: n for r, n in zip(items, counts["per"])}, "total": counts["total"], "sum": counts["sum"]}
+        # 압축한 줄 = 남은 이벤트 수 · 기준 축(사용자 지시 2026-11-02) - 압축 아닌 줄은 싣지 않는다
+        events = {r["id"]: {"n": n, "axes": a} for r, n, a in zip(items, counts.get("events") or [], counts.get("axes") or [])
+                  if n is not None}
+        return {"per": {r["id"]: n for r, n in zip(items, counts["per"])}, "total": counts["total"], "sum": counts["sum"],
+                "events": events}
 
     def _unlink_if_empty(data):
         """켜진 조합이 없으면(비움 · 전부 끔) 스테이징 연결도 푼다(빈 풀로 [ST Random] 이 실패해 Auto Gen 이 꺼지지 않게).

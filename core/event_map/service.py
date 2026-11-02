@@ -430,7 +430,7 @@ class EventMapService:
 
     # -- 질의 ----------------------------------------------------------------
     def suggest(self, query: str, limit: int = DEFAULT_SUGGEST, *,
-                kr_lookup: Callable[[str, int], Iterable[str]] | None = None) -> dict[str, Any]:
+                kr_lookup: Callable[[str, int], Iterable[str]] | None = None, within: Any = None) -> dict[str, Any]:
         """이름으로 태그를 찾는다. **못 꽂는 태그도 왜 못 꽂는지 붙여서** 낸다.
 
         `kr_lookup` 은 한글 질의를 태그 이름으로 바꿔 주는 다리다(라우트가 태그 사전
@@ -452,8 +452,11 @@ class EventMapService:
             tid = idx.by_name.get(name)
             if tid is None or name in seen:
                 return
+            # within = 압축한 조합 안 출현 수(pool_counts) - 없는 태그는 거르고 수는 그 안의 것으로(사용자 결정 2026-11-02)
+            if within is not None and not within[tid]:
+                return
             seen.add(name)
-            picked.append((idx.observed[tid], name, tid))
+            picked.append((int(within[tid]) if within is not None else idx.observed[tid], name, tid))
 
         # 1) 앞부분 일치. 정렬 목록에 bisect - 어휘 10만을 키 입력마다 훑지 않는다.
         names = self._sorted_names
@@ -504,7 +507,7 @@ class EventMapService:
                           "role_label": ROLE_LABELS.get(idx.role.get(tid) or "", ""),
                           "blocked": blocked})
         return {"ok": True, "status": "matched" if items else "no_match",
-                "query": raw, "items": items, "translated": translated}
+                "query": raw, "items": items, "translated": translated, **({"scope": "pool"} if within is not None else {})}
 
     # -- 영구 제외 -----------------------------------------------------------------------
     def permanent_text(self) -> str:
@@ -967,6 +970,27 @@ class EventMapService:
                 {"id": g["id"], "label": g["label"], "count": int(counts[i])}
                 for i, g in enumerate(self._group_rows) if counts[i]
             ]
+
+    def pool_counts(self, *, pins: Any, exclude: Any = None, ratings: Any = None, persons: Any = None,
+                    filters: Any = None, compress: Any = None, compress_cut: Any = None):
+        """압축한 조합(영구 제외 포함 - 맵 화면과 같은 표) 안 게시물에 태그마다 몇 번 나오나 · 압축이 아니면 None."""
+        from core.event_map.compress import normalize_compress, pool_freq
+        from core.event_map.library import normalize_filters
+        groups = normalize_compress(compress)
+        if not groups:
+            return None
+        if isinstance(filters, str):
+            try:
+                filters = json.loads(filters) if filters.strip() else None
+            except ValueError as exc:
+                raise MapQueryError("bad_request", "찾기 조건 JSON을 확인해주세요.") from exc
+        filters = normalize_filters(filters)
+        idx = self.index()
+        wanted = self._tags(pins, cap=MAX_PINS, what="핀", code="too_many_pins")
+        excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="제외 태그", code="too_many_exclude")
+        want_r, want_p = self._filters(idx, ratings, persons)
+        return pool_freq(self, idx, pins=wanted, exclude=excluded, ratings=want_r, persons=want_p,
+                         block=self.permanent_block(idx), filters=filters or None, groups=groups, cut=compress_cut)
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                persons: Any = None, n: Any = 5, seed: Any = None, permanent: bool = False,

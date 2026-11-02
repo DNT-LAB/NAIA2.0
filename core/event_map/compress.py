@@ -26,7 +26,7 @@ import random
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -197,6 +197,8 @@ class Table:
     freq: np.ndarray
     rows: int        # 후보 게시물(표본 전)
     used: int        # 실제로 센 게시물(50만 상한)
+    # 컷마다 태그 출현 수(pool_freq · 나중에 붙인다) - nbytes 에 넣지 않는다(캐시 회계는 넣을 때의 크기로 뺀다 · 하나 470KB · 4개까지)
+    pool: dict = field(default_factory=dict)
 
     @property
     def nbytes(self) -> int:
@@ -329,6 +331,50 @@ def candidate_rids(idx, wanted, excluded, ratings, persons, block, filters) -> n
     return idx.filter_posts(idx._unblocked(idx._without(pool, excluded), block), filters)
 
 
+def _table_for(service, idx, wanted, excluded, ratings, persons, block, filters, groups) -> Table:
+    """조건의 압축 표 - compressed() · pool_freq() 가 같은 열쇠로 같은 캐시를 쓴다."""
+    cache_key = (tuple(sorted(set(wanted))), tuple(sorted(set(excluded))), tuple(sorted(ratings or [])),
+                 tuple(sorted(persons or [])), getattr(block, "text", None) if block is not None else None,
+                 repr(filters or []))
+    if block is not None and not isinstance(getattr(block, "text", None), str):
+        cache_key = None   # 글로 가릴 수 없는 막을 것 - 캐시하지 않는다
+    return event_table(service, idx, lambda: candidate_rids(idx, wanted, excluded, ratings, persons, block, filters),
+                       cache_key=cache_key, groups=groups, wanted=wanted)
+
+
+def pool_freq(service, idx, *, pins, exclude, ratings, persons, block, filters, groups, cut=None) -> np.ndarray | None:
+    """압축한 조합의 게시물(태그 수 슬라이더 안 이벤트에 묶인 것 · 50만 상한 표본)에 태그마다 몇 번 나오나.
+    막의 '이벤트 안에서 찾기' 자동완성이 이 조합에 없는 태그를 거르고 이 안의 게시물 수를 보인다(사용자 결정 2026-11-02).
+    기준 축 밖 태그도 센다(표의 freq 는 남은 태그만). 실측 2만 12ms · 7.6만 43ms · 50만 257ms - 표에 붙여 둔다."""
+    cut = normalize_cut(cut)
+    wanted, unknown = idx._resolve_many(pins)
+    if unknown:
+        return None
+    excluded, _ = idx._resolve_many(exclude)
+    excluded = [t for t in excluded if t not in wanted]
+    table = _table_for(service, idx, wanted, excluded, ratings, persons, block, filters, groups)
+    key = repr(sorted(cut.items()))
+    hit = table.pool.get(key)
+    if hit is not None:
+        return hit
+    rids = table.members
+    if "min_tags" in cut or "max_tags" in cut:   # 빈도 컷은 이벤트를 빼지 않는다(태그 수만 바꾼다)
+        sizes = tag_counts(table, counted_tags(idx, table, wanted, cut))
+        inside = np.ones(sizes.size, dtype=bool)
+        if "min_tags" in cut:
+            inside &= sizes >= cut["min_tags"]
+        if "max_tags" in cut:
+            inside &= sizes <= cut["max_tags"]
+        rids = table.members[np.repeat(inside, table.counts)]
+    freq = np.zeros(idx.n_tags, dtype=np.int64)
+    for _at, picks, _before in _spans(idx, np.sort(rids)):
+        freq += np.bincount(idx.body[picks], minlength=idx.n_tags)
+    if len(table.pool) >= 4:
+        table.pool.clear()
+    table.pool[key] = freq
+    return freq
+
+
 def _hist(values: np.ndarray) -> dict:
     keys, counts = np.unique(values, return_counts=True)
     return {str(int(k)): int(c) for k, c in zip(keys, counts)}
@@ -355,13 +401,7 @@ def compressed(service, idx, *, pins, exclude, ratings, persons, block, filters,
     if unknown:
         out["status"] = "unknown_tag"
         return out
-    cache_key = (tuple(sorted(set(wanted))), tuple(sorted(set(excluded))), tuple(sorted(ratings or [])),
-                 tuple(sorted(persons or [])), getattr(block, "text", None) if block is not None else None,
-                 repr(filters or []))
-    if block is not None and not isinstance(getattr(block, "text", None), str):
-        cache_key = None   # 글로 가릴 수 없는 막을 것 - 캐시하지 않는다
-    table = event_table(service, idx, lambda: candidate_rids(idx, wanted, excluded, ratings, persons, block, filters),
-                        cache_key=cache_key, groups=groups, wanted=wanted)
+    table = _table_for(service, idx, wanted, excluded, ratings, persons, block, filters, groups)
     counted = counted_tags(idx, table, wanted, cut)
     sizes = tag_counts(table, counted)
     inside = np.ones(sizes.size, dtype=bool)

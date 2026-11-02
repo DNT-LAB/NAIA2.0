@@ -499,12 +499,18 @@ def register_event_map_routes(
                                     unlinked=unlinked, same_counts=same)
 
     @app.get("/api/event-map/suggest")
-    async def api_event_map_suggest(q: str = "", limit: int = 20):
+    async def api_event_map_suggest(q: str = "", limit: int = 20, pins: str = "", exclude: str = "", ratings: str = "",
+                                    persons: str = "", compress: str = "", compress_cut: str = "", filters: str = ""):
         service = ensure_event_map_service(session_context)
         lookup = _kr_lookup(session_context)
+
+        def run():
+            # compress 가 오면 그 압축 조합 안에 있는 태그만 · 그 안 게시물 수로(막의 '이벤트 안에서 찾기' - 사용자 결정 2026-11-02)
+            within = service.pool_counts(pins=pins, exclude=exclude, ratings=ratings, persons=persons, filters=filters,
+                                         compress=compress, compress_cut=compress_cut) if compress else None
+            return service.suggest(q, limit, kr_lookup=lookup, within=within)
         try:
-            payload = await run_in_thread(
-                _call, service.suggest, q, limit, kr_lookup=lookup)
+            payload = await run_in_thread(_call, run)
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

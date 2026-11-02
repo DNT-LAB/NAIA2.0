@@ -2610,9 +2610,13 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     rfAcTimer = setTimeout(async () => {
       const mine = ++rfAcSeq;
       try {
-        const body = await getJson('/api/event-map/suggest', { q, limit: 8 });
+        // 이 압축 조합 안에 있는 태그만 · 수 = 그 안의 게시물(사용자 결정 2026-11-02) - 이미 칩 · 핀인 태그는 빼고
+        const fp = filterParams();
+        const body = await getJson('/api/event-map/suggest', { q, limit: 12, pins: pins.join(','), exclude: excludes.join(','),
+          ratings: fp.ratings, persons: fp.persons, compress: compress.join(','), compress_cut: cutText(compressCut), filters: filtersText() });
         if (mine !== rfAcSeq) return;
-        rfAcItems = body.items || []; rfAcActive = -1; rfAcFor = kind;
+        const have = new Set([...pins, ...refine.inc, ...refine.exc].map(t => t.replace(/^\*/, '')));
+        rfAcItems = (body.items || []).filter(it => !have.has(it.tag)).slice(0, 8); rfAcActive = -1; rfAcFor = kind;
       } catch { if (mine === rfAcSeq) { rfAcItems = []; rfAcActive = -1; } }
       const live = cveilEl?.querySelector(`[data-emr-in="${kind}"]`);
       if (live && document.activeElement === live) paintRfAc(live); else closeRfAc();
@@ -2629,7 +2633,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       rfAc.addEventListener('click', event => { const row = event.target.closest('[data-ac]'); if (row) chooseRfAc(Number(row.dataset.ac)); });
     }
     if (!rfAcItems.length) { rfAc.hidden = true; return; }
-    rfAc.innerHTML = rfAcItems.map((it, i) => `<div class="emt-ac-row${i === rfAcActive ? ' is-active' : ''}" data-ac="${i}" role="option">
+    rfAc.innerHTML = rfAcItems.map((it, i) => `<div class="emt-ac-row${i === rfAcActive ? ' is-active' : ''}" data-ac="${i}" role="option"
+      title="이 압축 조합 안 게시물 ${fmt(it.observed)}건에 나옵니다">
       <span class="emt-ac-tag">${esc(it.tag)}</span><span class="emt-ac-kind">${esc(it.role_label || (it.group && it.group !== 'unsorted' ? roleLabel(it.group) : ''))}</span><span
       class="emt-ac-n">${fmtK(it.observed)}</span></div>`).join('');
     rfAc.hidden = false;

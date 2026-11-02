@@ -29355,8 +29355,20 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-compress-panel .ecw-cut { padding: 0; margin-top: 4px; border-bottom: 0; font-size: 10px; }
 .em-compress-panel .ecw-cut-bars { height: 16px; margin-top: 2px; }
 .em-compress-panel .ecw-cut-track { margin: 5px 7px 3px; }
-.em-compress-panel .emc-pv { margin-top: 6px; }
-.em-compress-panel .emc-ev i { font-style: normal; color: var(--text-muted); }
+.em-compress-panel button[data-emc-browse].is-on { color: #c9bdff; border-color: rgba(139,118,255,.6); }
+/* [살펴보기] 창 - 뽑힌 이벤트 줄(접지 않음 · 빈도 밖 태그는 회색) */
+.dragpanel.emc-browse-window .dragpanel-body { display: flex; flex-direction: column; min-height: 0; padding: 0; }
+.emc-browse-window .emc-bhead { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border-color, #343044); font-size: 10px; color: var(--text-muted); }
+.emc-browse-window .emc-bnote { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.emc-browse-window .emc-bhead button { font: inherit; font-size: 10px; color: var(--text-primary); background: #14131d; border: 1px solid #45405a; border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+.emc-browse-window .emc-bhead button:hover:not(:disabled) { border-color: #a894f5; }
+.emc-browse-window .emc-bhead button:disabled { opacity: .45; cursor: default; }
+.emc-browse-window .emc-blist { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.emc-browse-window .emc-brow { display: flex; gap: 8px; padding: 4px 10px; border-bottom: 1px solid rgba(255,255,255,.05); font-family: var(--font-mono, monospace); font-size: 10.5px; line-height: 1.5; color: var(--text-primary); }
+.emc-browse-window .emc-brow span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.emc-browse-window .emc-brow i { font-style: normal; color: var(--text-muted); }
+.emc-browse-window .emc-brow b { flex: none; color: #e6a84a; font-weight: 500; }
+.emc-browse-window .emc-bmsg { padding: 12px 10px; font-size: 10.5px; color: var(--text-muted); }
 .em-compress-panel .emc-dim { color: var(--text-muted); }
 .em-compress-panel .emc-err { color: #e57373; }
 .em-compress-panel .emc-ev { display: flex; gap: 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text-primary); padding: 1px 0; }

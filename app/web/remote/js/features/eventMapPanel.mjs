@@ -169,7 +169,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // 압축(사용자 지시 2026-11-02) = 조합의 상태: 지울 갈래 id. 비면 압축 안 함. 저장 · 스테이징 · 랜덤 연결에 함께 실린다.
   // compressDraft = 압축 판에서 고르는 중인 갈래(판이 닫혀 있으면 null) · compressInfo = 미리보기 응답(열쇠로 낡음을 가린다).
   // compressCut = 슬라이더 컷({min_tags, max_tags, min_freq, max_freq} 중 정한 것) · draftCut = 판에서 움직이는 중인 컷.
-  // compressLoading = 지금 세는 열쇠 · compressPreview = [미리 뽑아보기] 결과(열쇠로 낡음을 가린다).
+  // compressLoading = 지금 세는 열쇠 · compressPreview = [살펴보기] 창의 뽑기 결과(열쇠로 낡음을 가린다).
   let compress = [], compressDraft = null, compressInfo = null, compressSeq = 0, compressTimer = 0;
   let compressCut = {}, draftCut = {}, compressLoading = '', compressError = '', compressPreview = null;
   const prefs = loadPrefs();
@@ -2417,7 +2417,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // 핀 · 인원 태그는 남는다(서버 core/event_map/compress.py). 대상 = 이벤트 맵 갈래 10개(작품·고유명 · 미분류 제외).
   // 슬라이더 둘 = Quick Filter 이벤트 압축 창과 같은 뜻(사용자 결정 2026-11-02): 빈도 범위 밖 태그는 태그 수에서만 빠지고
   // (프롬프트엔 남음 · 미리 뽑아보기에서 회색) 태그 수 범위 밖 이벤트는 랜덤에서 빠진다. 후보가 50만을 넘으면 50만만 센다.
-  // 판의 숫자 줄은 남은 이벤트 수만 - 분포를 그리느라 큰 이벤트 목록 대신 [미리 뽑아보기] 를 둔다(사용자 지시 2026-11-02).
+  // 판의 숫자 줄은 남은 이벤트 수만 - 뽑힌 이벤트는 [살펴보기] 창에서 본다(사용자 지시 2026-11-02).
   const COMPRESS_IDS = ['clothing', 'body', 'cast', 'expression', 'action', 'adult', 'scene', 'object', 'situation', 'meta'];
   const CUT_KEYS = ['min_tags', 'max_tags', 'min_freq', 'max_freq'];
   const COMPRESS_DRAFT_KEY = 'naia.em.compressDraft';
@@ -2454,15 +2454,17 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   function takeCompress(selection) {
     compress = Array.isArray(selection?.compress) ? selection.compress.filter(id => COMPRESS_IDS.includes(id)) : [];
     compressCut = compress.length ? cleanCut(selection?.compress_cut) : {};
-    compressDraft = null; compressPreview = null;
+    compressDraft = null;
     paintCompress();
+    scheduleBrowse();
   }
   function setCompress(groups, cut) {
     compress = COMPRESS_IDS.filter(id => groups.includes(id));
     compressCut = compress.length ? cleanCut(cut) : {};
-    compressDraft = null; compressPreview = null;
+    compressDraft = null;
     samples = null;   // 실제 조합은 압축 전 것이다
     paintCompress();
+    scheduleBrowse();
     render();
     if (eventLinked()) void syncRandomLink();
     toast(compress.length ? `압축 - ${compress.map(groupLabel).join(' · ')} 제거 · 랜덤은 이벤트 단위` : '압축을 풀었습니다 - 랜덤은 게시물 단위', 'success');
@@ -2471,21 +2473,22 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     library?.close();
     compressDraft = COMPRESS_IDS.filter(id => groups.includes(id));
     draftCut = cleanCut(cut);
-    compressPreview = null;
     paintCompress();
     scheduleCompressInfo(0);
+    scheduleBrowse(0);
   }
   function closeCompressPanel() {
     if (compressDraft === null) return;
-    compressDraft = null; compressPreview = null;
+    compressDraft = null;
     paintCompress();
+    scheduleBrowse();   // 살펴보기 창은 지금 압축(또는 압축 없음)으로
   }
-  /** 판에서 고르는 것이 바뀌었다 - 기억 · 미리 뽑아보기 지움 · 다시 센다. */
+  /** 판에서 고르는 것이 바뀌었다 - 기억 · 다시 센다 · 살펴보기 창이 열려 있으면 다시 뽑는다. */
   function draftChanged(delay) {
     rememberDraft();
-    compressPreview = null;
     paintCompress();
     scheduleCompressInfo(delay);
+    scheduleBrowse(delay);
   }
   function onCompressPanelClick(event) {
     const t = event.target;
@@ -2496,7 +2499,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       draftChanged();
       return;
     }
-    if (t.closest('[data-emc-preview]')) { void drawCompressPreview(); return; }
+    if (t.closest('[data-emc-browse]')) { toggleBrowse(); return; }
     if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
     if (t.closest('[data-emc-apply]') && compressDraft?.length) setCompress(compressDraft, draftCut);
   }
@@ -2529,25 +2532,80 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       paintCompress();
     }, delay);
   }
-  /** [미리 뽑아보기] - 지금 판(갈래 · 슬라이더)으로 랜덤과 같은 규칙으로 5개. 누를 때마다 새로. */
-  async function drawCompressPreview() {
-    if (!compressDraft?.length) return;
-    const key = fullKey(compressDraft, draftCut);
-    compressPreview = { key, loading: true };
+  // [살펴보기] 창(사용자 지시 2026-11-02) - 랜덤과 같은 규칙으로 뽑은 이벤트 20줄을 판 밖 창에. 판이 열려 있으면 판의 것
+  // (칩 · 손잡이를 바꾸면 따라 다시 뽑는다), 닫혀 있으면 지금 압축. 줄은 접지 않는다 - 빈도 밖 태그는 회색으로 끝에.
+  const BROWSE_N = 20;
+  let browsePanel = null, browseTimer = 0;
+  const browseSource = () => (compressDraft ? { groups: compressDraft, cut: draftCut } : { groups: compress, cut: compressCut });
+  function ensureBrowse() {
+    if (browsePanel) return browsePanel;
+    browsePanel = createDraggablePanel({
+      document, window, id: 'emCompressBrowse', title: '압축 살펴보기', variant: 'em-overlay em-window emc-browse-window',
+      storageKey: 'event-map-compress-browse', width: 460, height: 420, minWidth: 300, minHeight: 200, maxWidth: 1200,
+      // 이벤트 맵 창의 자식 - 열면 그 옆에 붙는다(실행 첫 자리 규칙이면 맵 창 위에 떠 [압축 적용] 을 가렸다).
+      parentPanel: panel, resizable: true,
+      onClose: () => { clearTimeout(browseTimer); paintCompress(); },
+    });
+    browsePanel.body.innerHTML = `<div class="emc-bhead"><span class="emc-bnote"></span><button type="button" data-emc-reroll>다시 뽑기</button></div>
+      <div class="emc-blist"></div>`;
+    browsePanel.body.addEventListener('click', event => { if (event.target.closest('[data-emc-reroll]')) void drawBrowse(); });
+    return browsePanel;
+  }
+  function toggleBrowse() {
+    ensureBrowse();
+    if (browsePanel.isOpen()) { browsePanel.close(); return; }
+    browsePanel.open();
     paintCompress();
+    void drawBrowse();
+  }
+  function scheduleBrowse(delay = 250) {
+    if (!browsePanel?.isOpen()) return;
+    clearTimeout(browseTimer);
+    browseTimer = setTimeout(() => void drawBrowse(), delay);
+  }
+  async function drawBrowse() {
+    if (!browsePanel?.isOpen()) return;
+    clearTimeout(browseTimer);
+    const { groups, cut } = browseSource();
+    const key = `${fullKey(groups, cut)}|${Date.now()}`;   // 다시 뽑기마다 새 열쇠 - 늦게 온 앞 답을 버린다
+    compressPreview = { key, groups: groups.slice(), cut: { ...cut }, loading: groups.length > 0 };
+    paintBrowse();
+    if (!groups.length) return;
     try {
       const fp = filterParams();
       const body = await getJson('/api/event-map/sample', {
-        pins: pins.join(','), exclude: excludes.join(','), n: 5, seed: Date.now() % 1000003, ratings: fp.ratings,
-        persons: fp.persons, compress: compressDraft.join(','), compress_cut: cutText(draftCut),
+        pins: pins.join(','), exclude: excludes.join(','), n: BROWSE_N, seed: Date.now() % 1000003, ratings: fp.ratings,
+        persons: fp.persons, compress: groups.join(','), compress_cut: cutText(cut),
       });
       if (compressPreview?.key !== key) return;
-      compressPreview = { key, rows: body.samples || [] };
+      compressPreview = { ...compressPreview, loading: false, rows: body.samples || [], events: body.events_in ?? body.events };
     } catch (error) {
       if (compressPreview?.key !== key) return;
-      compressPreview = { key, error: error.message };
+      compressPreview = { ...compressPreview, loading: false, error: error.message };
     }
-    paintCompress();
+    paintBrowse();
+  }
+  function paintBrowse() {
+    if (!browsePanel?.isOpen()) return;
+    const pv = compressPreview || { groups: [], cut: {} };
+    browsePanel.setTitle(pv.events != null ? `압축 살펴보기 · ${fmt(pv.events)}` : '압축 살펴보기');
+    browsePanel.body.querySelector('.emc-bnote').textContent = [pins.length ? pins.join(', ') : '핀 없음',
+      pv.groups.length ? `${pv.groups.map(groupLabel).join(' · ')} 제거` : '', cutSummary(pv.cut)].filter(Boolean).join(' · ');
+    browsePanel.body.querySelector('[data-emc-reroll]').disabled = !pv.groups.length || Boolean(pv.loading);
+    let html;
+    if (!pv.groups.length) html = '<div class="emc-bmsg">압축 판에서 지울 갈래를 고르세요</div>';
+    else if (pv.loading) html = '<div class="emc-bmsg">뽑는 중…</div>';
+    else if (pv.error) html = `<div class="emc-bmsg emc-err">${esc(pv.error)}</div>`;
+    else if (!pv.rows.length) html = '<div class="emc-bmsg">슬라이더 안에 이벤트가 없습니다</div>';
+    else {
+      html = pv.rows.map(r => {
+        const off = new Set(r.uncounted || []);
+        const tags = r.tags.filter(t => !off.has(t)).map(esc)
+          .concat(r.tags.filter(t => off.has(t)).map(t => `<i title="빈도 범위 밖 - 태그 수에 세지 않습니다(프롬프트엔 남는다)">${esc(t)}</i>`));
+        return `<div class="emc-brow"><span>${tags.join(', ')}</span><b title="이 이벤트로 묶인 게시물">×${fmt(r.event_posts)}</b></div>`;
+      }).join('');
+    }
+    browsePanel.body.querySelector('.emc-blist').innerHTML = html;
   }
 
   // 슬라이더(Quick Filter eventCompressWindow.mjs 와 같은 두 손잡이 트랙 · 같은 .ecw-cut-* 모양).
@@ -2703,18 +2761,6 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const inside = cutText(draftCut) ? ` · 슬라이더 안 <b>${fmt(info.eventsIn)}</b>` : '';
     return `게시물 ${posts} → 이벤트 ${cutText(draftCut) ? fmt(info.events) : `<b>${fmt(info.events)}</b>`}${inside}`;
   }
-  function previewHtml() {
-    const pv = compressPreview?.key === fullKey(compressDraft, draftCut) ? compressPreview : null;
-    if (!pv) return '';
-    if (pv.loading) return '<div class="emc-pv"><span class="emc-dim">뽑는 중…</span></div>';
-    if (pv.error) return `<div class="emc-pv"><span class="emc-err">${esc(pv.error)}</span></div>`;
-    if (!pv.rows.length) return '<div class="emc-pv"><span class="emc-dim">슬라이더 안에 이벤트가 없습니다</span></div>';
-    return `<div class="emc-pv">${pv.rows.map(r => {
-      const off = new Set(r.uncounted || []);
-      const tags = r.tags.filter(t => !off.has(t)).map(esc).concat(r.tags.filter(t => off.has(t)).map(t => `<i>${esc(t)}</i>`));
-      return `<div class="emc-ev" title="${esc(r.tags.join(', '))}"><span>${tags.join(', ')}</span><b>×${fmt(r.event_posts)}</b></div>`;
-    }).join('')}</div>`;
-  }
   function paintCompress() {
     if (!overlay) return;
     const btn = overlay.querySelector('[data-em-compress]');
@@ -2739,14 +2785,15 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const same = on && compressDraft.join(',') === compress.join(',') && cutText(draftCut) === cutText(compressCut);
     if (!panelEl.querySelector('[data-emc-cut]')) {
       panelEl.innerHTML = `<div class="emc-grid"></div><div class="emc-sum"></div><div class="ecw-cut emc-cut" data-emc-cut></div>
-        <div class="emc-pvslot"></div><div class="emc-act"><button type="button" data-emc-preview>미리 뽑아보기</button><span></span></div>`;
+        <div class="emc-act"><button type="button" data-emc-browse title="랜덤과 같은 규칙으로 뽑은 이벤트를 따로 창에서 봅니다">살펴보기</button><span></span></div>`;
     }
     panelEl.querySelector('.emc-grid').innerHTML = COMPRESS_IDS.map(id => `<button type="button" class="emc-g${compressDraft.includes(id) ? ' is-on' : ''}" data-emc-g="${id}"
       aria-pressed="${compressDraft.includes(id)}">${esc(groupLabel(id))}</button>`).join('');
     panelEl.querySelector('.emc-sum').innerHTML = compressDraft.length ? compressSummary() : '<span class="emc-dim">지울 갈래를 고르세요</span>';
     paintSliders();
-    panelEl.querySelector('.emc-pvslot').innerHTML = compressDraft.length ? previewHtml() : '';
-    panelEl.querySelector('[data-emc-preview]').disabled = !compressDraft.length || Boolean(compressPreview?.loading);
+    const browseOn = Boolean(browsePanel?.isOpen());
+    panelEl.querySelector('[data-emc-browse]').classList.toggle('is-on', browseOn);
+    panelEl.querySelector('[data-emc-browse]').setAttribute('aria-pressed', String(browseOn));
     panelEl.querySelector('.emc-act > span').innerHTML = `<button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
       ${compressDraft.length && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
     fitHeight?.();

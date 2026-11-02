@@ -9747,6 +9747,9 @@ function requestGenerate(payload = {}, {queue = false} = {}) {
     return false;
   }
   flushPromptEngineeringEdits();
+  // 캐릭터 칸에 친 글도 **먼저** 보낸다(0.5초 묶음 대기분). 서버는 이 요청을 큐에 넣는 순간의 캐릭터를 고정하므로,
+  // 늦게 가면 방금 친 글이 아니라 그 앞 글이 이 장에 묶인다(Codex 리뷰 2026-11-02). 같은 소켓이라 순서가 지켜진다.
+  flushPendingModuleEdit('character');
   if (promptSendTimer) { clearTimeout(promptSendTimer); promptSendTimer = null; }
   _localPromptDirty = false;
   const message = {type: 'generate', ...(payload && typeof payload === 'object' ? payload : {})};
@@ -9935,7 +9938,7 @@ function generateAction() {
   collapsePromptDrawerForMobile();
   // 더블클릭·단축키 두 번이 두 장이 되지 않게(생성 중에도 쌓을 수 있게 된 뒤로는 돈이다).
   const now = performance.now();
-  if (now - lastHumanGenerateAt < 300) return;
+  if (now - lastHumanGenerateAt < 150) return;
   lastHumanGenerateAt = now;
   // Assets 신 사양(V5) 창이 떠 있으면 Generate 는 그 창의 시험 생성이다(사용자 승인 2026-10-11).
   // **사람이 누른 길에만** 건다 - 자동 반복이 부르는 `send('generate')` 까지 가로채면

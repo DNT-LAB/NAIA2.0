@@ -6,6 +6,7 @@ import os
 import random
 import re
 import threading
+from contextlib import contextmanager
 import time
 import uuid
 from pathlib import Path
@@ -556,7 +557,8 @@ def auto_character_positions(count: int) -> list[dict[str, float]]:
 
 def character_positions_for_mode(app_context, mode: str = "NAI",
                                  count: int | None = None,
-                                 *, use_conditional_mask: bool = True) -> list[dict[str, float]]:
+                                 *, use_conditional_mask: bool = True,
+                                 settings: dict | None = None) -> list[dict[str, float]]:
     """이 모드의 활성 캐릭터 좌표. 페이로드 빌드가 부르는 입구다.
 
     좌표는 **굴림의 일부가 아니다**(와일드카드로 변하지 않는다) - 그래서 캐릭터
@@ -572,7 +574,8 @@ def character_positions_for_mode(app_context, mode: str = "NAI",
     (Codex 지적, 실측: 얼린 C1,C2,C3 에 마스크가 고른 C1,C3,C4 의 좌표가 붙었다).
     """
     try:
-        settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
+        if settings is None:
+            settings = load_character_settings(mode, save_root=_save_root_from_context(app_context))
         mask = _conditional_slot_mask(app_context) if use_conditional_mask else None
         return resolved_character_positions(settings, count=count, slot_mask=mask)
     except Exception:
@@ -1439,8 +1442,10 @@ def _snapshot_result(snapshot: dict, frame_slot_ids: list[str]) -> dict:
     return result
 
 
-def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: list[str]) -> dict:
-    frozen = read_frozen_character_slots(app_context)
+def _overlay_frozen_character_slots(app_context, result: dict, frame_slot_ids: list[str],
+                                    frozen: dict[str, dict[str, str]] | None = None) -> dict:
+    if frozen is None:
+        frozen = read_frozen_character_slots(app_context)
     if not frozen:
         return result
     characters = list(result.get("characters") or [])
@@ -1855,6 +1860,9 @@ def _overlay_session_pool_pin(app_context, settings, result, pinned_frames, *, r
     return updated
 
 
+_LIVE_SNAPSHOT = object()
+
+
 def character_params_from_settings(
     app_context,
     mode: str = "NAI",
@@ -1865,6 +1873,7 @@ def character_params_from_settings(
     prefer_snapshot: bool = False,
     pinned: dict[str, dict[str, str]] | None = None,
     frozen_override: dict[str, dict[str, str]] | None = None,
+    snapshot_override: Any = _LIVE_SNAPSHOT,
 ) -> dict:
     """Resolve the character params for this call, with the SSOT precedence:
 
@@ -1884,6 +1893,8 @@ def character_params_from_settings(
     Used by ``roll_character_slot`` so one slot's [Refresh] leaves the others alone.
     ``frozen_override`` supplies a private freeze snapshot for a queued one-shot
     request. It also suppresses pruning of the shared freeze store.
+    ``snapshot_override`` replaces the live roll snapshot for step 3 (None = no
+    snapshot) - a queued Generate reuses the roll it saw when it was clicked.
 
     This function does NOT persist the snapshot — storage is explicit at the
     authoritative roll sites (Random / Generate / Refresh) via
@@ -1926,10 +1937,11 @@ def character_params_from_settings(
     # (3) Reuse the stored roll without re-rolling. Frozen slots overlay the
     # snapshot so a user pin wins without forcing unrelated slots to reroll.
     if prefer_snapshot:
-        snapshot = read_character_roll_snapshot(app_context, mode)
+        snapshot = (read_character_roll_snapshot(app_context, mode)
+                    if snapshot_override is _LIVE_SNAPSHOT else snapshot_override)
         if snapshot is not None:
             result = _snapshot_result(snapshot, frame_slot_ids)
-            result = _overlay_frozen_character_slots(app_context, result, frame_slot_ids)
+            result = _overlay_frozen_character_slots(app_context, result, frame_slot_ids, frozen_override)
             result = _overlay_session_pool_pin(app_context, normalized, result, pool_frames,
                                                reuse_current_context=reuse_current_context)
             _replay_character_snapshot_rolls(app_context, result, reuse_current_context=reuse_current_context)
@@ -2255,6 +2267,169 @@ def session_pool_request_characters(app_context, request: dict) -> dict:
         raise ValueError("선택한 캐릭터의 출력 줄이 비어 있습니다.")
     result["character_positions"] = resolved_character_positions(settings, count=len(result["characters"]))
     return result
+
+
+# 큐에 넣는 순간의 캐릭터 상태(사용자 제보 2026-11-02).
+#
+# ⚠️ 일반 Generate 는 캐릭터를 요청에 싣지 않고 **실행 직전**에 설정에서 풀었다(api_service 5-1).
+#    그래서 생성 중에 캐릭터 프롬프트를 고치면 이미 쌓아 둔 장까지 고친 값으로 나갔다 - 메인
+#    프롬프트는 누른 순간의 글이 나가는데 캐릭터만 어긋났다. 이제 누른 순간의 설정 · 굴림 스냅숏 ·
+#    📌 고정을 사본으로 떠 두고, 실행 때 그 사본으로 푼다.
+#    와일드카드 전개(재굴림 켬)와 굴림 기록은 그대로 **실행 때** 한다 - 기록이 그 장의 프롬프트
+#    맥락에 붙어야 하기 때문이다(누를 때 풀면 앞 장의 맥락에 붙는다).
+QUEUED_CHARACTER_CAPTURE_KEY = "_queued_character_capture"
+
+
+def capture_queued_characters(app_context, mode: str = "NAI") -> dict | None:
+    """누른 순간의 캐릭터 설정 사본. 캐릭터 서비스가 없는 맥락(옛 시험 · 데스크톱)이면 None - 예전처럼 실행 때 읽는다."""
+    from copy import deepcopy
+
+    getter = getattr(app_context, "_character_service", None)
+    if not callable(getter):
+        return None
+    service = getter()
+    settings_for = getattr(service, "settings_for", None)
+    if not callable(settings_for):
+        return None
+    mode_key = _snapshot_mode_key(mode)
+    with getattr(service, "_commit_lock", _SESSION_SNAPSHOT_LOCK), _SESSION_SNAPSHOT_LOCK:
+        settings = settings_for(mode_key)
+        if not isinstance(settings, dict):
+            return None
+        snapshot = read_character_roll_snapshot(app_context, mode_key)
+        # 누를 때 풀 📌 고정이 덮던 슬롯 - 풀이 사라져도 그 슬롯은 일반 Freeze 가 아니라 누를 때의 풀 값으로 나간다.
+        pool_pinned = [_frame_uuid(frame) for frame in
+                       _session_pool_pinned_frames(app_context, normalize_character_settings(settings), mode_key)]
+        capture = {
+            "mode": mode_key,
+            "settings": deepcopy(settings),
+            "snapshot": deepcopy(snapshot) if snapshot is not None else None,
+            "frozen": deepcopy(read_frozen_character_slots(app_context)),
+            # Freeze 의 와일드카드 구성요소 - 이 요청의 전개만 이것을 쓴다(`request_character_overrides`).
+            "components": deepcopy(dict(_character_wc_override_store(app_context) or {})),
+            "pool_pinned": pool_pinned,
+        }
+        capture["origin"] = _queued_state_fingerprint(capture)
+        return capture
+
+
+# 쌓인 장이 굴려 남긴 스냅숏에 다는 표 - 어느 상태(설정 · Freeze · 구성요소)에서 굴렸나.
+_QUEUED_ORIGIN_KEY = "_queued_origin"
+
+
+def _queued_state_fingerprint(capture: dict) -> str:
+    import hashlib
+
+    state = [capture.get("mode"), capture.get("settings"), capture.get("frozen") or {}, capture.get("components") or {}]
+    return hashlib.sha1(json.dumps(state, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
+
+
+@contextmanager
+def queued_resolution_lock(app_context):
+    """사본을 푸는 동안 세션 풀 · 캐릭터 편집 · 굴림 스냅숏이 바뀌지 않게 잡는다(Codex 리뷰 3차).
+    풀을 세우고 · 비우고 · 옵션을 바꾸는 라우트는 모두 캐릭터 `_commit_lock` 이나 `_SESSION_SNAPSHOT_LOCK` 안에서 한다 -
+    풀 확인(`queued_resolve_settings`)과 정규화 사이에 풀이 비면 누를 때의 슬롯이 빠졌다. 둘 다 RLock 이고
+    순서는 편집 · 풀 라우트와 같다(commit -> snapshot). 잡는 동안은 와일드카드 전개뿐이다(네트워크 없음)."""
+    getter = getattr(app_context, "_character_service", None)
+    service = getter() if callable(getter) else None
+    with getattr(service, "_commit_lock", _SESSION_SNAPSHOT_LOCK), _SESSION_SNAPSHOT_LOCK:
+        yield
+
+
+def queued_resolve_settings(capture: dict, snapshot: dict | None) -> tuple[dict, dict[str, dict[str, str]]]:
+    """사본을 풀 때 쓸 (설정, 고정 슬롯). 누른 뒤 세션 풀이 비워지거나 바뀌었으면, 그 풀을 가리키던 슬롯은 정규화가
+    버린다 - 누를 때 굴려 둔 값(snapshot)이 그 슬롯을 들고 있으면 그 값으로 나가도록 슬롯을 남기고(Codex 리뷰 2026-11-02),
+    그 값을 고정 슬롯(`pinned`)으로도 준다. 재굴림 켬은 새로 굴리는데 풀이 없어 굴릴 줄이 없다 - 누를 때의 값을 쓴다.
+    풀이 살아 있으면 손대지 않는다(📌 풀 고정이 그대로 이긴다). 굴린 값이 없으면 남길 글이 없다 - 예전처럼 빠진다."""
+    from copy import deepcopy
+    from core.wildcard_manager import LIVE_SESSION_WILDCARDS
+
+    settings = capture["settings"]
+    ids = [str(value) for value in (snapshot or {}).get("character_ids") or []]
+    rolled = set(ids)
+    if not rolled:
+        return settings, {}
+
+    def gone(frame) -> bool:
+        prompt = str(frame.get("prompt") or "")
+        return (isinstance(frame, dict) and bool(frame.get("session_wildcard")) and _frame_uuid(frame) in rolled
+                and not any(f"__{key}__" in prompt for key in LIVE_SESSION_WILDCARDS))
+
+    if not any(gone(frame) for frame in settings.get("character_frames") or []):
+        return settings, {}
+    copy = deepcopy(settings)
+    kept: set[str] = set()
+    for frame in copy.get("character_frames") or []:
+        if gone(frame):
+            frame["session_wildcard"] = False
+            kept.add(_frame_uuid(frame))
+    prompts = list(snapshot.get("characters") or [])
+    ucs = list(snapshot.get("uc") or [])
+    shares = snapshot.get("shares") if isinstance(snapshot.get("shares"), dict) else {}
+    pinned = {}
+    for index, sid in enumerate(ids):
+        if sid in kept and index < len(prompts):
+            prompt = str(prompts[index])
+            pinned[sid] = {"prompt": prompt, "uc": str(ucs[index]) if index < len(ucs) else "",
+                           "share": str(shares.get(sid, prompt))}
+    return copy, pinned
+
+
+def live_snapshot_if_capture_current(app_context, capture: dict, mode: str = "NAI") -> dict | None:
+    """사본을 뜬 뒤 설정이 그대로면 **지금** 굴림 스냅숏(앞 장이 그사이 굴려 둔 것)의 사본, 아니면 None.
+    ⚠️ 비교와 읽기를 편집과 같은 잠금 안에서 한다 - 사이에 편집 + Refresh 가 끼면 앞 요청이 새 캐릭터를 집는다(Codex 리뷰 2차)."""
+    from copy import deepcopy
+
+    getter = getattr(app_context, "_character_service", None)
+    if app_context is None or not callable(getter):
+        return None
+    service = getter()
+    with getattr(service, "_commit_lock", _SESSION_SNAPSHOT_LOCK), _SESSION_SNAPSHOT_LOCK:
+        if not queued_capture_is_current(app_context, capture):
+            return None
+        snapshot = read_character_roll_snapshot(app_context, mode)
+        # 같은 상태에서 누른 앞 장이 굴려 둔 것만 잇는다. 지금 상태가 같아 보여도 그사이 Freeze -> Refresh -> 해제처럼
+        # 다른 상태에서 만든 스냅숏일 수 있다(Codex 리뷰 6차: ABA). Refresh · Random 이 만든 것에는 표가 없다.
+        if snapshot is None or snapshot.get(_QUEUED_ORIGIN_KEY) != capture.get("origin"):
+            return None
+        return deepcopy(snapshot)
+
+
+def store_roll_if_capture_current(app_context, capture: dict, params: dict, mode: str = "NAI") -> dict | None:
+    """사본으로 새로 굴린 값을 미리보기 스냅숏으로 남긴다 - 그 사이 설정이 그대로일 때만.
+    ⚠️ 비교와 저장을 **편집과 같은 잠금**(캐릭터 서비스 `_commit_lock` -> `_SESSION_SNAPSHOT_LOCK`) 안에서 한다.
+       비교를 따로 해 두면 굴리는 사이 들어온 편집이 스냅숏을 지운 뒤 옛 글의 굴림이 되살아난다(Codex 리뷰 2026-11-02)."""
+    if app_context is None or not (isinstance(params, dict) and params.get("characters")):
+        return None
+    getter = getattr(app_context, "_character_service", None)
+    if not callable(getter):
+        return None
+    service = getter()
+    with getattr(service, "_commit_lock", _SESSION_SNAPSHOT_LOCK), _SESSION_SNAPSHOT_LOCK:
+        if not queued_capture_is_current(app_context, capture):
+            return None
+        stored = _store_character_roll_snapshot_locked(app_context, params, mode)
+        if stored is not None and capture.get("origin"):
+            stored[_QUEUED_ORIGIN_KEY] = capture["origin"]
+        return stored
+
+
+def queued_capture_is_current(app_context, capture: dict) -> bool:
+    """사본을 뜬 뒤 캐릭터 설정 · 📌 Freeze(그 구성요소까지)가 그대로인가. 바뀌었으면 사본으로 굴린 값을 미리보기
+    스냅숏으로 남기지 않고, 지금 스냅숏도 이어 쓰지 않는다 - 남기면 사용자가 고친 슬롯에 옛 글의 굴림이 붙고, 이어 쓰면
+    누른 뒤의 Freeze 가 만든 굴림이 쌓인 장에 들어간다(Codex 리뷰 5차: 재굴림 끔 · Freeze BLUE · Refresh -> BLUE)."""
+    getter = getattr(app_context, "_character_service", None)
+    if not callable(getter):
+        return False
+    try:
+        live = getter().settings_for(capture.get("mode") or "NAI")
+    except Exception:
+        return False
+    if not isinstance(live, dict) or live != capture.get("settings"):
+        return False
+    if (read_frozen_character_slots(app_context) or {}) != (capture.get("frozen") or {}):
+        return False
+    return dict(_character_wc_override_store(app_context) or {}) == (capture.get("components") or {})
 
 
 def record_session_pool_request_pick(app_context, request: dict) -> None:

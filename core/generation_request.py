@@ -28,6 +28,8 @@ def strip_session_pool_controls(params: dict) -> None:
     params.pop("_session_pool_character", None)
     params.pop("_session_pool_characters", None)
     params.pop("_temporary_character", None)
+    # 큐에 넣을 때 떠 둔 캐릭터 설정 사본(character_settings.QUEUED_CHARACTER_CAPTURE_KEY) - 그 장 한 번만 쓴다.
+    params.pop("_queued_character_capture", None)
 
 
 def restore_executed_character_params(params: dict) -> None:

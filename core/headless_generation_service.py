@@ -262,6 +262,8 @@ class HeadlessGenerationService:
         *,
         enqueue: bool,
         shared_nai: tuple | None = None,
+        shared_capture: dict | None = None,
+        share_roll: bool = False,
     ) -> HeadlessGenerationDispatch:
         """정규화된 params 하나를 요청 하나로 만든다(큐 삽입 · 런 연결 · 이벤트 발행까지).
         `shared_nai` 가 있으면 캐릭터·Vibe·레퍼런스를 새로 뽑지 않고 그것을 쓴다 -
@@ -314,6 +316,7 @@ class HeadlessGenerationService:
             # Direct requests record freshly evaluated negative-only operations.
             self._apply_conditional_negative(params, prompt_run_id)
         priority = self._priority(command)
+        self._capture_queued_characters(params, api_mode, shared_capture, share_roll=share_roll)
         try:
             if shared_nai is not None:
                 nai_characters, nai_vibe_transfer, nai_character_reference = shared_nai
@@ -476,6 +479,7 @@ class HeadlessGenerationService:
         cut_sources = list(parsed.get("sequences") or [])
         seed_fixed = self._to_bool(params.get("seed_fixed"))
         shared_nai: tuple | None = None
+        shared_capture: dict | None = None
         first: HeadlessGenerationDispatch | None = None
         total = len(prompt_sets)
         for index, text in enumerate(prompt_sets, 1):
@@ -498,7 +502,8 @@ class HeadlessGenerationService:
             cut["resolution"] = f"{cut_width} x {cut_height}"
             sizes.append(f"{cut_width}x{cut_height}")
             cut["_sequence_cut"] = {"index": index, "total": total}
-            dispatch = self._dispatch_params(command, cut, api_mode, enqueue=True, shared_nai=shared_nai)
+            dispatch = self._dispatch_params(command, cut, api_mode, enqueue=True, shared_nai=shared_nai,
+                                             shared_capture=shared_capture, share_roll=True)
             if not dispatch.ok or dispatch.request is None:
                 queued = index - 1
                 reason = dispatch.blocked_reason or "요청을 만들지 못했습니다."
@@ -509,6 +514,9 @@ class HeadlessGenerationService:
             if shared_nai is None:
                 request = dispatch.request
                 shared_nai = (request.nai_characters, request.nai_vibe_transfer, request.nai_character_reference)
+                from core.character_settings import QUEUED_CHARACTER_CAPTURE_KEY
+
+                shared_capture = request.params.get(QUEUED_CHARACTER_CAPTURE_KEY)
             if first is None:
                 first = dispatch
         assert first is not None
@@ -1235,6 +1243,44 @@ class HeadlessGenerationService:
             return 100
         priority = self._to_int(command.get("priority"), 0)
         return max(0, priority)
+
+    # 요청이 캐릭터를 직접 정한 경우 - 이 요청은 메인 슬롯을 읽지 않는다(api_service 의 캐릭터 출처 분기와 같은 목록).
+    _EXPLICIT_CHARACTER_KEYS = (
+        "_session_pool_character", "_session_pool_characters", "_temporary_character",
+        "sketchbook_character_prompts", "characters", "character_asset_request",
+        "_skip_character_late_binding", "_reference_inset_skip_characters",
+    )
+
+    def _capture_queued_characters(self, params: dict[str, Any], api_mode: str,
+                                   shared_capture: dict | None = None, *, share_roll: bool = False) -> None:
+        """누른 순간의 캐릭터 설정을 요청에 떠 둔다(사용자 제보 2026-11-02).
+
+        메인 프롬프트는 누를 때의 글이 요청에 실려 나가는데, 캐릭터는 실행 직전에 지금 설정에서 읽혀
+        생성 중에 고친 캐릭터가 이미 쌓인 장에 들어갔다. 실행 쪽(api_service 5-1)이 이 사본으로 푼다.
+        ⚠️ 밖에서 온 같은 키는 믿지 않는다 - 늘 지우고 새로 뜬다(Enhance 등이 옛 params 를 통째로 싣는다).
+        ⚠️ 뜨지 못하면(캐릭터 서비스가 없는 맥락) 예전처럼 실행 때 읽는다.
+        """
+        from core.character_settings import QUEUED_CHARACTER_CAPTURE_KEY, capture_queued_characters
+
+        params.pop(QUEUED_CHARACTER_CAPTURE_KEY, None)
+        if api_mode != "NAI" or any(params.get(key) for key in self._EXPLICIT_CHARACTER_KEYS):
+            return
+        if shared_capture is not None:
+            # 시퀀스의 뒤 컷 - 첫 컷과 **같은 사본 객체**를 든다. 첫 컷이 굴리면 그 값을 사본에 적고(`shared_roll`)
+            # 뒤 컷이 그것을 쓴다(api_service 5-1).
+            params[QUEUED_CHARACTER_CAPTURE_KEY] = shared_capture
+            return
+        try:
+            capture = capture_queued_characters(self.context, params.get("api_mode") or api_mode)
+        except Exception as exc:  # noqa: BLE001 - 사본 실패가 생성을 막지 않는다(실행 때 읽기로 돌아간다)
+            print(f"Headless Remote: queued character capture failed: {exc}", flush=True)
+            capture = None
+        if capture is not None:
+            if share_roll:
+                # 시퀀스 첫 컷 - 큐에 들어가기 **전에** 표식을 단다. 러너가 이미 돌고 있으면 넣자마자 실행돼서,
+                # 넣은 뒤에 달면 첫 컷의 굴림이 공유되지 않는다(Codex 리뷰 2차: ROLL_1/ROLL_2/ROLL_2).
+                capture["share_roll"] = True
+            params[QUEUED_CHARACTER_CAPTURE_KEY] = capture
 
     def _extract_nai_data(
         self,

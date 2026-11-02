@@ -5,6 +5,7 @@ import io, time, re, json
 import socket
 import ssl
 import threading
+import contextlib
 from contextlib import contextmanager
 import base64
 import copy
@@ -16,6 +17,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, List, Optional
 from core.comfyui_service import ComfyUIService
+from core.wildcard_processor import request_character_overrides
 from core.anima_engine.prompt_loras import split_lora_lines
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
@@ -38,7 +40,12 @@ from core.reference_inset_service import (
 from core.character_settings import (
     character_params_from_settings,
     conditional_character_override_active,
+    QUEUED_CHARACTER_CAPTURE_KEY,
+    live_snapshot_if_capture_current,
+    queued_resolution_lock,
     loaded_character_module_is_active,
+    queued_resolve_settings,
+    store_roll_if_capture_current,
     read_character_roll_snapshot,
     read_reroll_on_generate,
     store_character_roll_snapshot,
@@ -1561,50 +1568,102 @@ class APIService:
                         #     generated. (Auto Boost 는 캐릭터 프롬프트를 접지하지 않아 롤을 고정하지 않는다 —
                         #     옛 Ollama Boost 의 고정은 2026-09-26 회수.)
                         if not characters:
-                            _char_mode = params.get("api_mode", "NAI")
-                            _reroll_on_generate = read_reroll_on_generate(self.app_context, _char_mode)
-                            _prefer_snapshot = not _reroll_on_generate
-                            # Capture whether a reusable snapshot existed BEFORE resolving,
-                            # so we know if the result is a reuse (don't re-store) or a fresh
-                            # expansion (store, unless it's a per-run conditional override).
-                            _had_snapshot = (
-                                _prefer_snapshot
-                                and read_character_roll_snapshot(self.app_context, _char_mode) is not None
-                            )
-                            _had_override = conditional_character_override_active(self.app_context)
-                            char_params = character_params_from_settings(
-                                self.app_context,
-                                mode=_char_mode,
-                                prefer_snapshot=_prefer_snapshot,
-                            )
-                            if char_params and char_params.get("characters"):
-                                char_source = "Snapshot" if _had_snapshot else "HeadlessSettings"
-                                characters = char_params["characters"]
-                                ucs = char_params.get("uc", [])
-                                # POS: AUTO 든 CUSTOM 이든 채워진다.
-                                #   CUSTOM - 슬롯이 기억하는 사용자 좌표
-                                #   AUTO   - 여기서 굽는 하드코딩 배치(사용자 지정)
-                                # 좌표는 굴림의 일부가 아니라 슬롯에 붙은 정적 속성이라
-                                # 스냅샷을 거치지 않고 설정에서 곧장 읽는다.
-                                #
-                                # ⚠️ `count` 를 **실제로 나갈 캐릭터 수**로 준다. 조건부
-                                #    규칙이 캐릭터를 더하거나 빼면 설정의 활성 슬롯 수와
-                                #    갈리는데, 그때 좌표 개수가 어긋나면 아래 coords_given
-                                #    이 꺼져 배치가 통째로 조용히 사라진다.
-                                from core.character_settings import character_positions_for_mode
+                            # Auto Gen 이 다음 컷을 미리 만드는 동안(`pipeline_swap_lock`) 공용 current_prompt_context 가
+                            # 그 컷의 것으로 잠깐 바뀐다 - 조건부 결과 · 굴림 기록이 남의 맥락을 읽고 쓰지 않게 이 컷의
+                            # 캐릭터 풀기 전체를 같은 잠금 안에서 한다(Codex 리뷰 · 사용자 지시 2026-11-02). 네트워크는 없다.
+                            from core.headless_random_prompt_service import pipeline_swap_lock
 
-                                character_positions = (
-                                    char_params["character_positions"] if "character_positions" in char_params
-                                    else character_positions_for_mode(self.app_context, _char_mode, count=len(characters))
-                                )
-                                character_ids = list(char_params.get("character_ids") or [])
-                                # Persist a genuine fresh roll (reroll ON, or snapshot was
-                                # empty) so the preview reflects what was generated. Never
-                                # persist a reused snapshot or a per-run conditional override.
-                                if not _had_snapshot and not _had_override:
-                                    store_character_roll_snapshot(
-                                        self.app_context,
-                                        {
+                            with pipeline_swap_lock(self.app_context):
+                                _char_mode = params.get("api_mode", "NAI")
+                                _had_override = conditional_character_override_active(self.app_context)
+                                # 큐에 넣는 순간 떠 둔 캐릭터 설정(사용자 제보 2026-11-02 - 생성 중에 고친 캐릭터가
+                                # 이미 쌓인 장에 들어갔다). 조건부 결과가 이기는 런은 예전처럼 지금 값을 쓴다 -
+                                # 조건부는 그 런의 프롬프트 맥락을 따라가고, 사본에는 그것이 없다.
+                                _capture = params.get(QUEUED_CHARACTER_CAPTURE_KEY)
+                                if (not isinstance(_capture, dict) or _had_override
+                                        or not isinstance(_capture.get("settings"), dict)
+                                        or str(_capture.get("mode") or "") != str(_char_mode or "NAI").upper()):
+                                    _capture = None
+                                if _capture is not None:
+                                    _reroll_on_generate = bool(_capture["settings"].get("reroll_on_generate"))
+                                else:
+                                    _reroll_on_generate = read_reroll_on_generate(self.app_context, _char_mode)
+                                _prefer_snapshot = not _reroll_on_generate
+                                _resolve_kwargs = {}
+                                _resolve_settings = None
+                                # 사본으로 풀 때는 풀 확인부터 전개까지 풀 · 편집이 끼지 못한다(`queued_resolution_lock`).
+                                with (queued_resolution_lock(self.app_context) if _capture is not None
+                                      else contextlib.nullcontext()):
+                                    if _capture is not None:
+                                        _snapshot = _capture.get("snapshot")
+                                        if isinstance(_capture.get("shared_roll"), dict):
+                                            # 시퀀스의 뒤 컷 - 첫 컷이 굴린 캐릭터를 그대로 쓴다(사용자 지정 2026-09-13:
+                                            # 전 컷이 첫 컷의 캐릭터를 공유). 재굴림 켬이어도 컷마다 다시 굴리지 않는다.
+                                            _snapshot = _capture["shared_roll"]
+                                            _prefer_snapshot = True
+                                        elif _snapshot is None and _prefer_snapshot:
+                                            # 누를 때는 굴린 값이 없었지만 앞 장이 그사이 굴려 두었다 - 설정이 그대로면
+                                            # 예전처럼 그 값을 이어 쓴다(재굴림 끔 = 한 번 굴린 값 유지). 비교와 읽기는 한 잠금 안에서.
+                                            _snapshot = live_snapshot_if_capture_current(self.app_context, _capture, _char_mode)
+                                        # 풀이 사라진 세션 슬롯은 누를 때의 굴림으로(재굴림 켬이면 그 값을 고정 슬롯으로).
+                                        _resolve_settings, _pool_pinned = queued_resolve_settings(
+                                            _capture, _snapshot if _prefer_snapshot else _capture.get("snapshot"))
+                                        # 누를 때 풀 📌 고정이 덮던 슬롯은 풀이 사라져도 일반 Freeze 가 아니라 그때의 풀 값이다
+                                        # (Codex 리뷰 3차: Freeze=A · 풀 고정=B · 풀 비우기 -> A 가 나갔다).
+                                        _frozen = {sid: value for sid, value in (_capture.get("frozen") or {}).items()
+                                                   if not (sid in _pool_pinned and sid in (_capture.get("pool_pinned") or ()))}
+                                        _resolve_kwargs = {
+                                            "settings": _resolve_settings,
+                                            "snapshot_override": _snapshot,
+                                            "frozen_override": _frozen,
+                                            "pinned": _pool_pinned or None,
+                                        }
+                                    # Capture whether a reusable snapshot existed BEFORE resolving,
+                                    # so we know if the result is a reuse (don't re-store) or a fresh
+                                    # expansion (store, unless it's a per-run conditional override).
+                                    _had_snapshot = _prefer_snapshot and (
+                                        _resolve_kwargs["snapshot_override"] is not None if _capture is not None
+                                        else read_character_roll_snapshot(self.app_context, _char_mode) is not None
+                                    )
+                                    # 📌 Freeze 의 와일드카드 구성요소도 누를 때의 것 - 공용 저장소를 바꾸지 않고 이 요청의
+                                    # 전개에만 준다(Codex 리뷰 4차: 누른 뒤 Freeze 한 구성요소가 쌓인 장에 들어갔다).
+                                    with (request_character_overrides(_capture.get("components")) if _capture is not None
+                                          else contextlib.nullcontext()):
+                                        char_params = character_params_from_settings(
+                                            self.app_context,
+                                            mode=_char_mode,
+                                            prefer_snapshot=_prefer_snapshot,
+                                            **_resolve_kwargs,
+                                        )
+                                    if char_params and char_params.get("characters"):
+                                        char_source = "Snapshot" if _had_snapshot else "HeadlessSettings"
+                                        characters = char_params["characters"]
+                                        ucs = char_params.get("uc", [])
+                                        # POS: AUTO 든 CUSTOM 이든 채워진다.
+                                        #   CUSTOM - 슬롯이 기억하는 사용자 좌표
+                                        #   AUTO   - 여기서 굽는 하드코딩 배치(사용자 지정)
+                                        # 좌표는 굴림의 일부가 아니라 슬롯에 붙은 정적 속성이라
+                                        # 스냅샷을 거치지 않고 설정에서 곧장 읽는다.
+                                        #
+                                        # ⚠️ `count` 를 **실제로 나갈 캐릭터 수**로 준다. 조건부
+                                        #    규칙이 캐릭터를 더하거나 빼면 설정의 활성 슬롯 수와
+                                        #    갈리는데, 그때 좌표 개수가 어긋나면 아래 coords_given
+                                        #    이 꺼져 배치가 통째로 조용히 사라진다.
+                                        from core.character_settings import character_positions_for_mode
+
+                                        character_positions = (
+                                            char_params["character_positions"] if "character_positions" in char_params
+                                            else character_positions_for_mode(
+                                                self.app_context, _char_mode, count=len(characters),
+                                                settings=_resolve_settings)
+                                        )
+                                        character_ids = list(char_params.get("character_ids") or [])
+                                        # Persist a genuine fresh roll (reroll ON, or snapshot was
+                                        # empty) so the preview reflects what was generated. Never
+                                        # persist a reused snapshot or a per-run conditional override.
+                                        # 사본으로 굴렸으면 그사이 설정이 그대로일 때만 남긴다 - 고친 슬롯에 옛 글의 굴림이
+                                        # 붙는다. 비교와 저장은 편집과 같은 잠금 안에서(`store_roll_if_capture_current`).
+                                        _rolled = {
                                             "characters": characters,
                                             "uc": ucs,
                                             "character_ids": character_ids,
@@ -1617,9 +1676,16 @@ class APIService:
                                             #    에서만 조용히 죽어 있었다 - Random 경로는
                                             #    params 를 통째로 넘겨서 멀쩡했다(사용자 제보).
                                             "shares": char_params.get("shares"),
-                                        },
-                                        _char_mode,
-                                    )
+                                        }
+                                        if not _had_snapshot and not _had_override:
+                                            if _capture is None:
+                                                store_character_roll_snapshot(self.app_context, _rolled, _char_mode)
+                                            else:
+                                                store_roll_if_capture_current(self.app_context, _capture, _rolled, _char_mode)
+                                        if (_capture is not None and _capture.get("share_roll")
+                                                and not isinstance(_capture.get("shared_roll"), dict)):
+                                            # 같은 사본을 든 시퀀스의 뒤 컷이 첫 컷의 이 캐릭터를 그대로 쓴다(위 `shared_roll`).
+                                            _capture["shared_roll"] = _rolled
 
                 # `#주석` 은 캐릭터 프롬프트 · 네거티브에서도 걷는다(사용자 지정 2026-10-11 - 메인 프롬프트와 같은 규칙).
                 # 슬롯 전개가 이미 걷지만 그 길을 안 타는 소스(인페인트 세션 · Interactive · 즉시 생성 · 저장된 요청)가

@@ -8,6 +8,21 @@ from .wildcard_manager import WildcardManager
 
 
 _SUPPRESSED_SESSION_PICKS = ContextVar("suppressed_session_picks", default=())
+# 큐에 쌓인 Generate 가 쓰는 **누를 때의** 캐릭터 Freeze 구성요소({slot: {key: value}}). None 이면 공용 저장소
+# (`app_context.wildcard_override_character`)를 읽는다. 스레드(요청)마다 따로라 공용 저장소를 바꾸지 않는다.
+_REQUEST_CHARACTER_OVERRIDES = ContextVar("request_character_overrides", default=None)
+
+
+@contextmanager
+def request_character_overrides(overrides):
+    """이 요청의 캐릭터 전개만 `overrides` 로 Freeze 구성요소를 고정한다(사용자 제보 2026-11-02 · Codex 리뷰 4차)."""
+    from copy import deepcopy
+
+    token = _REQUEST_CHARACTER_OVERRIDES.set(deepcopy(overrides) if isinstance(overrides, dict) else {})
+    try:
+        yield
+    finally:
+        _REQUEST_CHARACTER_OVERRIDES.reset(token)
 
 
 @contextmanager
@@ -392,7 +407,9 @@ class WildcardProcessor:
         # frozen-character reassembly (character_settings) publishes this map.
         if location == 'character' and ctx is not None:
             slot = str(getattr(context, '_wc_slot', None) or '').strip()
-            char_overrides = getattr(ctx, 'wildcard_override_character', None)
+            char_overrides = _REQUEST_CHARACTER_OVERRIDES.get()
+            if char_overrides is None:
+                char_overrides = getattr(ctx, 'wildcard_override_character', None)
             if slot and isinstance(char_overrides, dict):
                 slot_map = char_overrides.get(slot)
                 if isinstance(slot_map, dict) and actual_wildcard_key in slot_map:

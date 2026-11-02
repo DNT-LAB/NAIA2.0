@@ -984,9 +984,9 @@ class EventMapService:
         from core.event_map.compress import normalize_compress
         groups = normalize_compress(compress)
         from core.event_map.library import normalize_filters
-        if isinstance(filters, str):
+        if isinstance(filters, str):   # 빈 글 = 찾기 없음(랜덤 연결은 키를 늘 글로 싣는다)
             try:
-                filters = json.loads(filters)
+                filters = json.loads(filters) if filters.strip() else None
             except ValueError as exc:
                 raise MapQueryError("bad_request", "찾기 조건 JSON을 확인해주세요.") from exc
         filters = normalize_filters(filters)

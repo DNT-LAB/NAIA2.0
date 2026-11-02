@@ -259,7 +259,8 @@ def register_event_map_routes(
                 session_context.event_map_random_link = state
         elif state["enabled"]:
             state["mode"] = "event"
-            for key in ("pins", "exclude", "ratings", "persons", "compress", "compress_cut", "compress_output"):
+            # filters = 찾기 조건 JSON 글(압축한 이벤트 안 찾기 - 사용자 지시 2026-11-02)
+            for key in ("pins", "exclude", "ratings", "persons", "compress", "compress_cut", "compress_output", "filters"):
                 value = payload.get(key, "")
                 if not isinstance(value, str) or len(value) > 8192:
                     return JSONResponse({"message": f"Invalid {key}"}, status_code=400)
@@ -271,7 +272,7 @@ def register_event_map_routes(
                 # generation must fail closed rather than broaden the conditions.
                 await run_in_thread(ensure_event_map_service(session_context).sample,
                                     **{k: state[k] for k in ("pins", "exclude", "ratings", "persons", "compress",
-                                                             "compress_cut", "compress_output")}, n=1,
+                                                             "compress_cut", "compress_output", "filters")}, n=1,
                                     permanent=True)
             except MapQueryError as exc:
                 if link_state(session_context)["revision"] == revision:

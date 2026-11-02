@@ -127,10 +127,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       compress = (state.compress || '').split(',').filter(Boolean);
       compressCut = compress.length ? cleanCut(state.compress_cut || '') : {};
       if (compress.length) compressOutput = state.compress_output === 'axes' ? 'axes' : 'full';
+      takeFilters(compress.length ? parseFilters(state.filters) : []);
       paintCompress();
       const fp = filterParams();
       linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
-        compress: compress.join(','), compress_cut: cutText(compressCut), compress_output: outputText() });
+        compress: compress.join(','), compress_cut: cutText(compressCut), compress_output: outputText(), filters: filtersText() });
       if (open) void explore();
     }
     paintRandomLink();
@@ -138,7 +139,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   function syncRandomLink(enabled = eventLinked()) {
     const fp = filterParams();
     const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
-      compress: compress.join(','), compress_cut: cutText(compressCut), compress_output: outputText() };
+      compress: compress.join(','), compress_cut: cutText(compressCut), compress_output: outputText(), filters: filtersText() };
     const key = JSON.stringify(payload);
     if (key === linkKey) return linkQueue;
     linkKey = key;
@@ -183,6 +184,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // peEnabled = 지금 켜진 PE 특징 제거 라운드(Set · 모르면 null) - 압축 중 막이 그 칸을 그린다. cveilEl = 그 막.
   // roomyHeight = 손으로 잡은 높이(압축 중엔 창을 줄였다가 풀면 돌려준다).
   let peEnabled = null, peSeq = 0, cveilEl = null, veilOn = false, roomyHeight = '';
+  // refine = 압축한 이벤트 안 찾기(사용자 지시 2026-11-02) - 포함 · 제외 칩이 곧 조합의 찾기 조건(selection.filters 한 묶음).
+  // 스테이징 줄 검색과 같은 문법(쉼표 · Enter = 칩 · 칩을 누르면 퍼펙트 매칭 `*` · `-x` = 제외 칸). 포함 칩에 맞는 태그는
+  // [선택한 축만] 출력에도 핀처럼 남는다(서버). [압축 해제] 와 함께 비운다. refineKeep = 칩으로 못 펴는 찾기 조건(뒤집은 묶음).
+  // refineDraft = 칸에 치는 중인 글 · refineMenu = 퍼펙트 매칭 단추를 띄운 칩 · plainInfo = 칩 없이 센 이벤트 수(분모).
+  let refine = { inc: [], exc: [] }, refineKeep = [], refineDraft = { inc: '', exc: '' }, refineMenu = '', plainInfo = null;
+  let rfAc = null, rfAcItems = [], rfAcActive = -1, rfAcSeq = 0, rfAcTimer = 0, rfAcFor = '';
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -806,7 +813,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   const currentSelection = () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons],
     ...(compress.length ? { compress: compress.slice() } : {}),
     ...(compress.length && cutText(compressCut) ? { compress_cut: { ...compressCut } } : {}),
-    ...(outputText() ? { compress_output: outputText() } : {}) });
+    ...(outputText() ? { compress_output: outputText() } : {}),
+    ...(refineFilters().length ? { filters: refineFilters() } : {}) });
   /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
    *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
   /** [넣기] = 고른 핀으로 메인 프롬프트를 대치한다. [생성] = 같은 대치 뒤 Generate(사용자 지정 2026-10-08 -
@@ -1921,9 +1929,13 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     bodyEl = overlay.querySelector('.em-body');
     cveilEl = overlay.querySelector('.em-cveil');
     cveilEl.addEventListener('click', event => {
-      if (event.target.closest('[data-em-cveil-release]')) setCompress([]);
+      if (event.target.closest('[data-em-cveil-release]')) { setCompress([]); return; }
+      onRefineClick(event);
     });
     cveilEl.addEventListener('change', onVeilPeChange);
+    cveilEl.addEventListener('input', onRefineInput);
+    cveilEl.addEventListener('keydown', onRefineKey);
+    cveilEl.addEventListener('focusout', event => { if (event.target.matches?.('[data-emr-in]')) closeRfAc(); });
     footEl = overlay.querySelector('.em-foot');
     ttabsEl = overlay.querySelector('.emt-tabs');
     actsEl = overlay.querySelector('.emt-acts');
@@ -2382,6 +2394,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     closeTreeMenu();
     if (chipPanel?.isOpen()) chipPanel.close();
     if (permOpen) { permOpen = false; if (permEl) permEl.hidden = true; closeAc(); }
+    closeRfAc();
     open = false;
     if (panel.isOpen()) panel.close();
     if (subEl) subEl.hidden = true;
@@ -2491,7 +2504,169 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   const outputText = () => (compress.length && compressOutput === 'axes' ? 'axes' : '');
   const compressParams = () => (compress.length
     ? { compress: compress.join(','), ...(cutText(compressCut) ? { compress_cut: cutText(compressCut) } : {}),
-      ...(outputText() ? { compress_output: outputText() } : {}) } : {});
+      ...(outputText() ? { compress_output: outputText() } : {}), ...(filtersText() ? { filters: filtersText() } : {}) } : {});
+  // ── 이벤트 안 찾기(사용자 지시 2026-11-02) ────────────────────────────────
+  const refineTerms = () => [...refine.inc, ...refine.exc.map(t => `-${t}`)];
+  /** 조합의 찾기 조건 - 압축 중일 때만(칩은 막 안에만 있다). */
+  const refineFilters = () => (compress.length
+    ? [...refineKeep, ...(refineTerms().length ? [{ terms: refineTerms(), invert: false }] : [])] : []);
+  const filtersText = () => { const f = refineFilters(); return f.length ? JSON.stringify(f) : ''; };
+  const parseFilters = text => { try { const v = JSON.parse(text || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
+  /** 불러온 찾기 조건을 칩으로 - 묶음들은 AND 라 한 묶음으로 합쳐도 뜻이 같다. 뒤집은 묶음만 그대로 둔다. */
+  function takeFilters(list) {
+    refine = { inc: [], exc: [] }; refineKeep = []; refineMenu = ''; refineDraft = { inc: '', exc: '' };
+    for (const g of Array.isArray(list) ? list : []) {
+      if (!g || !Array.isArray(g.terms)) continue;
+      if (g.invert) { refineKeep.push({ terms: g.terms.map(String), invert: true }); continue; }
+      for (const raw of g.terms.map(String)) {
+        const k = raw.startsWith('-') ? 'exc' : 'inc', tag = k === 'exc' ? raw.slice(1) : raw;
+        if (tag && !refine[k].includes(tag)) refine[k].push(tag);
+      }
+    }
+  }
+  /** 칩이 바뀌었다 - 상태 줄 · 머리줄 · 막의 수를 다시 세고([스테이징] 단추 · 랜덤 연결도) 지금 조건으로. */
+  function refineChanged() {
+    refineMenu = '';
+    samples = null;
+    render();   // refreshCompressViews -> 숫자 · 살펴보기 창
+    paintVeil();
+    if (eventLinked()) void syncRandomLink();
+  }
+  /** 칸에 친 것을 칩으로. `-x` 는 제외 칸으로 · `*x` 는 정확히(그대로 둔다) · 16개까지(서버와 같다). */
+  function addRefine(kind, text, rest = '') {
+    closeRfAc();
+    refineDraft[kind] = rest;
+    const live = cveilEl?.querySelector(`[data-emr-in="${kind}"]`);
+    if (live) live.value = rest;
+    let changed = false;
+    for (const raw of String(text || '').split(',')) {
+      let tag = raw.trim().replace(/_/g, ' ').replace(/\s+/g, ' ').toLowerCase(), k = kind;
+      if (tag.startsWith('-')) { k = 'exc'; tag = tag.replace(/^-+/, '').trim(); }
+      if (!tag || /^\*+$/.test(tag) || refine[k].includes(tag)) continue;
+      if (refine.inc.length + refine.exc.length >= 16) { toast('한 번에 16개까지 찾을 수 있습니다', 'info'); break; }
+      refine[k].push(tag);
+      changed = true;
+    }
+    if (changed) refineChanged();
+  }
+  function onRefineClick(event) {
+    const t = event.target;
+    const x = t.closest('[data-emr-x]');
+    if (x) { const [kind, i] = x.dataset.emrX.split(':'); refine[kind].splice(Number(i), 1); refineChanged(); return true; }
+    const pm = t.closest('[data-emr-exact]');
+    if (pm) {
+      const [kind, i] = pm.dataset.emrExact.split(':'), cur = refine[kind][Number(i)] || '';
+      const next = cur.startsWith('*') ? cur.slice(1) : `*${cur}`;
+      if (refine[kind].includes(next)) refine[kind].splice(Number(i), 1); else refine[kind][Number(i)] = next;   // 이미 있는 짝이면 하나로
+      refineChanged();
+      return true;
+    }
+    const chip = t.closest('[data-emr-chip]');
+    if (chip) { refineMenu = refineMenu === chip.dataset.emrChip ? '' : chip.dataset.emrChip; paintVeil(); return true; }
+    if (t.closest('.emr-inp') && !t.closest('button')) { t.closest('.emr-inp').querySelector('input')?.focus(); return true; }
+    return false;
+  }
+  function onRefineInput(event) {
+    const el = event.target;
+    if (!el.matches?.('[data-emr-in]')) return;
+    const kind = el.dataset.emrIn, value = el.value;
+    if (value.includes(',')) { const cut = value.lastIndexOf(','); addRefine(kind, value.slice(0, cut), value.slice(cut + 1)); return; }
+    refineDraft[kind] = value;
+    scheduleRfAc(el);
+  }
+  function onRefineKey(event) {
+    const el = event.target;
+    if (!el.matches?.('[data-emr-in]')) return;
+    event.stopPropagation();   // 창의 단축키로 새지 않게
+    const kind = el.dataset.emrIn;
+    if (event.isComposing) return;
+    if (rfAc && !rfAc.hidden && rfAcFor === kind && rfAcItems.length) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        rfAcActive = rfAcActive < 0 ? (event.key === 'ArrowDown' ? 0 : rfAcItems.length - 1)
+          : (rfAcActive + (event.key === 'ArrowDown' ? 1 : -1) + rfAcItems.length) % rfAcItems.length;
+        paintRfAc(el);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && rfAcActive >= 0) { event.preventDefault(); chooseRfAc(rfAcActive); return; }
+      if (event.key === 'Escape') { event.preventDefault(); closeRfAc(); return; }
+    }
+    if (event.key === 'Enter') { event.preventDefault(); if (el.value.trim()) addRefine(kind, el.value); return; }
+    if (event.key === 'Backspace' && !el.value && refine[kind].length) { event.preventDefault(); refine[kind].pop(); refineChanged(); }
+  }
+  // 자동완성 = 이벤트 맵 태그(/suggest - 한글도 받는다) · 처음엔 아무것도 고르지 않는다(Enter = 친 글자 그대로 · 스테이징과 같다).
+  function scheduleRfAc(el) {
+    clearTimeout(rfAcTimer);
+    const kind = el.dataset.emrIn, q = el.value.split(',').pop().trim().replace(/^[-*]+/, '');
+    if (!q) { closeRfAc(); return; }
+    rfAcTimer = setTimeout(async () => {
+      const mine = ++rfAcSeq;
+      try {
+        const body = await getJson('/api/event-map/suggest', { q, limit: 8 });
+        if (mine !== rfAcSeq) return;
+        rfAcItems = body.items || []; rfAcActive = -1; rfAcFor = kind;
+      } catch { if (mine === rfAcSeq) { rfAcItems = []; rfAcActive = -1; } }
+      const live = cveilEl?.querySelector(`[data-emr-in="${kind}"]`);
+      if (live && document.activeElement === live) paintRfAc(live); else closeRfAc();
+    }, DEBOUNCE_MS);
+  }
+  function paintRfAc(el) {
+    if (!rfAc) {
+      rfAc = document.createElement('div');
+      rfAc.className = 'emt-ac';
+      rfAc.setAttribute('role', 'listbox');
+      rfAc.hidden = true;
+      document.body.append(rfAc);
+      rfAc.addEventListener('mousedown', event => event.preventDefault());   // 칸이 초점을 잃지 않게
+      rfAc.addEventListener('click', event => { const row = event.target.closest('[data-ac]'); if (row) chooseRfAc(Number(row.dataset.ac)); });
+    }
+    if (!rfAcItems.length) { rfAc.hidden = true; return; }
+    rfAc.innerHTML = rfAcItems.map((it, i) => `<div class="emt-ac-row${i === rfAcActive ? ' is-active' : ''}" data-ac="${i}" role="option">
+      <span class="emt-ac-tag">${esc(it.tag)}</span><span class="emt-ac-kind">${esc(it.role_label || (it.group && it.group !== 'unsorted' ? roleLabel(it.group) : ''))}</span><span
+      class="emt-ac-n">${fmtK(it.observed)}</span></div>`).join('');
+    rfAc.hidden = false;
+    rfAc.style.zIndex = String(Number(overlay.style.zIndex) + 2);
+    const r = el.getBoundingClientRect();
+    rfAc.style.left = `${Math.round(r.left)}px`;
+    rfAc.style.top = `${Math.round(r.bottom + 4)}px`;
+    rfAc.style.width = `${Math.round(Math.max(240, Math.min(r.width + 40, 360)))}px`;
+  }
+  function closeRfAc() {
+    clearTimeout(rfAcTimer); ++rfAcSeq;
+    rfAcItems = []; rfAcActive = -1;
+    if (rfAc) rfAc.hidden = true;
+  }
+  function chooseRfAc(i) {
+    const it = rfAcItems[i], kind = rfAcFor;
+    if (!it) return;
+    const el = cveilEl?.querySelector(`[data-emr-in="${kind}"]`);
+    const raw = el?.value || '', cut = raw.lastIndexOf(',');
+    const prefix = (raw.slice(cut + 1).trim().match(/^[-*]+/) || [''])[0];
+    addRefine(kind, `${cut >= 0 ? raw.slice(0, cut + 1) : ''}${prefix}${it.tag}`);
+  }
+  function refineBarsHtml() {
+    // 칩을 누르면 [퍼펙트 매칭 적용 · 해제] - 스테이징 줄 검색 · Quick Filter 칩과 같은 손버릇(*tag = 그 태그와 정확히 같을 때만)
+    const chips = kind => refine[kind].map((tag, i) => {
+      const key = `${kind}:${i}`, exact = tag.startsWith('*');
+      return `<span class="emr-chip${kind === 'exc' ? ' is-ex' : ''}${exact ? ' is-exact' : ''}" data-emr-chip="${key}"
+        title="${exact ? '퍼펙트 매칭 - 눌러서 해제' : '눌러서 퍼펙트 매칭(*) - 이름에 들어 있으면 맞는 지금 대신 정확히 같은 태그만'}">${esc(tag)}${refineMenu === key
+        ? `<button type="button" class="emr-pm" data-emr-exact="${key}">${exact ? '퍼펙트 매칭 해제' : '퍼펙트 매칭 적용'}</button>` : ''}<button type="button"
+        data-emr-x="${key}" aria-label="${esc(tag)} 지우기">×</button></span>`;
+    }).join('');
+    const bar = (kind, label, ph) => `<div class="emr-bar"><span class="emr-lb">${label}</span><div class="emr-inp">${chips(kind)}<input
+      data-emr-in="${kind}" placeholder="${ph}" spellcheck="false" autocomplete="off" aria-label="${label}할 태그"></div></div>`;
+    return bar('inc', '포함', '태그 - 자동완성 · *정확히') + bar('exc', '제외', '태그');
+  }
+  /** 막의 수 줄 - 칩이 있으면 '맞는 이벤트 N / 칩 없이 센 수'(상태 줄 · 머리줄과 같은 수). */
+  function refineCountHtml() {
+    if (!refineFilters().length) return '<span class="emr-dim">포함 · 제외 태그로 이 압축 안을 좁힙니다 - 쉼표 · Enter 로 칩</span>';
+    const info = compressInfo?.key === fullKey(compress, compressCut) ? compressInfo : null;
+    if (compressError && !info) return `<span class="emr-err">세지 못했습니다 - ${esc(compressError)}</span>`;
+    if (!info) return '<span class="emr-dim">세는 중…</span>';
+    if (!info.eventsIn) return '<span class="emr-err">맞는 이벤트가 없습니다</span>';
+    const total = plainInfo?.key === fullKey(compress, compressCut, '') ? plainInfo.eventsIn : null;
+    return `맞는 이벤트 <b>${fmt(info.eventsIn)}</b>${total != null ? ` / ${fmt(total)}` : ''}`;
+  }
   const lockedAxes = () => (pinAxes.key === pins.join(',') ? pinAxes.axes : []);
   /** 지금 핀의 축을 안다 - 모르는 동안 [압축 적용] 을 막는다(잠긴 축을 끈 채 적용되지 않게 · Codex 리뷰 2026-11-02). */
   const pinAxesKnown = () => !pins.length || pinAxes.key === pins.join(',');
@@ -2546,8 +2721,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   ].map(([id, label, tip]) => `<button type="button" data-emc-out="${id}" class="${compressOutput === id ? 'is-on' : ''}"
     aria-pressed="${compressOutput === id}" title="${tip}">${label}</button>`).join('')}</span>`;
   // 영구 제외도 센 결과를 바꾼다 - 열쇠에 넣는다(Codex 리뷰 2026-11-02).
-  const baseKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, permText, groups]);
-  const fullKey = (groups, cut) => baseKey(groups) + '|' + cutText(cut);
+  // 찾기 조건(이벤트 안 찾기 칩)도 - ft 를 주면 그 조건으로(''= 칩 없이 · 막의 분모).
+  const baseKey = (groups, ft = filtersText()) => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, permText, groups, ft]);
+  const fullKey = (groups, cut, ft) => baseKey(groups, ft) + '|' + cutText(cut);
   /** 지난번 판에서 고른 기준 축 · 컷(저장 모양으로) - 없으면 기준 축 없음(핀 축만 잠겨 켜진다). */
   function lastCompressDraft() {
     try {
@@ -2564,6 +2740,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     compress = Array.isArray(selection?.compress) ? selection.compress.filter(id => COMPRESS_IDS.includes(id)) : [];
     compressCut = compress.length ? cleanCut(selection?.compress_cut) : {};
     if (compress.length) compressOutput = selection?.compress_output === 'axes' ? 'axes' : 'full';
+    takeFilters(compress.length ? selection?.filters : []);   // 압축한 조합의 찾기 조건 = 이벤트 안 찾기 칩
     compressDraft = null;
     paintCompress();
     scheduleBrowse();
@@ -2571,13 +2748,16 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   function setCompress(groups, cut) {
     compress = COMPRESS_IDS.filter(id => groups.includes(id));
     compressCut = compress.length ? cleanCut(cut) : {};
+    const dropped = !compress.length && (refine.inc.length + refine.exc.length + refineKeep.length) > 0;
+    if (!compress.length) takeFilters([]);   // [압축 해제] = 이벤트 안 찾기 칩도 비운다(사용자 결정 2026-11-02)
     compressDraft = null;
     samples = null;   // 실제 조합은 압축 전 것이다
     paintCompress();
     scheduleBrowse();
     render();
     if (eventLinked()) void syncRandomLink();
-    toast(compress.length ? `압축 - 기준 ${axesOf(compress).map(groupLabel).join(' · ')} · 랜덤은 이벤트 단위` : '압축을 풀었습니다 - 랜덤은 게시물 단위', 'success');
+    toast(compress.length ? `압축 - 기준 ${axesOf(compress).map(groupLabel).join(' · ')} · 랜덤은 이벤트 단위`
+      : `압축을 풀었습니다 - 랜덤은 게시물 단위${dropped ? ' · 이벤트 안 찾기 칩도 비웠습니다' : ''}`, 'success');
   }
   function openCompressPanel(groups, cut) {
     library?.close();
@@ -2619,7 +2799,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (draw && compressDraft && usable(compressDraft)) {
       const src = browseSource();   // 판의 것(살펴보기와 같은 규칙)
       void randomAssign(draw, draw.dataset.emcRandom === 'generate', { compress: src.groups.join(','),
-        ...(cutText(src.cut) ? { compress_cut: cutText(src.cut) } : {}), ...(src.output === 'axes' ? { compress_output: 'axes' } : {}) });
+        ...(cutText(src.cut) ? { compress_cut: cutText(src.cut) } : {}), ...(src.output === 'axes' ? { compress_output: 'axes' } : {}),
+        ...(filtersText() ? { filters: filtersText() } : {}) });
       return;
     }
     if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
@@ -2641,9 +2822,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     clearTimeout(compressTimer);
     compressPending = key;
     // 조건은 지금 것으로 고정한다 - 기다리거나 묻는 사이 핀이 바뀌어도 이 답은 이 열쇠로만 쓰인다(Codex 리뷰 2026-11-02).
-    const base = baseKey(groups), fp = filterParams();
+    const base = baseKey(groups), fp = filterParams(), ft = filtersText();
     const params = { pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: 1, ratings: fp.ratings, persons: fp.persons,
-      compress: groups.join(','), compress_cut: cutText(cut), hist: 1 };
+      compress: groups.join(','), compress_cut: cutText(cut), hist: 1, filters: ft };
     compressTimer = setTimeout(async () => {
       compressPending = '';
       const mine = ++compressSeq;
@@ -2652,6 +2833,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       try {
         const body = await getJson('/api/event-map/sample', params);
         if (mine !== compressSeq) return;
+        if (!ft) plainInfo = { key, eventsIn: body.events_in || 0 };   // 칩 없이 센 수 - 칩을 넣으면 막의 분모
         // 그 사이 이미 센 조건으로 돌아왔으면 그 숫자를 지킨다(Codex 재리뷰 2026-11-02)
         if (key === wantedCompressKey() || compressInfo?.key !== wantedCompressKey()) {
           compressInfo = { key, base, posts: body.observed_posts || 0, events: body.events || 0,
@@ -2711,7 +2893,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       const fp = filterParams();
       const body = await getJson('/api/event-map/sample', {
         pins: pins.join(','), exclude: excludes.join(','), n: BROWSE_N, seed: Date.now() % 1000003, ratings: fp.ratings,
-        persons: fp.persons, compress: groups.join(','), compress_cut: cutText(cut), compress_output: output,
+        persons: fp.persons, compress: groups.join(','), compress_cut: cutText(cut), compress_output: output, filters: filtersText(),
       });
       if (compressPreview?.key !== key) return;
       compressPreview = { ...compressPreview, loading: false, rows: body.samples || [], events: body.events_in ?? body.events };
@@ -2726,6 +2908,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const pv = compressPreview || { groups: [], cut: {} };
     browsePanel.setTitle(pv.events != null ? `압축 살펴보기 · ${fmt(pv.events)}` : '압축 살펴보기');
     browsePanel.body.querySelector('.emc-bnote').textContent = [pins.length ? pins.join(', ') : '핀 없음',
+      refineTerms().length ? `찾기 ${refineTerms().join(', ')}` : '',
       usable(pv.groups) ? `기준 ${axesOf(pv.groups).map(groupLabel).join(' · ')}` : '', cutSummary(pv.cut),
       usable(pv.groups) ? (pv.output === 'axes' ? '선택한 축만' : '프롬프트 전체') : ''].filter(Boolean).join(' · ');
     browsePanel.body.querySelector('[data-emc-reroll]').disabled = !usable(pv.groups) || Boolean(pv.loading);
@@ -2738,7 +2921,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       html = pv.rows.map(r => {
         const off = new Set(r.uncounted || []);
         const tags = r.tags.filter(t => !off.has(t)).map(esc)
-          .concat(r.tags.filter(t => off.has(t)).map(t => `<i title="기준 축 밖이거나 빈도 범위 밖 - 태그 수에 세지 않습니다(프롬프트엔 남는다)">${esc(t)}</i>`));
+          .concat(r.tags.filter(t => off.has(t)).map(t => `<i title="기준 축 밖이거나 빈도 범위 밖 - 태그 수에 세지 않습니다(프롬프트엔 남는다 · 포함 칩에 맞는 태그도 여기)">${esc(t)}</i>`));
         return `<div class="emc-brow"><span>${tags.join(', ')}</span><b title="이 이벤트로 묶인 게시물">×${fmt(r.event_posts)}</b></div>`;
       }).join('');
     }
@@ -3013,6 +3196,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       void loadPeEnabled();   // 막이 처음 덮일 때마다 지금 PE 를 묻는다(PE 창에서 바꿨을 수 있다)
       roomyHeight = manualSize ? overlay.style.height : '';
     } else if (!on && veilOn) {
+      closeRfAc();
       if (roomyHeight) overlay.style.height = roomyHeight;
       roomyHeight = '';
       const n = pins.length && result?.status === 'matched' ? Number(result.observed_posts) || 0 : 0;
@@ -3022,7 +3206,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (!on) return;
     if (!cveilEl.firstChild) {
       cveilEl.innerHTML = `<div class="em-cveil-mid"><span>압축 중에는 태그를 찾거나 꽂지 않습니다</span><button type="button"
-        data-em-cveil-release>압축 해제</button></div><div class="em-cveil-warn" hidden></div>
+        data-em-cveil-release>압축 해제</button></div><div class="em-cveil-rf"><div class="emr-head"><span class="emr-title">이벤트 안에서 찾기</span><span
+        class="emr-count"></span></div><div class="emr-bars"></div></div><div class="em-cveil-warn" hidden></div>
         <div class="ecw-pe em-cveil-pe"><div class="ecw-pe-head">[PE 특징 제거] - 여기에서 On/Off 시 현재 프리셋에도 반영됩니다</div>
         <div class="pe-opt-list ecw-pe-grid"></div></div>`;
     }
@@ -3031,6 +3216,18 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       data-em-pe-key="${key}"${peEnabled?.has(key) ? ' checked' : ''}${peEnabled ? '' : ' disabled'}><span class="pe-opt-check" aria-hidden="true"></span><span
       class="pe-opt-label">${esc(label)}</span></label></div>`).join('');
     if (grid._html !== html) { grid._html = html; grid.innerHTML = html; }
+    const count = refineCountHtml(), countEl = cveilEl.querySelector('.emr-count');
+    if (countEl.innerHTML !== count) countEl.innerHTML = count;
+    // 칩 칸 - 칩이 바뀔 때만 다시 그린다(치는 중인 글 · 초점을 지킨다)
+    const bars = cveilEl.querySelector('.emr-bars'), barsHtml = refineBarsHtml();
+    if (bars._html !== barsHtml) {
+      const focusKind = bars.contains(document.activeElement) ? document.activeElement.dataset.emrIn || '' : '';
+      bars._html = barsHtml;
+      bars.innerHTML = barsHtml;
+      bars.querySelectorAll('[data-emr-in]').forEach(el => { el.value = refineDraft[el.dataset.emrIn] || ''; });
+      if (focusKind) bars.querySelector(`[data-emr-in="${focusKind}"]`)?.focus({ preventScroll: true });
+      queueMicrotask(fitHeight);   // 칩 줄이 늘거나 줄면 창 높이를 다시 맞춘다
+    }
     const warn = cveilEl.querySelector('.em-cveil-warn');
     const lines = veilWarnings();
     warn.hidden = !lines.length;

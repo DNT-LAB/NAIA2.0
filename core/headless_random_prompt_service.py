@@ -304,7 +304,7 @@ class HeadlessRandomPromptService:
                     samples, combo, extra = self._staging_sample(service, staging_store(self.context), label)
                 else:
                     combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons", "compress",
-                                                          "compress_cut", "compress_output")}
+                                                          "compress_cut", "compress_output", "filters")}
                     body = service.sample(**combo, n=1, permanent=True)
                     samples = body.get("samples") or []
                 if not samples:

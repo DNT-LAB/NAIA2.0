@@ -29408,6 +29408,27 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   font-size: 10.5px; line-height: 1.5; color: #ffd99a; }
 .em-cveil-warn[hidden] { display: none; }
 .em-cveil-warn div::before { content: '· '; }
+/* 이벤트 안에서 찾기(사용자 지시 2026-11-02) - 스테이징 줄 검색과 같은 칩 칸 */
+.em-cveil-rf { flex: none; margin: 0 10px 8px; padding: 7px 9px 4px; border: 1px solid rgba(100,180,240,.32); border-radius: 6px; background: rgba(10,14,22,.92); }
+.em-cveil-rf .emr-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 10.5px; }
+.em-cveil-rf .emr-title { color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+.em-cveil-rf .emr-count { margin-left: auto; min-width: 0; text-align: right; color: var(--text-dim); }
+.em-cveil-rf .emr-count b { color: #7fd3ff; font-family: var(--font-mono); font-weight: 600; }
+.em-cveil-rf .emr-dim { color: var(--text-dim); }
+.em-cveil-rf .emr-err { color: #ff8fa3; }
+.em-cveil-rf .emr-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.em-cveil-rf .emr-lb { flex: 0 0 26px; font-size: 9.5px; color: var(--text-dim); }
+.em-cveil-rf .emr-inp { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 3px; min-height: 24px; box-sizing: border-box;
+  padding: 2px 5px; border: 1px solid var(--border-dim); border-radius: 5px; background: rgba(0,0,0,.26); cursor: text; }
+.em-cveil-rf .emr-inp:focus-within { border-color: var(--accent); }
+.em-cveil-rf .emr-inp input { flex: 1 0 60px; min-width: 60px; height: 18px; padding: 0 2px; border: 0; outline: none; background: transparent;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 10.5px; }
+.em-cveil-rf .emr-chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 7px; border-radius: 9px; font-family: var(--font-mono); font-size: 10px;
+  color: #9fd8ff; background: rgba(40,110,170,.22); border: 1px solid rgba(100,180,240,.45); cursor: pointer; }
+.em-cveil-rf .emr-chip.is-ex { color: #f2a9b8; background: rgba(170,50,80,.18); border-color: rgba(240,130,150,.45); }
+.em-cveil-rf .emr-chip.is-exact { font-weight: 700; box-shadow: inset 0 0 0 1px currentColor; }
+.em-cveil-rf .emr-chip button { height: auto; min-height: 0; padding: 0 4px; border: 0; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 1; cursor: pointer; }
+.em-cveil-rf .emr-chip button.emr-pm { margin-left: 4px; padding: 1px 6px; border: 1px solid currentColor; border-radius: 8px; font-size: 9.5px; }
 .em-cveil .ecw-pe { background: rgba(10,10,16,.9); }
 .em-cveil .ecw-pe .pe-opt-list { grid-template-columns: repeat(5, minmax(0, 1fr)); width: auto; }
 .em-cveil .pe-opt-row { grid-template-columns: 9px minmax(0, 1fr); gap: 0 4px; padding: 4px 5px; height: 100%; font-size: 10.5px; }

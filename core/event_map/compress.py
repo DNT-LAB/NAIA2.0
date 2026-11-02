@@ -286,6 +286,35 @@ def post_tags(idx, rid: int, wanted: list[int]) -> list[int]:
                           if t in pinned or not idx.color_arr[t]], wanted)
 
 
+def include_mask(idx, filters) -> np.ndarray | None:
+    """찾기 조건의 '포함' 낱말에 맞는 태그 - 압축한 이벤트 안 찾기의 포함 칩은 [선택한 축만] 출력에도 핀처럼 남긴다
+    (사용자 결정 2026-11-02). 뒤집은 묶음 · '-' 낱말은 뺀다 · 맞추는 법은 `EventMapIndex.filter_posts` 와 같다
+    (부분 일치 · `*` = 정확히). 출력에만 쓴다 - 이벤트 묶음(drop_mask)은 그대로. 포함 낱말이 없으면 None."""
+    mask = None
+    for group in filters or []:
+        if group.get("invert", False):
+            continue
+        for token in group.get("terms") or []:
+            if token.startswith("-"):
+                continue
+            exact = token.startswith("*")
+            clean = token[1:] if exact else token
+            if mask is None:
+                mask = np.zeros(idx.n_tags, dtype=bool)
+            hit = idx._filter_masks.get((clean, exact))
+            if hit is not None:
+                mask |= hit
+            elif exact:
+                tid = idx.resolve(clean)
+                if tid is not None:
+                    mask[tid] = True
+            else:
+                if idx._filter_names is None:
+                    idx._filter_names = [idx.by_id[t].lower() for t in range(idx.n_tags)]
+                mask |= np.fromiter((clean in name for name in idx._filter_names), dtype=bool, count=idx.n_tags)
+    return mask
+
+
 def _ordered(idx, tids: list[int], wanted: list[int]) -> list[int]:
     population = [t for t in tids if idx.population_arr[t]]
     head = population + [t for t in wanted if t in tids and t not in population]
@@ -353,8 +382,11 @@ def compressed(service, idx, *, pins, exclude, ratings, persons, block, filters,
         out["hist"] = _hist(sizes)   # {세는 태그 수: 이벤트 수} - 빈도 컷은 걸고 태그 수 컷은 안 건 전체
         out["freq_hist"] = _hist(table.freq[(table.freq > 0) & ~always])   # {빈도: 그 빈도의 태그 수} - 늘 세는 태그 빼고
 
+    keep = include_mask(idx, filters) if output == "axes" else None
+    shown = table.drop if keep is None else (table.drop & ~keep)   # 포함 칩에 맞는 태그는 축 밖이어도 남긴다(회색)
+
     def row(i, rid=None):
-        tids = event_tags(idx, int(table.reps[i]), table.drop, wanted) if rid is None else post_tags(idx, rid, wanted)
+        tids = event_tags(idx, int(table.reps[i]), shown, wanted) if rid is None else post_tags(idx, rid, wanted)
         item = {"tags": [idx.by_id[t] for t in tids], "posts": int(table.counts[i])}
         item["uncounted"] = [idx.by_id[t] for t in tids if table.drop[t] or (counted is not None and not counted[t])]
         return item

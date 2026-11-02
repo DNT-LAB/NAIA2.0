@@ -177,6 +177,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // compressOutput = 출력 'full'(프롬프트 전체 = 이벤트의 게시물 하나) | 'axes'(선택한 축만) - 판 · 상태 줄이 같은 값을 쓴다.
   // pinAxes = 핀이 든 축(해제 불가 기준 축 · /resolve 의 group) - key = 물어본 핀.
   let compressOutput = 'full', pinAxes = { key: '', axes: [] };
+  // compressPending = 타이머가 기다리는 숫자 줄 열쇠 · compressView = 마지막으로 그린 조건(핀 · 제외 · 등급 · 인원 · 영구 제외).
+  let compressPending = '', compressView = '';
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -739,6 +741,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     library?.close();
     if (!pins.length) return;
     const mine = ++seq;
+    // 뽑는 사이 압축 · 출력이 바뀌면 이 답은 옛 설정의 것이다(Codex 리뷰 2026-11-02) - seq 는 explore 와 같이 쓰니 따로 본다.
+    const packed = JSON.stringify(compressParams());
+    const stale = () => mine !== seq || packed !== JSON.stringify(compressParams());
     setStatus('실제 조합을 뽑는 중…', 'busy');
     setBusy(true);
     try {
@@ -746,12 +751,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
         pins: pins.join(','), exclude: excludes.join(','), n: SAMPLE_COUNT,
         seed: Date.now() % 1000003, ...filterParams(), ...compressParams(),
       });
-      if (mine !== seq) return;
+      if (stale()) return;
       await loadPeHidden((body.samples || []).flatMap(s => s.tags || []));
-      if (mine !== seq) return;
+      if (stale()) return;
       samples = body;
     } catch (error) {
-      if (mine !== seq) return;
+      if (stale()) return;
       samples = { status: 'error', message: error.message, samples: [] };
     } finally { setBusy(false); }
     render();
@@ -1607,7 +1612,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     paintTrail();
     paintFilters();
     paintTreeTabs();
-    if (compressDraft && pinAxes.key !== pins.join(',')) void loadPinAxes();
+    refreshCompressViews();
     rows = [];
     let html = '';
     let treeBody = false;
@@ -2458,6 +2463,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     ? { compress: compress.join(','), ...(cutText(compressCut) ? { compress_cut: cutText(compressCut) } : {}),
       ...(outputText() ? { compress_output: outputText() } : {}) } : {});
   const lockedAxes = () => (pinAxes.key === pins.join(',') ? pinAxes.axes : []);
+  /** 지금 핀의 축을 안다 - 모르는 동안 [압축 적용] 을 막는다(잠긴 축을 끈 채 적용되지 않게 · Codex 리뷰 2026-11-02). */
+  const pinAxesKnown = () => !pins.length || pinAxes.key === pins.join(',');
   /** 핀이 든 축을 묻는다 - 판에서 그 축은 기준에서 뺄 수 없다(예: covering privates -> 행위·자세). */
   async function loadPinAxes() {
     const key = pins.join(',');
@@ -2469,12 +2476,25 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       const body = await getJson('/api/event-map/resolve', { tags: key });
       axes = COMPRESS_IDS.filter(id => (body.items || []).some(item => item.group === id));
     } catch { /* 못 물으면 잠그지 않는다 - 서버는 핀을 늘 남긴다 */ }
-    if (pins.join(',') !== key) { pinAxes = { key: '', axes: [] }; return; }
+    if (pins.join(',') !== key) return;   // 그 사이 핀이 바뀌었다 - 새 핀의 물음이 따로 간다(render)
     pinAxes = { key, axes };
     if (compressDraft?.some(id => axes.includes(id))) {
       compressDraft = compressDraft.filter(id => !axes.includes(id));
       draftChanged(0);
     } else paintCompress();
+  }
+  /** 핀 · 제외 · 등급 · 인원 · 영구 제외가 바뀌었다(render 마다 불린다 - 조건이 같으면 바로 돌아간다).
+   *  상태 줄 · 판의 숫자 · 살펴보기 창을 지금 조건으로 다시 센다(Codex 리뷰 2026-11-02 - 전엔 옛 결과가 남았다). */
+  function refreshCompressViews() {
+    if (compressDraft && pinAxes.key !== pins.join(',')) void loadPinAxes();
+    const view = baseKey([]);
+    if (view === compressView) return;
+    compressView = view;
+    if (!compress.length && compressDraft === null) return;
+    paintCompress();
+    scheduleCompressInfo();
+    const src = browseSource();
+    if (browsePanel?.isOpen() && compressPreview?.base !== `${fullKey(src.groups, src.cut)}|${src.output}`) scheduleBrowse();
   }
   /** 출력 토글 - 판 · 상태 줄 어디서 눌러도 같은 값. 압축 중이면 바로 랜덤에 실린다. */
   function setOutput(id) {
@@ -2492,7 +2512,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     ['axes', '선택한 축만', '기준 축의 태그(+ 핀 · 인원)만 씁니다'],
   ].map(([id, label, tip]) => `<button type="button" data-emc-out="${id}" class="${compressOutput === id ? 'is-on' : ''}"
     aria-pressed="${compressOutput === id}" title="${tip}">${label}</button>`).join('')}</span>`;
-  const baseKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, groups]);
+  // 영구 제외도 센 결과를 바꾼다 - 열쇠에 넣는다(Codex 리뷰 2026-11-02).
+  const baseKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, permText, groups]);
   const fullKey = (groups, cut) => baseKey(groups) + '|' + cutText(cut);
   /** 지난번 판에서 고른 기준 축 · 컷(저장 모양으로) - 없으면 기준 축 없음(핀 축만 잠겨 켜진다). */
   function lastCompressDraft() {
@@ -2562,28 +2583,33 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (out) { setOutput(out.dataset.emcOut); return; }
     if (t.closest('[data-emc-browse]')) { toggleBrowse(); return; }
     if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
-    if (t.closest('[data-emc-apply]') && compressDraft && usable(compressDraft)) setCompress(compressDraft, draftCut);
+    if (t.closest('[data-emc-apply]') && compressDraft && pinAxesKnown()) {
+      const draft = compressDraft.filter(id => !lockedAxes().includes(id));
+      if (usable(draft)) setCompress(draft, draftCut);
+    }
   }
   /** 숫자 줄 · 슬라이더 분포 - 판에서 고르는 것, 판이 닫혔으면 지금 압축(상태 줄의 이벤트 수). */
   function scheduleCompressInfo(delay = 250) {
-    clearTimeout(compressTimer);
     const groups = compressDraft ?? compress;
     const cut = compressDraft ? draftCut : compressCut;
-    if (!usable(groups) || mapState?.state !== 'ready') return;
+    if (!usable(groups) || mapState?.state !== 'ready') { clearTimeout(compressTimer); compressPending = ''; return; }
     const key = fullKey(groups, cut);
-    if (compressInfo?.key === key || compressLoading === key) return;
+    if (compressInfo?.key === key || compressLoading === key || compressPending === key) return;
+    clearTimeout(compressTimer);
+    compressPending = key;
+    // 조건은 지금 것으로 고정한다 - 기다리거나 묻는 사이 핀이 바뀌어도 이 답은 이 열쇠로만 쓰인다(Codex 리뷰 2026-11-02).
+    const base = baseKey(groups), fp = filterParams();
+    const params = { pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: 1, ratings: fp.ratings, persons: fp.persons,
+      compress: groups.join(','), compress_cut: cutText(cut), hist: 1 };
     compressTimer = setTimeout(async () => {
+      compressPending = '';
       const mine = ++compressSeq;
       compressLoading = key; compressError = '';
       paintCompress();
       try {
-        const fp = filterParams();
-        const body = await getJson('/api/event-map/sample', {
-          pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: 1, ratings: fp.ratings, persons: fp.persons,
-          compress: groups.join(','), compress_cut: cutText(cut), hist: 1,
-        });
+        const body = await getJson('/api/event-map/sample', params);
         if (mine !== compressSeq) return;
-        compressInfo = { key, base: baseKey(groups), posts: body.observed_posts || 0, events: body.events || 0,
+        compressInfo = { key, base, posts: body.observed_posts || 0, events: body.events || 0,
           eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
       } catch (error) {
         if (mine !== compressSeq) return;
@@ -2630,7 +2656,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     clearTimeout(browseTimer);
     const { groups, cut, output } = browseSource();
     const key = `${fullKey(groups, cut)}|${output}|${Date.now()}`;   // 다시 뽑기마다 새 열쇠 - 늦게 온 앞 답을 버린다
-    compressPreview = { key, groups: groups.slice(), cut: { ...cut }, output, loading: usable(groups) };
+    compressPreview = { key, base: `${fullKey(groups, cut)}|${output}`, groups: groups.slice(), cut: { ...cut }, output,
+      loading: usable(groups) };
     paintBrowse();
     if (!usable(groups)) return;
     try {
@@ -2866,7 +2893,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     panelEl.querySelector('[data-emc-browse]').classList.toggle('is-on', browseOn);
     panelEl.querySelector('[data-emc-browse]').setAttribute('aria-pressed', String(browseOn));
     panelEl.querySelector('.emc-act-r').innerHTML = `<button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
-      ${usable(compressDraft) && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
+      ${usable(compressDraft) && pinAxesKnown() && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
     fitHeight?.();
   }
 

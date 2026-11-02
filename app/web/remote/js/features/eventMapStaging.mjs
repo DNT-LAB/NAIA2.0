@@ -583,6 +583,12 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const params = new URLSearchParams({ pins: sel.pins.join(','), exclude: sel.exclude.join(','),
       ratings: sel.ratings.join(','), persons: sel.persons.join(','), n: '1', seed: String(Date.now() % 1000003) });
     if (sel.filters?.length) params.set('filters', JSON.stringify(sel.filters));   // 분할 조건 - ST Random 과 같은 게시물에서
+    if (sel.compress?.length) {   // 압축한 조합 - 이벤트 단위 · 컷 · 출력도 ST Random 과 같게(Codex 리뷰 2026-11-02)
+      params.set('compress', sel.compress.join(','));
+      const cut = ['min_tags', 'max_tags', 'min_freq', 'max_freq'].map(k => sel.compress_cut?.[k] ?? '').join(',');
+      if (cut !== ',,,') params.set('compress_cut', cut);
+      if (sel.compress_output) params.set('compress_output', sel.compress_output);
+    }
     const body = await request(`/api/event-map/sample?${params}`);
     const s = (body.samples || [])[0];
     if (!s?.tags?.length) throw new Error('이 조합에 맞는 게시물이 없습니다');

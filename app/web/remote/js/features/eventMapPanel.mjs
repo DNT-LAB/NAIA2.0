@@ -2512,13 +2512,17 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     ? [...refineKeep, ...(refineTerms().length ? [{ terms: refineTerms(), invert: false }] : [])] : []);
   const filtersText = () => { const f = refineFilters(); return f.length ? JSON.stringify(f) : ''; };
   const parseFilters = text => { try { const v = JSON.parse(text || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
-  /** 불러온 찾기 조건을 칩으로 - 묶음들은 AND 라 한 묶음으로 합쳐도 뜻이 같다. 뒤집은 묶음만 그대로 둔다. */
+  /** 불러온 찾기 조건을 칩으로 - 묶음들은 AND 라 한 묶음으로 합쳐도 뜻이 같다. 다만 한 묶음은 16개까지(서버) -
+   *  넘치는 묶음과 뒤집은 묶음(스테이징 [분할] 의 나머지)은 경계 그대로 refineKeep 에 두고 '고정 조건' 줄에 보인다(Codex 리뷰). */
   function takeFilters(list) {
     refine = { inc: [], exc: [] }; refineKeep = []; refineMenu = ''; refineDraft = { inc: '', exc: '' };
     for (const g of Array.isArray(list) ? list : []) {
-      if (!g || !Array.isArray(g.terms)) continue;
-      if (g.invert) { refineKeep.push({ terms: g.terms.map(String), invert: true }); continue; }
-      for (const raw of g.terms.map(String)) {
+      if (!g || !Array.isArray(g.terms) || !g.terms.length) continue;
+      const terms = g.terms.map(String);
+      if (g.invert) { refineKeep.push({ terms, invert: true }); continue; }
+      const fresh = terms.filter(raw => { const k = raw.startsWith('-') ? 'exc' : 'inc'; return !refine[k].includes(k === 'exc' ? raw.slice(1) : raw); });
+      if (refine.inc.length + refine.exc.length + fresh.length > 16) { refineKeep.push({ terms, invert: false }); continue; }
+      for (const raw of fresh) {
         const k = raw.startsWith('-') ? 'exc' : 'inc', tag = k === 'exc' ? raw.slice(1) : raw;
         if (tag && !refine[k].includes(tag)) refine[k].push(tag);
       }
@@ -2563,6 +2567,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     }
     const chip = t.closest('[data-emr-chip]');
     if (chip) { refineMenu = refineMenu === chip.dataset.emrChip ? '' : chip.dataset.emrChip; paintVeil(); return true; }
+    const kx = t.closest('[data-emr-keep-x]');
+    if (kx) { refineKeep.splice(Number(kx.dataset.emrKeepX), 1); refineChanged(); return true; }
     if (t.closest('.emr-inp') && !t.closest('button')) { t.closest('.emr-inp').querySelector('input')?.focus(); return true; }
     return false;
   }
@@ -2655,7 +2661,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     }).join('');
     const bar = (kind, label, ph) => `<div class="emr-bar"><span class="emr-lb">${label}</span><div class="emr-inp">${chips(kind)}<input
       data-emr-in="${kind}" placeholder="${ph}" spellcheck="false" autocomplete="off" aria-label="${label}할 태그"></div></div>`;
-    return bar('inc', '포함', '태그 - 자동완성 · *정확히') + bar('exc', '제외', '태그');
+    // 고정 조건 = 칩으로 못 펴는 묶음(나머지 · 넘친 묶음) - 보이고 묶음째 지운다
+    const keep = !refineKeep.length ? '' : `<div class="emr-bar"><span class="emr-lb">고정</span><div class="emr-keep">${refineKeep.map((g, i) =>
+      `<span class="emr-chip is-keep${g.invert ? ' is-ex' : ''}" title="${g.invert
+        ? '스테이징 [분할] 의 나머지 - 이 태그들이 모두 맞는 게시물은 뺍니다' : '불러온 찾기 묶음(칩 16개를 넘어 따로 둡니다) - 모두 맞아야 합니다'}">${g.invert ? '나머지 ' : ''}${esc(g.terms.join(', '))}<button
+        type="button" data-emr-keep-x="${i}" aria-label="이 조건 지우기">×</button></span>`).join('')}</div></div>`;
+    return bar('inc', '포함', '태그 - 자동완성 · *정확히') + bar('exc', '제외', '태그') + keep;
   }
   /** 막의 수 줄 - 칩이 있으면 '맞는 이벤트 N / 칩 없이 센 수'(상태 줄 · 머리줄과 같은 수). */
   function refineCountHtml() {

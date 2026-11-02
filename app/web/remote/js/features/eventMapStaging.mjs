@@ -76,6 +76,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   let menuEl = null, menuFor = '';   // 저장된 조합 [분류 변경] 메뉴(분류 · 삭제). 이름은 이름 뒤 ✎ 로(사용자 지시 2026-10-14)
   // 프리셋(사용자 지시 2026-10-31): presetList = [{id, name, count}] · presetState = {active, dirty}(스테이징 응답마다 서버가 싣는다).
   let presetList = [], presetState = null, pmenuEl = null, pmenuFor = '';
+  // 프리셋 그룹(사용자 지시 2026-11-02): 1열 = 그룹 · 2열 = 고른 그룹의 프리셋 · 접으면 지금 프리셋 한 줄.
+  // presetGroup 은 이 창의 화면 상태('전체' · '미분류' 는 서버가 그룹 이름으로 받지 않는 예약어).
+  const prefGet = (key, fallback) => { try { return localStorage.getItem(`naia.staging.${key}`) ?? fallback; } catch { return fallback; } };
+  const prefSet = (key, value) => { try { localStorage.setItem(`naia.staging.${key}`, value); } catch { /* 이 창에서만 */ } };
+  let presetGroups = [], presetGroup = prefGet('presetGroup', '전체'), presetsOpen = prefGet('presetsOpen', '1') === '1', gmenuFor = '';
   // 조합 안 찾기: 칸 글 · 서버가 센 것({terms, per: {id: n}, total, sum}) · 늦은 응답 버리기.
   let findText = '', findResult = null, findError = '', findSeq = 0, findTimer = 0;
   // 공용 찾기 칸은 꺼 둔다(사용자 지시 2026-10-31: 만들어 둔 것은 두고 비활성화만) - 칸이 안 보이고 찾기 요청도 안 나간다.
@@ -159,7 +164,19 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     style.textContent = `
 .st-presets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 0 0 auto; padding: 5px 10px 6px; border-bottom: 1px solid var(--border-dim); }
 .st-presets[hidden], .st-find[hidden], .st-find-hint[hidden] { display: none; }
+.st-presets { display: block; }
 .st-presets .st-plabel { margin-right: 2px; font-size: 9.5px; color: var(--text-dim); }
+.st-prow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.st-prow + .st-prow { margin-top: 5px; padding-top: 5px; border-top: 1px dashed var(--border-dim); }
+.st-window button.st-pfold { border: 0; background: transparent; padding: 1px 3px; font-size: 9.5px; color: var(--text-dim); }
+.st-window button.st-gchip { padding: 1px 8px; }
+.st-window button.st-gchip.is-on { color: #fff; border-color: rgba(230,168,74,0.7); background: rgba(230,168,74,0.16); }
+.st-gchip .st-pn { margin-left: 4px; color: var(--text-dim); font-size: 9.5px; }
+.st-window button.st-gadd { border-style: dashed; color: var(--text-dim); }
+.st-pnone { font-size: 10px; color: var(--text-dim); }
+.st-link > label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; cursor: pointer; }
+.st-link { cursor: default; }
+.st-window .st-link button.st-padd { flex: 0 0 auto; color: #c9bfff; border-color: rgba(139,118,255,0.6); }
 .st-window button.st-pchip { border-radius: 10px; padding: 1px 9px; }
 .st-window button.st-pchip.is-on { color: #fff; border-color: rgba(139,118,255,0.8); background: rgba(88,76,170,0.35); }
 .st-pchip .st-pn { margin-left: 4px; color: var(--text-dim); font-size: 9.5px; }
@@ -238,7 +255,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     });
     injectStyle();
     panel.body.innerHTML = `
-      <label class="st-link"><input type="checkbox" data-st-link>스테이징 이벤트를 랜덤 버튼에 연결 적용합니다</label>
+      <div class="st-link"><label><input type="checkbox" data-st-link>스테이징 이벤트를 랜덤 버튼에 연결 적용합니다</label><button
+        type="button" class="st-padd" data-st-padd title="지금 스테이징을 새 프리셋으로 저장합니다(고른 그룹 안에)">프리셋 추가+</button></div>
       <div class="st-presets" hidden></div>
       <div class="st-total" role="status"></div>
       <div class="st-tabs" role="tablist"><button type="button" data-st-tab="stage" role="tab"></button><button type="button" data-st-tab="saved" role="tab"></button></div>
@@ -249,6 +267,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', event => {
       const chip = event.target.closest('[data-st-preset]');
+      const gchip = event.target.closest('[data-st-pgroup]');
+      if (gchip && presetGroups.includes(gchip.dataset.stPgroup)) { event.preventDefault(); openGroupMenu(gchip.dataset.stPgroup, gchip); return; }
       if (!chip) return;
       event.preventDefault();
       openPresetMenu(chip.dataset.stPreset, chip);
@@ -594,6 +614,10 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     if (t.closest('[data-st-psave]')) { await run(() => savePreset(presetState?.active), { readsExtras: true }); return; }
     if (t.closest('[data-st-padd]')) { await run(() => savePresetAsNew(), { readsExtras: true }); return; }
+    if (t.closest('[data-st-pfold]')) { presetsOpen = !presetsOpen; prefSet('presetsOpen', presetsOpen ? '1' : '0'); paintPresets(); return; }
+    const pg = t.closest('[data-st-pgroup]');
+    if (pg) { presetGroup = pg.dataset.stPgroup; prefSet('presetGroup', presetGroup); paintPresets(); return; }
+    if (t.closest('[data-st-gadd]')) { await run(() => addGroup()); return; }
     if (t.closest('[data-st-find-clear]')) {
       const field = panel.body.querySelector('[data-st-find]');
       if (field) field.value = '';
@@ -860,26 +884,45 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const p = Array.isArray(data?.items) ? data : data?.presets;
     if (!p || !Array.isArray(p.items)) return;
     presetList = p.items;
+    if (Array.isArray(p.groups)) presetGroups = p.groups;
     presetState = { active: p.active || '', dirty: p.dirty === true };
   }
   async function loadPresets() {
     try { takePresetList(await request('/api/event-map/staging/presets')); } catch { /* 줄만 옛것 */ }
     if (open) paint();
   }
+  const inGroup = (p, g) => (g === '전체' ? true : g === '미분류' ? !p.group : p.group === g);
   function paintPresets() {
     const row = panel?.body.querySelector('.st-presets');
+    const add = panel?.body.querySelector('[data-st-padd]');
+    if (add) add.disabled = !staged.length;
     if (!row) return;
-    row.hidden = !presetList.length && !staged.length;
+    row.hidden = !presetList.length && !presetGroups.length;
     if (row.hidden) return;
+    const loose = presetGroups.length > 0 && presetList.some(p => !p.group);
+    // 지워진 그룹 · 비어서 사라진 미분류면 전체로
+    if (!['전체', ...presetGroups, ...(loose ? ['미분류'] : [])].includes(presetGroup)) presetGroup = '전체';
     const act = presetState?.active || '', dirty = !!act && presetState?.dirty;
     const cur = presetList.find(p => p.id === act);
-    row.innerHTML = '<span class="st-plabel">프리셋</span>' + presetList.map(p => {
+    const chip = p => {
       const on = p.id === act;
       return `<button type="button" class="st-pchip${on ? ' is-on' : ''}" data-st-preset="${esc(p.id)}"
-        title="${on ? `지금 프리셋${dirty ? ' - 저장한 뒤 고쳤습니다' : ''} · 누르면 이름 · 덮어쓰기 · 삭제` : '눌러서 스테이징을 이 프리셋으로 바꾸기 · 우클릭 = 관리'}">${esc(p.name)}<span class="st-pn">${Number(p.count) || 0}</span>${on && dirty ? '<span class="st-pdirty">●</span>' : ''}</button>`;
-    }).join('')
-      + (cur && dirty ? `<button type="button" class="st-psave" data-st-psave title="지금 스테이징을 '${esc(cur.name)}' 에 저장합니다">저장</button>` : '')
-      + `<button type="button" class="st-padd" data-st-padd ${staged.length ? '' : 'disabled'} title="지금 스테이징을 새 프리셋으로 저장합니다">+ 지금 것으로</button>`;
+        title="${on ? `지금 프리셋${dirty ? ' - 저장한 뒤 고쳤습니다' : ''} · 누르면 이름 · 덮어쓰기 · 그룹 이동 · 삭제` : '눌러서 스테이징을 이 프리셋으로 바꾸기 · 우클릭 = 관리 · 그룹 이동'}">${esc(p.name)}<span class="st-pn">${Number(p.count) || 0}</span>${on && dirty ? '<span class="st-pdirty">●</span>' : ''}</button>`;
+    };
+    const save = cur && dirty ? `<button type="button" class="st-psave" data-st-psave title="지금 스테이징을 '${esc(cur.name)}' 에 저장합니다">저장</button>` : '';
+    const fold = `<button type="button" class="st-pfold" data-st-pfold aria-expanded="${presetsOpen}" title="${presetsOpen ? '접기 - 지금 프리셋만' : '펼치기 - 그룹 · 프리셋'}">${presetsOpen ? '▾ 그룹' : '▸ 프리셋'}</button>`;
+    if (!presetsOpen) {
+      row.innerHTML = `<div class="st-prow">${fold}${cur ? chip(cur) : '<span class="st-pnone">고른 프리셋 없음</span>'}${save}</div>`;
+      return;
+    }
+    const count = g => presetList.filter(p => inGroup(p, g)).length;
+    const gchip = g => `<button type="button" class="st-gchip${g === presetGroup ? ' is-on' : ''}" data-st-pgroup="${esc(g)}"
+      ${presetGroups.includes(g) ? 'title="우클릭 = 이름 바꾸기 · 삭제"' : ''}>${esc(g)}<span class="st-pn">${count(g)}</span></button>`;
+    const shown = presetList.filter(p => inGroup(p, presetGroup));
+    row.innerHTML = `<div class="st-prow">${fold}${['전체', ...presetGroups, ...(loose ? ['미분류'] : [])].map(gchip).join('')}<button
+        type="button" class="st-gadd" data-st-gadd title="새 그룹 - 프리셋은 우클릭 [그룹 이동] 으로 옮깁니다">+ 그룹</button></div>
+      <div class="st-prow"><span class="st-plabel">프리셋</span>${shown.map(chip).join('')
+        || '<span class="st-pnone">비어 있음 - 프리셋 우클릭 [그룹 이동] · [프리셋 추가+]</span>'}${save}</div>`;
   }
   async function presetAction(body) {
     const data = await request('/api/event-map/staging/presets', body);
@@ -894,11 +937,26 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     return String(name || '').trim();
   }
   async function savePresetAsNew() {
-    const name = await askPresetName('새 프리셋');
+    const group = presetGroups.includes(presetGroup) ? presetGroup : '';
+    const name = await askPresetName(group ? `새 프리셋 - ${group}` : '새 프리셋');
     if (!name) return false;
-    await presetAction({ action: 'save_new', name });
-    toast(`새 프리셋 저장: ${name} — ${staged.length}개`, 'success');
+    await presetAction({ action: 'save_new', name, group });
+    toast(`새 프리셋 저장: ${name} — ${staged.length}개${group ? ` · ${group}` : ''}`, 'success');
     return true;
+  }
+  async function askGroupName(title, value = '') {
+    const name = typeof promptDialog === 'function'
+      ? await promptDialog('그룹 이름', { title, defaultValue: value, okText: '저장', placeholder: '예: NSFW' })
+      : window.prompt('그룹 이름', value);
+    return String(name || '').trim();
+  }
+  /** [+ 그룹] - 만들고 그 그룹을 고른다. 돌려주는 값 = 새 이름(취소면 ''). */
+  async function addGroup() {
+    const name = await askGroupName('새 그룹');
+    if (!name) return '';
+    await presetAction({ action: 'group_add', name });
+    presetGroup = name; prefSet('presetGroup', name);
+    return name;
   }
   async function savePreset(pid) {
     const cur = presetList.find(p => p.id === pid);
@@ -933,22 +991,34 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   function openPresetMenu(pid, anchor) {
     const p = presetList.find(x => x.id === pid);
     if (!p) return;
-    if (!pmenuEl) {
-      pmenuEl = document.createElement('div');
-      pmenuEl.className = 'st-menu';
-      pmenuEl.setAttribute('role', 'menu');
-      pmenuEl.hidden = true;
-      document.body.append(pmenuEl);
-      pmenuEl.addEventListener('click', onPresetMenu);
-    }
+    ensureMenu();
     const on = pid === presetState?.active;
-    pmenuFor = pid;
+    pmenuFor = pid; gmenuFor = '';
+    // 그룹 이동(사용자 지시 2026-11-02) - 지금 그룹은 ✓ · 미분류는 그룹이 하나라도 있을 때만
+    const moves = [...presetGroups, ...(presetGroups.length ? [''] : [])].map(g => `<button type="button" role="menuitem"
+        class="st-menu-cat${(p.group || '') === g ? ' is-cur' : ''}" data-stp="move" data-stp-group="${esc(g)}" ${(p.group || '') === g ? 'disabled' : ''}><i>${(p.group || '') === g ? '✓' : ''}</i>${esc(g || '미분류')}</button>`).join('');
     pmenuEl.innerHTML = `<div class="st-menu-label">${esc(p.name)} · 조합 ${Number(p.count) || 0}개</div>
       ${on ? '' : '<button type="button" role="menuitem" data-stp="load">이 프리셋으로 바꾸기</button>'}
       <button type="button" role="menuitem" data-stp="rename">이름 바꾸기</button>
       <button type="button" role="menuitem" data-stp="save" ${staged.length ? '' : 'disabled'}>지금 스테이징으로 덮어쓰기</button>
       <div class="st-menu-sep"></div>
+      <div class="st-menu-label">그룹 이동</div>${moves}
+      <button type="button" role="menuitem" class="st-menu-cat" data-stp="move-new"><i>+</i>새 그룹 만들어 옮기기</button>
+      <div class="st-menu-sep"></div>
       <button type="button" role="menuitem" class="is-danger" data-stp="delete">삭제</button>`;
+    placeMenu(anchor);
+  }
+  function openGroupMenu(name, anchor) {
+    ensureMenu();
+    pmenuFor = ''; gmenuFor = name;
+    const n = presetList.filter(p => p.group === name).length;
+    pmenuEl.innerHTML = `<div class="st-menu-label">그룹 ${esc(name)} · 프리셋 ${n}개</div>
+      <button type="button" role="menuitem" data-stg="rename">이름 바꾸기</button>
+      <div class="st-menu-sep"></div>
+      <button type="button" role="menuitem" class="is-danger" data-stg="delete">그룹 삭제(프리셋은 미분류로)</button>`;
+    placeMenu(anchor);
+  }
+  function placeMenu(anchor) {
     pmenuEl.hidden = false;
     pmenuEl.style.zIndex = String(Number(panel.el.style.zIndex || 0) + 2);
     const r = anchor.getBoundingClientRect(), w = pmenuEl.offsetWidth, h = pmenuEl.offsetHeight;
@@ -956,17 +1026,53 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     pmenuEl.style.top = `${r.bottom + 4 + h > window.innerHeight ? Math.max(4, r.top - h - 4) : r.bottom + 4}px`;
     setTimeout(() => document.addEventListener('pointerdown', onPresetMenuOutside, true), 0);
   }
+  function ensureMenu() {
+    if (pmenuEl) return;
+    pmenuEl = document.createElement('div');
+    pmenuEl.className = 'st-menu';
+    pmenuEl.setAttribute('role', 'menu');
+    pmenuEl.hidden = true;
+    document.body.append(pmenuEl);
+    pmenuEl.addEventListener('click', onPresetMenu);
+  }
   function closePresetMenu() {
     if (pmenuEl) pmenuEl.hidden = true;
-    pmenuFor = '';
+    pmenuFor = ''; gmenuFor = '';
     document.removeEventListener('pointerdown', onPresetMenuOutside, true);
   }
   function onPresetMenuOutside(event) { if (!pmenuEl?.contains(event.target)) closePresetMenu(); }
   async function onPresetMenu(event) {
-    const what = event.target.closest('[data-stp]')?.dataset.stp;
+    const gWhat = event.target.closest('[data-stg]')?.dataset.stg, gname = gmenuFor;
+    if (gWhat && gname) {
+      closePresetMenu();
+      if (gWhat === 'rename') {
+        const to = await askGroupName('그룹 이름 바꾸기', gname);
+        if (to && to !== gname) await run(async () => {
+          await presetAction({ action: 'group_rename', name: gname, to });
+          if (presetGroup === gname) { presetGroup = to; prefSet('presetGroup', to); }
+          toast('그룹 이름을 바꿨습니다', 'success');
+        });
+      }
+      if (gWhat === 'delete') {
+        const ok = typeof confirmDialog === 'function' ? await confirmDialog(`그룹을 지웁니다: ${gname} · 안의 프리셋은 미분류로 남습니다.`) : true;
+        if (ok) await run(async () => { await presetAction({ action: 'group_delete', name: gname }); toast('그룹을 지웠습니다', 'success'); });
+      }
+      return;
+    }
+    const item = event.target.closest('[data-stp]');
+    const what = item?.dataset.stp;
     const pid = pmenuFor, p = presetList.find(x => x.id === pid);
     if (!what || !p) return;
     closePresetMenu();
+    if (what === 'move' || what === 'move-new') {
+      await run(async () => {
+        const group = what === 'move' ? item.dataset.stpGroup : await addGroup();
+        if (what === 'move-new' && !group) return;
+        await presetAction({ action: 'move', id: pid, group });
+        toast(`${p.name} → ${group || '미분류'}`, 'success');
+      });
+      return;
+    }
     if (what === 'load') { await run(() => switchPreset(pid), { readsExtras: true }); return; }
     if (what === 'save') {
       const ok = typeof confirmDialog === 'function' ? await confirmDialog(`지금 스테이징(${staged.length}개)으로 프리셋을 덮어씁니다: ${p.name}`) : true;

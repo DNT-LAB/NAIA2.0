@@ -393,7 +393,7 @@ def register_event_map_routes(
                 current = await run_in_thread(store.list)
                 items = current["items"]
                 if action == "save_new":
-                    await run_in_thread(presets.save_new, body.get("name"), items)
+                    await run_in_thread(presets.save_new, body.get("name"), items, body.get("group"))
                 elif action == "save":
                     await run_in_thread(presets.save, body.get("id"), items)
                 elif action == "load":
@@ -405,6 +405,14 @@ def register_event_map_routes(
                     await run_in_thread(presets.rename, body.get("id"), body.get("name"))
                 elif action == "delete":
                     await run_in_thread(presets.delete, body.get("id"))
+                elif action == "move":
+                    await run_in_thread(presets.move, body.get("id"), body.get("group"))
+                elif action == "group_add":
+                    await run_in_thread(presets.group_add, body.get("name"))
+                elif action == "group_rename":
+                    await run_in_thread(presets.group_rename, body.get("name"), body.get("to"))
+                elif action == "group_delete":
+                    await run_in_thread(presets.group_delete, body.get("name"))
                 else:
                     raise MapQueryError("bad_request", "지원하지 않는 프리셋 작업입니다.")
                 listed = await run_in_thread(presets.list, items)

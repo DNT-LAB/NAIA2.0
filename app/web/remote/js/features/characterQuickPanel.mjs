@@ -267,17 +267,9 @@ export function createCharacterQuickPanel({
     stage.classList.toggle('is-peek', peek);
     // 엿보기에서는 격자를 늘 깐다 - 어디쯤인지 가늠할 눈금이 없으면 원만 떠 있어
     // "저게 그림의 어느 지점인가" 를 알 수 없다(사용자가 보여 준 그림도 격자가 있다).
-    // ⚠️ 캐릭터가 **1명이면 NAI 가 좌표를 조용히 무시한다**(실측 - `api_service.py`
-    //    의 `coords_given` 주석 참조). 화면은 멀쩡히 움직이는데 결과가 안 바뀌니
-    //    모르면 "왜 안 먹지" 가 된다(사용자 지정). 엿보기와 편집 **둘 다**에 적는다 -
-    //    손을 올렸을 때만 알려 주고 정작 끌 때 입을 다물면 반만 해결한 셈이다.
-    //    0명일 때는 안 적는다. 그 문구가 가리키는 상황이 아니고, 빈 무대는 스스로
-    //    설명이 된다.
-    const lonely = slots.length === 1;
+    // 캐릭터가 1명이어도 CUSTOM 좌표를 그대로 보낸다(공홈 동기화 2026-11-02 - 공홈이 1명 Custom 을
+    // use_coords:true 로 받아 준다). 그래서 예전의 "1명이면 적용되지 않습니다" 알림은 걷었다.
     stage.innerHTML = (peek ? gridSvg(true) : gridSvg())
-      + (lonely
-        ? '<div class="cq-lonely">캐릭터가 1명일 때는 위치 지정이 적용되지 않습니다.</div>'
-        : '')
       + slots.map(({character, index}, i) => {
       const p = character.position || { x: 0.5, y: 0.5 };
       const on = !peek && posSelected === index;
@@ -987,7 +979,8 @@ export function createCharacterQuickPanel({
    *  빠졌다(사용자 제보). 라벨은 서명이 아니라 syncValues 가 제자리에서 고친다. */
   /** POS 세 상태. 서버가 `position_mode` 를 주지만 옛 필드도 받아 둔다. */
   const POS_CYCLE = ['auto', 'custom', 'random'];
-  const POS_LABEL = {auto: 'AUTO', custom: 'CUSTOM', random: 'RAND'};
+  // AUTO 의 화면 이름 = 공홈과 같은 AI's Choice(사용자 지정 2026-11-02). 저장 값은 그대로 'auto'.
+  const POS_LABEL = {auto: "AI's Choice", custom: 'CUSTOM', random: 'RAND'};
   function posModeOf(state) {
     const raw = state && state.position_mode;
     if (POS_CYCLE.includes(raw)) return raw;
@@ -1280,7 +1273,7 @@ export function createCharacterQuickPanel({
         return;
       }
       if (posBlockedByRandom()) {
-        showToast('Rnd Res 중에는 POS 가 AUTO 로 고정됩니다 (해상도가 매 생성마다 바뀌어 좌표를 앉힐 캔버스가 없습니다)', 'info');
+        showToast("Rnd Res 중에는 POS 가 AI's Choice 로 고정됩니다 (해상도가 매 생성마다 바뀌어 좌표를 앉힐 캔버스가 없습니다)", 'info');
         return;
       }
       // AUTO -> CUSTOM -> RAND -> AUTO (사용자 지정).
@@ -3426,7 +3419,7 @@ export function createCharacterQuickPanel({
       // 누르기 전에 알려 준다(누르면 토스트가 이유를 말한다).
       + `<button type="button" class="cq-pos is-${posMode}${posLocked ? ' is-locked' : ''}"`
       + (posLocked
-          ? ' data-naia-guide="Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다.\\n같은 캐릭터를 칸마다 직접 앉히는 기능이라 AUTO/RAND 가 자리를 정하면 안 됩니다."'
+          ? ' data-naia-guide="Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다.\\n같은 캐릭터를 칸마다 직접 앉히는 기능이라 AI&#39;s Choice/RAND 가 자리를 정하면 안 됩니다."'
           : '')
       + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}${posLocked ? ' &#128274;' : ''}</button>`
       + (custom

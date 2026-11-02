@@ -1030,7 +1030,7 @@ class HeadlessCharacterAssetService:
                     chars.append({"prompt": prompt, "uc": uc})
             elif name == "position_mode":
                 if str(value or "").strip().lower() != "auto":
-                    raise ValueError("인셋의 가상 캐릭터는 POS AUTO 만 씁니다.")
+                    raise ValueError("인셋의 가상 캐릭터는 POS AI's Choice 만 씁니다.")
             else:
                 raise ValueError(f"가상 캐릭터에 없는 기능입니다: {name}")
             self._reference_inset_sync_seq += 1

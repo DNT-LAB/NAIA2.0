@@ -794,7 +794,7 @@ function virtualSetModuleParam(moduleId, key, value, options) {
       return insetCharacterParam(key, key === 'add_character' ? '' : value);
     }
     if (key === 'position_mode') {
-      if (String(value) !== 'auto') showToast('인셋의 가상 캐릭터는 POS AUTO 만 씁니다', 'info');
+      if (String(value) !== 'auto') showToast("인셋의 가상 캐릭터는 POS AI's Choice 만 씁니다", 'info');
       return undefined;
     }
     showToast('인셋의 가상 캐릭터에는 없는 기능입니다', 'error');
@@ -825,7 +825,7 @@ function virtualSetModuleParam(moduleId, key, value, options) {
   if (key === 'position_mode') {
     // ⚠️ RAND 는 세션에 없다 - 백엔드도 거절하지만 여기서 먼저 말해 준다.
     if (String(value) === 'random') {
-      showToast('가상 캐릭터에는 POS RAND 가 없습니다 (AUTO / CUSTOM)', 'error');
+      showToast("가상 캐릭터에는 POS RAND 가 없습니다 (AI's Choice / CUSTOM)", 'error');
       return undefined;
     }
     return setModuleParam('img2img', 'position_mode', value);
@@ -2997,7 +2997,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261023-findsync1')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261102-aichoice')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,

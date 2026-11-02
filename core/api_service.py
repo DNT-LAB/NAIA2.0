@@ -1665,9 +1665,8 @@ class APIService:
                     #    캐릭터 모듈 경로는 AUTO 에서도 좌표를 준다(하드코딩 배치,
                     #    character_settings.auto_character_positions) - 그래서 여기서는
                     #    늘 켜진다. 좌표가 없는 쪽은 다른 소스(Interactive/스케치북 등)다.
-                    #    NAI 는 캐릭터가 1명이면 좌표를 조용히 무시한다(사용자 실측). 그래도
-                    #    여기서 막지는 않는다 - 무시는 NAI 쪽 동작이고, 프런트가 이미 1명일 때
-                    #    좌표를 보내지 않는다(interactivePanel.mjs `withCenter`).
+                    #    캐릭터가 1명이어도 좌표를 받았으면 그대로 켠다 - 공홈이 1명 Custom 을
+                    #    `use_coords:true` + 그 좌표로 보낸다(사용자 대조 2026-11-02 · 공홈 동기화).
                     coords_given = bool(characters) and all(
                         i < len(given_centers) and given_centers[i] is not None
                         for i in range(len(characters))

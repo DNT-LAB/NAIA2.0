@@ -76,6 +76,10 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
   const baseKey = (row, groups) => `${condKey(row)}|${groups.join(',')}`;
   const fullKey = (row, groups, cut) => `${baseKey(row, groups)}|${cutText(cut)}`;
   const lockedAxes = () => st?.locked || [];
+  // 줄에 저장된 압축 - 다른 창이 바꾸면 [다시 압축] 켜짐 · 단추 글자가 달라진다(Codex 리뷰)
+  const savedKey = row => JSON.stringify([selOf(row).compress || [], cutText(cleanCut(selOf(row).compress_cut)), selOf(row).compress_output || '']);
+  /** 지금 보여야 하는 숫자의 열쇠 - 창에서 고른 기준 축 · 컷. */
+  const wantedKey = () => (st ? fullKey(getRow(st.id), st.groups, st.cut) : '');
 
   function lastDraft() {
     try {
@@ -93,7 +97,7 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     if (!row) return;
     const s = selOf(row);
     const from = s.compress?.length ? { groups: s.compress.filter(g => IDS.includes(g)), cut: cleanCut(s.compress_cut) } : lastDraft();
-    st = { id, cond: condKey(row), groups: from.groups, cut: from.cut, output: s.compress_output === 'axes' ? 'axes' : 'full',
+    st = { id, cond: condKey(row), saved: savedKey(row), drawing: false, groups: from.groups, cut: from.cut, output: s.compress_output === 'axes' ? 'axes' : 'full',
       info: null, error: '', loadingKey: '', seq: 0, locked: null, pinKey: '' };
     void loadLabels();
     void loadLocked();
@@ -166,14 +170,18 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
       try {
         const body = await request(`/api/event-map/sample?${params(row, groups, cut, { n: '1', seed: '1', hist: '1' })}`);
         if (st !== mine || seq !== st.seq) return;
-        st.info = { key, base: baseKey(row, groups), posts: body.observed_posts || 0, events: body.events || 0,
-          eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
+        // 그 사이 이미 센 조건으로 돌아왔으면 그 숫자를 지킨다(A -> B -> A 의 늦은 B 답 - Codex 리뷰)
+        if (key === wantedKey() || st.info?.key !== wantedKey()) {
+          st.info = { key, base: baseKey(row, groups), posts: body.observed_posts || 0, events: body.events || 0,
+            eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
+        }
       } catch (error) {
         if (st !== mine || seq !== st.seq) return;
         st.error = error.message; st.errorKey = key;
       }
       st.loadingKey = '';
       paint();
+      if (key !== wantedKey()) schedule(0);   // 지금 조건의 숫자가 없으면 이어서 센다
     }, delay);
   }
 
@@ -357,7 +365,7 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     ].map(([id, text, tip]) => `<button type="button" data-stc-out="${id}" class="${st.output === id ? 'is-on' : ''}"
       aria-pressed="${st.output === id}" title="${tip}">${text}</button>`).join('')}</span>`;
     const browseOn = Boolean(browse?.isOpen());
-    const draw = ok ? '' : 'disabled';
+    const draw = ok && !st.drawing ? '' : 'disabled';
     return `<div class="em-compress-panel st-cmp-panel">
       <div class="emc-hint">기준 축 - 이 축들의 태그가 같은 게시물끼리 이벤트 하나로 묶습니다</div>
       <div class="emc-grid">${grid}</div>
@@ -399,7 +407,16 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     if (t.closest('[data-stc-browse]')) { toggleBrowse(); return true; }
     if (t.closest('[data-stc-close]')) { close(); return true; }
     const rnd = t.closest('[data-stc-random]');
-    if (rnd && usable(st.groups)) { await draw(row.id, draftSelection(row), rnd.dataset.stcRandom === 'generate'); return true; }
+    if (rnd && usable(st.groups)) {
+      if (st.drawing) return true;   // 창은 S 창의 inert 밖이다 - 겹쳐 뽑지 않게(Codex 리뷰)
+      const mine = st;
+      mine.drawing = true; paint();
+      try { await draw(row.id, draftSelection(row), rnd.dataset.stcRandom === 'generate'); } finally {
+        mine.drawing = false;
+        if (st === mine) paint();
+      }
+      return true;
+    }
     if (t.closest('[data-stc-apply]') && st.locked !== null && usable(st.groups)) {
       const groups = st.groups.filter(id => !lockedAxes().includes(id));
       if (!usable(groups)) return true;
@@ -417,8 +434,10 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     if (!st) return;
     const row = getRow(st.id);
     if (!row || st.id !== openRowId) { close(true); return; }
-    const cond = condKey(row);
-    if (cond === st.cond) return;
+    const cond = condKey(row), saved = savedKey(row);
+    if (cond === st.cond && saved === st.saved) return;
+    st.saved = saved;
+    if (cond === st.cond) { paint(); return; }   // 저장된 압축만 바뀌었다 - 고르던 것은 두고 단추만
     st.cond = cond;
     paint();
     schedule(0);

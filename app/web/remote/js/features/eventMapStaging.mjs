@@ -25,7 +25,7 @@
  * 서버가 다 한다(/api/event-map/staging · library · sample · apply). 여기서는 그리기와 단추뿐이다.
  */
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
-import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=20261102-stc2';
+import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=20261102-stc3';
 
 export function initEventMapStaging({ showToast, getPromptText, generateNow, confirmDialog, promptDialog,
                                       getEventMap = () => window.eventMap, isTabHidden = () => false } = {}) {
@@ -365,6 +365,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   }
   async function show(which = tab) {
     build();
+    if (rowCmp.isOpen() && which !== tab) { toast(CMP_LOCK_MSG, 'info'); which = tab; }   // 바깥 진입점도 막는다(Codex 리뷰)
     tab = which;
     open = true;
     panel.open();

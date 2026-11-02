@@ -333,13 +333,15 @@ export function createV5ScenePanel({
   function sceneDetail(scene, wrongMode, ordinal) {
     const detail = scene.detail || {};
     const characters = detail.characters || [];
+    // 저장 값 auto 의 화면 이름 = AI's Choice(공홈 동기화 2026-11-02 · characterQuickPanel POS_LABEL 과 같다).
+    const POS_NAME = {auto: "AI's Choice", custom: 'CUSTOM', random: 'RAND'};
     const line = (label, value) => value
       ? `<div class="scene-detail-line"><span>${escHtml(label)}</span><code>${escHtml(value)}</code></div>`
       : '';
     return `
       <div class="scene-detail">
         ${line('프롬프트', detail.prompt)}
-        ${line('POS', detail.position_mode)}
+        ${line('POS', POS_NAME[detail.position_mode] || detail.position_mode)}
         ${characters.map((item, i) => {
           const link = Number(item.connect_to || 0);
           const pos = item.position ? `${item.position.x} , ${item.position.y}` : '자동';

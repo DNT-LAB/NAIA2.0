@@ -3686,7 +3686,7 @@ const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20
   .catch(error => {
     console.error('Failed to initialize I.Sequence panel', error);
   });
-const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20260825-maint1')
+const v5SceneReady = import('./js/features/v5ScenePanel.mjs?v=20261102-aichoice')
   .then(({createV5ScenePanel}) => {
     v5SceneControl = createV5ScenePanel({
       panel: $('v5ScenePanel'),

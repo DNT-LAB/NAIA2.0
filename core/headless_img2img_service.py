@@ -1306,7 +1306,7 @@ class HeadlessImg2ImgService:
             # ⚠️ **RAND 는 받지 않는다**(사용자 지정). 세션 캐릭터에는 뜻이 없다.
             mode = str(value or "").strip().lower()
             if mode not in {"auto", "custom"}:
-                return context._toast("가상 캐릭터에는 AUTO/CUSTOM 만 있습니다", level="error")
+                return context._toast("가상 캐릭터에는 AI's Choice/CUSTOM 만 있습니다", level="error")
             context.img2img_session["position_mode"] = mode
         elif key == "main_prompt":
             context.img2img_session["main_prompt"] = str(value or "")

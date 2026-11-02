@@ -184,6 +184,11 @@ export function createPromptHighlighter({
 }) {
   const pe = palette === 'pe';
   const highlight = highlightEl || document.getElementById('promptHighlight');
+  // ⚠️ 덧칠 판은 접근성 트리에서 뺀다. 글은 같은 내용의 <textarea> 가 이미 가지고 있다(겹쳐 읽힘).
+  //    안 빼면 크롬이 이 글 노드에 걸린 하이라이트 범위 수백 개를 접근성 표식으로 붙들고, 접근성이
+  //    켜진 창(Windows UIA 클라이언트가 붙은 기계)에서 창을 끌 때마다 그것을 다시 맞추느라 0.25초마다
+  //    100~600ms 씩 멈췄다 - 가중치 많은 긴 프롬프트일수록 심했다(사용자 제보 2026-11-02 · 실측).
+  highlight?.setAttribute?.('aria-hidden', 'true');
   const wrap = highlight ? highlight.parentElement : null;
   const tagClassifier = createPromptTagClassifier();
   let mode = '';

@@ -156,15 +156,25 @@ export function createCustomSelectController({
     const displayLabel = forcedLabel || (selectedOption ? selectedOption.textContent : '');
     // 접힌 버튼에도 배지를 그린다 — 목록을 닫으면 어느 모델의 프리셋인지 알 수
     // 없어지면 배지의 의미가 반으로 준다. 강제 라벨이 있으면 그쪽이 이긴다.
-    if (!forcedLabel && selectedOption && selectedOption.dataset.modelLabel) {
-      paintOptionText(label, selectedOption);
-    } else {
-      label.textContent = displayLabel;
+    // ⚠️ **바뀐 것만 쓴다.** 이 함수는 0.75초마다 모든 셀렉트에 돈다(scan). 같은 값을 다시 쓰면
+    //    `title` 은 app.js 의 툴팁 도우미가 떼어 `data-naia-title` 로 옮기고, 다음 바퀴에 또 붙는다 -
+    //    붙였다 떼기를 끝없이 되풀이한다. 접근성(UIA)이 켜진 창에서는 그때마다 이름이 바뀐 것으로 쳐서
+    //    접근성 트리를 다시 맞추느라 창을 끌 때 0.25초마다 멈췄다(사용자 제보 2026-11-02).
+    const labelKey = (!forcedLabel && selectedOption && selectedOption.dataset.modelLabel)
+      ? `m|${selectedOption.dataset.modelLabel}|${selectedOption.dataset.modelFamily || ''}|${selectedOption.dataset.modelVariant || ''}|${selectedOption.textContent}`
+      : `t|${displayLabel}`;
+    if (state.labelKey !== labelKey || !label.firstChild) {
+      state.labelKey = labelKey;
+      if (labelKey.startsWith('m|')) paintOptionText(label, selectedOption);
+      else label.textContent = displayLabel;
     }
-    button.title = String(select.dataset.customSelectTitle || '').trim() || displayLabel;
-    button.disabled = select.disabled;
+    const title = String(select.dataset.customSelectTitle || '').trim() || displayLabel;
+    // 빈 title 은 도우미가 곧장 떼어 낸다 - 없는 것과 같게 본다(안 그러면 빈 셀렉트가 계속 붙였다 뗀다).
+    if ((button.getAttribute('title') ?? button.dataset.naiaTitle ?? '') !== title) button.title = title;
+    if (button.disabled !== select.disabled) button.disabled = select.disabled;
     wrapper.classList.toggle('is-disabled', select.disabled);
-    button.setAttribute('aria-expanded', openState?.select === select ? 'true' : 'false');
+    const expanded = openState?.select === select ? 'true' : 'false';
+    if (button.getAttribute('aria-expanded') !== expanded) button.setAttribute('aria-expanded', expanded);
 
     if (openState?.select === select && refreshMenu) {
       renderMenu(state);

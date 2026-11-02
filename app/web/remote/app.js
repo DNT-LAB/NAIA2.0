@@ -1672,7 +1672,7 @@ import('./js/features/assistPanel.mjs?v=20261001-agefix2')
     });
   })
   .catch(error => console.error('Failed to initialize Assist', error));
-const customSelectsReady = import('./js/features/customSelects.mjs?v=20261016-pvfield1')
+const customSelectsReady = import('./js/features/customSelects.mjs?v=20261102-axquiet')
   .then(({createCustomSelectController}) => {
     customSelectsControl = createCustomSelectController({
       document,
@@ -2598,7 +2598,7 @@ function updateInteractiveNaiToolBlock() {
   }
 }
 
-const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20261017-pehl2')
+const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=20261102-axhide')
   .then(({createPromptHighlighter}) => {
     createPromptHighlighterFn = createPromptHighlighter;
     promptHighlighter = createPromptHighlighter({

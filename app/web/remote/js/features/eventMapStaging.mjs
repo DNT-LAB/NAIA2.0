@@ -113,7 +113,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   const norm = t => String(t || '').trim().toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
   const filtersKey = s => (s.filters || []).map(g => (g.invert ? '!' : '') + [...new Set((g.terms || []).map(norm))].sort().join(',')).sort();
   const fingerprint = s => JSON.stringify([[...new Set(s.pins.map(norm))].sort(), [...new Set(s.exclude.map(norm))].sort(),
-    [...s.ratings].sort(), [...s.persons].sort(), ...(s.filters?.length ? [filtersKey(s)] : [])]);
+    [...s.ratings].sort(), [...s.persons].sort(), ...(s.filters?.length ? [filtersKey(s)] : []),
+    ...(s.compress?.length ? [['compress', ...s.compress]] : [])]);   // 압축한 조합은 다른 조합(서버 지문과 같다)
   /** 이미 스테이징에 있는 조합인가 - [스테이징 +] · 이벤트 맵 '스테이징에 넣기' 를 미리 끈다(사용자 지시 2026-10-14). */
   const isStaged = s => !!s && staged.some(r => fingerprint(r.selection) === fingerprint(s));
   // 인원 · 등급 = 색 칩(사용자 지시 2026-10-14). 인원은 여성 · 남성 · 혼성 셋으로만 칠한다(수에 따라 나누지 않는다).

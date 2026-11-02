@@ -199,6 +199,8 @@ class HeadlessRandomPromptService:
             combo = {k: list(item["selection"].get(k) or []) for k in ("pins", "exclude", "ratings", "persons")}
             if item["selection"].get("filters"):
                 combo["filters"] = item["selection"]["filters"]
+            if item["selection"].get("compress"):   # 압축한 조합 = 이벤트 단위로 뽑는다
+                combo["compress"] = item["selection"]["compress"]
             try:
                 body = service.sample(**combo, n=1, permanent=True)
             except MapQueryError as exc:
@@ -297,7 +299,7 @@ class HeadlessRandomPromptService:
                 if link.get("mode") == "staging":
                     samples, combo, extra = self._staging_sample(service, staging_store(self.context), label)
                 else:
-                    combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons")}
+                    combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons", "compress")}
                     body = service.sample(**combo, n=1, permanent=True)
                     samples = body.get("samples") or []
                 if not samples:

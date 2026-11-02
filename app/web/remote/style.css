@@ -29336,6 +29336,30 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-library-panel button { cursor: pointer; }
 .em-library-panel button:hover { border-color: #a894f5; }
 .em-library-panel button:disabled { opacity: .5; cursor: wait; }
+.em-window.em-tree .em-compress-state, .em-window.em-tree .em-compress-panel { order: 2; }
+.em-library-bar button[data-em-compress].is-on { color: #f5dc8a; background: rgba(230,168,74,.14); }
+.em-compress-state { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; padding: 4px 10px; border-bottom: 1px solid var(--border-color, #343044);
+  font-size: 10px; color: #f5dc8a; background: rgba(230,168,74,.06); }
+.em-compress-state[hidden], .em-compress-panel[hidden] { display: none; }
+.em-compress-state .emc-on { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.em-compress-state b, .em-compress-panel .emc-sum b { color: #7fd3ff; font-weight: 600; }
+.em-compress-state button, .em-compress-panel button { font: inherit; font-size: 10px; color: var(--text-primary); background: #14131d;
+  border: 1px solid #45405a; border-radius: 5px; padding: 3px 8px; cursor: pointer; }
+.em-compress-state button:hover, .em-compress-panel button:hover:not(:disabled) { border-color: #a894f5; }
+.em-compress-panel { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--border-color, #343044); }
+.em-compress-panel .emc-hint { margin-bottom: 6px; font-size: 10px; color: var(--text-muted); }
+.em-compress-panel .emc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.em-compress-panel button.emc-g { padding: 3px 0; color: var(--text-secondary); }
+.em-compress-panel button.emc-g.is-on { color: #ffd2d9; border-color: rgba(240,130,150,.6); background: rgba(170,50,80,.22); text-decoration: line-through; }
+.em-compress-panel .emc-sum { margin: 8px 0 4px; font-size: 10.5px; color: var(--text-secondary); }
+.em-compress-panel .emc-dim { color: var(--text-muted); }
+.em-compress-panel .emc-err { color: #e57373; }
+.em-compress-panel .emc-ev { display: flex; gap: 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text-primary); padding: 1px 0; }
+.em-compress-panel .emc-ev span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.em-compress-panel .emc-ev b { color: #e6a84a; font-weight: 500; }
+.em-compress-panel .emc-act { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.em-compress-panel button.is-primary { color: #d7ccff; border-color: rgba(139,118,255,.6); background: rgba(88,76,170,.25); }
+.em-compress-panel button:disabled { opacity: .45; cursor: default; }
 .em-library-form { display: grid; gap: 6px; }
 .em-library-preview, .em-library-tags { color: var(--text-muted); font-size: 10px; overflow-wrap: anywhere; }
 .em-library-actions { display: flex; justify-content: flex-end; gap: 6px; }
@@ -29620,7 +29644,7 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-window.em-tree .em-trail { order: 1; }
 .em-window.em-tree .em-library-bar, .em-window.em-tree .em-library-panel,
 .em-window.em-tree .em-body, .em-window.em-tree .em-foot { order: 2; }
-.em-window.em-tree .em-library-bar, .em-window.em-tree .em-keys { display: none; }
+.em-window.em-tree .em-keys { display: none; }   /* 저장 · 불러오기 · 압축 줄은 두 보기 모두(2026-11-02) */
 .em-window.em-tree .em-random-link { margin-left: 4px; }
 .em-cats.emt-tabs { position: static; flex: 0 0 auto; margin: 0; }
 /* 단순 검색 모드(사용자 지시 2026-10-14) - 갈래 탭 줄 오른쪽 끝. 켜면 줄의 lift 자리에 좁은 [복사][삽입]. */

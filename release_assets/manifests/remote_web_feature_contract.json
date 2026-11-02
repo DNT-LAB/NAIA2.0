@@ -299,6 +299,7 @@
         "core/event_map/permanent.py",
         "core/event_map/staging.py",
         "core/event_map/staging_presets.py",
+        "core/event_map/compress.py",
         "core/event_map/extra_prompt.py",
         "app/web/remote/js/features/eventMapStaging.mjs",
         "core/event_map/tree_3depth.json",

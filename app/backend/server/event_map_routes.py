@@ -259,7 +259,7 @@ def register_event_map_routes(
                 session_context.event_map_random_link = state
         elif state["enabled"]:
             state["mode"] = "event"
-            for key in ("pins", "exclude", "ratings", "persons"):
+            for key in ("pins", "exclude", "ratings", "persons", "compress"):
                 value = payload.get(key, "")
                 if not isinstance(value, str) or len(value) > 8192:
                     return JSONResponse({"message": f"Invalid {key}"}, status_code=400)
@@ -270,7 +270,7 @@ def register_event_map_routes(
                 # Validate the same query used by Random. Empty matches are valid;
                 # generation must fail closed rather than broaden the conditions.
                 await run_in_thread(ensure_event_map_service(session_context).sample,
-                                    **{k: state[k] for k in ("pins", "exclude", "ratings", "persons")}, n=1,
+                                    **{k: state[k] for k in ("pins", "exclude", "ratings", "persons", "compress")}, n=1,
                                     permanent=True)
             except MapQueryError as exc:
                 if link_state(session_context)["revision"] == revision:
@@ -562,13 +562,17 @@ def register_event_map_routes(
 
     @app.get("/api/event-map/sample")
     async def api_event_map_sample(pins: str = "", exclude: str = "", ratings: str = "",
-                                   persons: str = "", n: int = 5, seed: str = "", filters: str | None = None):
-        """뽑힌 조합의 `prompt` 가 프롬프트에 넣거나 복사할 문자열이다."""
+                                   persons: str = "", n: int = 5, seed: str = "", filters: str | None = None,
+                                   compress: str = "", top: int = 0):
+        """뽑힌 조합의 `prompt` 가 프롬프트에 넣거나 복사할 문자열이다.
+
+        `compress` = 갈래 id 쉼표 글 - 이벤트 단위로 뽑고 `events` · `top`(큰 이벤트, 압축 판 미리보기)을 싣는다."""
         service = ensure_event_map_service(session_context)
         try:
             payload = await run_in_thread(
                 _call, service.sample, pins=pins, exclude=exclude, ratings=ratings,
-                persons=persons, n=n, seed=seed, permanent=True, **({"filters": filters} if filters is not None else {}))
+                persons=persons, n=n, seed=seed, permanent=True, compress=compress, top=top,
+                **({"filters": filters} if filters is not None else {}))
         except MapQueryError as exc:
             return _error(exc)
         return JSONResponse(payload, headers=_no_store())

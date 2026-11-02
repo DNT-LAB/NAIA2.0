@@ -99,6 +99,10 @@ def selection(value):
     filters = normalize_filters(value.get("filters"))
     if filters:
         result["filters"] = filters
+    from core.event_map.compress import normalize_compress   # 압축 = 조합의 상태(사용자 지시 2026-11-02)
+    compress = normalize_compress(value.get("compress"))
+    if compress:
+        result["compress"] = compress
     return result
 
 
@@ -238,7 +242,9 @@ class EventMapLibrary:
     def _fingerprint(selected):
         base = tuple(tuple(sorted({normalize_tag(v) if k in ("pins", "exclude") else v for v in selected[k]}))
                      for k in ("pins", "exclude", "ratings", "persons"))
-        return base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
+        base = base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
+        # 압축한 조합은 같은 핀이라도 다른 조합이다 - 압축 없는 조합의 지문은 그대로(옛 저장본 · 프리셋 서명)
+        return base + (("compress",) + tuple(selected["compress"]),) if selected.get("compress") else base
 
     def _write(self, items):
         encoded = json.dumps({"schema": SCHEMA, "items": items, "categories": self._categories}, ensure_ascii=False, indent=2)

@@ -124,15 +124,18 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       excludes = (state.exclude || '').split(',').filter(Boolean);
       ratings = new Set((state.ratings || RATING_OPTIONS.map(r => r.id).join(',')).split(','));
       persons = new Set((state.persons || PERSON_IDS.join(',')).split(','));
+      compress = (state.compress || '').split(',').filter(Boolean);
       const fp = filterParams();
-      linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons });
+      linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
+        compress: compress.join(',') });
       if (open) void explore();
     }
     paintRandomLink();
   }
   function syncRandomLink(enabled = eventLinked()) {
     const fp = filterParams();
-    const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons };
+    const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
+      compress: compress.join(',') };
     const key = JSON.stringify(payload);
     if (key === linkKey) return linkQueue;
     linkKey = key;
@@ -162,6 +165,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   let mapState = null;            // /state 응답. 열 때마다 새로 받는다(색인이 바뀔 수 있다).
   let personLabels = new Map();   // id -> 화면 문구 (서버가 준다)
   let pins = [], excludes = [];
+  // 압축(사용자 지시 2026-11-02) = 조합의 상태: 지울 갈래 id. 비면 압축 안 함. 저장 · 스테이징 · 랜덤 연결에 함께 실린다.
+  // compressDraft = 압축 판에서 고르는 중인 갈래(판이 닫혀 있으면 null) · compressInfo = 미리보기 응답(열쇠로 낡음을 가린다).
+  let compress = [], compressDraft = null, compressInfo = null, compressSeq = 0, compressTimer = 0;
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -729,7 +735,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     try {
       const body = await getJson('/api/event-map/sample', {
         pins: pins.join(','), exclude: excludes.join(','), n: SAMPLE_COUNT,
-        seed: Date.now() % 1000003, ...filterParams(),
+        seed: Date.now() % 1000003, ...filterParams(), ...compressParams(),
       });
       if (mine !== seq) return;
       await loadPeHidden((body.samples || []).flatMap(s => s.tags || []));
@@ -778,7 +784,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   function clearExclude(tag) { excludes = excludes.filter(t => t !== tag); void explore(); }
 
   function currentPrompt() { return pins.join(', '); }
-  const currentSelection = () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons] });
+  const currentSelection = () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons],
+    ...(compress.length ? { compress: compress.slice() } : {}) });
   /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
    *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
   /** [넣기] = 고른 핀으로 메인 프롬프트를 대치한다. [생성] = 같은 대치 뒤 Generate(사용자 지정 2026-10-08 -
@@ -889,11 +896,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       const fp = filterParams();
       const body = await getJson('/api/event-map/sample', {
         pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: Date.now() % 1000003,
-        ratings: fp.ratings, persons: fp.persons,
+        ratings: fp.ratings, persons: fp.persons, ...compressParams(),
       });
       const s = (body.samples || [])[0];
       if (!s || !s.tags?.length) { toast(body.status === 'no_match' ? '이 조건에 맞는 게시물이 없습니다' : '뽑지 못했습니다', 'error'); return; }
-      const where = String(s.partition || '').replace(/_/g, ' ');
+      const where = String(s.partition || '').replace(/_/g, ' ') + (compress.length ? ` · 압축 이벤트 ${fmt(body.events)}개 중` : '');
       if (andGenerate) {
         await applyThenGenerate(s.tags, String(s.partition || 's').slice(0, 1));
         toast(`랜덤 프롬프트를 적용하고 생성을 눌렀습니다 (${where})`, 'success');
@@ -1759,14 +1766,11 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
         const act = item.dataset.emtAct;
         closeTreeMenu();
         if (act === 'pe') openPeSettings();
-        // 저장/불러오기는 기존 저장 줄의 단추를 그대로 누른다 - 저장 패널은 하나다(줄은 3단 지도에서 숨는다).
-        else overlay.querySelector(`.em-library-bar [data-library-mode="${act}"]`)?.click();
       });
     }
+    // 저장 · 불러오기 · 압축은 두 보기 모두 단추 줄에 있다(사용자 결정 2026-11-02) - 여기는 PE설정만.
     menuEl.innerHTML = `
-      <button type="button" role="menuitem" data-emt-act="pe">PE설정<small>메인 프롬프트의 /pe 와 같은 목록</small></button>
-      <button type="button" role="menuitem" data-emt-act="save" ${pins.length ? '' : 'disabled'}>이 조합 저장하기</button>
-      <button type="button" role="menuitem" data-emt-act="load">저장된 조합 (S)</button>`;
+      <button type="button" role="menuitem" data-emt-act="pe">PE설정<small>메인 프롬프트의 /pe 와 같은 목록</small></button>`;
     menuEl.hidden = false;
     menuEl.style.zIndex = String(Number(overlay.style.zIndex) + 1);
     btn.setAttribute('aria-expanded', 'true');
@@ -1856,7 +1860,10 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       <div class="em-trail"></div>
       <div class="em-filters"></div>
       <div class="em-cats emt-tabs" role="tablist" aria-label="갈래" hidden></div>
-      <div class="em-library-bar"><button type="button" data-library-mode="save" aria-expanded="false">이 조합 저장하기</button><button type="button" data-library-mode="load" aria-expanded="false">조합 불러오기</button></div>
+      <div class="em-library-bar"><button type="button" data-library-mode="save" aria-expanded="false">이 조합 저장하기</button><button type="button" data-library-mode="load" aria-expanded="false">조합 불러오기</button><button
+        type="button" data-em-compress aria-expanded="false">압축</button></div>
+      <div class="em-compress-state" hidden></div>
+      <div class="em-compress-panel" hidden></div>
       <div class="em-library-panel" hidden></div>
       <div class="em-body" role="listbox"></div>
       <div class="em-foot">
@@ -1943,12 +1950,13 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     library = initEventMapLibrary({
       bar: overlay.querySelector('.em-library-bar'), panel: overlay.querySelector('.em-library-panel'), anchor: overlay,
       onClose: () => paintSubcategories(),
-      onOpen: () => { samples = null; if (sideEl) sideEl.hidden = true; if (subEl) subEl.hidden = true; },
-      getSelection: () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons] }),
+      onOpen: () => { samples = null; if (sideEl) sideEl.hidden = true; if (subEl) subEl.hidden = true; closeCompressPanel(); },
+      getSelection: currentSelection,
       applySelection: async selection => {
         if (linkPending || linkUncertain) throw new Error('랜덤 연결 상태를 확인한 뒤 다시 불러와주세요.');
         pins = selection.pins.slice(); excludes = selection.exclude.slice();
         ratings = new Set(selection.ratings); persons = new Set(selection.persons);
+        takeCompress(selection);
         group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
         input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
         savePrefs(persons, ratings, sortMode);
@@ -1956,7 +1964,19 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
         await explore();
       }, toast, resize: fitHeight, onLoad: onOpenSaved, onChange: onLibraryChange,
     });
+    overlay.querySelector('.em-library-bar').addEventListener('click', event => {
+      if (!event.target.closest('[data-em-compress]')) return;
+      if (compress.length) { setCompress([]); return; }   // [압축 해제]
+      if (compressDraft) { closeCompressPanel(); return; }
+      openCompressPanel(lastCompressDraft());
+    });
+    overlay.querySelector('.em-compress-state').addEventListener('click', event => {
+      if (!event.target.closest('[data-em-compress-manage]')) return;
+      if (compressDraft) closeCompressPanel(); else openCompressPanel(compress);
+    });
+    overlay.querySelector('.em-compress-panel').addEventListener('click', onCompressPanelClick);
     paintRandomLink();
+    paintCompress();
     footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
       void syncRandomLink(event.target.checked);
     });
@@ -2376,12 +2396,131 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     library?.close();
     pins = item.tags.slice(); excludes = [];
     ratings = new Set([item.rating]); persons = new Set([item.person]);
+    takeCompress(null);   // 새 조합 - 압축 없이
     group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
     input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
     savePrefs(persons, ratings, sortMode);
     if (eventLinked()) await syncRandomLink();
     await explore();
   }
+  // ── 압축(사용자 지시 2026-11-02) ──────────────────────────────────────────
+  // 고른 갈래의 태그를 지우고 남은 태그(+ 등급)가 같은 게시물끼리 이벤트 하나 - 랜덤은 이벤트를 같은 확률로 뽑는다.
+  // 핀 · 인원 태그는 남는다(서버 core/event_map/compress.py). 대상 = 이벤트 맵 갈래 10개(작품·고유명 · 미분류 제외).
+  const COMPRESS_IDS = ['clothing', 'body', 'cast', 'expression', 'action', 'adult', 'scene', 'object', 'situation', 'meta'];
+  const COMPRESS_DRAFT_KEY = 'naia.em.compressDraft';
+  const compressParams = () => (compress.length ? { compress: compress.join(',') } : {});
+  const groupLabel = id => (mapState?.groups || []).find(g => g.id === id)?.label || id;
+  const compressKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, groups]);
+  function lastCompressDraft() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COMPRESS_DRAFT_KEY) || '[]');
+      return Array.isArray(saved) ? saved.filter(id => COMPRESS_IDS.includes(id)) : [];
+    } catch { return []; }
+  }
+  /** 불러온 · 연 조합의 압축을 지금 상태로(없으면 압축 해제). */
+  function takeCompress(selection) {
+    compress = Array.isArray(selection?.compress) ? selection.compress.filter(id => COMPRESS_IDS.includes(id)) : [];
+    compressDraft = null;
+    paintCompress();
+  }
+  function setCompress(groups) {
+    compress = COMPRESS_IDS.filter(id => groups.includes(id));
+    compressDraft = null;
+    samples = null;   // 실제 조합은 압축 전 것이다
+    paintCompress();
+    render();
+    if (eventLinked()) void syncRandomLink();
+    toast(compress.length ? `압축 - ${compress.map(groupLabel).join(' · ')} 제거 · 랜덤은 이벤트 단위` : '압축을 풀었습니다 - 랜덤은 게시물 단위', 'success');
+  }
+  function openCompressPanel(groups) {
+    library?.close();
+    compressDraft = COMPRESS_IDS.filter(id => groups.includes(id));
+    paintCompress();
+    scheduleCompressInfo(0);
+  }
+  function closeCompressPanel() {
+    if (compressDraft === null) return;
+    compressDraft = null;
+    paintCompress();
+  }
+  function onCompressPanelClick(event) {
+    const t = event.target;
+    const chip = t.closest('[data-emc-g]');
+    if (chip && compressDraft) {
+      const id = chip.dataset.emcG;
+      compressDraft = compressDraft.includes(id) ? compressDraft.filter(x => x !== id) : COMPRESS_IDS.filter(x => x === id || compressDraft.includes(x));
+      try { localStorage.setItem(COMPRESS_DRAFT_KEY, JSON.stringify(compressDraft)); } catch { /* 이 창에서만 */ }
+      paintCompress();
+      scheduleCompressInfo();
+      return;
+    }
+    if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
+    if (t.closest('[data-emc-apply]') && compressDraft?.length) setCompress(compressDraft);
+  }
+  /** 미리보기(게시물 → 이벤트 · 큰 이벤트 5) - 판에서 고르는 갈래, 판이 닫혔으면 지금 압축(상태 줄의 이벤트 수). */
+  function scheduleCompressInfo(delay = 250) {
+    clearTimeout(compressTimer);
+    const groups = compressDraft ?? compress;
+    if (!groups.length || mapState?.state !== 'ready') return;
+    const key = compressKey(groups);
+    if (compressInfo?.key === key && !compressInfo.error) return;
+    compressTimer = setTimeout(async () => {
+      const mine = ++compressSeq;
+      compressInfo = { key, loading: true };
+      paintCompress();
+      try {
+        const fp = filterParams();
+        const body = await getJson('/api/event-map/sample', {
+          pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: 1, ratings: fp.ratings, persons: fp.persons,
+          compress: groups.join(','), top: 5,
+        });
+        if (mine !== compressSeq) return;
+        compressInfo = { key, posts: body.observed_posts || 0, events: body.events || 0, top: body.top || [] };
+      } catch (error) {
+        if (mine !== compressSeq) return;
+        compressInfo = { key, error: error.message };
+      }
+      paintCompress();
+    }, delay);
+  }
+  function compressSummary(groups) {
+    const info = compressInfo?.key === compressKey(groups) ? compressInfo : null;
+    if (!info || info.loading) return '<span class="emc-dim">이벤트를 세는 중…</span>';
+    if (info.error) return `<span class="emc-err">세지 못했습니다 - ${esc(info.error)}</span>`;
+    return `게시물 ${fmt(info.posts)} → 이벤트 <b>${fmt(info.events)}</b>`;
+  }
+  function paintCompress() {
+    if (!overlay) return;
+    const btn = overlay.querySelector('[data-em-compress]');
+    const stateEl = overlay.querySelector('.em-compress-state');
+    const panelEl = overlay.querySelector('.em-compress-panel');
+    if (!btn || !stateEl || !panelEl) return;
+    const on = compress.length > 0, editing = compressDraft !== null;
+    btn.textContent = on ? '압축 해제' : '압축';
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-expanded', String(editing && !on));
+    btn.title = on ? '압축을 풀고 게시물 단위 랜덤으로' : '고른 갈래의 태그를 지우고 같은 장면끼리 묶어 이벤트 단위로 뽑습니다';
+    stateEl.hidden = !on;
+    if (on) {
+      const info = compressInfo?.key === compressKey(compress) && !compressInfo.loading && !compressInfo.error ? compressInfo : null;
+      stateEl.innerHTML = `<span class="emc-on">압축 중 · ${esc(compress.map(groupLabel).join(' · '))} 제거${info ? ` · 이벤트 <b>${fmt(info.events)}</b>` : ''}</span><button
+        type="button" data-em-compress-manage aria-expanded="${editing}">압축 관리</button>`;
+      if (!info && !editing) scheduleCompressInfo();
+    }
+    panelEl.hidden = !editing;
+    if (!editing) { fitHeight?.(); return; }
+    const info = compressInfo?.key === compressKey(compressDraft) && !compressInfo.loading && !compressInfo.error ? compressInfo : null;
+    const same = on && compressDraft.join(',') === compress.join(',');
+    panelEl.innerHTML = `<div class="emc-hint">체크한 갈래의 태그를 지우고, 남은 태그가 같은 게시물끼리 이벤트 하나로 묶습니다. 핀 · 인원 태그는 남습니다.</div>
+      <div class="emc-grid">${COMPRESS_IDS.map(id => `<button type="button" class="emc-g${compressDraft.includes(id) ? ' is-on' : ''}" data-emc-g="${id}"
+        aria-pressed="${compressDraft.includes(id)}">${esc(groupLabel(id))}</button>`).join('')}</div>
+      <div class="emc-sum">${compressDraft.length ? compressSummary(compressDraft) : '<span class="emc-dim">지울 갈래를 고르세요</span>'}</div>
+      ${info && compressDraft.length ? `<div class="emc-top">${info.top.map(e => `<div class="emc-ev" title="${esc(e.tags.join(', '))}"><span>${esc(e.tags.join(', '))}</span><b>×${fmt(e.posts)}</b></div>`).join('')}</div>` : ''}
+      <div class="emc-act"><button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
+        ${compressDraft.length && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button></div>`;
+    fitHeight?.();
+  }
+
   /** S 창의 [맵에서 열기] - 저장 · 스테이징된 조합을 이 창에 그대로 편다(저장된 조합 불러오기와 같은 길). */
   async function openSelection(selection) {
     if (linkPending || linkUncertain) throw new Error('랜덤 연결 상태를 확인한 뒤 다시 열어주세요.');
@@ -2389,6 +2528,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     library?.close();
     pins = selection.pins.slice(); excludes = selection.exclude.slice();
     ratings = new Set(selection.ratings); persons = new Set(selection.persons);
+    takeCompress(selection);
     group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
     if (isTree()) { treeFilter = treeSel.d1; treeAll = false; }
     input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);

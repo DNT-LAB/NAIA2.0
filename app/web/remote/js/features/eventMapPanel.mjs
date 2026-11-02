@@ -2949,15 +2949,16 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   ];
   const PE_LABEL = Object.fromEntries(PE_KEYS);
   // 축 태그 등장(게시물 가중)의 몇 % 를 그 라운드가 지우나 - 실측 2026-11-02(468만 게시물 · 지금 사전) · 20% 이상만 적는다.
+  // [색상] 제거는 적지 않는다(사용자 지시 2026-11-02 - 의상 31% · 배경·장소 27% 였지만 색상으로는 경고하지 않는다).
   // 매번 재지 않는다(사전 전체에 라운드를 돌려야 한다) - 사전 · 갈래가 크게 바뀌면 다시 잰다.
   const AXIS_PE = {
-    clothing: { remove_clothes: 86, remove_color: 31 },
+    clothing: { remove_clothes: 86 },
     body: { remove_character_features: 68, remove_pose_action: 24 },
     cast: { remove_pose_action: 25 },
     expression: { remove_expression: 77, remove_pose_action: 22 },
     action: { remove_pose_action: 99 },
     adult: { remove_pose_action: 96 },
-    scene: { remove_location_and_background_color: 88, remove_color: 27 },
+    scene: { remove_location_and_background_color: 88 },
     object: { remove_object_tags: 71 },
     situation: { remove_pose_action: 40, remove_meta_tags: 21 },
     meta: { remove_meta_tags: 55 },

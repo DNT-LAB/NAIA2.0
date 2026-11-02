@@ -10,7 +10,6 @@ import base64
 import copy
 import math
 import numpy as np
-import gc
 import ipaddress
 from pathlib import Path
 from PIL import Image
@@ -432,8 +431,10 @@ class APIService:
             except Exception:
                 pass
 
-            # 가비지 컬렉션
-            gc.collect()
+            # ⚠️ 여기서 gc.collect() 를 부르지 않는다(2026-11-02 실측). 전체 GC 한 번이 생성 한 장마다
+            #    0.26 -> 0.9초(히스토리가 쌓일수록 늘어남)를 쓰고, 그동안 GIL 을 쥐어 이벤트 루프도 멈췄다.
+            #    클릭 -> 표시 중앙값 3.46 -> 2.46초(같은 서버 교대 A/B 20장). PyQt 시절 Dummy 스레드
+            #    대책이었고 headless 에는 필요 없다 - 순환 참조는 파이썬 자동 GC 가 치운다.
         except Exception:
             pass
 

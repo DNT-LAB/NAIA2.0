@@ -98,7 +98,7 @@ const SORT_MODES = [
 ];
 
 export function initEventMap({ insertTag, insertAtCursor = null, showToast, getPromptText, generateNow, onRandomLinkChange,
-                               openPeSlash = null, onPermanentExcludeChange = null,
+                               openPeSlash = null, setPeOption = null, onPermanentExcludeChange = null,
                                onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null,
                                getStagedCount = null, getStagedTotal = null, onOpenStaging = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
@@ -127,6 +127,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       compress = (state.compress || '').split(',').filter(Boolean);
       compressCut = compress.length ? cleanCut(state.compress_cut || '') : {};
       if (compress.length) compressOutput = state.compress_output === 'axes' ? 'axes' : 'full';
+      paintCompress();
       const fp = filterParams();
       linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
         compress: compress.join(','), compress_cut: cutText(compressCut), compress_output: outputText() });
@@ -179,6 +180,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   let compressOutput = 'full', pinAxes = { key: '', axes: [] };
   // compressPending = 타이머가 기다리는 숫자 줄 열쇠 · compressView = 마지막으로 그린 조건(핀 · 제외 · 등급 · 인원 · 영구 제외).
   let compressPending = '', compressView = '';
+  // peEnabled = 지금 켜진 PE 특징 제거 라운드(Set · 모르면 null) - 압축 중 막이 그 칸을 그린다. cveilEl = 그 막.
+  let peEnabled = null, peSeq = 0, cveilEl = null, veilOn = false;
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -1884,6 +1887,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       <div class="em-compress-panel" hidden></div>
       <div class="em-library-panel" hidden></div>
       <div class="em-body" role="listbox"></div>
+      <div class="em-cveil" hidden></div>
       <div class="em-foot">
         <span class="em-actions"><button type="button" class="em-random" data-em-random="select"
             title="지금 고른 인원·등급(핀이 있으면 그 안)에서 게시물 하나를 뽑아 Random 과 같은 파이프라인으로 메인 프롬프트에">랜덤 선택</button><button type="button" class="em-random" data-em-random="generate"
@@ -1904,6 +1908,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     trailEl = overlay.querySelector('.em-trail');
     filtersEl = overlay.querySelector('.em-filters');
     bodyEl = overlay.querySelector('.em-body');
+    cveilEl = overlay.querySelector('.em-cveil');
+    cveilEl.addEventListener('click', event => {
+      if (event.target.closest('[data-em-cveil-release]')) setCompress([]);
+    });
+    cveilEl.addEventListener('change', onVeilPeChange);
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => positionVeil()).observe(bodyEl);
     footEl = overlay.querySelector('.em-foot');
     ttabsEl = overlay.querySelector('.emt-tabs');
     actsEl = overlay.querySelector('.emt-acts');
@@ -2300,6 +2310,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     fitWindow();
     panel.refit();
     if (bodyEl) bodyEl.style.setProperty('--emt-h', `${Math.max(120, bodyEl.clientHeight - 10)}px`);
+    positionVeil();
     const z = Number(overlay.style.zIndex) + 1;
     for (const el of [subEl, sideEl, personPopup, document.querySelector('.em-saved-panel')]) {
       if (el) el.style.zIndex = String(z);
@@ -2869,6 +2880,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const panelEl = overlay.querySelector('.em-compress-panel');
     if (!btn || !stateEl || !panelEl) return;
     const on = compress.length > 0, editing = compressDraft !== null;
+    paintVeil();
     btn.textContent = on ? '압축 해제' : '압축';
     btn.classList.toggle('is-on', on);
     btn.setAttribute('aria-expanded', String(editing && !on));
@@ -2906,6 +2918,91 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     panelEl.querySelector('.emc-act-r').innerHTML = `<button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
       ${usable(compressDraft) && pinAxesKnown() && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
     fitHeight?.();
+  }
+
+  // ── 압축 중 막(사용자 지시 2026-11-02) ─────────────────────────────────────
+  // 압축 중에는 태그를 찾거나 꽂지 않는다 - 찾기 칸을 잠그고 갈래 · 목록 자리를 흐린 막으로 덮는다(Tag Filter 의 Stale 처럼)
+  // 가운데 [압축 해제]. 막 아래쪽 = PE 특징 제거 칸(Quick Filter 이벤트 압축 창과 같은 키 · 같은 칸 · 바꾸면 지금 프리셋에도).
+  // PE 는 출력에만 든다(사용자 결정 - 이벤트 묶음은 그대로). [선택한 축만] 일 때 기준 축과 크게 겹치는 PE 제거가 켜져 있으면
+  // 칸 위에 경고 줄을 띄운다.
+  const PE_KEYS = [
+    ['remove_character_features', '캐릭터 특징'], ['remove_clothes', '의상'], ['remove_clothing_event', '의상 이벤트'],
+    ['remove_color', '색상'], ['remove_location_and_background_color', '장소 · 배경'], ['remove_expression', '표정'],
+    ['remove_pose_action', '포즈 · 동작'], ['remove_meta_tags', '메타 태그'], ['remove_object_tags', '사물'],
+    ['remove_noise_tags', '저빈도 태그'],
+  ];
+  const PE_LABEL = Object.fromEntries(PE_KEYS);
+  // 축 태그 등장(게시물 가중)의 몇 % 를 그 라운드가 지우나 - 실측 2026-11-02(468만 게시물 · 지금 사전) · 20% 이상만 적는다.
+  // 매번 재지 않는다(사전 전체에 라운드를 돌려야 한다) - 사전 · 갈래가 크게 바뀌면 다시 잰다.
+  const AXIS_PE = {
+    clothing: { remove_clothes: 86, remove_color: 31 },
+    body: { remove_character_features: 68, remove_pose_action: 24 },
+    cast: { remove_pose_action: 25 },
+    expression: { remove_expression: 77, remove_pose_action: 22 },
+    action: { remove_pose_action: 99 },
+    adult: { remove_pose_action: 96 },
+    scene: { remove_location_and_background_color: 88, remove_color: 27 },
+    object: { remove_object_tags: 71 },
+    situation: { remove_pose_action: 40, remove_meta_tags: 21 },
+    meta: { remove_meta_tags: 55 },
+  };
+  async function loadPeEnabled() {
+    const mine = ++peSeq;
+    let next = null;
+    try { next = new Set((await getJson('/api/event-map/pe-filter', { tags: '' })).enabled || []); } catch { /* 모르면 칸을 잠근다 */ }
+    if (mine !== peSeq) return;
+    peEnabled = next;
+    paintVeil();
+  }
+  function onVeilPeChange(event) {
+    const box = event.target.closest('[data-em-pe-key]');
+    if (!box) return;
+    if (typeof setPeOption !== 'function' || !peEnabled) { box.checked = !box.checked; toast('PE 설정을 바꿀 수 없습니다.', 'error'); return; }
+    const key = box.dataset.emPeKey;
+    setPeOption(key, box.checked);
+    if (box.checked) peEnabled.add(key); else peEnabled.delete(key);   // 서버가 바꾼 뒤 다시 묻는다
+    ++peSeq;
+    paintVeil();
+    setTimeout(() => { void loadPeEnabled(); }, 400);
+  }
+  /** 막은 목록 자리만 덮는다 - 갈래 탭(3단 지도)은 CSS 로 흐리기만(그 사이 핀 줄 · 압축 상태 줄은 그대로 눌린다).
+   *  창 몸통 안의 절대 위치라 몸통이 움직이면 다시 잰다. */
+  function positionVeil() {
+    if (!cveilEl || cveilEl.hidden || !bodyEl) return;
+    cveilEl.style.top = `${bodyEl.offsetTop}px`;
+    cveilEl.style.height = `${bodyEl.offsetHeight}px`;
+  }
+  function veilWarnings() {
+    if (compressOutput !== 'axes' || !peEnabled) return [];
+    return axesOf(compress).flatMap(axis => Object.entries(AXIS_PE[axis] || {}).filter(([key]) => peEnabled.has(key))
+      .map(([key, share]) => `검색 축이 [${groupLabel(axis)}]이지만, 현재 PE 설정에 [${PE_LABEL[key]}] 제거가 활성화 되어있습니다. (이 축 태그의 약 ${share}%)`));
+  }
+  function paintVeil() {
+    if (!cveilEl || !overlay) return;
+    const on = compress.length > 0;
+    overlay.classList.toggle('em-compressed', on);
+    input.disabled = on;
+    input.placeholder = on ? '압축 중에는 태그를 찾지 않습니다 - [압축 해제] 뒤에' : '태그 찾기…';
+    cveilEl.hidden = !on;
+    if (on && !veilOn) void loadPeEnabled();   // 막이 처음 덮일 때마다 지금 PE 를 묻는다(PE 창에서 바꿨을 수 있다)
+    veilOn = on;
+    if (!on) return;
+    if (!cveilEl.firstChild) {
+      cveilEl.innerHTML = `<div class="em-cveil-mid"><span>압축 중에는 태그를 찾거나 꽂지 않습니다</span><button type="button"
+        data-em-cveil-release>압축 해제</button></div><div class="em-cveil-warn" hidden></div>
+        <div class="ecw-pe em-cveil-pe"><div class="ecw-pe-head">[PE 특징 제거] - 여기에서 On/Off 시 현재 프리셋에도 반영됩니다</div>
+        <div class="pe-opt-list ecw-pe-grid"></div></div>`;
+    }
+    const grid = cveilEl.querySelector('.ecw-pe-grid');
+    const html = PE_KEYS.map(([key, label]) => `<div class="pe-opt-cell"><label class="pe-opt-row"><input type="checkbox" class="pe-opt-input"
+      data-em-pe-key="${key}"${peEnabled?.has(key) ? ' checked' : ''}${peEnabled ? '' : ' disabled'}><span class="pe-opt-check" aria-hidden="true"></span><span
+      class="pe-opt-label">${esc(label)}</span></label></div>`).join('');
+    if (grid._html !== html) { grid._html = html; grid.innerHTML = html; }
+    const warn = cveilEl.querySelector('.em-cveil-warn');
+    const lines = veilWarnings();
+    warn.hidden = !lines.length;
+    warn.innerHTML = lines.map(line => `<div>${esc(line)}</div>`).join('');
+    positionVeil();
   }
 
   /** S 창의 [맵에서 열기] - 저장 · 스테이징된 조합을 이 창에 그대로 편다(저장된 조합 불러오기와 같은 길). */

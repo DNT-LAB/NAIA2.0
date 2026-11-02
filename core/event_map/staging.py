@@ -56,6 +56,7 @@ class EventMapStaging:
                 row["selection"] = selection(row["selection"])
                 row["enabled"] = row.get("enabled") is not False   # 옛 줄 = 켜짐
                 row["extra"] = extra_of(row.get("extra"))           # 옛 줄 = 추가 프롬프트 꺼짐
+            items = self._merge_same(items)
             rev = data.get("rev", 0)
             self._gen = str(data.get("gen") or "")
             return items, rev if isinstance(rev, int) and rev >= 0 else 0
@@ -64,6 +65,25 @@ class EventMapStaging:
 
     def _read(self) -> list[dict]:
         return self._load()[0]
+
+    @staticmethod
+    def _merge_same(items: list[dict]) -> list[dict]:
+        """같은 조합(정체)이 둘 이상이면 한 줄로 - 압축은 줄의 설정이다(사용자 결정 2026-11-02).
+        남는 줄 = 켜진 줄, 둘 다 같으면 나중 줄(마지막으로 스테이징한 뜻). 자리는 앞 줄의 자리.
+        남는 줄의 추가 프롬프트가 비었으면 빠지는 줄의 글을 받는다. 옛 파일 · 프리셋은 읽을 때 이렇게 합친다."""
+        order, best = [], {}
+        for row in items:
+            key = EventMapLibrary._identity(row["selection"])
+            old = best.get(key)
+            if old is None:
+                order.append(key)
+                best[key] = row
+                continue
+            win, lose = (old, row) if old.get("enabled", True) and not row.get("enabled", True) else (row, old)
+            if not (win.get("extra") or {}).get("text") and (lose.get("extra") or {}).get("text"):
+                win = {**win, "extra": dict(lose["extra"])}
+            best[key] = win
+        return [best[k] for k in order]
 
     def _write(self, items: list[dict], rev: int, gen: str | None = None) -> None:
         self._gen = gen or getattr(self, "_gen", "") or uuid.uuid4().hex
@@ -91,7 +111,8 @@ class EventMapStaging:
 
     def add_many(self, selections: list, enabled: list | None = None, extras: list | None = None,
                  common: dict | None = None) -> dict:
-        """얼려 넣는다. 이미 있는 조합(같은 지문)은 건너뛴다 - `added` 가 실제로 들어간 수.
+        """얼려 넣는다. 이미 있는 조합(같은 정체)은 새 줄을 만들지 않는다 - 압축 설정이 다르면 그 줄의 압축만
+        지금 것으로 덮는다(`updated` · 사용자 결정 2026-11-02 · 켜짐 · 추가 프롬프트는 그대로). `added` = 실제로 들어간 수.
 
         `enabled` = 조합마다 켜짐(묶음을 다시 스테이징할 때 저장해 둔 상태). 없으면 전부 켜짐.
         `extras` = 조합마다 추가 프롬프트(묶음에 저장해 둔 것). 건너뛴 조합의 글은 버린다 - 이미 있는 줄의 글을 덮지 않는다.
@@ -107,17 +128,21 @@ class EventMapStaging:
             raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
         with _LOCK:
             items, rev = self._load()
-            seen = {EventMapLibrary._fingerprint(r["selection"]) for r in items}
-            added = 0
+            index = {EventMapLibrary._identity(r["selection"]): i for i, r in enumerate(items)}
+            added = updated = 0
             for s, on, extra in zip(clean, flags, texts):
-                key = EventMapLibrary._fingerprint(s)
-                if key in seen:
+                key = EventMapLibrary._identity(s)
+                at = index.get(key)
+                if at is not None:
+                    if EventMapLibrary._fingerprint(items[at]["selection"]) != EventMapLibrary._fingerprint(s):
+                        items[at] = {**items[at], "selection": s}   # 같은 조합 - 압축 설정만 바뀐다
+                        updated += 1
                     continue
                 if len(items) >= MAX_ITEMS:
                     raise MapQueryError("bad_request", f"스테이징은 {MAX_ITEMS}개까지입니다.")
                 items.append({"id": str(uuid.uuid4()), "selection": s, "enabled": on, "extra": extra,
                               "added_at": datetime.now(timezone.utc).isoformat()})
-                seen.add(key)
+                index[key] = len(items) - 1
                 added += 1
             adopted = False
             if isinstance(common, dict) and not self._common["text"]:
@@ -125,10 +150,10 @@ class EventMapStaging:
                 if incoming["text"]:
                     self._common = incoming
                     adopted = True
-            if added or adopted:
+            if added or updated or adopted:
                 rev += 1
                 self._write(items, rev)
-            return self._reply(items, rev, added=added, common_adopted=adopted)
+            return self._reply(items, rev, added=added, updated=updated, common_adopted=adopted)
 
     def split(self, item_id, terms, counts_fn=None) -> dict:
         return self._refine(item_id, terms, split=True)
@@ -151,12 +176,12 @@ class EventMapStaging:
             key = tuple(sorted(set(terms)))
             if any(tuple(sorted(set(g["terms"]))) == key for g in row["selection"].get("filters", [])):
                 raise MapQueryError("bad_request", "이미 같은 찾기가 걸려 있습니다")
-            seen = {EventMapLibrary._fingerprint(r["selection"]) for r in items if r["id"] != item_id}
+            seen = {EventMapLibrary._identity(r["selection"]) for r in items if r["id"] != item_id}
             replacements = []
             for invert in ([False, True] if split else [invert]):
                 selected = selection({**row["selection"], "filters": [*row["selection"].get("filters", []),
                                       {"terms": terms, "invert": invert}]})
-                if EventMapLibrary._fingerprint(selected) in seen:
+                if EventMapLibrary._identity(selected) in seen:
                     raise MapQueryError("duplicate", "이미 같은 조합이 스테이징에 있습니다")
                 replacements.append({**row, "id": str(uuid.uuid4()) if split else row["id"],
                                      "selection": selected, "extra": dict(row["extra"])})
@@ -167,19 +192,16 @@ class EventMapStaging:
     def replace_all(self, rows) -> dict:
         if not isinstance(rows, list) or len(rows) > MAX_ITEMS:
             raise MapQueryError("bad_request", f"스테이징은 {MAX_ITEMS}개까지입니다.")
-        items, seen = [], set()
+        items = []
         for row in rows:
             if not isinstance(row, dict):
                 raise MapQueryError("bad_request", "조합 목록을 확인해주세요.")
             selected = selection(row.get("selection"))
             if not selected["pins"]:
                 raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
-            key = EventMapLibrary._fingerprint(selected)
-            if key in seen:
-                continue
-            seen.add(key)
             items.append({"id": str(uuid.uuid4()), "selection": selected, "enabled": row.get("enabled") is not False,
                           "extra": extra_of(row.get("extra")), "added_at": datetime.now(timezone.utc).isoformat()})
+        items = self._merge_same(items)   # 같은 조합은 한 줄(옛 프리셋에 압축 줄 · 일반 줄이 같이 있어도)
         with _LOCK:
             _, rev = self._load()
             self._write(items, rev + 1)

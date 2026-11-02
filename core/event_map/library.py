@@ -245,11 +245,17 @@ class EventMapLibrary:
             return next((r for r in self._read() if r["id"] == item_id), None)
 
     @staticmethod
-    def _fingerprint(selected):
+    def _identity(selected):
+        """조합의 정체 = 핀 · 제외 · 등급 · 인원 · 찾기. 압축은 넣지 않는다 - 스테이징에서는 줄의 설정이다
+        (사용자 결정 2026-11-02 - 같은 조합의 압축 줄 · 일반 줄이 따로 있으면 줄에서 압축을 풀 때 겹친다)."""
         base = tuple(tuple(sorted({normalize_tag(v) if k in ("pins", "exclude") else v for v in selected[k]}))
                      for k in ("pins", "exclude", "ratings", "persons"))
-        base = base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
-        # 압축한 조합은 같은 핀이라도 다른 조합이다 - 압축 없는 조합의 지문은 그대로(옛 저장본 · 프리셋 서명)
+        return base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
+
+    @staticmethod
+    def _fingerprint(selected):
+        base = EventMapLibrary._identity(selected)
+        # 압축까지 같은가 - 저장된 조합의 중복 판정 · 프리셋 서명(압축을 바꾸면 '고침'). 압축 없는 조합의 지문은 그대로
         if selected.get("compress"):
             base = base + (("compress",) + tuple(selected["compress"]),)
         if selected.get("compress_cut"):

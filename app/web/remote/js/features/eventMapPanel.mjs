@@ -99,7 +99,7 @@ const SORT_MODES = [
 
 export function initEventMap({ insertTag, insertAtCursor = null, showToast, getPromptText, generateNow, onRandomLinkChange,
                                openPeSlash = null, setPeOption = null, onPermanentExcludeChange = null,
-                               onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null,
+                               onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null, stagedKind = null,
                                getStagedCount = null, getStagedTotal = null, onOpenStaging = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   // 랜덤 연결은 한 갈래뿐이다(서버 상태 하나): event = 이 창의 지금 조합, staging = S 창의 스테이징 풀
@@ -1158,8 +1158,12 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     const sg = overlay.querySelector('[data-emt-stage]');
     if (sg) {
       const staged = on && Boolean(isStaged?.(currentSelection()));
+      // 같은 조합이 압축 설정만 다르게 있으면 켜 둔다 - 누르면 그 줄의 압축을 지금 것으로(사용자 결정 2026-11-02)
+      const other = on && !staged && stagedKind?.(currentSelection()) === 'other';
       sg.disabled = !on || staged;
-      sg.title = staged ? '이미 스테이징에 있는 조합입니다' : '이 조합을 얼려 스테이징(S)에 넣는다 - 랜덤 버튼을 스테이징에 연결하면 그중 하나에서 뽑는다';
+      sg.title = staged ? '이미 스테이징에 있는 조합입니다'
+        : other ? '스테이징에 같은 조합이 있습니다 - 누르면 그 줄의 압축 설정을 지금 상태로 바꿉니다'
+          : '이 조합을 얼려 스테이징(S)에 넣는다 - 랜덤 버튼을 스테이징에 연결하면 그중 하나에서 뽑는다';
     }
     const so = overlay.querySelector('[data-emt-stage-open]');
     if (so) {

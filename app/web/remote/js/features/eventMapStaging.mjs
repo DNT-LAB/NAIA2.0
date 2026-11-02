@@ -112,13 +112,17 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   // 서버의 지문(library._fingerprint · normalize_tag)과 같은 뜻: 태그는 소문자 · 밑줄 = 빈칸 · 빈칸 접기, 네 목록 모두 순서 무시.
   const norm = t => String(t || '').trim().toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ');
   const filtersKey = s => (s.filters || []).map(g => (g.invert ? '!' : '') + [...new Set((g.terms || []).map(norm))].sort().join(',')).sort();
-  const fingerprint = s => JSON.stringify([[...new Set(s.pins.map(norm))].sort(), [...new Set(s.exclude.map(norm))].sort(),
-    [...s.ratings].sort(), [...s.persons].sort(), ...(s.filters?.length ? [filtersKey(s)] : []),
-    ...(s.compress?.length ? [['compress', ...s.compress]] : []),   // 압축한 조합은 다른 조합(서버 지문과 같다)
+  // 정체(서버 library._identity) = 핀 · 제외 · 등급 · 인원 · 찾기 - 같으면 스테이징의 같은 줄(압축은 줄의 설정 - 사용자 결정 2026-11-02).
+  const identity = s => JSON.stringify([[...new Set(s.pins.map(norm))].sort(), [...new Set(s.exclude.map(norm))].sort(),
+    [...s.ratings].sort(), [...s.persons].sort(), ...(s.filters?.length ? [filtersKey(s)] : [])]);
+  const fingerprint = s => JSON.stringify([identity(s),
+    ...(s.compress?.length ? [['compress', ...s.compress]] : []),   // 압축까지 같은가(서버 _fingerprint 와 같은 뜻)
     ...(s.compress_cut ? [['compress_cut', ...['min_tags', 'max_tags', 'min_freq', 'max_freq'].map(k => s.compress_cut[k] ?? null)]] : []),
     ...(s.compress_output ? [['compress_output', s.compress_output]] : [])]);
   /** 이미 스테이징에 있는 조합인가 - [스테이징 +] · 이벤트 맵 '스테이징에 넣기' 를 미리 끈다(사용자 지시 2026-10-14). */
   const isStaged = s => !!s && staged.some(r => fingerprint(r.selection) === fingerprint(s));
+  /** 'same' = 압축까지 같은 줄이 있다 · 'other' = 같은 조합이 압축 설정만 다르게 있다(다시 넣으면 그 줄의 압축을 덮는다) · ''. */
+  const stagedKind = s => (!s ? '' : isStaged(s) ? 'same' : staged.some(r => identity(r.selection) === identity(s)) ? 'other' : '');
   // 인원 · 등급 = 색 칩(사용자 지시 2026-10-14). 인원은 여성 · 남성 · 혼성 셋으로만 칠한다(수에 따라 나누지 않는다).
   const PERSON = {
     '1girl_solo': ['여1 단독', 'f'], '1girl': ['여1', 'f'], '2girls': ['여2', 'f'], multiple_girls: ['여다수', 'f'],
@@ -706,10 +710,11 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (t.closest('[data-st-stage-saved]') && savedRow) {
       await run(async () => {
         const data = await request('/api/event-map/staging', { action: 'stage_saved', id });
-        const n = data.added || 0;
+        const n = data.added || 0, u = data.updated || 0;
         applyStaging(data);
-        const more = data.common_adopted ? ' · 묶음의 공통 추가 프롬프트도 가져왔습니다' : '';
-        toast(n ? `스테이징에 ${n}개 넣었습니다${more}` : `이미 스테이징에 있는 조합입니다${more}`, n || more ? 'success' : 'info');
+        const more = (u ? ` · ${u}개는 압축 설정을 바꿨습니다` : '') + (data.common_adopted ? ' · 묶음의 공통 추가 프롬프트도 가져왔습니다' : '');
+        toast(n ? `스테이징에 ${n}개 넣었습니다${more}` : u ? `같은 조합 ${u}개의 압축 설정을 바꿨습니다${data.common_adopted ? ' · 묶음의 공통 추가 프롬프트도 가져왔습니다' : ''}`
+          : `이미 스테이징에 있는 조합입니다${more}`, n || u || more ? 'success' : 'info');
       }, { readsExtras: true });   // 공통을 가져올지는 지금 공통 글이 비었는지로 정한다
       return;
     }
@@ -1369,7 +1374,9 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     try {
       const data = await request('/api/event-map/staging', { action: 'add', selection, counts: open });
       applyStaging(data);
-      toast(data.added ? `스테이징에 넣었습니다 — ${staged.length}개` : '이미 스테이징에 있는 조합입니다', data.added ? 'success' : 'info');
+      toast(data.added ? `스테이징에 넣었습니다 — ${staged.length}개`
+        : data.updated ? '스테이징의 같은 조합을 지금 압축 설정으로 바꿨습니다' : '이미 스테이징에 있는 조합입니다',
+      data.added || data.updated ? 'success' : 'info');
       paint();
     } catch (error) { toast(error.message, 'error'); }
   }
@@ -1381,7 +1388,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
   void refreshCounts();
   return {
     show, close, toggle: () => (open ? close() : void show()), isOpen: () => open,
-    stage, refreshCounts, paint, isStaged, paintTab,
+    stage, refreshCounts, paint, isStaged, stagedKind, paintTab,
     /** 소켓이 다시 열렸다(서버 재실행 · 늦은 기동) - 열려 있으면 통째로, 아니면 수만 다시 받는다. */
     reconnected: () => (open ? reload() : refreshCounts()),
     stagedCount: () => (staged.length ? activeCount() : stagedCount), stagedTotal: () => stagedCount,

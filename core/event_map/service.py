@@ -587,7 +587,7 @@ class EventMapService:
         per = []
         for s, enabled in zip(selected, on):
             # 압축은 뽑는 방식이다 - 게시물 수(찾기 맞음)는 압축과 무관하다
-            rids = idx.posts_for(**{k: v for k, v in s.items() if k != "compress"}, block=block)
+            rids = idx.posts_for(**{k: v for k, v in s.items() if k not in ("compress", "compress_cut")}, block=block)
             rids = idx.filter_posts(rids, [{"terms": terms, "invert": False}])
             per.append(int(rids.size))
             if enabled:
@@ -941,13 +941,15 @@ class EventMapService:
 
     def sample(self, *, pins: Any, exclude: Any = None, ratings: Any = None,
                persons: Any = None, n: Any = 5, seed: Any = None, permanent: bool = False,
-               filters: Any = None, compress: Any = None, top: Any = 0) -> dict[str, Any]:
+               filters: Any = None, compress: Any = None, top: Any = 0, compress_cut: Any = None,
+               hist: Any = False) -> dict[str, Any]:
         """핀을 포함하는 **실제 게시물**의 태그 조합. Dev0714 Quick Search 의 랜덤과 같다.
 
         핀이 없으면 분면(인원·등급) 전체에서 뽑는다([랜덤 프롬프트 할당] - 사용자 지정 2026-09-12 밤).
         `permanent` = 영구 제외를 건다(이벤트 맵 화면 · 랜덤 버튼 연결). Assist 는 걸지 않는다.
         `compress` = 갈래 id 목록 - 압축한 조합은 이벤트를 같은 확률로 뽑는다(`core.event_map.compress`).
         `top` = 압축일 때 큰 이벤트 목록 길이(압축 판의 미리보기).
+        `compress_cut` = 압축 슬라이더(태그 수 · 빈도) · `hist` = 슬라이더 분포를 싣는다.
         """
         from core.event_map.compress import normalize_compress
         groups = normalize_compress(compress)
@@ -975,7 +977,8 @@ class EventMapService:
                 top_n = 0
             result = compressed(self, idx, pins=wanted, exclude=excluded, ratings=want_r, persons=want_p,
                                 block=self.permanent_block(idx) if permanent else None, filters=filters or None,
-                                groups=groups, n=self._count(n, 5, MAX_SAMPLES), top=top_n, seed=seed_value)
+                                groups=groups, cut=compress_cut, n=self._count(n, 5, MAX_SAMPLES), top=top_n,
+                                seed=seed_value, hist=bool(hist))
             result["ok"] = True
             return result
         try:

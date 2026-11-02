@@ -1,23 +1,31 @@
-"""이벤트 맵 압축(사용자 지시 2026-11-02) - 조합에 붙는 상태 `selection.compress = [갈래 id …]`.
+"""이벤트 맵 압축(사용자 지시 2026-11-02) - 조합에 붙는 상태 `selection.compress = [갈래 id …]` + `compress_cut`.
 
 고른 갈래의 태그를 지우고, 남은 태그(+ 등급)가 같은 게시물끼리 **이벤트** 하나로 묶는다.
 압축된 조합의 랜덤은 게시물이 아니라 이벤트를 **같은 확률로** 뽑는다(사용자 결정 2026-11-02) - 흔한 장면이 랜덤을 덮지 않게.
 프롬프트 = 그 이벤트의 남은 태그. 핀 · 인원 태그는 지우는 갈래에 있어도 남는다(사용자 결정 2026-11-02).
 색상은 맵 정책대로 늘 빠진다(핀이면 남는다) - `EventMapIndex.sample` 과 같다.
 
+슬라이더 둘(`compress_cut` - Quick Filter 이벤트 압축 창과 같은 뜻 · 사용자 결정 2026-11-02):
+- 빈도 = 태그 하나가 나오는 이벤트 수. 범위 밖 태그는 이벤트를 거르지 않고 **태그 수에서만** 빠진다(프롬프트엔 남는다).
+  핀 · 인원 태그는 늘 센다.
+- 태그 수 = 이벤트에서 세는 태그 개수. 범위 밖 이벤트는 랜덤에서 빠진다.
+후보 게시물이 50만을 넘으면 50만만 쓴다(나머지는 버림 · 사용자 지시 2026-11-02) - 조건마다 고정된 표본.
+
 Search 의 이벤트 압축(`core/event_compress.py`)과 뜻은 같지만 출처가 다르다: 저쪽은 Search 풀 + PE '특징 제거',
 여기는 이벤트 맵 색인 + 이벤트 맵 갈래(`kr_category_fold.json`).
 
 계산: 게시물마다 남은 태그의 64비트 무작위 값을 더한 합(+ 등급 값)을 열쇠로 삼는다 - 게시물 안 태그는 겹치지 않으므로
 합이 곧 집합의 지문이다(충돌 확률 ~ 이벤트 수² / 2^64). 파이썬 반복문 없이 본문을 한 번 긁는다(`_count_tags` 와 같은 수).
-같은 조건이면 표를 캐시에서 쓴다 - 랜덤 단추는 같은 조합을 거듭 부른다.
+같은 조건이면 표(이벤트 · 이벤트별 태그 · 태그 빈도)를 캐시에서 쓴다 - 랜덤 단추와 슬라이더는 같은 조합을 거듭 부른다.
 """
 from __future__ import annotations
 
+import hashlib
 import random
 import threading
 import time
 from collections import OrderedDict
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -25,9 +33,11 @@ from core.event_map.service import MapQueryError
 
 # 이벤트 맵 갈래 중 압축 대상 10개(사용자 지정 2026-11-02 - 작품·고유명 · 미분류는 뺀다). 차례 = 화면 차례.
 COMPRESS_GROUPS = ("clothing", "body", "cast", "expression", "action", "adult", "scene", "object", "situation", "meta")
+CUT_KEYS = ("min_tags", "max_tags", "min_freq", "max_freq")
+ROW_LIMIT = 500_000
 GATHER_BATCH = 250_000
 CACHE_ITEMS = 16
-CACHE_BYTES = 256 << 20
+CACHE_BYTES = 512 << 20
 TOP_LIMIT = 50
 
 _cache: OrderedDict = OrderedDict()
@@ -49,6 +59,41 @@ def normalize_compress(value) -> list[str]:
     if unknown:
         raise MapQueryError("bad_request", "압축할 수 없는 갈래입니다: %s" % ", ".join(sorted(unknown)))
     return [g for g in COMPRESS_GROUPS if g in wanted]
+
+
+def normalize_cut(value) -> dict:
+    """슬라이더 컷 -> {min_tags, max_tags, min_freq, max_freq} 중 정해진 것만(빈 dict = 끝까지).
+    'a,b,c,d' 글(GET 쿼리 · 랜덤 연결 상태)도 받는다 - 빈 칸 = 끝까지."""
+    if value in (None, "", {}, []):
+        return {}
+    if isinstance(value, str):
+        parts = value.split(",")
+        if len(parts) != len(CUT_KEYS):
+            raise MapQueryError("bad_request", "압축 슬라이더 값을 확인해주세요.")
+        value = dict(zip(CUT_KEYS, parts))
+    if not isinstance(value, dict) or set(value) - set(CUT_KEYS):
+        raise MapQueryError("bad_request", "압축 슬라이더 값을 확인해주세요.")
+    out = {}
+    for key in CUT_KEYS:
+        raw = value.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            number = int(str(raw).strip())
+        except ValueError as exc:
+            raise MapQueryError("bad_request", "압축 슬라이더 값을 확인해주세요.") from exc
+        if not 0 <= number <= 1_000_000_000:
+            raise MapQueryError("bad_request", "압축 슬라이더 값을 확인해주세요.")
+        out[key] = number
+    for lo, hi in (("min_tags", "max_tags"), ("min_freq", "max_freq")):
+        if lo in out and hi in out and out[lo] > out[hi]:
+            raise MapQueryError("bad_request", "압축 슬라이더의 최소가 최대보다 큽니다.")
+    return out
+
+
+def cut_text(cut: dict) -> str:
+    """normalize_cut 의 반대 - 'a,b,c,d'(빈 칸 = 끝까지). 비면 ''."""
+    return ",".join("" if cut.get(k) is None else str(cut[k]) for k in CUT_KEYS) if cut else ""
 
 
 def _tag_salt(idx) -> tuple[np.ndarray, np.ndarray]:
@@ -76,53 +121,105 @@ def drop_mask(service, idx, groups: list[str], wanted: list[int]) -> np.ndarray:
     return drop
 
 
-def _build(idx, rids: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """rids -> (대표 게시물, 게시물 수) - 큰 이벤트 먼저(같으면 rid 순)."""
-    salt, part_salt = _tag_salt(idx)
-    weights = np.where(drop, np.uint64(0), salt)
-    keys = np.empty(rids.size, dtype=np.uint64)
+def _spans(idx, rids: np.ndarray):
+    """rids 를 GATHER_BATCH 씩 - (구간 시작, 본문 자리, 구간 경계 누적) - 본문을 한 번에 다 펴지 않게."""
     starts_all = idx.offsets[rids].astype(np.int64)
     lengths_all = idx.offsets[rids + 1].astype(np.int64) - starts_all
     for at in range(0, rids.size, GATHER_BATCH):
         starts = starts_all[at:at + GATHER_BATCH]
         lengths = lengths_all[at:at + GATHER_BATCH]
-        total = int(lengths.sum())
         before = np.zeros(lengths.size + 1, dtype=np.int64)
         np.cumsum(lengths, out=before[1:])
-        if total:
-            picks = np.repeat(starts - before[:-1], lengths) + np.arange(total, dtype=np.int64)
-            run = np.zeros(total + 1, dtype=np.uint64)
-            np.cumsum(weights[idx.body[picks]], out=run[1:])   # uint64 넘침은 2^64 를 법으로 돈다 - 차는 그대로 맞다
-            part = run[before[1:]] - run[before[:-1]]
-        else:
-            part = np.zeros(lengths.size, dtype=np.uint64)
-        keys[at:at + lengths.size] = part + part_salt[idx.part_arr[rids[at:at + GATHER_BATCH]]]
+        total = int(before[-1])
+        picks = np.repeat(starts - before[:-1], lengths) + np.arange(total, dtype=np.int64)
+        yield at, picks, before
+
+
+def _build(idx, rids: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """rids -> (대표 게시물, 게시물 수) - 큰 이벤트 먼저(같으면 rid 순)."""
+    salt, part_salt = _tag_salt(idx)
+    weights = np.where(drop, np.uint64(0), salt)
+    keys = np.empty(rids.size, dtype=np.uint64)
+    for at, picks, before in _spans(idx, rids):
+        run = np.zeros(picks.size + 1, dtype=np.uint64)
+        np.cumsum(weights[idx.body[picks]], out=run[1:])   # uint64 넘침은 2^64 를 법으로 돈다 - 차는 그대로 맞다
+        part = run[before[1:]] - run[before[:-1]]
+        n = before.size - 1
+        keys[at:at + n] = part + part_salt[idx.part_arr[rids[at:at + n]]]
     _, first, counts = np.unique(keys, return_index=True, return_counts=True)
     order = np.lexsort((first, -counts))
     return rids[first[order]].astype(np.int64), counts[order].astype(np.int64)
 
 
-def event_table(service, idx, rids: np.ndarray, *, cache_key, groups: list[str], wanted: list[int]):
-    """(대표 rid, 게시물 수, 지울 태그) - 같은 열쇠면 캐시."""
+def _kept_tags(idx, reps: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """이벤트(대표 게시물)마다 남은 태그 - (경계 E+1, 태그 id 이어 붙임)."""
+    kept = np.zeros(reps.size, dtype=np.int64)
+    parts = []
+    for at, picks, before in _spans(idx, reps):
+        tids = idx.body[picks]
+        keep = ~drop[tids]
+        run = np.zeros(picks.size + 1, dtype=np.int64)
+        np.cumsum(keep, out=run[1:])
+        kept[at:at + before.size - 1] = run[before[1:]] - run[before[:-1]]
+        parts.append(tids[keep].astype(np.int32))
+    bounds = np.zeros(reps.size + 1, dtype=np.int64)
+    np.cumsum(kept, out=bounds[1:])
+    return bounds, (np.concatenate(parts) if parts else np.empty(0, dtype=np.int32))
+
+
+@dataclass
+class Table:
+    """압축 표 - 이벤트(큰 것 먼저) · 이벤트별 남은 태그 · 태그 빈도(그 태그가 나오는 이벤트 수)."""
+    reps: np.ndarray
+    counts: np.ndarray
+    drop: np.ndarray
+    bounds: np.ndarray
+    tags: np.ndarray
+    freq: np.ndarray
+    rows: int        # 후보 게시물(표본 전)
+    used: int        # 실제로 센 게시물(50만 상한)
+
+    @property
+    def nbytes(self) -> int:
+        return sum(a.nbytes for a in (self.reps, self.counts, self.drop, self.bounds, self.tags, self.freq))
+
+
+def _make_table(service, idx, rids: np.ndarray, groups, wanted, sample_key) -> Table:
+    rows = int(rids.size)
+    if rows > ROW_LIMIT:
+        # 50만만 센다(사용자 지시 2026-11-02 - 나머지는 버림). 같은 조건이면 같은 표본(Quick Filter 와 같다).
+        seed = int.from_bytes(hashlib.sha256(repr(sample_key).encode("utf-8")).digest()[:8], "big")
+        rids = rids[np.sort(np.random.default_rng(seed).choice(rows, size=ROW_LIMIT, replace=False))]
+    drop = drop_mask(service, idx, groups, wanted)
+    if rids.size:
+        reps, counts = _build(idx, rids, drop)
+    else:
+        reps, counts = np.empty(0, np.int64), np.empty(0, np.int64)
+    bounds, tags = _kept_tags(idx, reps, drop)
+    freq = np.bincount(tags, minlength=idx.n_tags).astype(np.int64)
+    return Table(reps, counts, drop, bounds, tags, freq, rows, int(rids.size))
+
+
+def event_table(service, idx, rids_fn, *, cache_key, groups: list[str], wanted: list[int]) -> Table:
+    """압축 표 - 같은 열쇠면 캐시(후보 게시물도 다시 안 센다). cache_key None = 캐시 안 함."""
     global _cache_bytes
     key = (id(idx), cache_key, tuple(groups))
-    with _lock:
-        hit = _cache.get(key)
-        if hit is not None and hit[0] is idx:
-            _cache.move_to_end(key)
-            return hit[1], hit[2], hit[3]
-    drop = drop_mask(service, idx, groups, wanted)
-    reps, counts = _build(idx, rids, drop) if rids.size else (np.empty(0, np.int64), np.empty(0, np.int64))
-    size = reps.nbytes + counts.nbytes + drop.nbytes
-    if size <= CACHE_BYTES:
+    if cache_key is not None:
+        with _lock:
+            hit = _cache.get(key)
+            if hit is not None and hit[0] is idx:
+                _cache.move_to_end(key)
+                return hit[1]
+    table = _make_table(service, idx, rids_fn(), groups, wanted, (cache_key, tuple(groups)))
+    if cache_key is not None and table.nbytes <= CACHE_BYTES:
         with _lock:
             if key not in _cache:
-                _cache[key] = (idx, reps, counts, drop)
-                _cache_bytes += size
+                _cache[key] = (idx, table)
+                _cache_bytes += table.nbytes
             while _cache and (_cache_bytes > CACHE_BYTES or len(_cache) > CACHE_ITEMS):
                 _, old = _cache.popitem(last=False)
-                _cache_bytes -= old[1].nbytes + old[2].nbytes + old[3].nbytes
-    return reps, counts, drop
+                _cache_bytes -= old[1].nbytes
+    return table
 
 
 def clear_cache() -> None:
@@ -132,13 +229,37 @@ def clear_cache() -> None:
         _cache_bytes = 0
 
 
-def event_tags(idx, rid: int, drop: np.ndarray, wanted: list[int]) -> list[str]:
-    """이벤트 대표 게시물의 남은 태그 - 인원 -> 핀 -> 나머지(`EventMapIndex.sample` 과 같은 차례)."""
+def counted_tags(idx, table: Table, wanted: list[int], cut: dict) -> np.ndarray | None:
+    """태그 수에 세는 태그(True) - 빈도 범위 안 + 핀 · 인원 태그. 빈도 컷이 없으면 None(남은 태그 전부)."""
+    if "min_freq" not in cut and "max_freq" not in cut:
+        return None
+    counted = table.freq > 0
+    if "min_freq" in cut:
+        counted &= table.freq >= cut["min_freq"]
+    if "max_freq" in cut:
+        counted &= table.freq <= cut["max_freq"]
+    counted |= idx.population_arr
+    if wanted:
+        counted[np.asarray(wanted, dtype=np.int64)] = True
+    return counted
+
+
+def tag_counts(table: Table, counted: np.ndarray | None) -> np.ndarray:
+    """이벤트마다 세는 태그 개수."""
+    if counted is None:
+        return np.diff(table.bounds)
+    run = np.zeros(table.tags.size + 1, dtype=np.int64)
+    np.cumsum(counted[table.tags], out=run[1:])
+    return run[table.bounds[1:]] - run[table.bounds[:-1]]
+
+
+def event_tags(idx, rid: int, drop: np.ndarray, wanted: list[int]) -> list[int]:
+    """이벤트 대표 게시물의 남은 태그 id - 인원 -> 핀 -> 나머지(`EventMapIndex.sample` 과 같은 차례)."""
     tids = [t for t in idx.body[idx.offsets[rid]:idx.offsets[rid + 1]].tolist() if not drop[t]]
     population = [t for t in tids if idx.population_arr[t]]
     head = population + [t for t in wanted if t in tids and t not in population]
     seen = set(head)
-    return [idx.by_id[t] for t in head + [t for t in tids if t not in seen]]
+    return head + [t for t in tids if t not in seen]
 
 
 def candidate_rids(idx, wanted, excluded, ratings, persons, block, filters) -> np.ndarray:
@@ -148,41 +269,73 @@ def candidate_rids(idx, wanted, excluded, ratings, persons, block, filters) -> n
     return idx.filter_posts(idx._unblocked(idx._without(pool, excluded), block), filters)
 
 
+def _hist(values: np.ndarray) -> dict:
+    keys, counts = np.unique(values, return_counts=True)
+    return {str(int(k)): int(c) for k, c in zip(keys, counts)}
+
+
 def compressed(service, idx, *, pins, exclude, ratings, persons, block, filters, groups,
-               n=0, top=0, seed=None) -> dict:
-    """압축된 조합 - 뽑기(n) 와 큰 이벤트 목록(top). `EventMapIndex.sample` 과 같은 모양 + events · compress."""
+               cut=None, n=0, top=0, seed=None, hist=False) -> dict:
+    """압축된 조합 - 뽑기(n) · 큰 이벤트 목록(top) · 슬라이더 분포(hist).
+    `EventMapIndex.sample` 과 같은 모양 + events(전체) · events_in(슬라이더 안) · sampled(50만 상한)."""
     started = time.perf_counter()
+    cut = normalize_cut(cut)
     wanted, unknown = idx._resolve_many(pins)
     excluded, unknown_ex = idx._resolve_many(exclude)
     excluded = [t for t in excluded if t not in wanted]
     out = {"pins": [idx.by_id[t] for t in wanted], "unknown_pins": unknown,
            "exclude": [idx.by_id[t] for t in excluded], "unknown_exclude": unknown_ex,
            "ratings": sorted(ratings or []), "persons": sorted(persons or []), "compress": list(groups),
-           "observed_posts": 0, "events": 0, "samples": [], "top": [], "kind": "compressed_event"}
+           "compress_cut": cut, "observed_posts": 0, "events": 0, "events_in": 0, "sampled": None,
+           "samples": [], "top": [], "kind": "compressed_event"}
     if unknown:
         out["status"] = "unknown_tag"
         return out
-    rids = candidate_rids(idx, wanted, excluded, ratings, persons, block, filters)
     cache_key = (tuple(sorted(set(wanted))), tuple(sorted(set(excluded))), tuple(sorted(ratings or [])),
                  tuple(sorted(persons or [])), getattr(block, "text", None) if block is not None else None,
                  repr(filters or []))
     if block is not None and not isinstance(getattr(block, "text", None), str):
         cache_key = None   # 글로 가릴 수 없는 막을 것 - 캐시하지 않는다
-    if cache_key is None:
-        drop = drop_mask(service, idx, groups, wanted)
-        reps, counts = _build(idx, rids, drop) if rids.size else (np.empty(0, np.int64), np.empty(0, np.int64))
-    else:
-        reps, counts, drop = event_table(service, idx, rids, cache_key=cache_key, groups=groups, wanted=wanted)
-    out["observed_posts"] = int(rids.size)
-    out["events"] = int(reps.size)
+    table = event_table(service, idx, lambda: candidate_rids(idx, wanted, excluded, ratings, persons, block, filters),
+                        cache_key=cache_key, groups=groups, wanted=wanted)
+    counted = counted_tags(idx, table, wanted, cut)
+    sizes = tag_counts(table, counted)
+    inside = np.ones(sizes.size, dtype=bool)
+    if "min_tags" in cut:
+        inside &= sizes >= cut["min_tags"]
+    if "max_tags" in cut:
+        inside &= sizes <= cut["max_tags"]
+    eligible = np.flatnonzero(inside)    # 큰 이벤트 먼저(표 차례)
+    out["observed_posts"] = table.rows
+    if table.used < table.rows:
+        out["sampled"] = {"rows": table.rows, "used": table.used}
+    out["events"] = int(table.reps.size)
+    out["events_in"] = int(eligible.size)
+    if hist:
+        always = idx.population_arr.copy()
+        if wanted:
+            always[np.asarray(wanted, dtype=np.int64)] = True
+        out["hist"] = _hist(sizes)   # {세는 태그 수: 이벤트 수} - 빈도 컷은 걸고 태그 수 컷은 안 건 전체
+        out["freq_hist"] = _hist(table.freq[(table.freq > 0) & ~always])   # {빈도: 그 빈도의 태그 수} - 늘 세는 태그 빼고
+
+    def row(i):
+        tids = event_tags(idx, int(table.reps[i]), table.drop, wanted)
+        item = {"tags": [idx.by_id[t] for t in tids], "posts": int(table.counts[i])}
+        if counted is not None:
+            item["uncounted"] = [idx.by_id[t] for t in tids if not counted[t]]
+        return item
+
     rng = random.Random(seed)
-    for i in rng.sample(range(int(reps.size)), min(int(n), int(reps.size))):
-        rid = int(reps[i])
-        tags = event_tags(idx, rid, drop, wanted)
-        out["samples"].append({"tags": tags, "prompt": ", ".join(tags), "event_posts": int(counts[i]),
-                               "partition": idx.partitions[idx.part_arr[rid]] if rid < idx.part_arr.size else None})
-    for i in range(min(int(top), int(reps.size), TOP_LIMIT)):
-        out["top"].append({"tags": event_tags(idx, int(reps[i]), drop, wanted), "posts": int(counts[i])})
-    out["status"] = "matched" if reps.size else "no_match"
+    for j in rng.sample(range(int(eligible.size)), min(int(n), int(eligible.size))):
+        i = int(eligible[j])
+        item = row(i)
+        rid = int(table.reps[i])
+        item["event_posts"] = item.pop("posts")
+        item["prompt"] = ", ".join(item["tags"])
+        item["partition"] = idx.partitions[idx.part_arr[rid]] if rid < idx.part_arr.size else None
+        out["samples"].append(item)
+    for i in eligible[:min(int(top), TOP_LIMIT)].tolist():
+        out["top"].append(row(i))
+    out["status"] = "matched" if eligible.size else "no_match"
     out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
     return out

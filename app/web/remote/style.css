@@ -29347,17 +29347,23 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
   border: 1px solid #45405a; border-radius: 5px; padding: 3px 8px; cursor: pointer; }
 .em-compress-state button:hover, .em-compress-panel button:hover:not(:disabled) { border-color: #a894f5; }
 .em-compress-panel { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--border-color, #343044); }
-.em-compress-panel .emc-hint { margin-bottom: 6px; font-size: 10px; color: var(--text-muted); }
 .em-compress-panel .emc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .em-compress-panel button.emc-g { padding: 3px 0; color: var(--text-secondary); }
 .em-compress-panel button.emc-g.is-on { color: #ffd2d9; border-color: rgba(240,130,150,.6); background: rgba(170,50,80,.22); text-decoration: line-through; }
-.em-compress-panel .emc-sum { margin: 8px 0 4px; font-size: 10.5px; color: var(--text-secondary); }
+.em-compress-panel .emc-sum { margin: 6px 0 0; font-size: 10.5px; color: var(--text-secondary); }
+/* 슬라이더 = Quick Filter 압축 창의 .ecw-cut-* 그대로 - 판 안에서는 테두리 · 여백만 줄인다 */
+.em-compress-panel .ecw-cut { padding: 0; margin-top: 4px; border-bottom: 0; font-size: 10px; }
+.em-compress-panel .ecw-cut-bars { height: 16px; margin-top: 2px; }
+.em-compress-panel .ecw-cut-track { margin: 5px 7px 3px; }
+.em-compress-panel .emc-pv { margin-top: 6px; }
+.em-compress-panel .emc-ev i { font-style: normal; color: var(--text-muted); }
 .em-compress-panel .emc-dim { color: var(--text-muted); }
 .em-compress-panel .emc-err { color: #e57373; }
 .em-compress-panel .emc-ev { display: flex; gap: 8px; font-family: var(--font-mono, monospace); font-size: 10px; color: var(--text-primary); padding: 1px 0; }
 .em-compress-panel .emc-ev span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .em-compress-panel .emc-ev b { color: #e6a84a; font-weight: 500; }
-.em-compress-panel .emc-act { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.em-compress-panel .emc-act { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; }
+.em-compress-panel .emc-act > span { display: flex; gap: 6px; }
 .em-compress-panel button.is-primary { color: #d7ccff; border-color: rgba(139,118,255,.6); background: rgba(88,76,170,.25); }
 .em-compress-panel button:disabled { opacity: .45; cursor: default; }
 .em-library-form { display: grid; gap: 6px; }

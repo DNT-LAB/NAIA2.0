@@ -125,9 +125,10 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       ratings = new Set((state.ratings || RATING_OPTIONS.map(r => r.id).join(',')).split(','));
       persons = new Set((state.persons || PERSON_IDS.join(',')).split(','));
       compress = (state.compress || '').split(',').filter(Boolean);
+      compressCut = compress.length ? cleanCut(state.compress_cut || '') : {};
       const fp = filterParams();
       linkKey = JSON.stringify({ enabled: true, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
-        compress: compress.join(',') });
+        compress: compress.join(','), compress_cut: cutText(compressCut) });
       if (open) void explore();
     }
     paintRandomLink();
@@ -135,7 +136,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   function syncRandomLink(enabled = eventLinked()) {
     const fp = filterParams();
     const payload = { enabled, pins: pins.join(','), exclude: excludes.join(','), ratings: fp.ratings, persons: fp.persons,
-      compress: compress.join(',') };
+      compress: compress.join(','), compress_cut: cutText(compressCut) };
     const key = JSON.stringify(payload);
     if (key === linkKey) return linkQueue;
     linkKey = key;
@@ -167,7 +168,10 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   let pins = [], excludes = [];
   // 압축(사용자 지시 2026-11-02) = 조합의 상태: 지울 갈래 id. 비면 압축 안 함. 저장 · 스테이징 · 랜덤 연결에 함께 실린다.
   // compressDraft = 압축 판에서 고르는 중인 갈래(판이 닫혀 있으면 null) · compressInfo = 미리보기 응답(열쇠로 낡음을 가린다).
+  // compressCut = 슬라이더 컷({min_tags, max_tags, min_freq, max_freq} 중 정한 것) · draftCut = 판에서 움직이는 중인 컷.
+  // compressLoading = 지금 세는 열쇠 · compressPreview = [미리 뽑아보기] 결과(열쇠로 낡음을 가린다).
   let compress = [], compressDraft = null, compressInfo = null, compressSeq = 0, compressTimer = 0;
+  let compressCut = {}, draftCut = {}, compressLoading = '', compressError = '', compressPreview = null;
   const prefs = loadPrefs();
   let ratings = new Set(prefs?.ratings || DEFAULT_RATINGS);
   let persons = new Set(prefs?.persons || DEFAULT_PERSONS);
@@ -785,7 +789,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
 
   function currentPrompt() { return pins.join(', '); }
   const currentSelection = () => ({ pins: pins.slice(), exclude: excludes.slice(), ratings: [...ratings], persons: [...persons],
-    ...(compress.length ? { compress: compress.slice() } : {}) });
+    ...(compress.length ? { compress: compress.slice() } : {}),
+    ...(compress.length && cutText(compressCut) ? { compress_cut: { ...compressCut } } : {}) });
   /** [넣기] = 랜덤 대치(사용자 지정 2026-09-13): 고른 핀을 Random 과 같은 파이프라인에 태워 메인 프롬프트를
    *  **갈아끼운다**(/api/event-map/apply). 전에는 커서 자리에 끼워 넣었다. 등급은 지금 고른 등급이 하나면 그것, 아니면 s. */
   /** [넣기] = 고른 핀으로 메인 프롬프트를 대치한다. [생성] = 같은 대치 뒤 Generate(사용자 지정 2026-10-08 -
@@ -900,7 +905,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       });
       const s = (body.samples || [])[0];
       if (!s || !s.tags?.length) { toast(body.status === 'no_match' ? '이 조건에 맞는 게시물이 없습니다' : '뽑지 못했습니다', 'error'); return; }
-      const where = String(s.partition || '').replace(/_/g, ' ') + (compress.length ? ` · 압축 이벤트 ${fmt(body.events)}개 중` : '');
+      const where = String(s.partition || '').replace(/_/g, ' ') + (compress.length ? ` · 압축 이벤트 ${fmt(body.events_in ?? body.events)}개 중` : '');
       if (andGenerate) {
         await applyThenGenerate(s.tags, String(s.partition || 's').slice(0, 1));
         toast(`랜덤 프롬프트를 적용하고 생성을 눌렀습니다 (${where})`, 'success');
@@ -1968,13 +1973,17 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       if (!event.target.closest('[data-em-compress]')) return;
       if (compress.length) { setCompress([]); return; }   // [압축 해제]
       if (compressDraft) { closeCompressPanel(); return; }
-      openCompressPanel(lastCompressDraft());
+      const last = lastCompressDraft();
+      openCompressPanel(last.groups, last.cut);
     });
     overlay.querySelector('.em-compress-state').addEventListener('click', event => {
       if (!event.target.closest('[data-em-compress-manage]')) return;
-      if (compressDraft) closeCompressPanel(); else openCompressPanel(compress);
+      if (compressDraft) closeCompressPanel(); else openCompressPanel(compress, compressCut);
     });
-    overlay.querySelector('.em-compress-panel').addEventListener('click', onCompressPanelClick);
+    const compressPanelEl = overlay.querySelector('.em-compress-panel');
+    compressPanelEl.addEventListener('click', onCompressPanelClick);
+    compressPanelEl.addEventListener('pointerdown', onCompressPointerDown);
+    compressPanelEl.addEventListener('keydown', onCompressKeyDown);
     paintRandomLink();
     paintCompress();
     footEl.querySelector('[data-em-random-link]').addEventListener('change', event => {
@@ -2406,42 +2415,77 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   // ── 압축(사용자 지시 2026-11-02) ──────────────────────────────────────────
   // 고른 갈래의 태그를 지우고 남은 태그(+ 등급)가 같은 게시물끼리 이벤트 하나 - 랜덤은 이벤트를 같은 확률로 뽑는다.
   // 핀 · 인원 태그는 남는다(서버 core/event_map/compress.py). 대상 = 이벤트 맵 갈래 10개(작품·고유명 · 미분류 제외).
+  // 슬라이더 둘 = Quick Filter 이벤트 압축 창과 같은 뜻(사용자 결정 2026-11-02): 빈도 범위 밖 태그는 태그 수에서만 빠지고
+  // (프롬프트엔 남음 · 미리 뽑아보기에서 회색) 태그 수 범위 밖 이벤트는 랜덤에서 빠진다. 후보가 50만을 넘으면 50만만 센다.
+  // 판의 숫자 줄은 남은 이벤트 수만 - 분포를 그리느라 큰 이벤트 목록 대신 [미리 뽑아보기] 를 둔다(사용자 지시 2026-11-02).
   const COMPRESS_IDS = ['clothing', 'body', 'cast', 'expression', 'action', 'adult', 'scene', 'object', 'situation', 'meta'];
+  const CUT_KEYS = ['min_tags', 'max_tags', 'min_freq', 'max_freq'];
   const COMPRESS_DRAFT_KEY = 'naia.em.compressDraft';
-  const compressParams = () => (compress.length ? { compress: compress.join(',') } : {});
+  const EMC_FREQ_BINS = 32;
   const groupLabel = id => (mapState?.groups || []).find(g => g.id === id)?.label || id;
-  const compressKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, groups]);
+  /** {min_tags …} -> 'a,b,c,d'(빈 칸 = 끝까지) · 다 비면 '' - 서버 normalize_cut 의 글 모양. */
+  const cutText = cut => (CUT_KEYS.some(k => cut?.[k] != null) ? CUT_KEYS.map(k => cut?.[k] ?? '').join(',') : '');
+  function cleanCut(raw) {
+    if (typeof raw === 'string') raw = Object.fromEntries(raw.split(',').map((v, i) => [CUT_KEYS[i], v]));
+    const out = {};
+    for (const k of CUT_KEYS) {
+      const v = raw?.[k];
+      if (v === '' || v == null) continue;
+      const n = Number(v);
+      if (Number.isInteger(n) && n >= 0) out[k] = n;
+    }
+    return out;
+  }
+  const compressParams = () => (compress.length
+    ? { compress: compress.join(','), ...(cutText(compressCut) ? { compress_cut: cutText(compressCut) } : {}) } : {});
+  const baseKey = groups => JSON.stringify([pins, excludes, filterParams().ratings, filterParams().persons, groups]);
+  const fullKey = (groups, cut) => baseKey(groups) + '|' + cutText(cut);
   function lastCompressDraft() {
     try {
-      const saved = JSON.parse(localStorage.getItem(COMPRESS_DRAFT_KEY) || '[]');
-      return Array.isArray(saved) ? saved.filter(id => COMPRESS_IDS.includes(id)) : [];
-    } catch { return []; }
+      const saved = JSON.parse(localStorage.getItem(COMPRESS_DRAFT_KEY) || 'null');
+      const groups = Array.isArray(saved) ? saved : saved?.groups;   // 옛 모양 = 갈래 배열
+      return { groups: Array.isArray(groups) ? groups.filter(id => COMPRESS_IDS.includes(id)) : [], cut: cleanCut(saved?.cut) };
+    } catch { return { groups: [], cut: {} }; }
+  }
+  function rememberDraft() {
+    try { localStorage.setItem(COMPRESS_DRAFT_KEY, JSON.stringify({ groups: compressDraft, cut: draftCut })); } catch { /* 이 창에서만 */ }
   }
   /** 불러온 · 연 조합의 압축을 지금 상태로(없으면 압축 해제). */
   function takeCompress(selection) {
     compress = Array.isArray(selection?.compress) ? selection.compress.filter(id => COMPRESS_IDS.includes(id)) : [];
-    compressDraft = null;
+    compressCut = compress.length ? cleanCut(selection?.compress_cut) : {};
+    compressDraft = null; compressPreview = null;
     paintCompress();
   }
-  function setCompress(groups) {
+  function setCompress(groups, cut) {
     compress = COMPRESS_IDS.filter(id => groups.includes(id));
-    compressDraft = null;
+    compressCut = compress.length ? cleanCut(cut) : {};
+    compressDraft = null; compressPreview = null;
     samples = null;   // 실제 조합은 압축 전 것이다
     paintCompress();
     render();
     if (eventLinked()) void syncRandomLink();
     toast(compress.length ? `압축 - ${compress.map(groupLabel).join(' · ')} 제거 · 랜덤은 이벤트 단위` : '압축을 풀었습니다 - 랜덤은 게시물 단위', 'success');
   }
-  function openCompressPanel(groups) {
+  function openCompressPanel(groups, cut) {
     library?.close();
     compressDraft = COMPRESS_IDS.filter(id => groups.includes(id));
+    draftCut = cleanCut(cut);
+    compressPreview = null;
     paintCompress();
     scheduleCompressInfo(0);
   }
   function closeCompressPanel() {
     if (compressDraft === null) return;
-    compressDraft = null;
+    compressDraft = null; compressPreview = null;
     paintCompress();
+  }
+  /** 판에서 고르는 것이 바뀌었다 - 기억 · 미리 뽑아보기 지움 · 다시 센다. */
+  function draftChanged(delay) {
+    rememberDraft();
+    compressPreview = null;
+    paintCompress();
+    scheduleCompressInfo(delay);
   }
   function onCompressPanelClick(event) {
     const t = event.target;
@@ -2449,45 +2493,227 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (chip && compressDraft) {
       const id = chip.dataset.emcG;
       compressDraft = compressDraft.includes(id) ? compressDraft.filter(x => x !== id) : COMPRESS_IDS.filter(x => x === id || compressDraft.includes(x));
-      try { localStorage.setItem(COMPRESS_DRAFT_KEY, JSON.stringify(compressDraft)); } catch { /* 이 창에서만 */ }
-      paintCompress();
-      scheduleCompressInfo();
+      draftChanged();
       return;
     }
+    if (t.closest('[data-emc-preview]')) { void drawCompressPreview(); return; }
     if (t.closest('[data-emc-close]')) { closeCompressPanel(); return; }
-    if (t.closest('[data-emc-apply]') && compressDraft?.length) setCompress(compressDraft);
+    if (t.closest('[data-emc-apply]') && compressDraft?.length) setCompress(compressDraft, draftCut);
   }
-  /** 미리보기(게시물 → 이벤트 · 큰 이벤트 5) - 판에서 고르는 갈래, 판이 닫혔으면 지금 압축(상태 줄의 이벤트 수). */
+  /** 숫자 줄 · 슬라이더 분포 - 판에서 고르는 것, 판이 닫혔으면 지금 압축(상태 줄의 이벤트 수). */
   function scheduleCompressInfo(delay = 250) {
     clearTimeout(compressTimer);
     const groups = compressDraft ?? compress;
+    const cut = compressDraft ? draftCut : compressCut;
     if (!groups.length || mapState?.state !== 'ready') return;
-    const key = compressKey(groups);
-    if (compressInfo?.key === key && !compressInfo.error) return;
+    const key = fullKey(groups, cut);
+    if (compressInfo?.key === key || compressLoading === key) return;
     compressTimer = setTimeout(async () => {
       const mine = ++compressSeq;
-      compressInfo = { key, loading: true };
+      compressLoading = key; compressError = '';
       paintCompress();
       try {
         const fp = filterParams();
         const body = await getJson('/api/event-map/sample', {
           pins: pins.join(','), exclude: excludes.join(','), n: 1, seed: 1, ratings: fp.ratings, persons: fp.persons,
-          compress: groups.join(','), top: 5,
+          compress: groups.join(','), compress_cut: cutText(cut), hist: 1,
         });
         if (mine !== compressSeq) return;
-        compressInfo = { key, posts: body.observed_posts || 0, events: body.events || 0, top: body.top || [] };
+        compressInfo = { key, base: baseKey(groups), posts: body.observed_posts || 0, events: body.events || 0,
+          eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
       } catch (error) {
         if (mine !== compressSeq) return;
-        compressInfo = { key, error: error.message };
+        compressError = error.message;
       }
+      compressLoading = '';
       paintCompress();
     }, delay);
   }
-  function compressSummary(groups) {
-    const info = compressInfo?.key === compressKey(groups) ? compressInfo : null;
-    if (!info || info.loading) return '<span class="emc-dim">이벤트를 세는 중…</span>';
-    if (info.error) return `<span class="emc-err">세지 못했습니다 - ${esc(info.error)}</span>`;
-    return `게시물 ${fmt(info.posts)} → 이벤트 <b>${fmt(info.events)}</b>`;
+  /** [미리 뽑아보기] - 지금 판(갈래 · 슬라이더)으로 랜덤과 같은 규칙으로 5개. 누를 때마다 새로. */
+  async function drawCompressPreview() {
+    if (!compressDraft?.length) return;
+    const key = fullKey(compressDraft, draftCut);
+    compressPreview = { key, loading: true };
+    paintCompress();
+    try {
+      const fp = filterParams();
+      const body = await getJson('/api/event-map/sample', {
+        pins: pins.join(','), exclude: excludes.join(','), n: 5, seed: Date.now() % 1000003, ratings: fp.ratings,
+        persons: fp.persons, compress: compressDraft.join(','), compress_cut: cutText(draftCut),
+      });
+      if (compressPreview?.key !== key) return;
+      compressPreview = { key, rows: body.samples || [] };
+    } catch (error) {
+      if (compressPreview?.key !== key) return;
+      compressPreview = { key, error: error.message };
+    }
+    paintCompress();
+  }
+
+  // 슬라이더(Quick Filter eventCompressWindow.mjs 와 같은 두 손잡이 트랙 · 같은 .ecw-cut-* 모양).
+  //   태그 수: 값 = 최소 … 최대(작은 것 → 큰 것). 왼쪽 = min_tags · 오른쪽 = max_tags.
+  //   빈도:    값 = 있는 태그 빈도(흔함 → 희귀 · 로그 눈금). 왼쪽 = max_freq · 오른쪽 = min_freq.
+  //   손잡이를 끝에 두면 null(끝까지) - 분포가 바뀌어도 '끝까지' 가 유지된다.
+  function cutInfo() {
+    return compressDraft && compressInfo?.base === baseKey(compressDraft) ? compressInfo : null;
+  }
+  function sliderVals(kind) {
+    const info = cutInfo();
+    if (!info) return [];
+    if (kind === 'freq') return Object.keys(info.freqHist).map(Number).sort((a, b) => b - a);
+    const keys = Object.keys(info.hist).map(Number);
+    if (!keys.length) return [];
+    const vals = [];
+    for (let v = Math.min(...keys); v <= Math.max(...keys); v += 1) vals.push(v);
+    return vals;
+  }
+  function edgeIndex(kind, edge, vals = sliderVals(kind)) {
+    const last = vals.length - 1;
+    if (last < 0) return 0;
+    if (kind === 'tags') {
+      if (edge === 'lo') { const i = draftCut.min_tags == null ? 0 : vals.findIndex(v => v >= draftCut.min_tags); return i < 0 ? last : i; }
+      if (draftCut.max_tags == null) return last;
+      let i = last;
+      while (i > 0 && vals[i] > draftCut.max_tags) i -= 1;
+      return i;
+    }
+    if (edge === 'lo') { const i = draftCut.max_freq == null ? 0 : vals.findIndex(v => v <= draftCut.max_freq); return i < 0 ? last : i; }
+    if (draftCut.min_freq == null) return last;
+    let i = last;
+    while (i > 0 && vals[i] < draftCut.min_freq) i -= 1;
+    return i;
+  }
+  function setEdgeIndex(kind, edge, index) {
+    const vals = sliderVals(kind);
+    const last = vals.length - 1;
+    if (last < 0) return;
+    let i = Math.max(0, Math.min(last, Math.round(index)));
+    if (edge === 'lo') i = Math.min(i, edgeIndex(kind, 'hi', vals)); else i = Math.max(i, edgeIndex(kind, 'lo', vals));
+    const v = vals[i];
+    const key = kind === 'tags' ? (edge === 'lo' ? 'min_tags' : 'max_tags') : (edge === 'lo' ? 'max_freq' : 'min_freq');
+    if ((edge === 'lo' && i === 0) || (edge === 'hi' && i === last)) delete draftCut[key]; else draftCut[key] = v;
+  }
+  function posOf(kind, i, vals = sliderVals(kind)) {
+    const last = vals.length - 1;
+    if (last <= 0) return 0;
+    if (kind !== 'freq') return i / last;
+    const top = Math.log(Math.max(1, vals[0]));
+    const span = top - Math.log(Math.max(1, vals[last]));
+    return span > 0 ? (top - Math.log(Math.max(1, vals[i]))) / span : i / last;
+  }
+  function sliderHtml(kind) {
+    const vals = sliderVals(kind);
+    const head = kind === 'freq' ? '빈도' : '태그 수';
+    const cls = kind === 'freq' ? 'ecw-cut-one is-freq' : 'ecw-cut-one';
+    if (vals.length < 2) return `<div class="${cls}"><div class="ecw-cut-head"><span>${head}</span><span class="ecw-dim">—</span></div></div>`;
+    const info = cutInfo();
+    const counts = kind === 'freq' ? info.freqHist : info.hist;
+    const last = vals.length - 1;
+    const lo = edgeIndex(kind, 'lo', vals), hi = edgeIndex(kind, 'hi', vals);
+    const pct = i => posOf(kind, i, vals) * 100;
+    let cols;
+    if (kind === 'freq') {
+      // 로그 눈금 위에 같은 너비의 칸으로 모은다 - 값 하나에 막대 하나면 희귀 쪽이 촘촘해 오른쪽에 쏠린다.
+      const nb = Math.min(vals.length, EMC_FREQ_BINS);
+      const bins = Array.from({ length: nb }, () => ({ c: 0, a: -1, b: -1 }));
+      vals.forEach((v, i) => {
+        const bin = bins[Math.min(nb - 1, Math.floor(posOf(kind, i, vals) * nb))];
+        bin.c += Number(counts[v]) || 0;
+        if (bin.a < 0) bin.a = i;
+        bin.b = i;
+      });
+      cols = bins.map((bin, k) => {
+        if (bin.a < 0) { const mid = ((k + 0.5) / nb) * 100; return { c: 0, inn: mid >= pct(lo) && mid <= pct(hi), tip: '' }; }
+        const range = bin.a === bin.b ? fmt(vals[bin.a]) : `${fmt(vals[bin.b])}–${fmt(vals[bin.a])}`;
+        return { c: bin.c, inn: bin.b >= lo && bin.a <= hi, tip: `이벤트 ${range}개에 나오는 태그 · ${fmt(bin.c)}개` };
+      });
+    } else {
+      cols = vals.map((v, i) => { const c = Number(counts[v]) || 0; return { c, inn: i >= lo && i <= hi, tip: `세는 태그 ${v}개 · ${fmt(c)} 이벤트` }; });
+    }
+    const top = Math.max(1, ...cols.map(col => col.c));
+    const bars = cols.map(col => `<span class="${col.inn ? 'is-in' : ''}" style="height:${col.c ? Math.max(6, Math.round(Math.sqrt(col.c / top) * 100)) : 0}%"${col.tip ? ` title="${col.tip}"` : ''}></span>`).join('');
+    const label = v => (kind === 'freq' ? fmt(v) : String(v));
+    const ends = kind === 'freq' ? `<span>흔함 ${label(vals[0])}</span><span>희귀 ${label(vals[last])}</span>` : `<span>${vals[0]}</span><span>${vals[last]}</span>`;
+    return `<div class="${cls}"><div class="ecw-cut-head"><span>${head}</span><span class="ecw-cut-range">${label(vals[lo])} – ${label(vals[hi])}</span></div>`
+      + `<div class="ecw-cut-bars">${bars}</div>`
+      + `<div class="ecw-cut-track" data-emc-track="${kind}"><div class="ecw-cut-fill" style="left:${pct(lo)}%;right:${100 - pct(hi)}%"></div>`
+      + `<div class="ecw-cut-handle" data-emc-slider="${kind}" data-emc-edge="lo" tabindex="0" style="left:${pct(lo)}%"></div>`
+      + `<div class="ecw-cut-handle" data-emc-slider="${kind}" data-emc-edge="hi" tabindex="0" style="left:${pct(hi)}%"></div></div>`
+      + `<div class="ecw-cut-ends">${ends}</div></div>`;
+  }
+  function paintSliders() {
+    const el = overlay?.querySelector('[data-emc-cut]');
+    if (!el) return;
+    const html = cutInfo() ? sliderHtml('tags') + sliderHtml('freq') : '';
+    if (el._html === html) return;
+    // 다시 그리면 손잡이가 새 요소다 - 키보드로 옮기던 손잡이의 초점을 되돌린다.
+    const a = el.contains(document.activeElement) ? document.activeElement.dataset : null;
+    el._html = html;
+    el.innerHTML = html;
+    if (a?.emcSlider) el.querySelector(`[data-emc-slider="${a.emcSlider}"][data-emc-edge="${a.emcEdge}"]`)?.focus();
+  }
+  function indexAt(kind, clientX) {
+    const track = overlay.querySelector(`[data-emc-track="${kind}"]`);
+    if (!track) return 0;
+    const rect = track.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(1, rect.width)));
+    const vals = sliderVals(kind);
+    if (kind !== 'freq') return f * Math.max(0, vals.length - 1);
+    let best = 0;   // 로그 눈금 - 자리가 가장 가까운 값
+    for (let i = 1; i < vals.length; i += 1) if (Math.abs(posOf(kind, i, vals) - f) < Math.abs(posOf(kind, best, vals) - f)) best = i;
+    return best;
+  }
+  function onCompressPointerDown(event) {
+    const handle = event.target.closest('[data-emc-edge]');
+    if (!handle || !compressDraft) return;
+    event.preventDefault();
+    handle.focus();   // 이어서 ← → 로 한 칸씩
+    const kind = handle.dataset.emcSlider, edge = handle.dataset.emcEdge;
+    const move = e => { setEdgeIndex(kind, edge, indexAt(kind, e.clientX)); paintSliders(); };
+    const up = () => {
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      document.removeEventListener('pointercancel', up);
+      draftChanged(0);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
+  }
+  function onCompressKeyDown(event) {
+    const handle = event.target.closest('[data-emc-edge]');
+    if (!handle || !compressDraft || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+    event.preventDefault();
+    const kind = handle.dataset.emcSlider, edge = handle.dataset.emcEdge;
+    setEdgeIndex(kind, edge, edgeIndex(kind, edge) + (event.key === 'ArrowLeft' ? -1 : 1));
+    paintSliders();
+    draftChanged();
+  }
+  /** '태그 8–22 · 빈도 402–1' - 정한 쪽만. */
+  function cutSummary(cut) {
+    const part = (name, lo, hi) => (lo == null && hi == null ? '' : `${name} ${lo == null ? '…' : fmt(lo)}–${hi == null ? '…' : fmt(hi)}`);
+    return [part('태그', cut.min_tags, cut.max_tags), part('빈도', cut.max_freq, cut.min_freq)].filter(Boolean).join(' · ');
+  }
+  function compressSummary() {
+    const key = fullKey(compressDraft, draftCut);
+    const info = compressInfo?.key === key ? compressInfo : null;
+    if (compressError && !info) return `<span class="emc-err">세지 못했습니다 - ${esc(compressError)}</span>`;
+    if (!info) return '<span class="emc-dim">이벤트를 세는 중…</span>';
+    const posts = info.sampled ? `${fmt(info.posts)} 중 ${fmt(info.sampled.used)}` : fmt(info.posts);
+    const inside = cutText(draftCut) ? ` · 슬라이더 안 <b>${fmt(info.eventsIn)}</b>` : '';
+    return `게시물 ${posts} → 이벤트 ${cutText(draftCut) ? fmt(info.events) : `<b>${fmt(info.events)}</b>`}${inside}`;
+  }
+  function previewHtml() {
+    const pv = compressPreview?.key === fullKey(compressDraft, draftCut) ? compressPreview : null;
+    if (!pv) return '';
+    if (pv.loading) return '<div class="emc-pv"><span class="emc-dim">뽑는 중…</span></div>';
+    if (pv.error) return `<div class="emc-pv"><span class="emc-err">${esc(pv.error)}</span></div>`;
+    if (!pv.rows.length) return '<div class="emc-pv"><span class="emc-dim">슬라이더 안에 이벤트가 없습니다</span></div>';
+    return `<div class="emc-pv">${pv.rows.map(r => {
+      const off = new Set(r.uncounted || []);
+      const tags = r.tags.filter(t => !off.has(t)).map(esc).concat(r.tags.filter(t => off.has(t)).map(t => `<i>${esc(t)}</i>`));
+      return `<div class="emc-ev" title="${esc(r.tags.join(', '))}"><span>${tags.join(', ')}</span><b>×${fmt(r.event_posts)}</b></div>`;
+    }).join('')}</div>`;
   }
   function paintCompress() {
     if (!overlay) return;
@@ -2502,22 +2728,27 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     btn.title = on ? '압축을 풀고 게시물 단위 랜덤으로' : '고른 갈래의 태그를 지우고 같은 장면끼리 묶어 이벤트 단위로 뽑습니다';
     stateEl.hidden = !on;
     if (on) {
-      const info = compressInfo?.key === compressKey(compress) && !compressInfo.loading && !compressInfo.error ? compressInfo : null;
-      stateEl.innerHTML = `<span class="emc-on">압축 중 · ${esc(compress.map(groupLabel).join(' · '))} 제거${info ? ` · 이벤트 <b>${fmt(info.events)}</b>` : ''}</span><button
+      const info = compressInfo?.key === fullKey(compress, compressCut) ? compressInfo : null;
+      const cutNote = cutSummary(compressCut);
+      stateEl.innerHTML = `<span class="emc-on">압축 중 · ${esc(compress.map(groupLabel).join(' · '))} 제거${cutNote ? ` · ${esc(cutNote)}` : ''}${info ? ` · 이벤트 <b>${fmt(info.eventsIn)}</b>` : ''}</span><button
         type="button" data-em-compress-manage aria-expanded="${editing}">압축 관리</button>`;
       if (!info && !editing) scheduleCompressInfo();
     }
     panelEl.hidden = !editing;
     if (!editing) { fitHeight?.(); return; }
-    const info = compressInfo?.key === compressKey(compressDraft) && !compressInfo.loading && !compressInfo.error ? compressInfo : null;
-    const same = on && compressDraft.join(',') === compress.join(',');
-    panelEl.innerHTML = `<div class="emc-hint">체크한 갈래의 태그를 지우고, 남은 태그가 같은 게시물끼리 이벤트 하나로 묶습니다. 핀 · 인원 태그는 남습니다.</div>
-      <div class="emc-grid">${COMPRESS_IDS.map(id => `<button type="button" class="emc-g${compressDraft.includes(id) ? ' is-on' : ''}" data-emc-g="${id}"
-        aria-pressed="${compressDraft.includes(id)}">${esc(groupLabel(id))}</button>`).join('')}</div>
-      <div class="emc-sum">${compressDraft.length ? compressSummary(compressDraft) : '<span class="emc-dim">지울 갈래를 고르세요</span>'}</div>
-      ${info && compressDraft.length ? `<div class="emc-top">${info.top.map(e => `<div class="emc-ev" title="${esc(e.tags.join(', '))}"><span>${esc(e.tags.join(', '))}</span><b>×${fmt(e.posts)}</b></div>`).join('')}</div>` : ''}
-      <div class="emc-act"><button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
-        ${compressDraft.length && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button></div>`;
+    const same = on && compressDraft.join(',') === compress.join(',') && cutText(draftCut) === cutText(compressCut);
+    if (!panelEl.querySelector('[data-emc-cut]')) {
+      panelEl.innerHTML = `<div class="emc-grid"></div><div class="emc-sum"></div><div class="ecw-cut emc-cut" data-emc-cut></div>
+        <div class="emc-pvslot"></div><div class="emc-act"><button type="button" data-emc-preview>미리 뽑아보기</button><span></span></div>`;
+    }
+    panelEl.querySelector('.emc-grid').innerHTML = COMPRESS_IDS.map(id => `<button type="button" class="emc-g${compressDraft.includes(id) ? ' is-on' : ''}" data-emc-g="${id}"
+      aria-pressed="${compressDraft.includes(id)}">${esc(groupLabel(id))}</button>`).join('');
+    panelEl.querySelector('.emc-sum').innerHTML = compressDraft.length ? compressSummary() : '<span class="emc-dim">지울 갈래를 고르세요</span>';
+    paintSliders();
+    panelEl.querySelector('.emc-pvslot').innerHTML = compressDraft.length ? previewHtml() : '';
+    panelEl.querySelector('[data-emc-preview]').disabled = !compressDraft.length || Boolean(compressPreview?.loading);
+    panelEl.querySelector('.emc-act > span').innerHTML = `<button type="button" data-emc-close>닫기</button><button type="button" class="is-primary" data-emc-apply
+      ${compressDraft.length && !same ? '' : 'disabled'}>${on ? '다시 압축' : '압축 적용'}</button>`;
     fitHeight?.();
   }
 

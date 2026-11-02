@@ -103,6 +103,10 @@ def selection(value):
     compress = normalize_compress(value.get("compress"))
     if compress:
         result["compress"] = compress
+        from core.event_map.compress import normalize_cut   # 슬라이더 컷 - 압축한 조합에만 붙는다
+        cut = normalize_cut(value.get("compress_cut"))
+        if cut:
+            result["compress_cut"] = cut
     return result
 
 
@@ -244,7 +248,12 @@ class EventMapLibrary:
                      for k in ("pins", "exclude", "ratings", "persons"))
         base = base + (filter_fingerprint(selected["filters"]),) if selected.get("filters") else base
         # 압축한 조합은 같은 핀이라도 다른 조합이다 - 압축 없는 조합의 지문은 그대로(옛 저장본 · 프리셋 서명)
-        return base + (("compress",) + tuple(selected["compress"]),) if selected.get("compress") else base
+        if selected.get("compress"):
+            base = base + (("compress",) + tuple(selected["compress"]),)
+        if selected.get("compress_cut"):
+            cut = selected["compress_cut"]
+            base = base + (("compress_cut",) + tuple(cut.get(k) for k in ("min_tags", "max_tags", "min_freq", "max_freq")),)
+        return base
 
     def _write(self, items):
         encoded = json.dumps({"schema": SCHEMA, "items": items, "categories": self._categories}, ensure_ascii=False, indent=2)

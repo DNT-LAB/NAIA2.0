@@ -1,12 +1,14 @@
-/* S 줄 압축 판(사용자 결정 2026-11-02).
+/* S 줄 압축 창(사용자 결정 2026-11-02).
  *
  * 펼친 스테이징 줄의 [추가 프롬프트] 줄 오른쪽 = [압축](압축 전) · [압축 관리] [압축 해제](압축한 줄). [압축] · [압축 관리] 를
- * 누르면 그 줄 안에 판이 펼쳐진다 - 이벤트 맵 압축 판과 같은 구성(기준 축 · 게시물 → 이벤트 · 태그 수 · 빈도 슬라이더 · 출력 ·
- * 살펴보기). 판이 열려 있을 때만 [랜덤 선택] [랜덤+생성](판에서 고른 압축으로 - 적용 전 시험). [압축 해제] 는 줄의 찾기 조건을
- * 남긴다(맵 막의 해제는 칩을 비운다 - S 줄의 찾기는 줄 설정이다).
+ * 누르면 S 창 옆에 압축 창이 붙어 뜬다 - 이벤트 맵 압축 판과 같은 구성(기준 축 · 게시물 → 이벤트 · 태그 수 · 빈도 슬라이더 ·
+ * 출력 · 살펴보기). 줄 안에 펼치면 판이 줄 목록을 밀어내 불편했다(사용자 지적). 창이 열려 있을 때만 [랜덤 선택] [랜덤+생성]
+ * (창에서 고른 압축으로 - 적용 전 시험). [압축 해제] 는 줄의 찾기 조건을 남긴다(S 줄의 찾기는 줄 설정이다).
+ * 창이 열린 동안 S 창은 다른 줄로 옮길 수 없다 - 줄마다 등급 · 인원이 달라(위 줄은 E, 아래 줄은 G) 다른 줄 조건으로 고른
+ * 축이 섞이면 안 된다(사용자 결정). 막는 쪽은 eventMapStaging.mjs.
  *
  * 저장 모양은 맵과 같다: compress = 기준 축이 **아닌** 갈래 id · compress_cut · compress_output('axes' 일 때만).
- * 판은 한 번에 한 줄(펼친 줄은 하나뿐). 수 · 분포는 /api/event-map/sample?hist=1 (맵 판과 같은 물음).
+ * 수 · 분포는 /api/event-map/sample?hist=1 (맵 판과 같은 물음).
  */
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
@@ -45,8 +47,8 @@ export function cutSummary(cut) {
  * draw(id, selection, andGenerate) = 판에서 고른 압축으로 랜덤 · getParent() = 살펴보기 창을 붙일 스테이징 창.
  */
 export function createRowCompress({ getRow, repaint, apply, draw, getParent, request }) {
-  let st = null;          // { id, groups, cut, output, info, error, loadingKey, seq, locked(null = 묻는 중), pinKey }
-  let labels = null, labelsAsked = false, timer = 0;
+  let st = null;          // { id, cond, groups, cut, output, info, error, loadingKey, seq, locked(null = 묻는 중), pinKey }
+  let labels = null, labelsAsked = false, timer = 0, win = null;
   let browse = null, browseState = null, browseTimer = 0;
 
   const label = id => labels?.[id] || LABELS[id] || id;
@@ -56,7 +58,7 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     try {
       const body = await request('/api/event-map/state');
       labels = Object.fromEntries((body.groups || []).map(g => [g.id, g.label]));
-      if (st) repaint();
+      paint();
     } catch { /* 기본 이름 */ }
   }
   const selOf = row => row?.selection || {};
@@ -91,25 +93,46 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     if (!row) return;
     const s = selOf(row);
     const from = s.compress?.length ? { groups: s.compress.filter(g => IDS.includes(g)), cut: cleanCut(s.compress_cut) } : lastDraft();
-    st = { id, groups: from.groups, cut: from.cut, output: s.compress_output === 'axes' ? 'axes' : 'full',
+    st = { id, cond: condKey(row), groups: from.groups, cut: from.cut, output: s.compress_output === 'axes' ? 'axes' : 'full',
       info: null, error: '', loadingKey: '', seq: 0, locked: null, pinKey: '' };
     void loadLabels();
     void loadLocked();
     schedule(0);
-    repaint();
-    reveal();
+    ensureWin().open();
+    paint();
+    repaint();   // S 창: 이 줄 표시 · 다른 줄 잠금
   }
-  /** 아래쪽 줄이면 판이 목록 밖에 펼쳐진다 - 보이게 굴린다. 슬라이더는 수를 받은 뒤 그려져 판이 길어지므로 그때 한 번 더. */
-  function reveal() {
-    const id = st?.id;
-    requestAnimationFrame(() => document.querySelector(`.st-row[data-st-id="${CSS.escape(id || '')}"] .st-cmp-panel`)?.scrollIntoView({ block: 'nearest' }));
-  }
-  function close() {
+  /** quiet = S 창을 다시 그리지 않는다(S 창이 그리는 중에 부를 때). */
+  function close(quiet = false) {
     if (!st) return;
     st = null;
     clearTimeout(timer);
     browse?.close();
-    repaint();
+    if (win?.isOpen()) win.close();
+    if (!quiet) repaint();
+  }
+  function ensureWin() {
+    if (win) return win;
+    win = createDraggablePanel({
+      document, window, id: 'stCompressWindow', title: '압축', variant: 'em-overlay em-window st-cmp-window',
+      storageKey: 'staging-compress', width: 380, minWidth: 320, maxWidth: 640,
+      parentPanel: getParent?.() || null,   // S 창의 자식 - 옆에 붙어 뜬다
+      onClose: () => close(),
+    });
+    win.body.addEventListener('click', event => { if (st) void onClick(event.target, getRow(st.id)); });
+    win.body.addEventListener('pointerdown', event => { onPointerDown(event, win.body); });
+    win.body.addEventListener('keydown', event => { event.stopPropagation(); onKeyDown(event, win.body); });
+    return win;
+  }
+  /** 창 내용 - 축 · 컷 · 수가 바뀔 때. 키보드로 옮기던 슬라이더 손잡이의 초점을 되돌린다. */
+  function paint() {
+    if (!st || !win?.isOpen()) return;
+    const row = getRow(st.id);
+    if (!row) return;
+    win.setTitle(`압축 · ${(selOf(row).pins || []).join(', ')}`);
+    const a = win.body.contains(document.activeElement) ? document.activeElement.dataset : null;
+    win.body.innerHTML = panelHtml(row);
+    if (a?.stcSlider) win.body.querySelector(`[data-stc-slider="${a.stcSlider}"][data-stc-edge="${a.stcEdge}"]`)?.focus();
   }
   /** 핀이 든 축 - 판에서 끌 수 없다(맵 판과 같다). 모르는 동안 [압축 적용] 을 막는다. */
   async function loadLocked() {
@@ -122,11 +145,11 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     if (st !== mine) return;
     st.locked = axes; st.pinKey = key;
     if (st.groups.some(id => axes.includes(id))) { st.groups = st.groups.filter(id => !axes.includes(id)); changed(0); }
-    else repaint();
+    else paint();
   }
   function changed(delay = 250) {
     remember();
-    repaint();
+    paint();
     schedule(delay);
     scheduleBrowse(delay);
   }
@@ -143,16 +166,14 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
       try {
         const body = await request(`/api/event-map/sample?${params(row, groups, cut, { n: '1', seed: '1', hist: '1' })}`);
         if (st !== mine || seq !== st.seq) return;
-        const first = !st.info;
         st.info = { key, base: baseKey(row, groups), posts: body.observed_posts || 0, events: body.events || 0,
           eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
-        if (first) { st.loadingKey = ''; repaint(); reveal(); return; }
       } catch (error) {
         if (st !== mine || seq !== st.seq) return;
         st.error = error.message; st.errorKey = key;
       }
       st.loadingKey = '';
-      repaint();
+      paint();
     }, delay);
   }
 
@@ -316,12 +337,12 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
   function buttonsHtml(row) {
     const on = Boolean(selOf(row).compress?.length), editing = st?.id === row.id;
     return on
-      ? `<button type="button" class="st-cmp-btn${editing ? ' is-on' : ''}" data-stc-manage aria-expanded="${editing}" title="기준 축 · 슬라이더 · 출력을 바꿉니다">압축 관리</button><button
+      ? `<button type="button" class="st-cmp-btn${editing ? ' is-on' : ''}" data-stc-manage aria-expanded="${editing}" title="기준 축 · 슬라이더 · 출력을 바꿉니다">압축 관리${editing ? ' ▸' : ''}</button><button
           type="button" data-stc-release title="압축을 풀고 게시물 단위 랜덤으로 - 찾기 조건은 남습니다">압축 해제</button>`
       : `<button type="button" class="st-cmp-btn${editing ? ' is-on' : ''}" data-stc-manage aria-expanded="${editing}"
-          title="기준 축의 태그가 같은 게시물끼리 묶어 이벤트 단위로 뽑습니다">압축</button>`;
+          title="기준 축의 태그가 같은 게시물끼리 묶어 이벤트 단위로 뽑습니다">압축${editing ? ' ▸' : ''}</button>`;
   }
-  /** 줄 안 판 - 열린 줄에만. */
+  /** 창 내용 - 연 줄의 것. */
   function panelHtml(row) {
     if (st?.id !== row.id) return '';
     const locked = lockedAxes(), on = Boolean(selOf(row).compress?.length), ok = usable(st.groups);
@@ -374,7 +395,7 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
       return true;
     }
     const out = t.closest('[data-stc-out]');
-    if (out) { st.output = out.dataset.stcOut === 'axes' ? 'axes' : 'full'; repaint(); scheduleBrowse(0); return true; }
+    if (out) { st.output = out.dataset.stcOut === 'axes' ? 'axes' : 'full'; paint(); scheduleBrowse(0); return true; }
     if (t.closest('[data-stc-browse]')) { toggleBrowse(); return true; }
     if (t.closest('[data-stc-close]')) { close(); return true; }
     const rnd = t.closest('[data-stc-random]');
@@ -390,10 +411,18 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     }
     return t.closest('.st-cmp-panel') != null;
   }
-  /** 줄이 사라졌거나(빼기 · 프리셋) 접혔으면 판을 닫는다 - paint 때 부른다. */
+  /** 줄이 사라졌거나(빼기 · 다른 창의 프리셋) 접혔으면 창을 닫는다 - S 창이 그릴 때 부른다.
+   *  줄 조건이 바뀌었으면(줄 찾기 · 분할 · 다른 창) 다시 센다. */
   function sync(openRowId) {
-    if (st && (st.id !== openRowId || !getRow(st.id))) { st = null; clearTimeout(timer); browse?.close(); }
-    else if (st) schedule(0);   // 줄 조건이 바뀌었으면(찾기 · 분할) 다시 센다 - 같으면 바로 돌아간다
+    if (!st) return;
+    const row = getRow(st.id);
+    if (!row || st.id !== openRowId) { close(true); return; }
+    const cond = condKey(row);
+    if (cond === st.cond) return;
+    st.cond = cond;
+    paint();
+    schedule(0);
+    scheduleBrowse(0);
   }
 
   // ── [살펴보기] 창(맵 판과 같은 모양 · 같은 물음) ───────────────────────────
@@ -402,8 +431,8 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     browse = createDraggablePanel({
       document, window, id: 'stCompressBrowse', title: '압축 살펴보기', variant: 'em-overlay em-window emc-browse-window',
       storageKey: 'staging-compress-browse', width: 460, height: 420, minWidth: 300, minHeight: 200, maxWidth: 1200,
-      parentPanel: getParent?.() || null, resizable: true,
-      onClose: () => { clearTimeout(browseTimer); if (st) repaint(); },
+      parentPanel: win || getParent?.() || null, resizable: true,
+      onClose: () => { clearTimeout(browseTimer); paint(); },
     });
     browse.body.innerHTML = `<div class="emc-bhead"><span class="emc-bnote"></span><button type="button" data-stc-reroll>다시 뽑기</button></div>
       <div class="emc-blist"></div>`;
@@ -414,7 +443,7 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
     ensureBrowse();
     if (browse.isOpen()) { browse.close(); return; }
     browse.open();
-    repaint();
+    paint();
     void drawBrowse();
   }
   function scheduleBrowse(delay = 250) {
@@ -468,8 +497,9 @@ export function createRowCompress({ getRow, repaint, apply, draw, getParent, req
   }
 
   return {
-    openFor, close, sync, onClick, onPointerDown, onKeyDown, buttonsHtml, panelHtml, label,
+    close, sync, onClick, buttonsHtml, label,
     axesText: removed => axesOf(removed || []).map(label),
+    isOpen: () => Boolean(st),
     isOpenFor: id => st?.id === id,
   };
 }

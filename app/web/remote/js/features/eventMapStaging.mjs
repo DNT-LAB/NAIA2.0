@@ -25,7 +25,7 @@
  * 서버가 다 한다(/api/event-map/staging · library · sample · apply). 여기서는 그리기와 단추뿐이다.
  */
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
-import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=20261102-stc1';
+import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=20261102-stc2';
 
 export function initEventMapStaging({ showToast, getPromptText, generateNow, confirmDialog, promptDialog,
                                       getEventMap = () => window.eventMap, isTabHidden = () => false } = {}) {
@@ -110,7 +110,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (!res.ok || data.ok === false) throw Object.assign(new Error(data.message || `HTTP ${res.status}`), { code: data.code });
     return data;
   }
-  // 줄 안 압축 판(사용자 결정 2026-11-02 - stagingRowCompress.mjs). 판은 펼친 줄에만 · 적용 = 서버 staging action 'compress'.
+  // 줄 압축 창(사용자 결정 2026-11-02 - stagingRowCompress.mjs). S 창 옆에 붙는다 · 적용 = 서버 staging action 'compress'.
+  // 창이 열린 동안 다른 줄 · 탭 · 프리셋 · 비우기를 막는다(cmpBlocked) - 줄마다 등급 · 인원이 다르다(사용자 결정).
   const rowCmp = createRowCompress({
     request, getParent: () => panel,
     getRow: id => staged.find(r => r.id === id),
@@ -232,8 +233,10 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
 .st-cmp-btns { display: flex; gap: 4px; margin-left: auto; }
 .st-window .st-cmp-btns button.st-cmp-btn { color: #ffd99a; border-color: rgba(230,168,74,0.55); }
 .st-window .st-cmp-btns button.st-cmp-btn.is-on { background: rgba(230,168,74,0.18); }
-.st-window .em-compress-panel.st-cmp-panel { flex: 1 0 100%; margin-top: 6px; padding: 8px; border: 1px solid rgba(230,168,74,0.3); border-radius: 6px;
-  background: rgba(0,0,0,0.18); cursor: default; }
+.st-row.is-cmp-row { background: rgba(230,168,74,0.07); }
+.st-body.is-cmp-lock .st-row:not(.is-cmp-row) { opacity: 0.4; cursor: not-allowed; }
+.is-cmp-lock .st-presets, .is-cmp-lock .st-tabs, .is-cmp-lock [data-st-clear] { opacity: 0.45; }
+.st-cmp-window .em-compress-panel { border-bottom: 0; }
 .st-count.st-count-ev { color: #ffd99a; }
 .st-window button.st-split { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
 .st-window button.st-rf-btn.is-on { color: #cfeeff; border-color: rgba(100,180,240,0.6); background: rgba(40,110,170,0.2); }
@@ -304,6 +307,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       <div class="st-foot"></div>`;
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', event => {
+      if (cmpBlocked(event.target)) { event.preventDefault(); toast(CMP_LOCK_MSG, 'info'); return; }
       const chip = event.target.closest('[data-st-preset]');
       const gchip = event.target.closest('[data-st-pgroup]');
       if (gchip && presetGroups.includes(gchip.dataset.stPgroup)) { event.preventDefault(); openGroupMenu(gchip.dataset.stPgroup, gchip); return; }
@@ -342,10 +346,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     panel.body.addEventListener('focusout', event => {
       if (event.target.matches?.('[data-st-extra-text], [data-st-common-text]')) commitText(event.target);
     });
-    panel.body.addEventListener('pointerdown', event => { rowCmp.onPointerDown(event, panel.body); });
     panel.body.addEventListener('keydown', event => {
       event.stopPropagation();
-      if (rowCmp.onKeyDown(event, panel.body)) return;   // 압축 판 슬라이더 손잡이 ← →
       // Ctrl+Enter = 칸을 떠나며 저장(Enter 는 줄바꿈 그대로)
       if (event.target.matches('.st-extra-text') && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
         event.preventDefault(); event.target.blur(); return;
@@ -375,6 +377,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     closeOpt();
     closePresetMenu();
     closeAc();
+    rowCmp.close(true);   // S 창을 닫으면 압축 창도
     open = false;
     if (panel?.isOpen()) panel.close();
     paintTab();
@@ -462,14 +465,16 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
       return `<button type="button" class="st-rf-btn${lit ? ' is-on' : ''}" data-st-rf aria-expanded="${rfOpen === r.id}"
         title="이 조합 안에서 태그로 찾아 [제거] · [분할] 합니다">찾기 ${rfOpen === r.id ? '▴' : '▾'}</button>`;
     };
-    const rowsHtml = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${r.enabled === false ? ' is-off' : ''}${hit(r) === 0 ? ' is-miss' : ''}" data-st-id="${esc(r.id)}" data-st-pick
+    body.classList.toggle('is-cmp-lock', rowCmp.isOpen());
+    panel.body.classList.toggle('is-cmp-lock', rowCmp.isOpen());
+    const rowsHtml = staged.length ? staged.map(r => `<div class="st-row st-pick${openRow === r.id ? ' is-open' : ''}${rowCmp.isOpenFor(r.id) ? ' is-cmp-row' : ''}${r.enabled === false ? ' is-off' : ''}${hit(r) === 0 ? ' is-miss' : ''}" data-st-id="${esc(r.id)}" data-st-pick
         aria-expanded="${openRow === r.id}" title="${openRow === r.id ? '' : '눌러서 랜덤 · 랜덤+생성 · 맵에서 열기 · 제외 · 추가 프롬프트'}">
         <button type="button" class="st-sw" data-st-toggle role="switch" aria-checked="${r.enabled !== false}"
           title="${r.enabled === false ? '꺼짐 - 눌러서 랜덤 후보에 넣기' : '켜짐 - 눌러서 랜덤 후보에서 빼기'}"></button>
         <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}${filterSuffix(r.selection.filters)}</span>${countHtml(r)}</div>
         <div class="st-meta">${metaHtml(r.selection, false)}${extraChip(r.extra)}</div>
         </div>
-        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}${rowCmp.panelHtml(r)}`}
+        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
       </div>`).join('')
       : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
     // 하단 = 공통 추가 프롬프트(켜기 · 끄기 - 꺼도 글은 남는다) + [통째로 저장] [비우기] ...... [옵션]
@@ -656,8 +661,20 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     if (sel.filters?.length) toast('찾기 조건(분할)은 맵에 옮겨지지 않습니다 - 핀 · 제외만 열었습니다', 'info');
   }
 
+  /** 압축 창이 열린 동안 막는 것 - 다른 줄 · 연 줄 접기 · 탭 · 프리셋 · 비우기(사용자 결정 2026-11-02). */
+  function cmpBlocked(t) {
+    if (!rowCmp.isOpen()) return false;
+    if (t.closest('[data-st-tab], [data-st-preset], [data-st-pgroup], [data-st-gadd], [data-st-psave], [data-st-padd], [data-st-clear]')) return true;
+    const rowEl = t.closest('.st-row[data-st-id]');
+    if (!rowEl) return false;
+    if (!rowCmp.isOpenFor(rowEl.dataset.stId)) return true;
+    return !t.closest('button, input, textarea, label, .st-extra, .st-rf');   // 연 줄의 머리 · 몸통 = 접기
+  }
+  const CMP_LOCK_MSG = '압축 창을 닫은 뒤 다른 줄로 옮겨주세요';
+
   async function onClick(event) {
     const t = event.target;
+    if (cmpBlocked(t)) { toast(CMP_LOCK_MSG, 'info'); return; }
     const tb = t.closest('[data-st-tab]');
     if (tb) { tab = tb.dataset.stTab; renaming = ''; openRow = ''; closeMenu(); closeOpt(); paint(); return; }
     if (t.closest('[data-st-opt]')) { if (optOpen) closeOpt(); else openOpt(t.closest('[data-st-opt]')); return; }
@@ -682,7 +699,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     const id = t.closest('[data-st-id]')?.dataset.stId;
     const stagedRow = staged.find(r => r.id === id), savedRow = saved.find(r => r.id === id);
-    if (stagedRow && t.closest('[data-stc-manage], [data-stc-release], .st-cmp-panel')) { await rowCmp.onClick(t, stagedRow); return; }
+    if (stagedRow && t.closest('[data-stc-manage], [data-stc-release]')) { await rowCmp.onClick(t, stagedRow); return; }
     if (t.closest('[data-st-random]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, false, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-random-gen]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, true, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-open]') && stagedRow) { await run(() => openInMap(stagedRow.selection)); return; }
@@ -765,7 +782,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     }
     // 스테이징 줄 펼치기 · 접기(단추 · 추가 프롬프트 칸을 누른 것이 아닐 때)
     const pick = t.closest('[data-st-pick]');
-    if (pick && !t.closest('button, input, .st-extra, .st-rf, .st-cmp-panel')) {
+    if (pick && !t.closest('button, input, .st-extra, .st-rf')) {
       openRow = openRow === id ? '' : id;
       if (tab === 'saved') { closeMenu(); paintSavedList(); } else paintBody();
       return;

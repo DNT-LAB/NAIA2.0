@@ -222,6 +222,10 @@ function shortcutLetter(event) {
     : (/^Key([A-Z])$/.exec(String(event.code || ''))?.[1] || '');
 }
 
+const WIRE_FLOW_VISIBLE = (() => {
+  try { return globalThis.localStorage?.getItem('naia.wireFlow.dev') === '1'; } catch { return false; }
+})();
+
 const CATEGORY_REGISTRY = [
   {
     id: 'prompt_tools',
@@ -232,7 +236,9 @@ const CATEGORY_REGISTRY = [
     //    ⚠️ 옛 `chunkPanel.mjs` 은 이제 **열리는 길이 없다**. 우클릭 › [Add to Chunk] 도
     //    새 창으로 가게 바꿔서(`onAddToChunkWindow`), 그 파일은 지금 사실상 죽은 코드다.
     //    지우는 것은 별도 작업으로 둔다(31KB · 배선이 여러 곳).
-    moduleIds: ['wire_flow', 'event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
+    // Wire-Flow 는 아직 개발 중 - 런처 줄을 숨겨 들어가는 길만 막는다(사용자 지시 2026-11-02 · 코드는 그대로 싣는다).
+    // 개발 중에 보려면 localStorage 'naia.wireFlow.dev' = '1' 뒤 새로고침.
+    moduleIds: [...(WIRE_FLOW_VISIBLE ? ['wire_flow'] : []), 'event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },

@@ -12034,7 +12034,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261031-wf1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261102-wfgate')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,

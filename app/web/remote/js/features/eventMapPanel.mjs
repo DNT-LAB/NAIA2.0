@@ -334,6 +334,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       try { permInfo = await getJson('/api/event-map/permanent-exclude', {}); permText = String(permInfo.text || ''); }
       catch { permInfo = null; }
       paintPermanent();
+      refreshCompressViews();   // 압축 숫자의 열쇠에 영구 제외가 든다 - 늦게 온 글로 다시 센다(Codex 재리뷰 2026-11-02)
     }).catch(() => {});
     return permQueue;
   }
@@ -2476,7 +2477,10 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       const body = await getJson('/api/event-map/resolve', { tags: key });
       axes = COMPRESS_IDS.filter(id => (body.items || []).some(item => item.group === id));
     } catch { /* 못 물으면 잠그지 않는다 - 서버는 핀을 늘 남긴다 */ }
-    if (pins.join(',') !== key) return;   // 그 사이 핀이 바뀌었다 - 새 핀의 물음이 따로 간다(render)
+    if (pins.join(',') !== key) {   // 그 사이 핀이 바뀌었다 - 새 핀의 물음이 따로 간다(render)
+      if (pinAxes.loading === key) pinAxes = { key: pinAxes.key, axes: pinAxes.axes };   // 내 표시만 푼다 - 되돌아오면 다시 묻게
+      return;
+    }
     pinAxes = { key, axes };
     if (compressDraft?.some(id => axes.includes(id))) {
       compressDraft = compressDraft.filter(id => !axes.includes(id));
@@ -2589,11 +2593,14 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     }
   }
   /** 숫자 줄 · 슬라이더 분포 - 판에서 고르는 것, 판이 닫혔으면 지금 압축(상태 줄의 이벤트 수). */
+  /** 지금 보여야 하는 숫자 줄의 열쇠 - 판이 열려 있으면 판의 것, 아니면 지금 압축. */
+  const wantedCompressKey = () => fullKey(compressDraft ?? compress, compressDraft ? draftCut : compressCut);
   function scheduleCompressInfo(delay = 250) {
     const groups = compressDraft ?? compress;
     const cut = compressDraft ? draftCut : compressCut;
     if (!usable(groups) || mapState?.state !== 'ready') { clearTimeout(compressTimer); compressPending = ''; return; }
     const key = fullKey(groups, cut);
+    if (compressPending && compressPending !== key) { clearTimeout(compressTimer); compressPending = ''; }
     if (compressInfo?.key === key || compressLoading === key || compressPending === key) return;
     clearTimeout(compressTimer);
     compressPending = key;
@@ -2609,14 +2616,18 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       try {
         const body = await getJson('/api/event-map/sample', params);
         if (mine !== compressSeq) return;
-        compressInfo = { key, base, posts: body.observed_posts || 0, events: body.events || 0,
-          eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
+        // 그 사이 이미 센 조건으로 돌아왔으면 그 숫자를 지킨다(Codex 재리뷰 2026-11-02)
+        if (key === wantedCompressKey() || compressInfo?.key !== wantedCompressKey()) {
+          compressInfo = { key, base, posts: body.observed_posts || 0, events: body.events || 0,
+            eventsIn: body.events_in || 0, hist: body.hist || {}, freqHist: body.freq_hist || {}, sampled: body.sampled || null };
+        }
       } catch (error) {
         if (mine !== compressSeq) return;
         compressError = error.message;
       }
       compressLoading = '';
       paintCompress();
+      if (key !== wantedCompressKey()) scheduleCompressInfo(0);   // 지금 조건의 숫자가 없으면 이어서 센다
     }, delay);
   }
   // [살펴보기] 창(사용자 지시 2026-11-02) - 랜덤과 같은 규칙으로 뽑은 이벤트 20줄을 판 밖 창에. 판이 열려 있으면 판의 것

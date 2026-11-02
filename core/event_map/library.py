@@ -103,10 +103,12 @@ def selection(value):
     compress = normalize_compress(value.get("compress"))
     if compress:
         result["compress"] = compress
-        from core.event_map.compress import normalize_cut   # 슬라이더 컷 - 압축한 조합에만 붙는다
+        from core.event_map.compress import normalize_cut, normalize_output   # 슬라이더 컷 · 출력 - 압축한 조합에만
         cut = normalize_cut(value.get("compress_cut"))
         if cut:
             result["compress_cut"] = cut
+        if normalize_output(value.get("compress_output")) == "axes":   # 기본(full)은 적지 않는다
+            result["compress_output"] = "axes"
     return result
 
 
@@ -253,6 +255,8 @@ class EventMapLibrary:
         if selected.get("compress_cut"):
             cut = selected["compress_cut"]
             base = base + (("compress_cut",) + tuple(cut.get(k) for k in ("min_tags", "max_tags", "min_freq", "max_freq")),)
+        if selected.get("compress_output"):
+            base = base + (("compress_output", selected["compress_output"]),)
         return base
 
     def _write(self, items):

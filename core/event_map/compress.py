@@ -1,8 +1,9 @@
-"""이벤트 맵 압축(사용자 지시 2026-11-02) - 조합에 붙는 상태 `selection.compress = [갈래 id …]` + `compress_cut`.
+"""이벤트 맵 압축(사용자 지시 2026-11-02) - 조합에 붙는 상태 `selection.compress` + `compress_cut` + `compress_output`.
 
-고른 갈래의 태그를 지우고, 남은 태그(+ 등급)가 같은 게시물끼리 **이벤트** 하나로 묶는다.
+화면은 **기준 축**을 고른다(핀의 축은 늘 기준 - 끌 수 없다). 저장 값 `compress` = 기준이 아닌 축(지운 축) 목록 - 비면 압축 안 함.
+기준 축의 태그(+ 핀 · 인원 태그 + 등급)가 같은 게시물끼리 **이벤트** 하나로 묶는다. 작품·고유명 · 미분류 태그는 축 밖이라 묶을 때 빠진다.
 압축된 조합의 랜덤은 게시물이 아니라 이벤트를 **같은 확률로** 뽑는다(사용자 결정 2026-11-02) - 흔한 장면이 랜덤을 덮지 않게.
-프롬프트 = 그 이벤트의 남은 태그. 핀 · 인원 태그는 지우는 갈래에 있어도 남는다(사용자 결정 2026-11-02).
+프롬프트 = [프롬프트 전체] 그 이벤트에 묶인 게시물 하나의 태그 전부(기본) | [선택한 축만] 기준 축 태그만(`compress_output`).
 색상은 맵 정책대로 늘 빠진다(핀이면 남는다) - `EventMapIndex.sample` 과 같다.
 
 슬라이더 둘(`compress_cut` - Quick Filter 이벤트 압축 창과 같은 뜻 · 사용자 결정 2026-11-02):
@@ -109,12 +110,21 @@ def _tag_salt(idx) -> tuple[np.ndarray, np.ndarray]:
     return hit[1], hit[2]
 
 
+def normalize_output(value) -> str:
+    """프롬프트 = 'full'(이벤트에 묶인 게시물 하나의 태그 전부 · 기본) | 'axes'(기준 축 태그만)."""
+    if value in (None, "", "full"):
+        return "full"
+    if value == "axes":
+        return "axes"
+    raise MapQueryError("bad_request", "압축 출력은 full 또는 axes 입니다.")
+
+
 def drop_mask(service, idx, groups: list[str], wanted: list[int]) -> np.ndarray:
-    """지울 태그(True) - 고른 갈래 + 색상. 핀 · 인원 태그는 남긴다."""
-    drop = idx.color_arr.copy()
-    mask = service.group_mask(groups)
-    if mask is not None:
-        drop |= mask
+    """이벤트를 가를 때 지울 태그(True) - 기준 축(10개 − groups) 밖의 태그 전부(작품·고유명 · 미분류 포함) + 색상.
+    핀 · 인원 태그는 남긴다. 화면은 '기준 축' 을 고르고, 저장 값 `compress` 는 그 나머지(지운 축)다(사용자 지시 2026-11-02)."""
+    axes = [g for g in COMPRESS_GROUPS if g not in groups]
+    keep = service.group_mask(axes) if axes else np.zeros(idx.n_tags, dtype=bool)
+    drop = idx.color_arr.copy() if keep is None else (~keep | idx.color_arr)   # 갈래 표가 없으면 옛 동작(색상만)
     drop &= ~idx.population_arr
     if wanted:
         drop[np.asarray(wanted, dtype=np.int64)] = False
@@ -135,8 +145,8 @@ def _spans(idx, rids: np.ndarray):
         yield at, picks, before
 
 
-def _build(idx, rids: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """rids -> (대표 게시물, 게시물 수) - 큰 이벤트 먼저(같으면 rid 순)."""
+def _build(idx, rids: np.ndarray, drop: np.ndarray):
+    """rids -> (대표 게시물, 게시물 수, 이벤트 차례로 늘어놓은 게시물, 그 경계) - 큰 이벤트 먼저(같으면 rid 순)."""
     salt, part_salt = _tag_salt(idx)
     weights = np.where(drop, np.uint64(0), salt)
     keys = np.empty(rids.size, dtype=np.uint64)
@@ -146,9 +156,16 @@ def _build(idx, rids: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndar
         part = run[before[1:]] - run[before[:-1]]
         n = before.size - 1
         keys[at:at + n] = part + part_salt[idx.part_arr[rids[at:at + n]]]
-    _, first, counts = np.unique(keys, return_index=True, return_counts=True)
+    _, first, inverse, counts = np.unique(keys, return_index=True, return_inverse=True, return_counts=True)
     order = np.lexsort((first, -counts))
-    return rids[first[order]].astype(np.int64), counts[order].astype(np.int64)
+    rank = np.empty(order.size, dtype=np.int64)
+    rank[order] = np.arange(order.size)
+    counts = counts[order].astype(np.int64)
+    # 이벤트마다 묶인 게시물 - [프롬프트 전체] 는 그중 하나의 태그를 쓴다
+    members = rids[np.argsort(rank[inverse.ravel()], kind="stable")].astype(np.int64)
+    member_bounds = np.zeros(counts.size + 1, dtype=np.int64)
+    np.cumsum(counts, out=member_bounds[1:])
+    return rids[first[order]].astype(np.int64), counts, members, member_bounds
 
 
 def _kept_tags(idx, reps: np.ndarray, drop: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -172,6 +189,8 @@ class Table:
     """압축 표 - 이벤트(큰 것 먼저) · 이벤트별 남은 태그 · 태그 빈도(그 태그가 나오는 이벤트 수)."""
     reps: np.ndarray
     counts: np.ndarray
+    members: np.ndarray        # 이벤트 차례로 늘어놓은 게시물(member_bounds 로 자른다)
+    member_bounds: np.ndarray
     drop: np.ndarray
     bounds: np.ndarray
     tags: np.ndarray
@@ -181,7 +200,8 @@ class Table:
 
     @property
     def nbytes(self) -> int:
-        return sum(a.nbytes for a in (self.reps, self.counts, self.drop, self.bounds, self.tags, self.freq))
+        return sum(a.nbytes for a in (self.reps, self.counts, self.members, self.member_bounds, self.drop,
+                                      self.bounds, self.tags, self.freq))
 
 
 def _make_table(service, idx, rids: np.ndarray, groups, wanted, sample_key) -> Table:
@@ -192,12 +212,13 @@ def _make_table(service, idx, rids: np.ndarray, groups, wanted, sample_key) -> T
         rids = rids[np.sort(np.random.default_rng(seed).choice(rows, size=ROW_LIMIT, replace=False))]
     drop = drop_mask(service, idx, groups, wanted)
     if rids.size:
-        reps, counts = _build(idx, rids, drop)
+        reps, counts, members, member_bounds = _build(idx, rids, drop)
     else:
-        reps, counts = np.empty(0, np.int64), np.empty(0, np.int64)
+        reps = counts = members = np.empty(0, np.int64)
+        member_bounds = np.zeros(1, np.int64)
     bounds, tags = _kept_tags(idx, reps, drop)
     freq = np.bincount(tags, minlength=idx.n_tags).astype(np.int64)
-    return Table(reps, counts, drop, bounds, tags, freq, rows, int(rids.size))
+    return Table(reps, counts, members, member_bounds, drop, bounds, tags, freq, rows, int(rids.size))
 
 
 def event_table(service, idx, rids_fn, *, cache_key, groups: list[str], wanted: list[int]) -> Table:
@@ -255,7 +276,17 @@ def tag_counts(table: Table, counted: np.ndarray | None) -> np.ndarray:
 
 def event_tags(idx, rid: int, drop: np.ndarray, wanted: list[int]) -> list[int]:
     """이벤트 대표 게시물의 남은 태그 id - 인원 -> 핀 -> 나머지(`EventMapIndex.sample` 과 같은 차례)."""
-    tids = [t for t in idx.body[idx.offsets[rid]:idx.offsets[rid + 1]].tolist() if not drop[t]]
+    return _ordered(idx, [t for t in idx.body[idx.offsets[rid]:idx.offsets[rid + 1]].tolist() if not drop[t]], wanted)
+
+
+def post_tags(idx, rid: int, wanted: list[int]) -> list[int]:
+    """게시물 하나의 태그 전부 - 색상만 뺀다(핀이면 남김) · `EventMapIndex.sample` 과 같은 규칙 · 같은 차례."""
+    pinned = set(wanted)
+    return _ordered(idx, [t for t in idx.body[idx.offsets[rid]:idx.offsets[rid + 1]].tolist()
+                          if t in pinned or not idx.color_arr[t]], wanted)
+
+
+def _ordered(idx, tids: list[int], wanted: list[int]) -> list[int]:
     population = [t for t in tids if idx.population_arr[t]]
     head = population + [t for t in wanted if t in tids and t not in population]
     seen = set(head)
@@ -275,18 +306,22 @@ def _hist(values: np.ndarray) -> dict:
 
 
 def compressed(service, idx, *, pins, exclude, ratings, persons, block, filters, groups,
-               cut=None, n=0, top=0, seed=None, hist=False) -> dict:
+               cut=None, output=None, n=0, top=0, seed=None, hist=False) -> dict:
     """압축된 조합 - 뽑기(n) · 큰 이벤트 목록(top) · 슬라이더 분포(hist).
-    `EventMapIndex.sample` 과 같은 모양 + events(전체) · events_in(슬라이더 안) · sampled(50만 상한)."""
+    `EventMapIndex.sample` 과 같은 모양 + events(전체) · events_in(슬라이더 안) · sampled(50만 상한).
+    뽑기 = 이벤트를 같은 확률로 고른 뒤 output='full' 이면 그 이벤트에 묶인 게시물 하나의 태그 전부,
+    'axes' 면 기준 축 태그만(사용자 지시 2026-11-02 - [프롬프트 전체] [선택한 축만]).
+    `uncounted` = 태그 수에 안 세는 태그(기준 축 밖 + 빈도 범위 밖) - 화면은 회색."""
     started = time.perf_counter()
     cut = normalize_cut(cut)
+    output = normalize_output(output)
     wanted, unknown = idx._resolve_many(pins)
     excluded, unknown_ex = idx._resolve_many(exclude)
     excluded = [t for t in excluded if t not in wanted]
     out = {"pins": [idx.by_id[t] for t in wanted], "unknown_pins": unknown,
            "exclude": [idx.by_id[t] for t in excluded], "unknown_exclude": unknown_ex,
            "ratings": sorted(ratings or []), "persons": sorted(persons or []), "compress": list(groups),
-           "compress_cut": cut, "observed_posts": 0, "events": 0, "events_in": 0, "sampled": None,
+           "compress_cut": cut, "compress_output": output, "observed_posts": 0, "events": 0, "events_in": 0, "sampled": None,
            "samples": [], "top": [], "kind": "compressed_event"}
     if unknown:
         out["status"] = "unknown_tag"
@@ -318,18 +353,22 @@ def compressed(service, idx, *, pins, exclude, ratings, persons, block, filters,
         out["hist"] = _hist(sizes)   # {세는 태그 수: 이벤트 수} - 빈도 컷은 걸고 태그 수 컷은 안 건 전체
         out["freq_hist"] = _hist(table.freq[(table.freq > 0) & ~always])   # {빈도: 그 빈도의 태그 수} - 늘 세는 태그 빼고
 
-    def row(i):
-        tids = event_tags(idx, int(table.reps[i]), table.drop, wanted)
+    def row(i, rid=None):
+        tids = event_tags(idx, int(table.reps[i]), table.drop, wanted) if rid is None else post_tags(idx, rid, wanted)
         item = {"tags": [idx.by_id[t] for t in tids], "posts": int(table.counts[i])}
-        if counted is not None:
-            item["uncounted"] = [idx.by_id[t] for t in tids if not counted[t]]
+        item["uncounted"] = [idx.by_id[t] for t in tids if table.drop[t] or (counted is not None and not counted[t])]
         return item
 
     rng = random.Random(seed)
     for j in rng.sample(range(int(eligible.size)), min(int(n), int(eligible.size))):
         i = int(eligible[j])
-        item = row(i)
-        rid = int(table.reps[i])
+        if output == "full":
+            lo, hi = int(table.member_bounds[i]), int(table.member_bounds[i + 1])
+            rid = int(table.members[rng.randrange(lo, hi)])
+            item = row(i, rid)
+        else:
+            rid = int(table.reps[i])
+            item = row(i)
         item["event_posts"] = item.pop("posts")
         item["prompt"] = ", ".join(item["tags"])
         item["partition"] = idx.partitions[idx.part_arr[rid]] if rid < idx.part_arr.size else None

@@ -29349,7 +29349,10 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-compress-panel { flex: 0 0 auto; padding: 8px 10px; border-bottom: 1px solid var(--border-color, #343044); }
 .em-compress-panel .emc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
 .em-compress-panel button.emc-g { padding: 3px 0; color: var(--text-secondary); }
-.em-compress-panel button.emc-g.is-on { color: #ffd2d9; border-color: rgba(240,130,150,.6); background: rgba(170,50,80,.22); text-decoration: line-through; }
+.em-compress-panel button.emc-g.is-on { color: #cfe0ff; border-color: rgba(110,150,240,.7); background: rgba(70,110,200,.25); }
+.em-compress-panel button.emc-g.is-locked { cursor: not-allowed; }
+.em-compress-panel .emc-lock { margin-left: 4px; padding: 0 3px; border-radius: 3px; font-size: 9px; color: #9fd0ff; background: rgba(127,211,255,.14); }
+.em-compress-panel .emc-hint { margin: 0 0 5px; font-size: 10px; color: var(--text-muted); }
 .em-compress-panel .emc-sum { margin: 6px 0 0; font-size: 10.5px; color: var(--text-secondary); }
 /* 슬라이더 = Quick Filter 압축 창의 .ecw-cut-* 그대로 - 판 안에서는 테두리 · 여백만 줄인다 */
 .em-compress-panel .ecw-cut { padding: 0; margin-top: 4px; border-bottom: 0; font-size: 10px; }
@@ -29376,6 +29379,13 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-compress-panel .emc-ev b { color: #e6a84a; font-weight: 500; }
 .em-compress-panel .emc-act { display: flex; justify-content: space-between; gap: 6px; margin-top: 6px; }
 .em-compress-panel .emc-act > span { display: flex; gap: 6px; }
+/* 출력 [프롬프트 전체][선택한 축만] - 판 · 상태 줄에 같은 붙은 단추 한 쌍 */
+.emc-out { display: inline-flex; align-items: center; flex: none; }
+.emc-out-l { margin-right: 4px; font-size: 10px; color: var(--text-muted); }
+.emc-out button { border-radius: 0; margin-left: -1px; }
+.emc-out button:first-of-type { border-radius: 5px 0 0 5px; margin-left: 0; }
+.emc-out button:last-of-type { border-radius: 0 5px 5px 0; }
+.emc-out button.is-on { position: relative; color: #cfe0ff; border-color: rgba(110,150,240,.7); background: rgba(70,110,200,.25); }
 .em-compress-panel button.is-primary { color: #d7ccff; border-color: rgba(139,118,255,.6); background: rgba(88,76,170,.25); }
 .em-compress-panel button:disabled { opacity: .45; cursor: default; }
 .em-library-form { display: grid; gap: 6px; }

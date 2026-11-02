@@ -203,6 +203,8 @@ class HeadlessRandomPromptService:
                 combo["compress"] = item["selection"]["compress"]
                 if item["selection"].get("compress_cut"):
                     combo["compress_cut"] = item["selection"]["compress_cut"]
+                if item["selection"].get("compress_output"):
+                    combo["compress_output"] = item["selection"]["compress_output"]
             try:
                 body = service.sample(**combo, n=1, permanent=True)
             except MapQueryError as exc:
@@ -302,7 +304,7 @@ class HeadlessRandomPromptService:
                     samples, combo, extra = self._staging_sample(service, staging_store(self.context), label)
                 else:
                     combo = {k: link.get(k, "") for k in ("pins", "exclude", "ratings", "persons", "compress",
-                                                          "compress_cut")}
+                                                          "compress_cut", "compress_output")}
                     body = service.sample(**combo, n=1, permanent=True)
                     samples = body.get("samples") or []
                 if not samples:

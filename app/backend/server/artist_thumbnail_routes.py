@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, Response
 
 from core.artist_affinity import default_pack as artist_affinity_pack
 from core.artist_bench_views import ArtistBenchViewError, ArtistBenchViewStore
-from core.artist_groups import ArtistGroupError, ArtistGroupStore
+from core.artist_groups import LINK_SLOT, LINK_SLOT_NAME, ArtistGroupError, ArtistGroupStore
 from core.artist_mixes import ArtistMixError, ArtistMixStore, MIX_SETTING_KEYS
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
 from core.artist_thumbnail_service import ArtistLoadCancelled, ArtistThumbnailService
@@ -643,6 +643,88 @@ def _main_random_artist_override(context: WebSessionContext):
     return artist_thumbnail_service(context).main_random_token(context.get_api_mode())
 
 
+# ── 결과 화면 작가 패널(사용자 지정 2026-11-03) ─────────────────────────────
+#  [메인 랜덤 버튼 연결] 이 켜져 있으면 결과 화면 왼쪽 아래에 늘 뜬다. 다루는 작가 = **보이는 그림에 붙은 작가**
+#  (히스토리 `linked_artist`). 조작 넷: [고정](빌린 정책 · `ArtistThumbnailService.link_pin`) · [임시](패널 전용
+#  그룹 한 칸 · `ArtistGroupStore.toggle_link_slot`) · [숨김](제외 작가) · [그룹](관심 작가 포함).
+LINK_PANEL_OPS = {"pin", "unpin", "ban", "unban", "slot", "group", "group_new"}
+
+
+def _link_panel_state(context: WebSessionContext, artist: str, mode: str = "") -> dict:
+    service = artist_thumbnail_service(context)
+    name = " ".join(str(artist or "").split())
+    out: dict[str, Any] = {"tools": service.random_tools(), "artist": name}
+    if not name:
+        return out
+    image_url = ""
+    try:
+        items = (service.describe_artists(mode, [name]) or {}).get("items") or []
+        image_url = str(items[0].get("image_url") or "") if items else ""
+    except Exception:  # noqa: BLE001 - 그림은 장식이다
+        pass
+    favorite = name in set(service.favorite_artists())
+    groups = artist_group_store(context).list()
+    key = name.casefold()
+
+    def has(group: dict) -> bool:
+        return any(str(item.get("artist") or "").casefold() == key for item in group.get("items") or [])
+
+    slot = next((g for g in groups if g.get("slot") == LINK_SLOT), None)
+    out.update(
+        image_url=image_url,
+        banned=name in set(service._banned()),
+        slot={"id": slot["id"], "name": slot["name"], "has": has(slot), "count": len(slot.get("items") or [])}
+        if slot else {"id": "", "name": LINK_SLOT_NAME, "has": False, "count": 0},
+        groups=[{"id": FAVORITES_GROUP_ID, "name": FAVORITES_GROUP_NAME, "has": favorite, "fixed": True},
+                *({"id": g["id"], "name": g["name"], "has": has(g)} for g in groups if not g.get("temp"))],
+    )
+    return out
+
+
+def _apply_link_panel_op(context: WebSessionContext, payload: dict) -> bool:
+    """패널 조작 하나. 돌려주는 값 = 랜덤 도구(고정 · 정책)가 바뀌었을 수 있는가."""
+    op = str(payload.get("op") or "")
+    artist = " ".join(str(payload.get("artist") or "").split())
+    if not artist:
+        raise ValueError("artist is required")
+    service = artist_thumbnail_service(context)
+    if op in ("pin", "unpin"):
+        service.link_pin(artist, payload.get("weight"), pin=op == "pin")
+        return True
+    if op in ("ban", "unban"):
+        service.set_banned(artist, op == "ban", return_state=False)
+        return True
+    store = artist_group_store(context)
+    if op == "slot":
+        store.toggle_link_slot(artist)
+    elif op == "group":
+        gid = str(payload.get("group_id") or "")
+        add = bool(payload.get("add", True))
+        if gid == FAVORITES_GROUP_ID:
+            _apply_favorites_op(context, {"op": "add", "items": [{"artist": artist}], "mode": payload.get("mode")}
+                                if add else {"op": "remove", "artists": [artist]})
+        elif add:
+            store.add(gid, [{"artist": artist}])
+        else:
+            store.remove(gid, [artist])
+    elif op == "group_new":
+        store.create(payload.get("name"), [{"artist": artist}])
+    _sync_group_thumbnails(context)
+    _sync_group_wildcards(context)
+    return False
+
+
+async def _broadcast_random_tools(context: WebSessionContext, clients: set[Any], run_in_thread) -> None:
+    """랜덤 도구가 바뀌었다 - 결과 화면 작가 패널 · 아티스트 창(다른 탭 포함)이 같은 값을 보게 한다."""
+    try:
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        tools = await run_in_thread(artist_thumbnail_service(context).random_tools)
+        await broadcast_json(clients, {"type": "artist_random_tools", "tools": tools})
+    except Exception:  # noqa: BLE001 - 알림이 본 요청을 실패시키지 않는다
+        pass
+
+
 def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
     service = getattr(context, "headless_random_prompt_service", None)
     if service is None:
@@ -1117,7 +1199,7 @@ def register_artist_thumbnail_routes(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            return await run_in_thread(
+            result = await run_in_thread(
                 artist_thumbnail_service(session_context).set_banned,
                 payload.get("artist", ""),
                 bool(payload.get("banned", True)),
@@ -1126,6 +1208,8 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb ban failed: {exc}"}, status_code=500)
+        await _broadcast_random_tools(session_context, clients, run_in_thread)
+        return result
 
     @app.post("/api/artist-thumb/options")
     async def api_artist_thumb_options(req: Request):
@@ -1144,6 +1228,7 @@ def register_artist_thumbnail_routes(
             from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
 
             invalidate_auto_gen_prefetch(session_context)
+            await _broadcast_random_tools(session_context, clients, run_in_thread)
         return saved
 
     @app.get("/api/artist-thumb/download")
@@ -1185,6 +1270,41 @@ def register_artist_thumbnail_routes(
             return await run_in_thread(artist_thumbnail_service(session_context).random_tools)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb random tools failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/link-panel")
+    async def api_artist_thumb_link_panel(artist: str = "", mode: str = ""):
+        try:
+            return await run_in_thread(_link_panel_state, session_context, artist, mode)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist link panel failed: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/link-panel")
+    async def api_artist_thumb_link_panel_op(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict) or str(payload.get("op") or "") not in LINK_PANEL_OPS:
+            return JSONResponse({"error": f"op must be one of {sorted(LINK_PANEL_OPS)}"}, status_code=400)
+        try:
+            tools_changed = await run_in_thread(_apply_link_panel_op, session_context, payload)
+        except ArtistGroupError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist link panel failed: {exc}"}, status_code=500)
+        if tools_changed:
+            # 붙일 작가 · 정책이 바뀌었다 - Auto Gen 이 옛 설정으로 미리 만든 컷을 버린다(옵션 저장과 같은 규칙).
+            from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+            invalidate_auto_gen_prefetch(session_context)
+            await _broadcast_random_tools(session_context, clients, run_in_thread)
+        try:
+            return await run_in_thread(_link_panel_state, session_context, payload.get("artist", ""),
+                                       str(payload.get("mode") or ""))
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist link panel failed: {exc}"}, status_code=500)
 
     # [생성 버튼 -> 랜덤 아티스트] - 지금 목록에서 한 명(사용자 지시 2026-10-19).
     @app.post("/api/artist-thumb/random-pick")

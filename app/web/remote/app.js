@@ -862,6 +862,8 @@ let naiModelManagerPanel = null;
 let danbooruTabControl = null;
 let thumbTabControl = null;
 let artistThumbControl = null;
+// 결과 화면 작가 패널(사용자 지정 2026-11-03) - [메인 랜덤 버튼 연결] 중 보이는 그림의 작가를 고정 · 임시 · 숨김 · 그룹.
+let artistLinkPanel = null;
 let characterViewerControl = null;
 let studioTabControl = null;
 let customSelectsControl = null;
@@ -985,7 +987,15 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261019-pick3')
+import('./js/features/artistLinkPanel.mjs?v=20261103-alp1')
+  .then(({installArtistLinkPanel}) => {
+    artistLinkPanel = installArtistLinkPanel({document, fetch: window.fetch.bind(window), showToast, escHtml});
+    artistLinkPanel?.setAsset(resultUnsavedActionAsset);
+  })
+  .catch(error => {
+    console.error('Failed to initialize artist link panel', error);
+  });
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -5159,6 +5169,11 @@ function afterWsJsonMessage(m) {
   if (m.type === 'prompt_generated') scheduleCharacterStateRefresh();
   // [메인 랜덤 버튼 연결] + [생성 버튼 → 랜덤 아티스트] - 서버가 뽑은 작가로 아티스트 창의 격자를 넘겨 고른다.
   if (m.type === 'prompt_generated' && m.random_artist) void artistThumbControl?.focusRandomArtist?.(m.random_artist);
+  // 랜덤 도구가 바뀌었다(작가 패널 [고정] · [숨김] · 다른 탭의 토글) - 패널과 아티스트 창이 같은 값을 보게 한다.
+  if (m.type === 'artist_random_tools') {
+    artistLinkPanel?.receiveTools(m.tools);
+    artistThumbControl?.receiveRandomTools?.(m.tools);
+  }
 }
 
 function onWsMessageError(error) {
@@ -5801,6 +5816,8 @@ function setResultUnsavedActionBusy(busy) {
 
 function renderResultUnsavedActions(asset = null) {
   resultUnsavedActionAsset = asset;
+  // 보이는 그림이 바뀌었다 - 작가 패널은 **이 그림에 붙은** 작가를 다룬다(`linked_artist`).
+  artistLinkPanel?.setAsset(asset);
   // current 프리뷰에 안정적 history 식별자(rel_path)를 각인 → 삭제 시 "표시 중 이미지" 여부를
   // source가 아닌 동일성으로 정확히 판정 (오클리어 방지). source는 'current' 그대로 유지하므로
   // activeResultAssetUrl / buildImagePlaneContext 등 기존 흐름은 영향받지 않는다.

@@ -564,11 +564,14 @@ class ArtistThumbnailService:
     # ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
     #  [생성 버튼 -> 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 셋 다 다음 실행에도 남는다(사용자 결정).
     #  `pool` 은 리모컨이 보고 있던 목록 조건(모드 · 필터 · 이름 검색)이다 - 창을 닫아도 메인 Random 이 이것으로 뽑는다.
-    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link")
+    #  `pin_hold` = 결과 화면 작가 패널의 [고정] 이 [생성 버튼 -> 랜덤 아티스트] 를 **빌려** 꺼 두었다(사용자 지정
+    #  2026-11-03). 토글은 상위 정책이다 - 고정을 풀면 다시 켜고 정책을 돌려준다. 이번 실행에만 산다(다른 토글과 같이).
+    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
         "random_weight": False,
         "main_link": False,
+        "pin_hold": False,
         "weight_start": 0.85,
         "weight_end": 1.15,
         "weight_step": 0.05,
@@ -593,6 +596,7 @@ class ArtistThumbnailService:
             "gen_pick": bool(source.get("gen_pick", False)),
             "random_weight": bool(source.get("random_weight", False)),
             "main_link": bool(source.get("main_link", False)),
+            "pin_hold": bool(source.get("pin_hold", False)),
             "weight_start": number("weight_start", 0.0, 5.0),
             "weight_end": number("weight_end", 0.0, 5.0),
             "weight_step": number("weight_step", 0.01, 5.0),
@@ -651,6 +655,8 @@ class ArtistThumbnailService:
         weight = self.draw_random_weight(tools)
         if not tools.get("gen_pick"):
             artist = str(tools.get("focus") or "").strip()
+            if artist and artist in set(self._banned()):
+                return None                       # 제외 작가는 고른 작가여도 붙이지 않는다(작가 패널 [숨김])
             token = self.format_artist_token(artist, weight, api_mode) if artist else ""
             return {"token": token, "artist": artist, "weight": weight, "pick": False} if token else None
         pool = tools.get("pool") or {}
@@ -685,7 +691,49 @@ class ArtistThumbnailService:
         with self._options_lock:
             return self._save_options_locked(options)
 
-    def _save_options_locked(self, options: dict) -> dict:
+    # ── 결과 화면 작가 패널의 [고정](사용자 지정 2026-11-03) ──────────────────────
+    #  [생성 버튼 -> 랜덤 아티스트] 는 상위 정책이다. 켜져 있을 때 고정하면 끄고 `pin_hold` 로 '고정이 껐다' 를
+    #  기억한다. 고정을 풀면(또는 그 작가를 숨기면 · 연결을 끄면) 다시 켜고 표를 지운다. 정책이 원래 꺼져 있었으면
+    #  붙일 작가만 바꾸고 토글은 건드리지 않는다. 사용자가 토글을 직접 누르면 정책을 되찾은 것이라 표만 지운다.
+    def link_pin(self, artist: str, weight: Any = None, pin: bool = True) -> dict:
+        """고정(`pin`) = 다음 Random 도 이 작가 · 이 가중치. 해제 = 빌린 정책을 돌려준다. 돌려주는 값 = random_tools."""
+        with self._options_lock:
+            tools = self.load_options().get("random_tools") or {}
+            changes: dict = {}
+            if pin:
+                name = str(artist or "").strip()
+                if not name:
+                    raise ValueError("artist is required")
+                if name in set(self._banned()):
+                    # 숨긴 작가는 붙이지 않는다(`main_random_token`) - 고정해도 아무것도 안 붙는 상태를 만들지 않는다.
+                    raise ValueError("숨긴 작가는 고정할 수 없습니다 - [숨김] 을 먼저 푸세요.")
+                changes["focus"] = name
+                try:
+                    value = float(weight)
+                    if math.isfinite(value):
+                        changes["weight"] = value
+                except (TypeError, ValueError):
+                    pass
+                if tools.get("gen_pick"):
+                    changes.update(gen_pick=False, pin_hold=True)
+            elif tools.get("pin_hold"):
+                changes.update(gen_pick=True, pin_hold=False)
+            if not changes:
+                return tools
+            return self._save_options_locked({"random_tools": changes}, internal=True)["random_tools"]
+
+    def release_link_pin(self, artist: str = "") -> bool:
+        """빌린 정책을 돌려준다(`artist` 를 주면 그 작가를 고정한 때만). 돌려줬으면 True."""
+        with self._options_lock:
+            tools = self.load_options().get("random_tools") or {}
+            if not tools.get("pin_hold"):
+                return False
+            if artist and str(tools.get("focus") or "").strip() != str(artist).strip():
+                return False
+            self._save_options_locked({"random_tools": {"gen_pick": True, "pin_hold": False}}, internal=True)
+            return True
+
+    def _save_options_locked(self, options: dict, *, internal: bool = False) -> dict:
         requested_mode = options.get("mode") if isinstance(options, dict) else ""
         mode = self._options_mode(requested_mode)
         current = self.load_options(mode)
@@ -697,8 +745,17 @@ class ArtistThumbnailService:
                 mode_values["postfix"] = str(options.get("postfix") or "")
             # 랜덤 도구는 보낸 칸만 바꾼다(프리픽스 저장이 이것을 지우지 않게 · 반대도).
             if isinstance(options.get("random_tools"), dict):
-                current["random_tools"] = self._normalize_random_tools(
-                    {**current.get("random_tools", {}), **options["random_tools"]})
+                incoming = dict(options["random_tools"])
+                previous = current.get("random_tools", {})
+                if not internal:
+                    incoming.pop("pin_hold", None)        # 표는 고정 길(`link_pin`)만 다룬다
+                    if previous.get("pin_hold"):
+                        if "gen_pick" in incoming:
+                            incoming["pin_hold"] = False  # 사용자가 토글을 직접 눌렀다 - 정책을 되찾았다
+                        elif "main_link" in incoming and not incoming["main_link"]:
+                            # 연결을 끄면 패널이 사라진다 - 보이지 않는 곳에 빌린 정책을 남기지 않는다
+                            incoming.update(gen_pick=True, pin_hold=False)
+                current["random_tools"] = self._normalize_random_tools({**previous, **incoming})
                 for key in self.RANDOM_TOOL_TOGGLES:
                     self._random_toggles[key] = bool(current["random_tools"].get(key))
         selected = current["modes"].get(mode, {"prefix": "", "postfix": ""})
@@ -2024,7 +2081,7 @@ class ArtistThumbnailService:
                 self._remove_favorite_thumbnail_cache(artist_name)
         return self.state()
 
-    def set_banned(self, artist: str, banned: bool) -> dict:
+    def set_banned(self, artist: str, banned: bool, *, return_state: bool = True) -> dict:
         artist_name = str(artist or "").strip()
         if not artist_name:
             raise ValueError("artist is required")
@@ -2039,7 +2096,9 @@ class ArtistThumbnailService:
             if banned:
                 state["favorites"] = [item for item in state.get("favorites", []) if item != artist_name]
             self._write_state(state)
-        return self.state()
+        if banned:
+            self.release_link_pin(artist_name)   # 숨긴 작가를 고정해 두었으면 정책을 돌려준다
+        return self.state() if return_state else {"artist": artist_name, "banned": bool(banned)}
 
     @staticmethod
     def final_prompt(payload: dict) -> str:

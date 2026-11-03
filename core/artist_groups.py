@@ -34,6 +34,11 @@ MAX_GROUPS = 200
 # 화면(`artistThumbTab.mjs` TEMP_WINDOW_MAX)도 같은 수로 먼저 막는다 - 여기는 창이 둘일 때의 뒷문.
 # 이미 넘게 가진 사용자의 창은 그대로 둔다(새로 만드는 것만 막는다). 오래된 창을 알아서 지우지 않는다.
 MAX_TEMP_GROUPS = 5
+# 결과 화면 작가 패널의 [임시](사용자 지정 2026-11-03) - 임시 창과 **따로** 한 칸. 위 5개에 세지 않는다.
+# 이름이 늘 같아 와일드카드 주소(`__artist_group/랜덤 임시__`)도 같다. 이름을 붙이면(저장) 표가 떨어져
+# 일반 그룹이 되고, 다음 [임시] 에 빈 칸이 새로 생긴다.
+LINK_SLOT = "link"
+LINK_SLOT_NAME = "랜덤 임시"
 MAX_ITEMS_PER_GROUP = 2000
 MAX_NAME_LEN = 40
 MAX_ARTIST_LEN = 200
@@ -105,6 +110,18 @@ def _auto_temp_name(groups: list[dict]) -> str:
     used = {g["name"].casefold() for g in groups}
     for index in range(1, MAX_GROUPS + 2):
         candidate = f"임시 창 {index}"
+        if candidate.casefold() not in used:
+            return candidate
+    raise ArtistGroupError(f"too many groups (max {MAX_GROUPS})")
+
+
+def _link_slot_name(groups: list[dict]) -> str:
+    """패널 칸 이름 - 사용자가 같은 이름의 그룹을 이미 가졌으면 번호를 붙인다."""
+    used = {g["name"].casefold() for g in groups}
+    if LINK_SLOT_NAME.casefold() not in used:
+        return LINK_SLOT_NAME
+    for index in range(2, MAX_GROUPS + 2):
+        candidate = f"{LINK_SLOT_NAME} {index}"
         if candidate.casefold() not in used:
             return candidate
     raise ArtistGroupError(f"too many groups (max {MAX_GROUPS})")
@@ -188,6 +205,8 @@ class ArtistGroupStore:
         # 아직 이름을 안 붙인 그룹(임시 창). 참일 때만 싣는다 - 옛 파일에는 없는 키다.
         if raw.get("temp"):
             group["temp"] = True
+            if raw.get("slot") == LINK_SLOT:
+                group["slot"] = LINK_SLOT
         return group
 
     # ── 조회 ──────────────────────────────────────────────────────────────
@@ -212,7 +231,7 @@ class ArtistGroupStore:
         """`temp=True` 면 이름을 받지 않고 `임시 창 N` 을 붙인다(사용자가 나중에 고친다)."""
         with self._lock:
             groups = self._read()
-            if temp and sum(1 for g in groups if g.get("temp")) >= MAX_TEMP_GROUPS:
+            if temp and sum(1 for g in groups if g.get("temp") and not g.get("slot")) >= MAX_TEMP_GROUPS:
                 raise ArtistGroupError(
                     f"임시 창은 {MAX_TEMP_GROUPS}개까지입니다. 안 쓰는 창을 비우거나 이름을 붙여 저장하세요.")
             clean = _auto_temp_name(groups) if temp else _clean_name(name)
@@ -246,6 +265,7 @@ class ArtistGroupStore:
             # ⚠️ 이름을 붙이는 것이 곧 **저장**이다(사용자 결정) - 표를 떼어 임시 창
             #    목록에서 빠지게 한다. 다시 임시로 만드는 길은 없다.
             group.pop("temp", None)
+            group.pop("slot", None)
             group["updated"] = int(time.time())
             self._write(groups)
             return {"group": group, "groups": groups}
@@ -257,6 +277,35 @@ class ArtistGroupStore:
             groups = [g for g in groups if g["id"] != group["id"]]
             self._write(groups)
             return {"groups": groups}
+
+    def toggle_link_slot(self, artist: Any) -> dict:
+        """결과 화면 작가 패널의 [임시] - 그 칸에 있으면 빼고 없으면 넣는다. 칸이 없으면 만든다.
+        `in_slot` = 누른 뒤 그 작가가 칸에 있는지."""
+        name = _clean_artist(artist)
+        if not name:
+            raise ArtistGroupError("artist is required")
+        with self._lock:
+            groups = self._read()
+            group = next((g for g in groups if g.get("slot") == LINK_SLOT), None)
+            if group is None:
+                if len(groups) >= MAX_GROUPS:
+                    raise ArtistGroupError(f"too many groups (max {MAX_GROUPS})")
+                now = int(time.time())
+                group = {"id": f"g_{uuid.uuid4().hex[:12]}", "name": _link_slot_name(groups), "items": [],
+                         "created": now, "updated": now, "temp": True, "slot": LINK_SLOT}
+                groups.append(group)
+            key = name.casefold()
+            if any(i["artist"].casefold() == key for i in group["items"]):
+                group["items"] = [i for i in group["items"] if i["artist"].casefold() != key]
+                in_slot = False
+            else:
+                if len(group["items"]) >= MAX_ITEMS_PER_GROUP:
+                    raise ArtistGroupError(f"group is full (max {MAX_ITEMS_PER_GROUP})")
+                group["items"].append({"artist": name})
+                in_slot = True
+            group["updated"] = int(time.time())
+            self._write(groups)
+            return {"group": group, "groups": groups, "in_slot": in_slot}
 
     def add(self, group_id: Any, items: Any) -> dict:
         """이미 있는 작가는 **자리를 지키고** 건너뛴다 - 복사해 오는 조작이 순서를

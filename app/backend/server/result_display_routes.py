@@ -420,6 +420,16 @@ def _with_current_wildcard_frozen_state(context: WebSessionContext, payload: Any
     return out
 
 
+def _linked_artist_fields(context: WebSessionContext, item) -> dict[str, Any]:
+    """[메인 랜덤 버튼 연결] 이 이 그림에 붙인 작가 - 결과 화면 작가 패널이 보이는 그림의 작가를 다룬다."""
+    if item is None:
+        return {}
+    try:
+        return context.result_store._history_linked_artist(item)
+    except Exception:
+        return {}
+
+
 def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str, Any]:
     item = context.result_store.latest_item
     metadata_payload = context.result_store.latest_metadata_payload if isinstance(context.result_store.latest_metadata_payload, dict) else {}
@@ -446,6 +456,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
     )
     can_enhance = bool(item and has_generation_params and (nai_mode or webui_mode))
     return {
+        **_linked_artist_fields(context, item),
         "id": "current",
         "source": "current",
         "path": rel_path,
@@ -510,6 +521,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
     image_url = f"/api/history/image/{item.history_id}" if item else f"/api/viewer/image/{quote(normalized_path)}"
     metadata_url = f"/api/history/meta/{item.history_id}" if item else f"/api/viewer/meta?path={quote(normalized_path, safe='')}"
     return {
+        **_linked_artist_fields(context, item),
         "id": f"saved:{normalized_path}",
         "source": "saved",
         "path": normalized_path,

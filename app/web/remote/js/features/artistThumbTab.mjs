@@ -59,6 +59,7 @@ export function createArtistThumbController({
   const remoteBtn = document.getElementById('artistThumbRemoteBtn');
   // Result 의 [아티스트 탭 연동됨](사용자 지시 2026-10-19) - 연결이 켜져 있고 리모컨 창이 닫혀 있을 때만.
   const linkPillEl = document.getElementById('artistLinkPill');
+  const linkPanelEl = document.getElementById('artistLinkPanel');
   const seedPillEl = document.getElementById('seedLockPill');
   const groupsBtn = document.getElementById('artistThumbGroupsBtn');
   const selectBtn = document.getElementById('artistThumbSelectBtn');
@@ -2144,7 +2145,9 @@ export function createArtistThumbController({
     linkPillEl.hidden = !show;
     if (!show || !seedPillEl) return;
     // 시드 알약은 켜면 시드 번호만큼 길어진다 - 그 오른쪽 끝에 붙인다.
-    linkPillEl.style.left = `${seedPillEl.offsetLeft + seedPillEl.offsetWidth + 6}px`;
+    // 결과 화면 작가 패널이 떠 있으면 그 오른쪽으로 비켜 선다(사용자 지정 2026-11-03).
+    const panel = linkPanelEl && !linkPanelEl.hidden && linkPanelEl.offsetWidth > 0 ? linkPanelEl : seedPillEl;
+    linkPillEl.style.left = `${panel.offsetLeft + panel.offsetWidth + 6}px`;
   }
 
   function paintRandomTools() {
@@ -2228,6 +2231,35 @@ export function createArtistThumbController({
     if (Number.isFinite(weight) && !mixOn) setArtistWeight(weight);
   }
 
+  /** 서버가 알린 랜덤 도구(`artist_random_tools` - 결과 화면 작가 패널 [고정] · 다른 탭). 이 창의 토글과 저장 기준을
+   *  서버 값으로 맞춘다. ⚠️ 아직 안 보낸 칸(0.4초 대기 중)은 이 창 값을 지키고, 저장 기준만 서버 값으로 바꿔 다음 저장에
+   *  그대로 실리게 한다. 붙일 작가가 바뀌었으면 이 창도 그 작가를 고른다 - 안 그러면 다음 저장이 옛 작가로 되돌린다. */
+  function receiveRandomTools(tools) {
+    if (!tools || typeof tools !== 'object') return;
+    linkHint = Boolean(tools.main_link);
+    if (!randomToolsLoaded) { syncLinkPill(); return; }
+    let saved = {};
+    try { saved = JSON.parse(randomToolsSaved || '{}'); } catch (_) { saved = {}; }
+    const local = randomToolsPayload();
+    const pending = new Set(Object.keys(local).filter(key => JSON.stringify(local[key]) !== JSON.stringify(saved[key])));
+    for (const key of ['gen_pick', 'random_weight', 'main_link', 'pin_hold', 'weight_start', 'weight_end', 'weight_step',
+      'pool', 'focus']) {
+      if (!pending.has(key) && key in tools) randomTools[key] = tools[key];
+    }
+    randomToolsSaved = JSON.stringify(Object.fromEntries(Object.keys(local).map(key => [key, key in tools ? tools[key] : saved[key]])));
+    paintRandomTools();
+    if (mixOn) return;
+    const focus = String(tools.focus || '');
+    const nextWeight = Number(tools.weight);
+    if (focus && !pending.has('focus') && focus !== String(selected?.artist || '')) {
+      void focusRandomArtist({artist: focus, weight: nextWeight});
+    } else if (!pending.has('weight') && Number.isFinite(nextWeight)
+      && Math.abs(nextWeight - Number(local.weight)) > 1e-9) {
+      paintWeightControls(nextWeight);
+      syncPromptFormat();
+    }
+  }
+
   function bindLinkPill() {
     linkPillEl?.addEventListener('click', () => {
       // 리모컨을 다시 올리고, 닫혀 있으면 열고, 접혀 있으면 편다(requestArtistsTab 이 셋 다 한다).
@@ -2243,6 +2275,13 @@ export function createArtistThumbController({
       if (typeof ResizeObserver === 'function') new ResizeObserver(later).observe(seedPillEl);
       if (typeof MutationObserver === 'function') {
         new MutationObserver(later).observe(seedPillEl, {attributes: true, childList: true, characterData: true, subtree: true});
+      }
+      // 작가 패널이 뜨고 지거나 폭이 바뀌어도(이름 · 가중치) 옆자리를 따라간다.
+      if (linkPanelEl) {
+        if (typeof ResizeObserver === 'function') new ResizeObserver(later).observe(linkPanelEl);
+        if (typeof MutationObserver === 'function') {
+          new MutationObserver(later).observe(linkPanelEl, {attributes: true, attributeFilter: ['hidden', 'style']});
+        }
       }
     }
     // 앱을 켠 직후 - 창을 안 열어도 연결 상태를 안다(가벼운 조회 · 잠깐 뒤에).
@@ -3197,7 +3236,8 @@ export function createArtistThumbController({
   // 오래된 창을 알아서 지우지 않는다 - 작가가 든 창이 말없이 사라지면 안 된다.
   const TEMP_WINDOW_MAX = 5;
   const TEMP_FULL_MESSAGE = `임시 창은 ${TEMP_WINDOW_MAX}개까지입니다. 안 쓰는 창을 비우거나 ✎ 로 이름을 붙여 저장하세요.`;
-  const tempCount = store => store.all().filter(g => store.isTemp(g.id)).length;
+  // 결과 화면 작가 패널의 `랜덤 임시` 칸(slot)은 임시 창 5개에 세지 않는다(서버 `MAX_TEMP_GROUPS` 와 같은 규칙).
+  const tempCount = store => store.all().filter(g => store.isTemp(g.id) && !g.slot).length;
 
   /** 이름 없는 그룹 하나 + 그 창. ⚠️ 이름은 **서버가** 붙인다(`임시 창 N`) -
    *  화면에서 번호를 세면 두 창이 같은 이름을 갖는 경합이 생긴다. */
@@ -3276,7 +3316,7 @@ export function createArtistThumbController({
     return `
         <div class="artist-thumb-group-label">임시 창에 올리기</div>
         ${rows}
-        ${tempNewButtonHtml(temps.length)}`;
+        ${tempNewButtonHtml(temps.filter(g => !g.slot).length)}`;
   }
 
   /** [+ 새 임시 창] - 다 찼으면 흐리게 + 오른쪽에 `최대 5`.
@@ -3346,7 +3386,7 @@ export function createArtistThumbController({
     menu.setAttribute('role', 'menu');
     menu.innerHTML = `
       <div class="result-context-group">
-        ${tempNewButtonHtml(temps.length)}
+        ${tempNewButtonHtml(temps.filter(g => !g.slot).length)}
         ${tempRows}
       </div>
       ${groupMenuHtml(false)}`;
@@ -4077,6 +4117,8 @@ export function createArtistThumbController({
     syncPromptFormat,
     /** 메인 Random 이 [메인 랜덤 버튼 연결] + [생성 버튼 → 랜덤 아티스트] 로 뽑은 작가를 고른다. */
     focusRandomArtist,
+    /** 서버가 알린 랜덤 도구(결과 화면 작가 패널 [고정] · 다른 탭) - 토글 · 고른 작가를 맞춘다. */
+    receiveRandomTools,
     /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
      *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도
      *  NAI 의 모델 목록·썸네일이 그대로 남았다(Codex #5).

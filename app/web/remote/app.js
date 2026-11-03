@@ -1643,8 +1643,14 @@ import('./js/features/eventMapStaging.mjs?v=20261102-stc3')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Wire-Flow · 조건부 와일드카드(사용자 지시 2026-10-31) - 노드 그래프 창 + 모드. 모드가 켜지면 조건부 프롬프트 · E · S 가
 // 일시 해제되고 결과 가장자리에 W 가 뜬다(W 단추 · 상태 읽기 때문에 처음부터 싣는다 - 창은 처음 열 때 만든다).
+// ⛔ 아직 개발 중이라 임시로 막는다(사용자 지시 2026-11-03): 런처 줄(moduleLauncher.mjs)과 같은 개발 표식
+// localStorage 'naia.wireFlow.dev' = '1' 이 있을 때만 창 모듈을 읽는다. 없으면 wireFlowControl 은 null 그대로이고
+// 아래 쓰는 곳은 전부 ?. 라서 조용히 빠진다. 공개할 때 이 막음을 걷는다.
 let wireFlowControl = null;
-const wireFlowReady = import('./js/features/wireFlowWindow.mjs?v=20261101-wf8')
+const WIRE_FLOW_DEV = (() => {
+  try { return window.localStorage?.getItem('naia.wireFlow.dev') === '1'; } catch { return false; }
+})();
+const wireFlowReady = !WIRE_FLOW_DEV ? Promise.resolve() : import('./js/features/wireFlowWindow.mjs?v=20261101-wf8')
   .then(({installWireFlow}) => {
     wireFlowControl = installWireFlow({
       document,

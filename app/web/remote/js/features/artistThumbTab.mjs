@@ -4126,6 +4126,8 @@ export function createArtistThumbController({
       await store.load().catch(() => {});
       return openGroupWindow(groupId);
     },
+    /** 결과 화면 작가 패널 [삽입] - 지금 모드의 작가 태그 서식(이 창과 같은 `formatArtistToken`). */
+    formatArtistToken: (artist, weight) => formatArtistToken(artist, weight, {withPrefix: true}),
     /** 결과 화면 작가 패널이 그룹을 바꿨다 - 그룹을 한 번이라도 연 탭이면 새로 읽어 열린 창이 따라온다. */
     reloadGroups() {
       if (groupsApi) void groupsApi.store.load().catch(() => {});

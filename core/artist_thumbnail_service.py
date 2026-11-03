@@ -734,6 +734,18 @@ class ArtistThumbnailService:
                 return tools
             return self._save_options_locked({"random_tools": changes}, internal=True)["random_tools"]
 
+    def set_random_weight(self, weight: Any) -> dict:
+        """작가 패널 손잡이 - 랜덤 작가 가중치(아티스트 창 손잡이와 같은 값)만 바꾼다. 고정 · 정책은 그대로
+        (사용자 지정 2026-11-03 - 바꾸면 고정하던 것을 바꿨다). 고정 중이면 고정 작가도 이 값을 쓴다. 돌려주는 값 = random_tools."""
+        try:
+            value = float(weight)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("weight must be a number") from exc
+        if not math.isfinite(value):
+            raise ValueError("weight must be a number")
+        with self._options_lock:
+            return self._save_options_locked({"random_tools": {"weight": value}}, internal=True)["random_tools"]
+
     def release_link_pin(self, artist: str = "") -> bool:
         """고정을 풀고 빌린 정책을 돌려준다(`artist` 를 주면 그 작가를 고정한 때만). 풀었으면 True."""
         with self._options_lock:

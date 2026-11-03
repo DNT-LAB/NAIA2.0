@@ -5,14 +5,16 @@
  * 다루는 작가 = **보이는 그림에 붙은 작가**(히스토리 `linked_artist`). Auto Gen 은 다음 컷을 미리 만들므로
  * '마지막으로 뽑힌 작가' 를 쓰면 엉뚱한 작가를 숨긴다.
  *
- *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [그룹 ▴]
+ *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [삽입] [그룹 ▴]
  *
- * - [× 가중치] = 누르면 위에 손잡이(휠 0.05씩). 바꾸면 **그 값으로 고정**한다(사용자 지정 2026-11-03).
+ * - [× 가중치] = 누르면 위에 손잡이(휠 0.01씩). 바꾸면 **랜덤 작가 가중치**(아티스트 창 손잡이)에 바로 반영한다 -
+ *   고정하지 않는다(사용자 지정 2026-11-03 · 처음엔 '그 값으로 고정' 이었다). 고정 중이면 고정 작가도 그 값을 쓴다.
  * - [고정] = 다음 Random 도 이 작가 · 이 가중치. [생성 버튼 → 랜덤 아티스트](상위 정책)를 서버가 **빌려** 끄고,
  *   풀면 돌려준다(`ArtistThumbnailService.link_pin`).
  * - [기억] = 패널 전용 그룹 한 칸(`임시 그룹`) - 와일드카드로 바로 쓰이고 재시작해도 남는다. 이름을 붙이면 저장.
  *   사람이 있으면 [그룹 ▴] 맨 위에 그 칸이 뜨고, 누르면 아티스트 그룹 창으로 연다.
  * - [숨김] = 제외 작가. 고정해 둔 작가를 숨기면 정책이 돌아온다.
+ * - [삽입] = 이 작가를 지금 가중치로 PE Prefix 맨 앞에(메인 랜덤 연결이 붙이는 자리). 이미 있으면 가중치만 바꾼다.
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
  * ⚠️ 상태는 서버가 주인이다 - 조작 응답과 `artist_random_tools` 알림으로만 그린다(다른 탭 · 아티스트 창과 같은 값).
  */
@@ -20,6 +22,7 @@ export function installArtistLinkPanel({
   document, fetch = window.fetch.bind(window), showToast, escHtml,
   openGroupWindow = null,          // (groupId) => 그 그룹을 아티스트 그룹 창으로 연다
   onGroupsChanged = null,          // () => 패널이 그룹을 바꿨다 - 열린 그룹 창이 새로 읽는다
+  onInsert = null,                 // ({artist, weight}) => PE Prefix 맨 앞에 넣는다(있으면 가중치만)
 }) {
   const el = document.getElementById('artistLinkPanel');
   const seedPill = document.getElementById('seedLockPill');
@@ -44,19 +47,19 @@ export function installArtistLinkPanel({
   menu.setAttribute('role', 'menu');
   el.after(menu);
 
-  // 가중치 손잡이 - 칩을 누르면 위에 뜬다. 바꾸면 잠깐 뒤 그 값으로 고정한다(휠은 손잡이 위에서만 받는다).
-  const WEIGHT_MIN = 0, WEIGHT_MAX = 2, WEIGHT_STEP = 0.05;
+  // 가중치 손잡이 - 칩을 누르면 위에 뜬다. 바꾸면 곧바로 랜덤 작가 가중치가 된다(휠은 손잡이 위에서만 받는다).
+  const WEIGHT_MIN = 0, WEIGHT_MAX = 2, WEIGHT_STEP = 0.01;
   const weightPop = document.createElement('div');
   weightPop.className = 'artist-link-weight';
   weightPop.hidden = true;
   weightPop.innerHTML = `
     <div class="alp-weight-head"><span class="alp-weight-who"></span><span class="alp-weight-value"></span></div>
     <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" aria-label="가중치">
-    <div class="alp-weight-foot">휠 = ${WEIGHT_STEP}씩 · 바꾸면 이 값으로 고정</div>`;
+    <div class="alp-weight-foot">휠 ${WEIGHT_STEP}씩 · 랜덤 가중치에 바로 반영</div>`;
   menu.after(weightPop);
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
-  let weightSaving = null;         // 도는 중인 가중치 고정(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
+  let weightSaving = null;         // 도는 중인 가중치 저장(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
   let weightTicket = 0;            // 버린 가중치 저장 표(연결이 꺼지면 오른다 - 이미 기다리는 저장도 멈춘다)
 
   const formatWeight = value => {
@@ -106,12 +109,14 @@ export function installArtistLinkPanel({
         <span class="alp-name">${esc(artist)}</span>
       </span>
       <button type="button" class="alp-weight${weightPop.hidden ? '' : ' is-open'}" data-alp="weight"
-        aria-expanded="${!weightPop.hidden}" title="가중치 조절 - 바꾸면 이 값으로 고정합니다">× ${esc(w)}</button>
+        aria-expanded="${!weightPop.hidden}" title="가중치 조절 - 바꾸면 랜덤 작가 가중치에 바로 반영합니다">× ${esc(w)}</button>
       <button type="button" class="alp-btn${pin ? ' is-on' : ''}" data-alp="pin" aria-pressed="${pin}" title="${esc(pinTitle)}">고정</button>
       <button type="button" class="alp-btn${slot?.has ? ' is-on' : ''}" data-alp="slot" aria-pressed="${Boolean(slot?.has)}"
         title="${esc(`${slot?.name || '임시 그룹'} 에${slot?.has ? '서 뺍니다' : ' 담습니다'} - 와일드카드로 쓰이고 재시작해도 남습니다. [그룹 ▴] 에서 열어 이름을 붙이면 저장됩니다.`)}">기억</button>
       <button type="button" class="alp-btn alp-ban${banned ? ' is-on' : ''}" data-alp="ban" aria-pressed="${Boolean(banned)}"
         title="${banned ? '제외 작가에서 뺍니다' : '제외 작가로 - 다음부터 뽑히지 않습니다'}">숨김</button>
+      <button type="button" class="alp-btn" data-alp="insert"
+        title="${esc(`Prefix 맨 앞에 × ${w} 로 넣습니다 - 이미 있으면 가중치만 바꿉니다`)}">삽입</button>
       <button type="button" class="alp-btn" data-alp="group" aria-haspopup="menu" aria-expanded="${!menu.hidden}" title="그룹에 담기">그룹 ▴</button>`;
     place();
   }
@@ -221,7 +226,7 @@ export function installArtistLinkPanel({
     weightRange.focus({preventScroll: true});
   }
 
-  /** 손잡이를 닫는다. `commit` = 대기 중인 값을 지금 고정한다(아니면 버린다). 돌려주는 값 = 도는 가중치 고정. */
+  /** 손잡이를 닫는다. `commit` = 대기 중인 값을 지금 보낸다(아니면 버린다). 돌려주는 값 = 도는 가중치 저장. */
   function closeWeight({commit = true} = {}) {
     if (!commit) weightTicket += 1;
     if (weightTimer) {
@@ -251,18 +256,16 @@ export function installArtistLinkPanel({
     weightRange.value = String(weight);
     paintWeight();
     if (weightTimer) clearTimeout(weightTimer);
-    weightTimer = setTimeout(() => { weightTimer = null; startWeightCommit(); }, 350);
+    weightTimer = setTimeout(() => { weightTimer = null; startWeightCommit(); }, 150);   // 휠 한 칸마다 쓰지 않게만
   }
 
-  // 바꾼 값으로 고정한다(고정 중이면 가중치만 바뀐다). 다른 조작이 도는 중이면 잠깐 뒤 다시.
+  // 바꾼 값을 랜덤 작가 가중치로 보낸다(고정은 건드리지 않는다). 다른 조작이 도는 중이면 끝난 뒤에.
   async function commitWeight(target) {
     const ticket = weightTicket;
     while (busy) await new Promise(resolve => setTimeout(resolve, 80));
-    if (ticket !== weightTicket) return;                // 기다리는 사이 연결이 꺼졌다 - 고정을 되살리지 않는다
-    if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 새 작가를 고정하지 않는다
-    const wasPinned = pinnedHere();
-    const data = await op('pin');
-    if (data && !wasPinned) showToast?.(`${artist} 를 × ${weightLabel()} 로 고정했습니다.`, 'info');
+    if (ticket !== weightTicket) return;                // 기다리는 사이 연결이 꺼졌다 - 보내지 않는다
+    if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 옛 손잡이 값은 버린다
+    await op('weight');
   }
 
   // 패널은 결과 뷰어(`.viewer`, draggable) 안에 산다 - 슬라이더 · 단추를 끌면 뷰어 끌기(→ 메타데이터 뷰어)가 시작된다.
@@ -313,6 +316,10 @@ export function installArtistLinkPanel({
       if (data?.slot) {
         showToast?.(data.slot.has ? `${data.slot.name} 에 기억했습니다(${data.slot.count}명).` : `${data.slot.name} 에서 뺐습니다.`, 'info');
       }
+      return;
+    }
+    if (action === 'insert') {
+      await onInsert?.({artist, weight: weightNumber()});
       return;
     }
     if (action === 'ban') {

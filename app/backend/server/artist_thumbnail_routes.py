@@ -647,7 +647,8 @@ def _main_random_artist_override(context: WebSessionContext):
 #  [메인 랜덤 버튼 연결] 이 켜져 있으면 결과 화면 왼쪽 아래에 늘 뜬다. 다루는 작가 = **보이는 그림에 붙은 작가**
 #  (히스토리 `linked_artist`). 조작 넷: [고정](빌린 정책 · `ArtistThumbnailService.link_pin`) · [임시](패널 전용
 #  그룹 한 칸 · `ArtistGroupStore.toggle_link_slot`) · [숨김](제외 작가) · [그룹](관심 작가 포함).
-LINK_PANEL_OPS = {"pin", "unpin", "ban", "unban", "slot", "group", "group_new"}
+#  `weight` = 가중치 손잡이 - 랜덤 작가 가중치만 바꾼다(고정하지 않는다). [삽입] 은 화면이 PE Prefix 를 고친다.
+LINK_PANEL_OPS = {"pin", "unpin", "weight", "ban", "unban", "slot", "group", "group_new"}
 
 
 def _link_panel_state(context: WebSessionContext, artist: str, mode: str = "") -> dict:
@@ -690,6 +691,9 @@ def _apply_link_panel_op(context: WebSessionContext, payload: dict) -> bool:
     service = artist_thumbnail_service(context)
     if op in ("pin", "unpin"):
         service.link_pin(artist, payload.get("weight"), pin=op == "pin")
+        return True
+    if op == "weight":
+        service.set_random_weight(payload.get("weight"))
         return True
     if op in ("ban", "unban"):
         service.set_banned(artist, op == "ban", return_state=False)

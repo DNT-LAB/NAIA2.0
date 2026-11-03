@@ -564,14 +564,16 @@ class ArtistThumbnailService:
     # ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
     #  [생성 버튼 -> 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 셋 다 다음 실행에도 남는다(사용자 결정).
     #  `pool` 은 리모컨이 보고 있던 목록 조건(모드 · 필터 · 이름 검색)이다 - 창을 닫아도 메인 Random 이 이것으로 뽑는다.
-    #  `pin_hold` = 결과 화면 작가 패널의 [고정] 이 [생성 버튼 -> 랜덤 아티스트] 를 **빌려** 꺼 두었다(사용자 지정
-    #  2026-11-03). 토글은 상위 정책이다 - 고정을 풀면 다시 켜고 정책을 돌려준다. 이번 실행에만 산다(다른 토글과 같이).
-    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold")
+    #  `link_pin` = 결과 화면 작가 패널의 [고정] 이 켜져 있다 - 메인 Random 이 뽑지 않고 `focus` 작가를 붙인다.
+    #  `pin_hold` = 그 [고정] 이 [생성 버튼 -> 랜덤 아티스트] 를 **빌려** 꺼 두었다(사용자 지정 2026-11-03). 토글은 상위
+    #  정책이다 - 고정을 풀면 다시 켜고 정책을 돌려준다. 둘 다 이번 실행에만 산다(다른 토글과 같이).
+    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
         "random_weight": False,
         "main_link": False,
         "pin_hold": False,
+        "link_pin": False,
         "weight_start": 0.85,
         "weight_end": 1.15,
         "weight_step": 0.05,
@@ -597,6 +599,7 @@ class ArtistThumbnailService:
             "random_weight": bool(source.get("random_weight", False)),
             "main_link": bool(source.get("main_link", False)),
             "pin_hold": bool(source.get("pin_hold", False)),
+            "link_pin": bool(source.get("link_pin", False)),
             "weight_start": number("weight_start", 0.0, 5.0),
             "weight_end": number("weight_end", 0.0, 5.0),
             "weight_step": number("weight_step", 0.01, 5.0),
@@ -606,7 +609,7 @@ class ArtistThumbnailService:
                 "filter": str(pool.get("filter") or "all").strip()[:200] or "all",
                 "query": str(pool.get("query") or "").strip()[:200],
             },
-            # 아티스트 창에서 지금 고른 작가 - [메인 랜덤 버튼 연결] 이 이 작가를 붙인다(창을 닫아도 마지막 것).
+            # 아티스트 창에서 지금 고른 작가 - 작가 패널 [고정] 중이면 [메인 랜덤 버튼 연결] 이 이 작가를 붙인다.
             "focus": str(source.get("focus") or "").strip()[:300],
         }
 
@@ -646,14 +649,15 @@ class ArtistThumbnailService:
     def main_random_token(self, api_mode: str) -> dict | None:
         """[메인 랜덤 버튼 연결] - 이번 랜덤 한 번에 얹을 작가 토큰(사용자 지정 2026-10-19).
 
-        - [생성 버튼 → 랜덤 아티스트] 끔 = 아티스트 창에서 **고른 작가**(`focus`). 가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다.
-        - 켬 = 저장된 목록에서 **무작위** 한 명 - 화면이 그 작가로 격자를 넘겨 고른다(`pick` · `page`).
-        꺼져 있거나 고른 작가 · 목록이 없으면 None. 아티스트 창이 닫혀 있어도 돈다(사용자 결정)."""
+        - 늘 저장된 목록에서 **무작위** 한 명 - 화면이 그 작가로 격자를 넘겨 고른다(`pick` · `page`).
+          [생성 버튼 → 랜덤 아티스트] 와 상관없다(사용자 지시 2026-11-03 - 그 토글은 창의 Generate 단추 몫이다).
+        - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`focus`).
+        가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다. 꺼져 있거나 목록이 비면 None. 창이 닫혀 있어도 돈다."""
         tools = self.random_tools()
         if not tools.get("main_link"):
             return None
         weight = self.draw_random_weight(tools)
-        if not tools.get("gen_pick"):
+        if tools.get("link_pin"):
             artist = str(tools.get("focus") or "").strip()
             if artist and artist in set(self._banned()):
                 return None                       # 제외 작가는 고른 작가여도 붙이지 않는다(작가 패널 [숨김])
@@ -692,9 +696,11 @@ class ArtistThumbnailService:
             return self._save_options_locked(options)
 
     # ── 결과 화면 작가 패널의 [고정](사용자 지정 2026-11-03) ──────────────────────
+    #  고정 = `link_pin` 켬 + 붙일 작가(`focus`) · 가중치. 메인 Random 은 고정이 없으면 늘 뽑는다.
     #  [생성 버튼 -> 랜덤 아티스트] 는 상위 정책이다. 켜져 있을 때 고정하면 끄고 `pin_hold` 로 '고정이 껐다' 를
     #  기억한다. 고정을 풀면(또는 그 작가를 숨기면 · 연결을 끄면) 다시 켜고 표를 지운다. 정책이 원래 꺼져 있었으면
-    #  붙일 작가만 바꾸고 토글은 건드리지 않는다. 사용자가 토글을 직접 누르면 정책을 되찾은 것이라 표만 지운다.
+    #  토글은 건드리지 않는다. 사용자가 토글을 직접 누르면 정책을 되찾은 것이라 표만 지우고, 켰으면 무작위를
+    #  원한 것이라 고정도 푼다.
     def link_pin(self, artist: str, weight: Any = None, pin: bool = True) -> dict:
         """고정(`pin`) = 다음 Random 도 이 작가 · 이 가중치. 해제 = 빌린 정책을 돌려준다. 돌려주는 값 = random_tools."""
         with self._options_lock:
@@ -707,7 +713,7 @@ class ArtistThumbnailService:
                 if name in set(self._banned()):
                     # 숨긴 작가는 붙이지 않는다(`main_random_token`) - 고정해도 아무것도 안 붙는 상태를 만들지 않는다.
                     raise ValueError("숨긴 작가는 고정할 수 없습니다 - [숨김] 을 먼저 푸세요.")
-                changes["focus"] = name
+                changes.update(focus=name, link_pin=True)
                 try:
                     value = float(weight)
                     if math.isfinite(value):
@@ -716,21 +722,27 @@ class ArtistThumbnailService:
                     pass
                 if tools.get("gen_pick"):
                     changes.update(gen_pick=False, pin_hold=True)
-            elif tools.get("pin_hold"):
-                changes.update(gen_pick=True, pin_hold=False)
+            else:
+                if tools.get("link_pin"):
+                    changes["link_pin"] = False
+                if tools.get("pin_hold"):
+                    changes.update(gen_pick=True, pin_hold=False)
             if not changes:
                 return tools
             return self._save_options_locked({"random_tools": changes}, internal=True)["random_tools"]
 
     def release_link_pin(self, artist: str = "") -> bool:
-        """빌린 정책을 돌려준다(`artist` 를 주면 그 작가를 고정한 때만). 돌려줬으면 True."""
+        """고정을 풀고 빌린 정책을 돌려준다(`artist` 를 주면 그 작가를 고정한 때만). 풀었으면 True."""
         with self._options_lock:
             tools = self.load_options().get("random_tools") or {}
-            if not tools.get("pin_hold"):
+            if not tools.get("link_pin") and not tools.get("pin_hold"):
                 return False
             if artist and str(tools.get("focus") or "").strip() != str(artist).strip():
                 return False
-            self._save_options_locked({"random_tools": {"gen_pick": True, "pin_hold": False}}, internal=True)
+            changes: dict = {"link_pin": False}
+            if tools.get("pin_hold"):
+                changes.update(gen_pick=True, pin_hold=False)
+            self._save_options_locked({"random_tools": changes}, internal=True)
             return True
 
     def _save_options_locked(self, options: dict, *, internal: bool = False) -> dict:
@@ -748,13 +760,19 @@ class ArtistThumbnailService:
                 incoming = dict(options["random_tools"])
                 previous = current.get("random_tools", {})
                 if not internal:
-                    incoming.pop("pin_hold", None)        # 표는 고정 길(`link_pin`)만 다룬다
-                    if previous.get("pin_hold"):
-                        if "gen_pick" in incoming:
-                            incoming["pin_hold"] = False  # 사용자가 토글을 직접 눌렀다 - 정책을 되찾았다
-                        elif "main_link" in incoming and not incoming["main_link"]:
-                            # 연결을 끄면 패널이 사라진다 - 보이지 않는 곳에 빌린 정책을 남기지 않는다
+                    incoming.pop("pin_hold", None)        # 두 표는 고정 길(`link_pin` 메서드)만 다룬다
+                    incoming.pop("link_pin", None)
+                    if "main_link" in incoming and not incoming["main_link"]:
+                        # 연결을 끄면 패널이 사라진다 - 보이지 않는 곳에 고정 · 빌린 정책을 남기지 않는다
+                        if previous.get("link_pin"):
+                            incoming["link_pin"] = False
+                        if previous.get("pin_hold"):
                             incoming.update(gen_pick=True, pin_hold=False)
+                    elif "gen_pick" in incoming:
+                        if previous.get("pin_hold"):
+                            incoming["pin_hold"] = False  # 사용자가 토글을 직접 눌렀다 - 정책을 되찾았다
+                        if incoming["gen_pick"] and previous.get("link_pin"):
+                            incoming["link_pin"] = False  # 무작위를 켰다 - 고정도 푼다
                 current["random_tools"] = self._normalize_random_tools({**previous, **incoming})
                 for key in self.RANDOM_TOOL_TOGGLES:
                     self._random_toggles[key] = bool(current["random_tools"].get(key))

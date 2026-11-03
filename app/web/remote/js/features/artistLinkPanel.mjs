@@ -21,7 +21,7 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   const esc = typeof escHtml === 'function' ? escHtml : (value => String(value ?? '').replace(/[&<>"']/g, c => (
     {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])));
 
-  let tools = null;          // 서버의 랜덤 도구(main_link · gen_pick · pin_hold · focus …)
+  let tools = null;          // 서버의 랜덤 도구(main_link · link_pin · pin_hold · focus …)
   let artist = '';           // 보이는 그림의 작가
   let weight = null;
   let info = null;           // GET /api/artist-thumb/link-panel 답(그림 · 숨김 · 임시 · 그룹)
@@ -41,9 +41,8 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
     return String(Math.round(n * 100) / 100);
   };
   const seedShown = () => Boolean(seedPill && seedPill.offsetParent !== null && seedPill.offsetWidth > 0);
-  const pinnedHere = () => Boolean(tools && artist && !tools.gen_pick && tools.focus === artist);
-  // 정책이 원래 꺼져 있다(빌린 것이 아니다) = 늘 고른 작가가 붙는다.
-  const policyFixed = () => pinnedHere() && !tools.pin_hold;
+  // 메인 Random 은 늘 뽑는다 - [고정](`link_pin`) 중일 때만 그 작가(`focus`)를 붙인다(사용자 지시 2026-11-03).
+  const pinnedHere = () => Boolean(tools && artist && tools.link_pin && tools.focus === artist);
 
   function place() {
     if (el.hidden || !seedPill) return;
@@ -68,9 +67,7 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
     const pin = pinnedHere();
     const slot = info?.artist === artist ? info.slot : null;
     const banned = info?.artist === artist && info.banned;
-    const pinTitle = policyFixed()
-      ? '리모컨의 [생성 버튼 → 랜덤 아티스트] 가 꺼져 있어 늘 이 작가가 붙습니다'
-      : (pin ? '고정 해제 - 다시 무작위로 뽑습니다' : '다음 Random 에도 이 작가를 붙입니다');
+    const pinTitle = pin ? '고정 해제 - 다시 무작위로 뽑습니다' : '다음 Random 에도 이 작가를 붙입니다';
     el.innerHTML = `
       <span class="alp-who" title="${esc(artist)}${w ? ` × ${esc(w)}` : ''}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
@@ -169,10 +166,6 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
       return;
     }
     if (action === 'pin') {
-      if (policyFixed()) {
-        showToast?.('리모컨의 [생성 버튼 → 랜덤 아티스트] 가 꺼져 있어 늘 이 작가가 붙습니다.', 'info');
-        return;
-      }
       const wasPinned = pinnedHere();
       const data = await op(wasPinned ? 'unpin' : 'pin');
       if (data) showToast?.(wasPinned ? '고정을 풀었습니다 - 다시 무작위로 뽑습니다.' : `다음 Random 에도 ${artist} 를 붙입니다.`, 'info');

@@ -2242,7 +2242,7 @@ export function createArtistThumbController({
     try { saved = JSON.parse(randomToolsSaved || '{}'); } catch (_) { saved = {}; }
     const local = randomToolsPayload();
     const pending = new Set(Object.keys(local).filter(key => JSON.stringify(local[key]) !== JSON.stringify(saved[key])));
-    for (const key of ['gen_pick', 'random_weight', 'main_link', 'pin_hold', 'weight_start', 'weight_end', 'weight_step',
+    for (const key of ['gen_pick', 'random_weight', 'main_link', 'pin_hold', 'link_pin', 'weight_start', 'weight_end', 'weight_step',
       'pool', 'focus']) {
       if (!pending.has(key) && key in tools) randomTools[key] = tools[key];
     }

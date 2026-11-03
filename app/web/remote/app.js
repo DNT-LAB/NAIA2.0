@@ -987,7 +987,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261103-alp1')
+import('./js/features/artistLinkPanel.mjs?v=20261103-alp2')
   .then(({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({document, fetch: window.fetch.bind(window), showToast, escHtml});
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
@@ -995,7 +995,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261103-alp1')
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp2')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

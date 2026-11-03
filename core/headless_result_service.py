@@ -631,6 +631,7 @@ class HeadlessResultStore:
             "image_url": f"/api/history/image/{item.history_id}",
             "metadata_url": f"/api/history/meta/{item.history_id}",
             **self._history_pipeline_ids(item),
+            **self._history_linked_artist(item),
         }
 
     def history_list(self, page: int = 0, per_page: int = 30) -> dict[str, Any]:
@@ -686,6 +687,7 @@ class HeadlessResultStore:
             metadata_json_safe=json_safe_generation_params,
         )
         payload.update(self._history_pipeline_ids(item))
+        payload.update(self._history_linked_artist(item))
         return payload
 
     def viewer_new_image_payload(self, item: HeadlessHistoryItem) -> dict[str, Any]:
@@ -723,6 +725,7 @@ class HeadlessResultStore:
             "remote_queue_source": str(params.get("_remote_queue_source") or ""),
             "prompt_run_id": str(params.get("prompt_run_id") or ""),
             "generation_request_id": str(params.get("generation_request_id") or ""),
+            **self._history_linked_artist(item),
         }
         for key, value in params.items():
             if str(key).startswith("artist_thumb_"):
@@ -749,6 +752,16 @@ class HeadlessResultStore:
             # (사용자 2026-10-18 · 히스토리가 메모리에 있는 이번 서버 세션만).
             "sequence_group_id": str(params.get("sequence_preset_group_id") or ""),
         }
+
+    @staticmethod
+    def _history_linked_artist(item: HeadlessHistoryItem) -> dict[str, Any]:
+        """[메인 랜덤 버튼 연결] 이 이 그림에 붙인 작가 - 결과 화면의 작가 패널이 **보이는 그림의** 작가를 다룬다.
+        붙인 작가가 없으면 빈 dict(키 없음)."""
+        params = item.generation_params if isinstance(item.generation_params, dict) else {}
+        linked = params.get("_linked_artist")
+        if not isinstance(linked, dict) or not str(linked.get("artist") or "").strip():
+            return {}
+        return {"linked_artist": {"artist": str(linked["artist"]), "weight": linked.get("weight")}}
 
     def _build_metadata_payload(self, item: HeadlessHistoryItem, image_meta: dict[str, Any]) -> dict[str, Any]:
         summary = {

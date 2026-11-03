@@ -315,6 +315,7 @@ class HeadlessGenerationService:
             # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 병합한다.
             # Direct requests record freshly evaluated negative-only operations.
             self._apply_conditional_negative(params, prompt_run_id)
+        self._capture_linked_artist(params, prompt_run_id)
         priority = self._priority(command)
         self._capture_queued_characters(params, api_mode, shared_capture, share_roll=share_roll)
         try:
@@ -1102,6 +1103,28 @@ class HeadlessGenerationService:
             "artist": None,
             "meta": None,
         }, name="web_headless")
+
+    def _capture_linked_artist(self, params: dict[str, Any], prompt_run_id: str) -> None:
+        """[메인 랜덤 버튼 연결] 이 이 프롬프트에 붙인 작가를 요청에 싣는다 - 히스토리가 그림마다 작가를 안다.
+
+        Auto Gen 은 다음 컷을 미리 만들므로 '마지막으로 뽑힌 작가' 는 보이는 그림의 작가가 아닐 수 있다.
+        그래서 요청을 만드는 지금 **같은 prompt run** 의 맥락에서만 옮긴다. 손으로 고쳐 작가를 지웠으면 싣지 않는다."""
+        params.pop("_linked_artist", None)       # 리플레이가 실어 온 옛 값은 이 요청의 것이 아니다
+        if not prompt_run_id:
+            return
+        ctx = getattr(self.context, "current_prompt_context", None)
+        meta = getattr(ctx, "metadata", None) if ctx is not None else None
+        if not isinstance(meta, dict) or str(meta.get("prompt_run_id") or "") != str(prompt_run_id):
+            return
+        linked = meta.get("linked_artist")
+        artist = str((linked or {}).get("artist") or "").strip() if isinstance(linked, dict) else ""
+        if not artist:
+            return
+        # 최종 서식이 괄호를 이스케이프한다(`nns \(sobchan\)`) - 역슬래시를 떼고 견준다.
+        prompt = str(params.get("input") or params.get("_raw_input") or "").replace("\\", "").casefold()
+        if artist.replace("\\", "").casefold() not in prompt:
+            return
+        params["_linked_artist"] = {"artist": artist, "weight": linked.get("weight")}
 
     def _prompt_run_id_for_command(self, command: dict[str, Any], params: dict[str, Any]) -> str:
         explicit = (

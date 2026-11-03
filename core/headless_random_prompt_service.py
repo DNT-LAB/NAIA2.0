@@ -139,6 +139,15 @@ def current_random_artist_token() -> str:
     return str(getattr(_RANDOM_ARTIST, "token", None) or "")
 
 
+def current_random_artist() -> dict[str, Any] | None:
+    """지금 붙이는 작가 {artist, weight} - PE 훅이 프롬프트 맥락에 적는다(히스토리가 그림마다 작가를 안다)."""
+    picked = getattr(_RANDOM_ARTIST, "picked", None)
+    artist = str((picked or {}).get("artist") or "").strip() if isinstance(picked, dict) else ""
+    if not artist:
+        return None
+    return {"artist": artist, "weight": picked.get("weight")}
+
+
 class HeadlessRandomPromptService:
     """Generate Remote Web random prompts without RemoteBridge or Qt widgets."""
 
@@ -269,11 +278,14 @@ class HeadlessRandomPromptService:
             yield None
             return
         previous = getattr(_RANDOM_ARTIST, "token", None)
+        previous_picked = getattr(_RANDOM_ARTIST, "picked", None)
         _RANDOM_ARTIST.token = token
+        _RANDOM_ARTIST.picked = picked
         try:
             yield picked
         finally:
             _RANDOM_ARTIST.token = previous
+            _RANDOM_ARTIST.picked = previous_picked
 
     def _generate(
         self,

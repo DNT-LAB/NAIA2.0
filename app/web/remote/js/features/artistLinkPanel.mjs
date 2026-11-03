@@ -35,6 +35,7 @@ export function installArtistLinkPanel({
   let busy = false;
   // 보이는 그림이 막 바뀌었고 그 그림의 작가를 아직 모른다 - 그동안 단추는 옛 그림의 작가를 다루므로 막는다(Codex 리뷰 P1).
   let stale = false;
+  let assetGen = 0;                // 보이는 그림이 바뀔 때마다 오른다 - 기다린 클릭이 다른 그림에 걸리지 않게
   let refreshTimer = null;
 
   const menu = document.createElement('div');
@@ -56,6 +57,7 @@ export function installArtistLinkPanel({
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
   let weightSaving = null;         // 도는 중인 가중치 고정(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
+  let weightTicket = 0;            // 버린 가중치 저장 표(연결이 꺼지면 오른다 - 이미 기다리는 저장도 멈춘다)
 
   const formatWeight = value => {
     const n = Number(value);
@@ -221,6 +223,7 @@ export function installArtistLinkPanel({
 
   /** 손잡이를 닫는다. `commit` = 대기 중인 값을 지금 고정한다(아니면 버린다). 돌려주는 값 = 도는 가중치 고정. */
   function closeWeight({commit = true} = {}) {
+    if (!commit) weightTicket += 1;
     if (weightTimer) {
       clearTimeout(weightTimer);
       weightTimer = null;
@@ -253,7 +256,9 @@ export function installArtistLinkPanel({
 
   // 바꾼 값으로 고정한다(고정 중이면 가중치만 바뀐다). 다른 조작이 도는 중이면 잠깐 뒤 다시.
   async function commitWeight(target) {
+    const ticket = weightTicket;
     while (busy) await new Promise(resolve => setTimeout(resolve, 80));
+    if (ticket !== weightTicket) return;                // 기다리는 사이 연결이 꺼졌다 - 고정을 되살리지 않는다
     if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 새 작가를 고정하지 않는다
     const wasPinned = pinnedHere();
     const data = await op('pin');
@@ -274,8 +279,9 @@ export function installArtistLinkPanel({
       if (weightPop.hidden) openWeight(); else closeWeight();
       return;
     }
+    const gen = assetGen;
     await closeWeight();
-    if (stale) return;
+    if (stale || gen !== assetGen) return;             // 저장을 기다리는 사이 그림이 바뀌었다 - 새 그림의 작가에 걸지 않는다
     if (action === 'group') {
       if (menu.hidden) openMenu(); else closeMenu();
       return;
@@ -362,6 +368,7 @@ export function installArtistLinkPanel({
       const nextWeight = linked && Number.isFinite(Number(linked.weight)) ? Number(linked.weight) : null;
       if (stale) { stale = false; el.classList.remove('is-stale'); }
       if (next === artist && nextWeight === weight) return;
+      assetGen += 1;
       closeWeight();                                   // 손잡이로 바꾼 값은 옛 그림의 작가에 먼저 고정한다
       artist = next;
       weight = nextWeight;
@@ -372,6 +379,7 @@ export function installArtistLinkPanel({
     },
     /** 보이는 그림이 바뀌기 시작했다(그 그림의 작가는 곧 `setAsset` 으로 온다) - 그때까지 단추를 막는다. */
     markStale() {
+      assetGen += 1;
       stale = true;
       el.classList.add('is-stale');
       closeMenu();

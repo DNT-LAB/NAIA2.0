@@ -987,7 +987,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261103-alp4')
+import('./js/features/artistLinkPanel.mjs?v=20261103-alp5')
   .then(({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
@@ -5868,7 +5868,9 @@ async function refreshResultUnsavedActions() {
       renderResultUnsavedActions(null);
       return;
     }
-    renderResultUnsavedActions(await response.json());
+    const asset = await response.json();
+    if (requestId !== resultUnsavedActionRequestId) return;
+    renderResultUnsavedActions(asset);
   } catch (error) {
     if (requestId === resultUnsavedActionRequestId) renderResultUnsavedActions(null);
   }
@@ -5877,6 +5879,7 @@ async function refreshResultUnsavedActions() {
 function scheduleResultUnsavedActionRefresh(delay = 120) {
   // 보이는 그림이 바뀌었다 - 새 그림의 작가가 올 때까지 작가 패널 단추를 막는다(옛 그림의 작가를 숨기지 않게 · Codex 리뷰).
   artistLinkPanel?.markStale?.();
+  resultUnsavedActionRequestId += 1;                   // 도는 옛 조회는 버린다 - 옛 그림의 응답이 막을 먼저 풀지 않게
   if (resultUnsavedActionTimer) clearTimeout(resultUnsavedActionTimer);
   resultUnsavedActionTimer = setTimeout(() => {
     resultUnsavedActionTimer = null;

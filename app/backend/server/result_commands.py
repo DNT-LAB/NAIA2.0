@@ -173,7 +173,7 @@ def _enrich_img2img_source_prompt(
         or prompt_ctx.get("prompt")
         or gen_params.get("input")
     )
-    if has_prompt:
+    if has_prompt and gen_params.get("model"):
         return gen_params, prompt_ctx
     try:
         from utils.image_info import extract_embedded_metadata
@@ -182,6 +182,17 @@ def _enrich_img2img_source_prompt(
     except Exception:
         extracted = {}
     if extracted:
+        from core.nai_model_contract import nai_key_from_metadata
+
+        if not gen_params.get("model"):
+            model = nai_key_from_metadata(
+                extracted.get("model") or extracted.get("model_name"),
+                " ".join(str(extracted.get(key) or "") for key in ("Source", "source", "model_hash")),
+            )
+            if model:
+                gen_params["model"] = model
+        if has_prompt:
+            return gen_params, prompt_ctx
         prompt = str(extracted.get("prompt") or "")
         negative = str(extracted.get("negative") or extracted.get("uc") or "")
         if prompt:

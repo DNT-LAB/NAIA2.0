@@ -3353,7 +3353,49 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize image module panels', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261003-maskbg')
+// 인페인트 프롬프트 스왑(사용자 지정 2026-11-03) - 칩 줄 + 설정 창. 상태는 img2img 모듈 상태를 그대로 읽는다.
+let inpaintPromptSwap = null;
+const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261103-ips5')
+  .then(({createInpaintPromptSwap}) => {
+    inpaintPromptSwap = createInpaintPromptSwap({
+      document, window, escHtml, showToast,
+      loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign')
+        .then(module => module.createDraggablePanel),
+      getSession: () => {
+        const state = moduleStateCache.get('img2img');
+        return state && state.active ? state : null;
+      },
+      getPresets: () => lastPromptEngineeringState?.preset_summaries || [],
+      // 스왑이 덮는 것은 메인 · 네거티브뿐이다 - 그 대기분만 꺼내고, 캐릭터 칸 대기분은 지금 보낸다.
+      takePendingEdit: () => {
+        const pending = pendingModuleEdit;
+        if (!pending || pending.moduleId !== 'img2img') return null;
+        if (pending.key !== 'main_prompt' && pending.key !== 'negative_prompt') {
+          flushPendingModuleEdit('img2img');
+          return null;
+        }
+        discardPendingModuleEdit('img2img');
+        return pending;
+      },
+      restorePendingEdit: pending => {
+        if (!pending) return;
+        // 적용을 기다리는 사이 같은 칸을 더 쳤으면 그 글이 지금의 의사다 - 꺼내 둔 옛 글로 덮지 않는다.
+        const field = document.getElementById(pending.key === 'main_prompt' ? 'img2imgMainPrompt' : 'img2imgNegativePrompt');
+        if (field && field.value !== String(pending.value ?? '')) return;
+        sendPendingModuleEdit(pending);
+      },
+    });
+    // 최근 칩이 바뀌면 지금 떠 있는 두 자리를 다시 그린다.
+    inpaintPromptSwap.setOnRecentChange(() => {
+      inpaintPromptSwap.renderInto($('inpaintSwapRow'), virtualCharacterSession());
+      const state = moduleStateCache.get('img2img');
+      if (state && currentModuleId === 'img2img') img2imgPanel?.render?.(state);
+    });
+  })
+  .catch(error => {
+    console.error('Failed to initialize inpaint prompt swap', error);
+  });
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261103-ips1')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -3367,6 +3409,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261003-mask
       // V3 인페인트는 디노이징 미지원 → 강도 슬라이더 숨김(백엔드 img2img.strength 게이트와 동일 기준).
       hideInpaintStrength: () => naiModelBlocksReference(),
       isOpen: () => currentModuleId === 'img2img',
+      renderPromptSwap: state => inpaintPromptSwap?.rowHtml(state) || '',
     });
   })
   .catch(error => {
@@ -13311,6 +13354,7 @@ function onModuleState(m) {
   if (m.module_id === 'prompt_engineering') {
     lastPromptEngineeringState = m;
     syncPromptEngineeringPopups();
+    try { inpaintPromptSwap?.syncPresets(); } catch (_) {}
     // 리모컨의 빠른 수정도 같은 값을 비춘다 - 안 걸면 프리셋을 바꾼 뒤 옛 글에
     // 도장만 새로 찍혀 나간다.
     try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
@@ -13369,6 +13413,9 @@ function onModuleState(m) {
     renderCharacterQuickPanel();
     applyInpaintSessionLock();
     applyVirtualMainPrompt();
+    // 프롬프트 스왑 칩 줄. V5 캔버스는 왼쪽 메인 칸에, V4.5 팝업은 패널이 자기 메인 칸에 그린다.
+    inpaintPromptSwap?.noteState(m);
+    inpaintPromptSwap?.renderInto($('inpaintSwapRow'), virtualCharacterSession());
     // 캔버스에서 부르는 마스크 편집기는 img2img 패널의 상태를 본다. 팝업이 닫혀
     // 있어도 상태만은 최신으로 흘려 넣는다 - `isOpen` 가드가 DOM 은 안 건드린다.
     if (m.module_id !== currentModuleId) img2imgPanel?.render?.(m);

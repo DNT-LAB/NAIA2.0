@@ -265,6 +265,22 @@ export function installArtistLinkPanel({
     if (data && !wasPinned) showToast?.(`${artist} 를 × ${weightLabel()} 로 고정했습니다.`, 'info');
   }
 
+  // 패널은 결과 뷰어(`.viewer`, draggable) 안에 산다 - 슬라이더 · 단추를 끌면 뷰어 끌기(→ 메타데이터 뷰어)가 시작된다.
+  // 자식의 draggable="false" 로는 안 막힌다(dragstart 의 target 이 뷰어다). 누르는 동안만 감싼 끌기를 끈다.
+  const holdAncestorDrag = event => {
+    const host = event.currentTarget.parentElement?.closest('[draggable="true"]');
+    if (!host) return;
+    host.draggable = false;
+    const restore = () => {
+      host.draggable = true;
+      window.removeEventListener('pointerup', restore, true);
+      window.removeEventListener('pointercancel', restore, true);
+    };
+    window.addEventListener('pointerup', restore, true);
+    window.addEventListener('pointercancel', restore, true);
+  };
+  for (const node of [el, menu, weightPop]) node.addEventListener('pointerdown', holdAncestorDrag);
+
   weightRange.addEventListener('input', () => setWeight(weightRange.value));
   weightPop.addEventListener('wheel', event => {
     event.preventDefault();

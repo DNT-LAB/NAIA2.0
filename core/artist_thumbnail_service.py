@@ -651,18 +651,19 @@ class ArtistThumbnailService:
 
         - 늘 저장된 목록에서 **무작위** 한 명 - 화면이 그 작가로 격자를 넘겨 고른다(`pick` · `page`).
           [생성 버튼 → 랜덤 아티스트] 와 상관없다(사용자 지시 2026-11-03 - 그 토글은 창의 Generate 단추 몫이다).
-        - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`focus`).
-        가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다. 꺼져 있거나 목록이 비면 None. 창이 닫혀 있어도 돈다."""
+        - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`focus`) · 그 가중치(`weight` - [랜덤 가중치] 여도).
+        뽑을 때 가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다. 꺼져 있거나 목록이 비면 None. 창이 닫혀 있어도 돈다."""
         tools = self.random_tools()
         if not tools.get("main_link"):
             return None
-        weight = self.draw_random_weight(tools)
         if tools.get("link_pin"):
+            weight = tools["weight"]                # 고정 = 이 작가 · 이 가중치(패널 손잡이로 고친 값)
             artist = str(tools.get("focus") or "").strip()
             if artist and artist in set(self._banned()):
                 return None                       # 제외 작가는 고른 작가여도 붙이지 않는다(작가 패널 [숨김])
             token = self.format_artist_token(artist, weight, api_mode) if artist else ""
             return {"token": token, "artist": artist, "weight": weight, "pick": False} if token else None
+        weight = self.draw_random_weight(tools)
         pool = tools.get("pool") or {}
         item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""))
         if not item:

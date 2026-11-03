@@ -4119,6 +4119,16 @@ export function createArtistThumbController({
     focusRandomArtist,
     /** 서버가 알린 랜덤 도구(결과 화면 작가 패널 [고정] · 다른 탭) - 토글 · 고른 작가를 맞춘다. */
     receiveRandomTools,
+    /** 결과 화면 작가 패널 - 그룹 하나를 창으로 연다(패널이 서버에서 바꾼 것까지 새로 읽고). */
+    async openGroupWindow(groupId) {
+      const {store} = await ensureGroups();
+      await store.load().catch(() => {});
+      return openGroupWindow(groupId);
+    },
+    /** 결과 화면 작가 패널이 그룹을 바꿨다 - 그룹을 한 번이라도 연 탭이면 새로 읽어 열린 창이 따라온다. */
+    reloadGroups() {
+      if (groupsApi) void groupsApi.store.load().catch(() => {});
+    },
     /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
      *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도
      *  NAI 의 모델 목록·썸네일이 그대로 남았다(Codex #5).

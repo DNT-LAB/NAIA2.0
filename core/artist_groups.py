@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -34,11 +35,13 @@ MAX_GROUPS = 200
 # 화면(`artistThumbTab.mjs` TEMP_WINDOW_MAX)도 같은 수로 먼저 막는다 - 여기는 창이 둘일 때의 뒷문.
 # 이미 넘게 가진 사용자의 창은 그대로 둔다(새로 만드는 것만 막는다). 오래된 창을 알아서 지우지 않는다.
 MAX_TEMP_GROUPS = 5
-# 결과 화면 작가 패널의 [임시](사용자 지정 2026-11-03) - 임시 창과 **따로** 한 칸. 위 5개에 세지 않는다.
-# 이름이 늘 같아 와일드카드 주소(`__artist_group/랜덤 임시__`)도 같다. 이름을 붙이면(저장) 표가 떨어져
-# 일반 그룹이 되고, 다음 [임시] 에 빈 칸이 새로 생긴다.
+# 결과 화면 작가 패널의 [기억](사용자 지정 2026-11-03) - 임시 창과 **따로** 한 칸. 위 5개에 세지 않는다.
+# 이름이 늘 같아 와일드카드 주소(`__artist_group/임시 그룹__`)도 같다. 이름을 붙이면(저장) 표가 떨어져
+# 일반 그룹이 되고, 다음 [기억] 에 빈 칸이 새로 생긴다.
 LINK_SLOT = "link"
-LINK_SLOT_NAME = "랜덤 임시"
+LINK_SLOT_NAME = "임시 그룹"
+# 처음 이름(같은 날 [임시] 단추 시절). 그 이름 그대로인 칸은 읽을 때 새 이름으로 옮긴다 - 사용자가 붙인 이름이 아니다.
+_LEGACY_LINK_SLOT_NAME = re.compile(r"^랜덤 임시(?: \d+)?$")
 MAX_ITEMS_PER_GROUP = 2000
 MAX_NAME_LEN = 40
 MAX_ARTIST_LEN = 200
@@ -163,7 +166,11 @@ class ArtistGroupStore:
         groups = data.get("groups") if isinstance(data, dict) else None
         if not isinstance(groups, list):
             raise RuntimeError(f"artist groups file has no 'groups' list: {path}")
-        return [g for g in (self._normalize_group(raw) for raw in groups) if g]
+        normalized = [g for g in (self._normalize_group(raw) for raw in groups) if g]
+        for group in normalized:
+            if group.get("slot") == LINK_SLOT and _LEGACY_LINK_SLOT_NAME.match(group["name"]):
+                group["name"] = _link_slot_name([g for g in normalized if g is not group])
+        return normalized
 
     def _write(self, groups: list[dict]) -> None:
         path = self.path
@@ -279,7 +286,7 @@ class ArtistGroupStore:
             return {"groups": groups}
 
     def toggle_link_slot(self, artist: Any) -> dict:
-        """결과 화면 작가 패널의 [임시] - 그 칸에 있으면 빼고 없으면 넣는다. 칸이 없으면 만든다.
+        """결과 화면 작가 패널의 [기억] - 그 칸에 있으면 빼고 없으면 넣는다. 칸이 없으면 만든다.
         `in_slot` = 누른 뒤 그 작가가 칸에 있는지."""
         name = _clean_artist(artist)
         if not name:

@@ -5,16 +5,22 @@
  * 다루는 작가 = **보이는 그림에 붙은 작가**(히스토리 `linked_artist`). Auto Gen 은 다음 컷을 미리 만들므로
  * '마지막으로 뽑힌 작가' 를 쓰면 엉뚱한 작가를 숨긴다.
  *
- *   [그림 · 이름 × 가중치] [고정] [임시] [숨김] [그룹 ▴]
+ *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [그룹 ▴]
  *
- * - [고정] = 다음 Random 도 이 작가. [생성 버튼 → 랜덤 아티스트](상위 정책)를 서버가 **빌려** 끄고, 풀면 돌려준다
- *   (`ArtistThumbnailService.link_pin`). 정책이 원래 꺼져 있으면 늘 고정이라 단추는 켜진 채 말만 한다.
- * - [임시] = 패널 전용 그룹 한 칸(`랜덤 임시`) - 와일드카드로 바로 쓰이고 재시작해도 남는다. 이름을 붙이면 저장.
+ * - [× 가중치] = 누르면 위에 손잡이(휠 0.05씩). 바꾸면 **그 값으로 고정**한다(사용자 지정 2026-11-03).
+ * - [고정] = 다음 Random 도 이 작가 · 이 가중치. [생성 버튼 → 랜덤 아티스트](상위 정책)를 서버가 **빌려** 끄고,
+ *   풀면 돌려준다(`ArtistThumbnailService.link_pin`).
+ * - [기억] = 패널 전용 그룹 한 칸(`임시 그룹`) - 와일드카드로 바로 쓰이고 재시작해도 남는다. 이름을 붙이면 저장.
+ *   사람이 있으면 [그룹 ▴] 맨 위에 그 칸이 뜨고, 누르면 아티스트 그룹 창으로 연다.
  * - [숨김] = 제외 작가. 고정해 둔 작가를 숨기면 정책이 돌아온다.
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
  * ⚠️ 상태는 서버가 주인이다 - 조작 응답과 `artist_random_tools` 알림으로만 그린다(다른 탭 · 아티스트 창과 같은 값).
  */
-export function installArtistLinkPanel({document, fetch = window.fetch.bind(window), showToast, escHtml}) {
+export function installArtistLinkPanel({
+  document, fetch = window.fetch.bind(window), showToast, escHtml,
+  openGroupWindow = null,          // (groupId) => 그 그룹을 아티스트 그룹 창으로 연다
+  onGroupsChanged = null,          // () => 패널이 그룹을 바꿨다 - 열린 그룹 창이 새로 읽는다
+}) {
   const el = document.getElementById('artistLinkPanel');
   const seedPill = document.getElementById('seedLockPill');
   if (!el) return null;
@@ -35,6 +41,19 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   menu.setAttribute('role', 'menu');
   el.after(menu);
 
+  // 가중치 손잡이 - 칩을 누르면 위에 뜬다. 바꾸면 잠깐 뒤 그 값으로 고정한다(휠은 손잡이 위에서만 받는다).
+  const WEIGHT_MIN = 0, WEIGHT_MAX = 2, WEIGHT_STEP = 0.05;
+  const weightPop = document.createElement('div');
+  weightPop.className = 'artist-link-weight';
+  weightPop.hidden = true;
+  weightPop.innerHTML = `
+    <div class="alp-weight-head"><span class="alp-weight-who"></span><span class="alp-weight-value"></span></div>
+    <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" aria-label="가중치">
+    <div class="alp-weight-foot">휠 = ${WEIGHT_STEP}씩 · 바꾸면 이 값으로 고정</div>`;
+  menu.after(weightPop);
+  const weightRange = weightPop.querySelector('input');
+  let weightTimer = null;
+
   const formatWeight = value => {
     const n = Number(value);
     if (!Number.isFinite(n) || Math.abs(n - 1) < 1e-9) return '';
@@ -43,6 +62,8 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   const seedShown = () => Boolean(seedPill && seedPill.offsetParent !== null && seedPill.offsetWidth > 0);
   // 메인 Random 은 늘 뽑는다 - [고정](`link_pin`) 중일 때만 그 작가(`focus`)를 붙인다(사용자 지시 2026-11-03).
   const pinnedHere = () => Boolean(tools && artist && tools.link_pin && tools.focus === artist);
+  const weightNumber = () => (Number.isFinite(Number(weight)) && weight !== null ? Number(weight) : 1);
+  const weightLabel = () => formatWeight(weightNumber()) || '1';
 
   function place() {
     if (el.hidden || !seedPill) return;
@@ -50,33 +71,40 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
     if (!menu.hidden) {
       menu.style.left = `${el.offsetLeft}px`;
     }
+    if (!weightPop.hidden) {
+      const chip = el.querySelector('[data-alp="weight"]');
+      weightPop.style.left = `${el.offsetLeft + (chip ? chip.offsetLeft : 0)}px`;
+    }
   }
 
   function render() {
     const show = Boolean(tools?.main_link) && seedShown();
     el.hidden = !show;
-    if (!show) { closeMenu(); return; }
+    if (!show) { closeMenu(); closeWeight(); return; }
     if (!artist) {
       el.innerHTML = '<span class="alp-empty" title="이 그림은 메인 Random 이 작가를 붙이지 않았습니다">붙은 작가 없음</span>';
       closeMenu();
+      closeWeight();
       place();
       return;
     }
-    const w = formatWeight(weight);
+    const w = weightLabel();
     const image = info?.artist === artist ? info.image_url : '';
     const pin = pinnedHere();
     const slot = info?.artist === artist ? info.slot : null;
     const banned = info?.artist === artist && info.banned;
     const pinTitle = pin ? '고정 해제 - 다시 무작위로 뽑습니다' : '다음 Random 에도 이 작가를 붙입니다';
     el.innerHTML = `
-      <span class="alp-who" title="${esc(artist)}${w ? ` × ${esc(w)}` : ''}">
+      <span class="alp-who" title="${esc(artist)} × ${esc(w)}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
     : `<span class="alp-thumb alp-thumb-blank" aria-hidden="true">${esc(artist.slice(0, 1).toUpperCase())}</span>`}
-        <span class="alp-name">${esc(artist)}</span>${w ? `<span class="alp-weight">× ${esc(w)}</span>` : ''}
+        <span class="alp-name">${esc(artist)}</span>
       </span>
+      <button type="button" class="alp-weight${weightPop.hidden ? '' : ' is-open'}" data-alp="weight"
+        aria-expanded="${!weightPop.hidden}" title="가중치 조절 - 바꾸면 이 값으로 고정합니다">× ${esc(w)}</button>
       <button type="button" class="alp-btn${pin ? ' is-on' : ''}" data-alp="pin" aria-pressed="${pin}" title="${esc(pinTitle)}">고정</button>
       <button type="button" class="alp-btn${slot?.has ? ' is-on' : ''}" data-alp="slot" aria-pressed="${Boolean(slot?.has)}"
-        title="${esc(`${slot?.name || '랜덤 임시'} 에 ${slot?.has ? '서 뺍니다' : '담습니다'} - 와일드카드로 쓰이고 재시작해도 남습니다. 그룹 창에서 이름을 붙이면 저장됩니다.`)}">임시</button>
+        title="${esc(`${slot?.name || '임시 그룹'} 에${slot?.has ? '서 뺍니다' : ' 담습니다'} - 와일드카드로 쓰이고 재시작해도 남습니다. [그룹 ▴] 에서 열어 이름을 붙이면 저장됩니다.`)}">기억</button>
       <button type="button" class="alp-btn alp-ban${banned ? ' is-on' : ''}" data-alp="ban" aria-pressed="${Boolean(banned)}"
         title="${banned ? '제외 작가에서 뺍니다' : '제외 작가로 - 다음부터 뽑히지 않습니다'}">숨김</button>
       <button type="button" class="alp-btn" data-alp="group" aria-haspopup="menu" aria-expanded="${!menu.hidden}" title="그룹에 담기">그룹 ▴</button>`;
@@ -119,6 +147,7 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
       if (data.artist === artist) info = data;
       render();
       if (!menu.hidden) renderMenu();
+      if (name === 'slot' || name === 'group' || name === 'group_new') onGroupsChanged?.();
       return data;
     } catch (error) {
       showToast?.(error.message || '작가 패널 조작에 실패했습니다.', 'error');
@@ -132,7 +161,14 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   // ── 그룹 메뉴 ──────────────────────────────────────────────────────────
   function renderMenu() {
     const groups = info?.artist === artist ? (info.groups || []) : [];
-    menu.innerHTML = `
+    const slot = info?.artist === artist ? info.slot : null;
+    // [기억] 칸에 사람이 있으면 맨 위에 - 누르면 그 칸을 아티스트 그룹 창으로 연다(넣고 빼기는 [기억] 단추).
+    const slotRow = slot?.id && slot.count > 0 ? `
+      <button type="button" class="alp-menu-item alp-menu-slot" data-alp-slot-open="${esc(slot.id)}" role="menuitem"
+        title="${esc(slot.name)} 창을 엽니다"><span class="alp-check" aria-hidden="true">${slot.has ? '✓' : ''}</span>
+        <span>${esc(slot.name)}</span><span class="alp-menu-count">${Number(slot.count)}명 ↗</span></button>
+      <div class="alp-menu-sep" role="separator"></div>` : '';
+    menu.innerHTML = `${slotRow}
       ${groups.map(g => `
         <button type="button" class="alp-menu-item${g.has ? ' is-on' : ''}" data-alp-group="${esc(g.id)}" role="menuitemcheckbox"
           aria-checked="${Boolean(g.has)}"><span class="alp-check" aria-hidden="true">${g.has ? '✓' : ''}</span><span>${esc(g.name)}</span></button>`).join('')}
@@ -157,10 +193,69 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
     el.querySelector('[data-alp="group"]')?.setAttribute('aria-expanded', 'false');
   }
 
+  // ── 가중치 손잡이 ──────────────────────────────────────────────────────
+  function paintWeight() {
+    const w = weightLabel();
+    const chip = el.querySelector('[data-alp="weight"]');
+    if (chip) chip.textContent = `× ${w}`;
+    weightPop.querySelector('.alp-weight-who').textContent = artist;
+    weightPop.querySelector('.alp-weight-value').textContent = weightNumber().toFixed(2);
+  }
+
+  function openWeight() {
+    closeMenu();
+    weightRange.value = String(weightNumber());
+    weightPop.hidden = false;
+    paintWeight();
+    render();
+    weightRange.focus({preventScroll: true});
+  }
+
+  function closeWeight() {
+    if (weightPop.hidden) return;
+    weightPop.hidden = true;
+    el.querySelector('[data-alp="weight"]')?.classList.remove('is-open');
+    el.querySelector('[data-alp="weight"]')?.setAttribute('aria-expanded', 'false');
+    if (weightTimer) { clearTimeout(weightTimer); weightTimer = null; void commitWeight(); }
+  }
+
+  function setWeight(value) {
+    const n = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, Math.round(Number(value) / WEIGHT_STEP) * WEIGHT_STEP));
+    if (!Number.isFinite(n)) return;
+    weight = Math.round(n * 100) / 100;
+    weightRange.value = String(weight);
+    paintWeight();
+    if (weightTimer) clearTimeout(weightTimer);
+    weightTimer = setTimeout(() => { weightTimer = null; void commitWeight(); }, 350);
+  }
+
+  // 바꾼 값으로 고정한다(고정 중이면 가중치만 바뀐다). 다른 조작이 도는 중이면 잠깐 뒤 다시.
+  async function commitWeight(target = artist) {
+    if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 새 작가를 고정하지 않는다
+    if (busy) {
+      weightTimer = setTimeout(() => { weightTimer = null; void commitWeight(target); }, 200);
+      return;
+    }
+    const wasPinned = pinnedHere();
+    const data = await op('pin');
+    if (data && !wasPinned) showToast?.(`${artist} 를 × ${weightLabel()} 로 고정했습니다.`, 'info');
+  }
+
+  weightRange.addEventListener('input', () => setWeight(weightRange.value));
+  weightPop.addEventListener('wheel', event => {
+    event.preventDefault();
+    setWeight(weightNumber() + (event.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP));
+  }, {passive: false});
+
   el.addEventListener('click', async event => {
     const button = event.target.closest('[data-alp]');
     if (!button) return;
     const action = button.dataset.alp;
+    if (action === 'weight') {
+      if (weightPop.hidden) openWeight(); else closeWeight();
+      return;
+    }
+    closeWeight();
     if (action === 'group') {
       if (menu.hidden) openMenu(); else closeMenu();
       return;
@@ -174,7 +269,7 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
     if (action === 'slot') {
       const data = await op('slot');
       if (data?.slot) {
-        showToast?.(data.slot.has ? `${data.slot.name} 에 담았습니다(${data.slot.count}명).` : `${data.slot.name} 에서 뺐습니다.`, 'info');
+        showToast?.(data.slot.has ? `${data.slot.name} 에 기억했습니다(${data.slot.count}명).` : `${data.slot.name} 에서 뺐습니다.`, 'info');
       }
       return;
     }
@@ -186,6 +281,12 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   });
 
   menu.addEventListener('click', async event => {
+    const slotOpen = event.target.closest('[data-alp-slot-open]');
+    if (slotOpen) {
+      closeMenu();
+      if (openGroupWindow) await openGroupWindow(slotOpen.dataset.alpSlotOpen);
+      return;
+    }
     const item = event.target.closest('[data-alp-group]');
     if (!item) return;
     const group = (info?.groups || []).find(g => g.id === item.dataset.alpGroup);
@@ -206,11 +307,14 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
   });
 
   document.addEventListener('pointerdown', event => {
-    if (menu.hidden || menu.contains(event.target) || el.contains(event.target)) return;
-    closeMenu();
+    if (el.contains(event.target)) return;
+    if (!menu.hidden && !menu.contains(event.target)) closeMenu();
+    if (!weightPop.hidden && !weightPop.contains(event.target)) closeWeight();
   }, true);
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && !menu.hidden) { closeMenu(); event.stopPropagation(); }
+    if (event.key !== 'Escape') return;
+    if (!menu.hidden) { closeMenu(); event.stopPropagation(); }
+    if (!weightPop.hidden) { closeWeight(); event.stopPropagation(); }
   }, true);
 
   // 시드 알약 폭이 바뀌면(고정 켜고 끔 · 시드 번호) 옆자리를 따라간다 - [아티스트 탭 연동됨] 알약과 같은 방식.
@@ -235,6 +339,7 @@ export function installArtistLinkPanel({document, fetch = window.fetch.bind(wind
       const next = String(linked?.artist || '').trim();
       const nextWeight = linked && Number.isFinite(Number(linked.weight)) ? Number(linked.weight) : null;
       if (next === artist && nextWeight === weight) return;
+      closeWeight();                                   // 손잡이로 바꾼 값은 옛 그림의 작가에 먼저 고정한다
       artist = next;
       weight = nextWeight;
       info = null;

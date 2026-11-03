@@ -987,15 +987,20 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261103-alp2')
+import('./js/features/artistLinkPanel.mjs?v=20261103-alp3')
   .then(({installArtistLinkPanel}) => {
-    artistLinkPanel = installArtistLinkPanel({document, fetch: window.fetch.bind(window), showToast, escHtml});
+    artistLinkPanel = installArtistLinkPanel({
+      document, fetch: window.fetch.bind(window), showToast, escHtml,
+      // [그룹 ▴] 의 임시 그룹 줄 - 아티스트 그룹 창으로 연다 · 패널이 그룹을 바꾸면 열린 그룹 창이 새로 읽는다.
+      openGroupWindow: groupId => artistThumbReady.then(() => artistThumbControl?.openGroupWindow?.(groupId)),
+      onGroupsChanged: () => artistThumbControl?.reloadGroups?.(),
+    });
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
   })
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp2')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp3')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

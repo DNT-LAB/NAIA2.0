@@ -21257,6 +21257,9 @@ body.detached-module .mod-grid-3 {
 }
 .artist-link-panel[hidden] { display: none; }
 .artist-link-panel.is-busy { opacity: 0.7; }
+.artist-link-panel.is-stale { opacity: 0.55; }
+.artist-link-panel.is-stale .alp-btn,
+.artist-link-panel.is-stale .alp-weight { cursor: progress; }
 .artist-link-panel .alp-empty { padding: 0 8px; color: rgba(243,238,219,0.6); }
 .artist-link-panel .alp-who { display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding-right: 4px; }
 .artist-link-panel .alp-thumb {

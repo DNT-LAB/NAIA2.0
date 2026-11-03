@@ -307,15 +307,20 @@ class HeadlessGenerationService:
                 and nai_model_spec is not None and not nai_model_spec.uses_v4_payload):
             return HeadlessGenerationDispatch(None, api_mode, "캐릭터 슬롯을 지원하는 NAI 모델을 선택해 주세요.")
         base_negative = str(params.get("negative_prompt") or "")
-        prompt_run_id = self._prompt_run_id_for_command(command, params)
-        if not prompt_run_id:
-            prompt_run_id = self._create_direct_prompt_run(command, params, source_row)
-        if prompt_run_id:
-            params["prompt_run_id"] = prompt_run_id
-            # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 병합한다.
-            # Direct requests record freshly evaluated negative-only operations.
-            self._apply_conditional_negative(params, prompt_run_id)
-        self._capture_linked_artist(params, prompt_run_id)
+        # 프롬프트 런 판정과 작가 기록은 current_prompt_context 를 읽는다 - Auto Gen 프리페치가 그것을 잠깐 바꿔 두는
+        # 구간과 겹치면 다음 컷의 맥락을 읽어 이 그림의 기록을 잃는다(Codex 리뷰). 위 전개와 같은 잠금으로 묶는다.
+        from core.headless_random_prompt_service import pipeline_swap_lock
+
+        with pipeline_swap_lock(self.context):
+            prompt_run_id = self._prompt_run_id_for_command(command, params)
+            if not prompt_run_id:
+                prompt_run_id = self._create_direct_prompt_run(command, params, source_row)
+            if prompt_run_id:
+                params["prompt_run_id"] = prompt_run_id
+                # 조건부 규칙(neg 타겟)이 이 프롬프트 런에 기록한 네거티브 조작을 병합한다.
+                # Direct requests record freshly evaluated negative-only operations.
+                self._apply_conditional_negative(params, prompt_run_id)
+            self._capture_linked_artist(params, prompt_run_id)
         priority = self._priority(command)
         self._capture_queued_characters(params, api_mode, shared_capture, share_roll=share_roll)
         try:

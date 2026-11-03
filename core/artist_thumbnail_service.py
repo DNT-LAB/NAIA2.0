@@ -653,7 +653,9 @@ class ArtistThumbnailService:
           [생성 버튼 → 랜덤 아티스트] 와 상관없다(사용자 지시 2026-11-03 - 그 토글은 창의 Generate 단추 몫이다).
         - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`focus`) · 그 가중치(`weight` - [랜덤 가중치] 여도).
         뽑을 때 가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다. 꺼져 있거나 목록이 비면 None. 창이 닫혀 있어도 돈다."""
-        tools = self.random_tools()
+        # 고정 표(런타임)와 작가 · 가중치(파일)를 한 시점에서 읽는다 - 저장은 표를 먼저 바꾸고 파일을 쓴다(Codex 리뷰).
+        with self._options_lock:
+            tools = self.random_tools()
         if not tools.get("main_link"):
             return None
         if tools.get("link_pin"):

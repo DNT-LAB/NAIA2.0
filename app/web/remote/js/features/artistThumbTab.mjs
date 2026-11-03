@@ -2252,7 +2252,8 @@ export function createArtistThumbController({
     const focus = String(tools.focus || '');
     const nextWeight = Number(tools.weight);
     if (focus && !pending.has('focus') && focus !== String(selected?.artist || '')) {
-      void focusRandomArtist({artist: focus, weight: nextWeight});
+      // 아직 안 보낸 가중치 손질은 지킨다 - 작가만 따라간다(Codex 리뷰).
+      void focusRandomArtist({artist: focus, weight: pending.has('weight') ? Number(local.weight) : nextWeight});
     } else if (!pending.has('weight') && Number.isFinite(nextWeight)
       && Math.abs(nextWeight - Number(local.weight)) > 1e-9) {
       paintWeightControls(nextWeight);

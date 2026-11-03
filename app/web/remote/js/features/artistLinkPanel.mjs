@@ -33,6 +33,8 @@ export function installArtistLinkPanel({
   let info = null;           // GET /api/artist-thumb/link-panel 답(그림 · 숨김 · 임시 · 그룹)
   let infoSeq = 0;
   let busy = false;
+  // 보이는 그림이 막 바뀌었고 그 그림의 작가를 아직 모른다 - 그동안 단추는 옛 그림의 작가를 다루므로 막는다(Codex 리뷰 P1).
+  let stale = false;
   let refreshTimer = null;
 
   const menu = document.createElement('div');
@@ -53,6 +55,7 @@ export function installArtistLinkPanel({
   menu.after(weightPop);
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
+  let weightSaving = null;         // 도는 중인 가중치 고정(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
 
   const formatWeight = value => {
     const n = Number(value);
@@ -80,7 +83,7 @@ export function installArtistLinkPanel({
   function render() {
     const show = Boolean(tools?.main_link) && seedShown();
     el.hidden = !show;
-    if (!show) { closeMenu(); closeWeight(); return; }
+    if (!show) { closeMenu(); closeWeight({commit: false}); return; }
     if (!artist) {
       el.innerHTML = '<span class="alp-empty" title="이 그림은 메인 Random 이 작가를 붙이지 않았습니다">붙은 작가 없음</span>';
       closeMenu();
@@ -134,6 +137,7 @@ export function installArtistLinkPanel({
     if (busy || !artist) return null;
     busy = true;
     el.classList.add('is-busy');
+    const target = artist;
     try {
       const res = await fetch('/api/artist-thumb/link-panel', {
         method: 'POST',
@@ -142,9 +146,13 @@ export function installArtistLinkPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      infoSeq += 1;                                    // 늦게 온 옛 조회가 덮지 않게
       if (data.tools) tools = data.tools;
-      if (data.artist === artist) info = data;
+      if (artist === target) {
+        infoSeq += 1;                                  // 늦게 온 옛 조회가 덮지 않게
+        if (data.artist === artist) info = data;
+      } else {
+        scheduleRefresh();                             // 그사이 그림이 바뀌었다 - 그 그림의 조회는 살려 두고 새로 받는다
+      }
       render();
       if (!menu.hidden) renderMenu();
       if (name === 'slot' || name === 'group' || name === 'group_new') onGroupsChanged?.();
@@ -211,12 +219,26 @@ export function installArtistLinkPanel({
     weightRange.focus({preventScroll: true});
   }
 
-  function closeWeight() {
-    if (weightPop.hidden) return;
-    weightPop.hidden = true;
-    el.querySelector('[data-alp="weight"]')?.classList.remove('is-open');
-    el.querySelector('[data-alp="weight"]')?.setAttribute('aria-expanded', 'false');
-    if (weightTimer) { clearTimeout(weightTimer); weightTimer = null; void commitWeight(); }
+  /** 손잡이를 닫는다. `commit` = 대기 중인 값을 지금 고정한다(아니면 버린다). 돌려주는 값 = 도는 가중치 고정. */
+  function closeWeight({commit = true} = {}) {
+    if (weightTimer) {
+      clearTimeout(weightTimer);
+      weightTimer = null;
+      if (commit) startWeightCommit();
+    }
+    if (!weightPop.hidden) {
+      weightPop.hidden = true;
+      el.querySelector('[data-alp="weight"]')?.classList.remove('is-open');
+      el.querySelector('[data-alp="weight"]')?.setAttribute('aria-expanded', 'false');
+    }
+    return weightSaving || Promise.resolve();
+  }
+
+  function startWeightCommit() {
+    const saving = commitWeight(artist);
+    weightSaving = saving;
+    saving.finally(() => { if (weightSaving === saving) weightSaving = null; });
+    return saving;
   }
 
   function setWeight(value) {
@@ -226,16 +248,13 @@ export function installArtistLinkPanel({
     weightRange.value = String(weight);
     paintWeight();
     if (weightTimer) clearTimeout(weightTimer);
-    weightTimer = setTimeout(() => { weightTimer = null; void commitWeight(); }, 350);
+    weightTimer = setTimeout(() => { weightTimer = null; startWeightCommit(); }, 350);
   }
 
   // 바꾼 값으로 고정한다(고정 중이면 가중치만 바뀐다). 다른 조작이 도는 중이면 잠깐 뒤 다시.
-  async function commitWeight(target = artist) {
+  async function commitWeight(target) {
+    while (busy) await new Promise(resolve => setTimeout(resolve, 80));
     if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 새 작가를 고정하지 않는다
-    if (busy) {
-      weightTimer = setTimeout(() => { weightTimer = null; void commitWeight(target); }, 200);
-      return;
-    }
     const wasPinned = pinnedHere();
     const data = await op('pin');
     if (data && !wasPinned) showToast?.(`${artist} 를 × ${weightLabel()} 로 고정했습니다.`, 'info');
@@ -249,13 +268,14 @@ export function installArtistLinkPanel({
 
   el.addEventListener('click', async event => {
     const button = event.target.closest('[data-alp]');
-    if (!button) return;
+    if (!button || stale) return;
     const action = button.dataset.alp;
     if (action === 'weight') {
       if (weightPop.hidden) openWeight(); else closeWeight();
       return;
     }
-    closeWeight();
+    await closeWeight();
+    if (stale) return;
     if (action === 'group') {
       if (menu.hidden) openMenu(); else closeMenu();
       return;
@@ -281,6 +301,7 @@ export function installArtistLinkPanel({
   });
 
   menu.addEventListener('click', async event => {
+    if (stale) return;
     const slotOpen = event.target.closest('[data-alp-slot-open]');
     if (slotOpen) {
       closeMenu();
@@ -299,6 +320,7 @@ export function installArtistLinkPanel({
     const form = event.target.closest('[data-alp-new]');
     if (!form) return;
     event.preventDefault();
+    if (stale) return;
     const input = form.querySelector('input');
     const name = String(input?.value || '').trim();
     if (!name) { input?.focus(); return; }
@@ -338,6 +360,7 @@ export function installArtistLinkPanel({
       const linked = asset && typeof asset === 'object' ? asset.linked_artist : null;
       const next = String(linked?.artist || '').trim();
       const nextWeight = linked && Number.isFinite(Number(linked.weight)) ? Number(linked.weight) : null;
+      if (stale) { stale = false; el.classList.remove('is-stale'); }
       if (next === artist && nextWeight === weight) return;
       closeWeight();                                   // 손잡이로 바꾼 값은 옛 그림의 작가에 먼저 고정한다
       artist = next;
@@ -346,6 +369,12 @@ export function installArtistLinkPanel({
       closeMenu();
       render();
       scheduleRefresh(0);
+    },
+    /** 보이는 그림이 바뀌기 시작했다(그 그림의 작가는 곧 `setAsset` 으로 온다) - 그때까지 단추를 막는다. */
+    markStale() {
+      stale = true;
+      el.classList.add('is-stale');
+      closeMenu();
     },
     /** 서버 알림(`artist_random_tools`) - 아티스트 창 · 다른 탭이 바꾼 고정 · 숨김도 따라간다. */
     receiveTools(next) {

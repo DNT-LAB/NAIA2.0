@@ -1208,6 +1208,10 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb ban failed: {exc}"}, status_code=500)
+        # 숨긴 작가가 Auto Gen 이 미리 만든 다음 컷에 붙어 있을 수 있다 - 그 컷을 버린다(Codex 리뷰).
+        from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+        invalidate_auto_gen_prefetch(session_context)
         await _broadcast_random_tools(session_context, clients, run_in_thread)
         return result
 

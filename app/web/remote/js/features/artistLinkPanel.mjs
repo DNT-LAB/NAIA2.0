@@ -15,7 +15,7 @@
  *   사람이 있으면 [그룹 ▴] 맨 위에 그 칸이 뜨고, 누르면 아티스트 그룹 창으로 연다.
  * - [숨김] = 제외 작가. 고정해 둔 작가를 숨기면 정책이 돌아온다.
  * - [삽입 ▴] = 이 작가를 지금 가중치로 PE Prefix 맨 앞 / Postfix 맨 뒤에(사용자 지정 2026-11-04). 이미 있으면 가중치만
- *   바꾼다. 넣은 작가는 위의 삽입 그룹 판(`artistInsertTray.mjs`)이 추적한다.
+ *   바꾼다. 넣은 작가는 위의 삽입 그룹 판(`artistInsertTray.mjs`)이 추적한다. 넣으면 [고정] 은 풀린다.
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
  * ⚠️ 상태는 서버가 주인이다 - 조작 응답과 `artist_random_tools` 알림으로만 그린다(다른 탭 · 아티스트 창과 같은 값).
  */
@@ -389,7 +389,9 @@ export function installArtistLinkPanel({
     const gen = assetGen;
     closeInsert();
     if (gen !== assetGen) return;
-    await onInsert?.({artist, weight: weightNumber(), slot: item.dataset.alpInsert === 'post' ? 'post' : 'pre'});
+    const inserted = await onInsert?.({artist, weight: weightNumber(), slot: item.dataset.alpInsert === 'post' ? 'post' : 'pre'});
+    // 넣었으면 [고정] 을 푼다(사용자 지정 2026-11-04) - 글에 들어간 작가를 랜덤 연결이 또 붙이지 않게.
+    if (inserted && gen === assetGen && !stale && pinnedHere()) await op('unpin');
   });
 
   document.addEventListener('pointerdown', event => {

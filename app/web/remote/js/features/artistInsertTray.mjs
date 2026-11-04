@@ -169,10 +169,10 @@ export function installArtistInsertTray({
     return hit ? removeArtistPiece(text, hit) : text;
   }
 
-  /** 작가 패널 [삽입] - 그 칸에 넣고(있으면 가중치만) 추적을 시작한다. */
+  /** 작가 패널 [삽입] - 그 칸에 넣고(있으면 가중치만) 추적을 시작한다. 넣었으면 서버 스냅숏, 못 넣었으면 null. */
   async function insert({artist, weight, slot = 'pre'}) {
     const name = String(artist || '').trim();
-    if (!name) return;
+    if (!name) return null;
     const where = slot === 'post' ? 'post' : 'pre';
     const item = {artist: name, weight: round2(weight ?? 1), with_prefix: true, slot: where};
     const text = readField(where);
@@ -183,6 +183,7 @@ export function installArtistInsertTray({
       showToast?.(had ? `${SLOT_FIELD[where]} 에 있던 ${name} 를 ${tokenOf(item)} 로 바꿨습니다.`
         : `${SLOT_FIELD[where]} ${where === 'post' ? '맨 뒤' : '맨 앞'}에 ${tokenOf(item)} 를 넣었습니다.`, 'success');
     }
+    return data;
   }
 
   // ── 맞추기 - 손으로 고친 글을 목록에 반영한다 ─────────────────────────────

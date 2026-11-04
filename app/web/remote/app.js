@@ -1016,7 +1016,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261104-cnt1')
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-src1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-rng2')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -5239,6 +5239,7 @@ function afterWsJsonMessage(m) {
   if (m.type === 'prompt_generated') scheduleCharacterStateRefresh();
   // [메인 랜덤 버튼 연결] + [생성 버튼 → 랜덤 아티스트] - 서버가 뽑은 작가로 아티스트 창의 격자를 넘겨 고른다.
   if (m.type === 'prompt_generated' && m.random_artist) void artistThumbControl?.focusRandomArtist?.(m.random_artist);
+  if (m.type === 'prompt_generated') artistThumbControl?.refreshLinkSources?.();
   // 랜덤 도구가 바뀌었다(작가 패널 [고정] · [숨김] · 다른 탭의 토글) - 패널과 아티스트 창이 같은 값을 보게 한다.
   if (m.type === 'artist_random_tools') {
     artistLinkPanel?.receiveTools(m.tools);
@@ -5246,6 +5247,10 @@ function afterWsJsonMessage(m) {
   }
   // 삽입 그룹 판 - 어느 탭의 조작이든 같은 목록을 본다.
   if (m.type === 'artist_insert_tracker') artistInsertTray?.receive(m.tracker);
+  // [이번 세션 중복 스킵] 으로 뽑을 작가가 바닥났다 - 뽑을 때마다 빨간 알림(사용자 지정 2026-11-04 · 서버는 중복 허용으로 뽑았다).
+  if (m.type === 'artist_pool_exhausted') {
+    showToast('아티스트 풀 소진됨 - 이번 세션에 다 뽑아서 중복을 허용해 뽑았습니다', 'error');
+  }
 }
 
 function onWsMessageError(error) {

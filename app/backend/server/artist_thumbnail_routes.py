@@ -638,10 +638,30 @@ def artist_thumbnail_service(context: WebSessionContext) -> ArtistThumbnailServi
     return service
 
 
-def _main_random_artist_override(context: WebSessionContext):
+def _main_random_artist_override(context: WebSessionContext, clients: set[Any] | None = None):
     """[메인 랜덤 버튼 연결] - 메인 Random 이 부른다(`HeadlessRandomPromptService.random_artist_link`).
-    {token, artist, weight, pick, page?} · 꺼져 있으면 None."""
-    return artist_thumbnail_service(context).main_random_token(context.get_api_mode())
+    {token, artist, weight, pick, page?} · 꺼져 있으면 None.
+    [이번 세션 중복 스킵] 으로 뽑을 작가가 바닥났으면 뽑을 때마다 화면에 알린다(빨간 토스트 · 사용자 지정 2026-11-04).
+    Auto Gen 이 미리 만드는 컷도 이 길이라 장마다 뜬다."""
+    picked = artist_thumbnail_service(context).main_random_token(context.get_api_mode())
+    if isinstance(picked, dict) and picked.get("exhausted") and clients:
+        _announce_pool_exhausted(context, clients, str(picked.get("source") or "tab"))
+    return picked
+
+
+def _announce_pool_exhausted(context: WebSessionContext, clients: set[Any], source: str) -> None:
+    """일꾼 스레드에서 부른다 - 주 이벤트 루프에 WS 알림을 넘긴다(기다리지 않는다)."""
+    loop = getattr(context, "headless_main_loop", None)
+    if loop is None or not loop.is_running():
+        return
+    try:
+        import asyncio
+
+        from app.backend.server.websocket_broadcast import broadcast_json
+
+        asyncio.run_coroutine_threadsafe(broadcast_json(clients, {"type": "artist_pool_exhausted", "source": source}), loop)
+    except Exception:  # noqa: BLE001 - 알림이 뽑기를 막지 않는다
+        pass
 
 
 # ── 결과 화면 작가 패널(사용자 지정 2026-11-03) ─────────────────────────────
@@ -797,7 +817,7 @@ def register_artist_thumbnail_routes(
     start_generation_runner: GenerationRunnerStarter,
 ) -> None:
     # [메인 랜덤 버튼 연결] - 메인 Random 이 이 공급자를 부른다(core 는 app.backend 를 모른다).
-    session_context.random_artist_override_provider = partial(_main_random_artist_override, session_context)
+    session_context.random_artist_override_provider = partial(_main_random_artist_override, session_context, clients)
 
     @app.get("/api/artist-thumb/state")
     async def api_artist_thumb_state(req: Request):
@@ -1338,11 +1358,16 @@ def register_artist_thumbnail_routes(
             payload = await req.json()
         except Exception:
             payload = None
-        if not isinstance(payload, dict):
-            return JSONResponse({"error": "body must be {kind, id}"}, status_code=400)
+        if not isinstance(payload, dict) or not ({"kind", "range", "skip_seen"} & set(payload)):
+            return JSONResponse({"error": "body must have kind/id, range or skip_seen"}, status_code=400)
         service = artist_thumbnail_service(session_context)
         try:
-            await run_in_thread(service.set_random_source, payload)
+            if "kind" in payload:
+                await run_in_thread(service.set_random_source, payload)
+            if "range" in payload or "skip_seen" in payload:
+                # 아티스트 탭 구간 · 이번 세션 중복 스킵(사용자 지정 2026-11-04)
+                await run_in_thread(partial(service.set_random_source_options, range_value=payload.get("range"),
+                                            skip_seen=payload["skip_seen"] if "skip_seen" in payload else None))
             result = await run_in_thread(service.random_sources)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb random source failed: {exc}"}, status_code=500)

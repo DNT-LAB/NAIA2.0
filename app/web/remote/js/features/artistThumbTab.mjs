@@ -223,6 +223,11 @@ export function createArtistThumbController({
   let linkSourceRows = [];
   let linkSourceTab = null;
   let linkSourceSeq = 0;
+  // 아티스트 탭 구간(게시물 많은 순 목록의 % · 100칸) · 이번 세션 중복 스킵(사용자 지정 2026-11-04).
+  let linkRange = [0, 100];
+  let linkSkip = false;
+  let rangeHeld = false;           // 슬라이더를 쥐고 있다 - 그동안 메뉴를 다시 그리지 않는다(끌기가 끊긴다)
+  let rangeSeq = 0;
   // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
   let keepWeightOnce = false;
   // 메인 Random 이 보낸 뽑기의 차례 - 늦게 끝난 옛 것이 새 것을 덮지 않게.
@@ -949,6 +954,7 @@ export function createArtistThumbController({
       randomToolsLoaded = true;
       randomTools = {...randomTools, ...state.options.random_tools};
       takeLinkSource(state.options.random_tools.source);
+      takeLinkOptions(state.options.random_tools);
       // 저장된 손잡이 값도 되살린다 - 안 하면 화면의 1 이 다음 저장 때 저장값을 덮는다(Codex 리뷰).
       const savedWeight = Number(state.options.random_tools.weight);
       if (Number.isFinite(savedWeight)) { paintWeightControls(savedWeight); syncPromptFormat(); }
@@ -2175,13 +2181,33 @@ export function createArtistThumbController({
     linkSource = {kind, id: kind === 'group' ? String(raw.id || '') : ''};
   }
 
+  /** 구간 · 스킵(랜덤 도구 · 출처 조회 답 모두 같은 이름). 쥐고 끄는 중인 구간은 덮지 않는다. */
+  function takeLinkOptions(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    if (Array.isArray(raw.range) && raw.range.length === 2 && !rangeHeld) {
+      const lo = Math.round(Number(raw.range[0])), hi = Math.round(Number(raw.range[1]));
+      linkRange = Number.isFinite(lo) && Number.isFinite(hi) && lo >= 0 && hi <= 100 && lo < hi ? [lo, hi] : [0, 100];
+    }
+    if ('skip_seen' in raw) linkSkip = Boolean(raw.skip_seen);
+  }
+
+  function rangeIsFull() { return linkRange[0] === 0 && linkRange[1] === 100; }
+
+  /** 서버와 같은 셈(`random_range_bounds` - 정수 내림 · 사람이 있으면 적어도 한 명). */
+  function rangeCount(total) {
+    if (!Number.isFinite(total)) return null;
+    let start = Math.floor(total * linkRange[0] / 100), end = Math.floor(total * linkRange[1] / 100);
+    if (total && end <= start) { end = Math.min(total, start + 1); start = end - 1; }
+    return end - start;
+  }
+
   function linkSourceName() {
     if (linkSource.kind === 'favorites') return '관심 작가';
     if (linkSource.kind === 'group') {
       const row = linkSourceRows.find(r => r.kind === 'group' && r.id === linkSource.id);
       return row ? row.name : '그룹';
     }
-    return '아티스트 탭';
+    return rangeIsFull() ? '아티스트 탭' : `아티스트 탭 ${linkRange[0]}–${linkRange[1]}%`;
   }
 
   function paintLinkPill() {
@@ -2194,6 +2220,77 @@ export function createArtistThumbController({
       : `메인 Random 이 '${name}' 에서 작가를 뽑아 붙이고 있습니다(비었으면 아티스트 탭에서). 누르면 뽑는 곳을 고릅니다.`;
     linkPillEl.setAttribute('aria-haspopup', 'menu');
     linkPillEl.setAttribute('aria-expanded', String(!sourceMenuEl.hidden));
+  }
+
+  /** 아티스트 탭 구간 - 게시물 많은 순 목록을 100칸으로(사용자 지정 2026-11-04). 손잡이 둘 · 놓으면 저장. */
+  function rangeBlock() {
+    const wrap = document.createElement('div');
+    wrap.className = 'als-range';
+    wrap.innerHTML = `
+      <div class="als-track"><div class="als-bar"></div><div class="als-fill"></div>
+        <input type="range" min="0" max="100" step="1" data-als-range="lo" aria-label="구간 시작 - 게시물 많은 순 %">
+        <input type="range" min="0" max="100" step="1" data-als-range="hi" aria-label="구간 끝 - 게시물 많은 순 %">
+      </div>
+      <div class="als-range-lab"><span data-als-range-text></span><b data-als-range-count></b></div>`;
+    wrap.title = '아티스트 탭에서 뽑을 때만 - 아티스트 창과 같은 순서(게시물 많은 순)를 100칸으로 나눈 구간';
+    paintRange(wrap);
+    return wrap;
+  }
+
+  function paintRange(wrap = sourceMenuEl.querySelector('.als-range')) {
+    if (!wrap) return;
+    const [lo, hi] = linkRange;
+    const loInput = wrap.querySelector('[data-als-range="lo"]');
+    const hiInput = wrap.querySelector('[data-als-range="hi"]');
+    if (Number(loInput.value) !== lo) loInput.value = String(lo);
+    if (Number(hiInput.value) !== hi) hiInput.value = String(hi);
+    const fill = wrap.querySelector('.als-fill');
+    fill.style.left = `${lo}%`;
+    fill.style.right = `${100 - hi}%`;
+    wrap.querySelector('[data-als-range-text]').textContent = `게시물 많은 순 ${lo}% — ${hi}%`;
+    const count = rangeCount(Number((linkSourceTab || {}).count));
+    wrap.querySelector('[data-als-range-count]').textContent = count === null ? '' : `${count.toLocaleString('en-US')}명`;
+  }
+
+  /** 지금 출처에서 아직 안 뽑힌 수(스킵 켰을 때만 서버가 센다). */
+  function remainingNow() {
+    if (!linkSkip) return null;
+    const row = linkSource.kind === 'tab'
+      ? linkSourceTab
+      : linkSourceRows.find(r => r.kind === linkSource.kind && (r.kind !== 'group' || r.id === linkSource.id));
+    return row && Number.isFinite(row.remaining) ? row.remaining : null;
+  }
+
+  function skipRow() {
+    const label = document.createElement('label');
+    label.className = 'als-skip';
+    label.title = '이번 실행에서 메인 Random 이 이미 붙인 작가를 건너뜁니다(모든 출처). 다 쓰면 빨간 알림 후 중복 허용으로 뽑습니다. 끄면 기록을 비웁니다.';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = linkSkip;
+    box.dataset.alsSkip = '1';
+    const text = document.createElement('span');
+    text.textContent = '이번 세션 중복 스킵';
+    const left = document.createElement('span');
+    left.className = 'alp-menu-count';
+    const remaining = remainingNow();
+    left.textContent = remaining === null ? '' : `남은 ${remaining.toLocaleString('en-US')}명`;
+    label.append(box, text, left);
+    return label;
+  }
+
+  async function saveLinkOptions(payload) {
+    const seq = ++rangeSeq;
+    try {
+      const data = await postJson('/api/artist-thumb/random-sources', payload);
+      if (seq !== rangeSeq) return;
+      applySourcesResponse(data);
+      if (!sourceMenuEl.hidden) renderSourceMenu();
+      syncLinkPill();
+    } catch (error) {
+      showToast?.(error.message || '구간 · 스킵을 저장하지 못했습니다.', 'error');
+      void loadLinkSources();                         // 서버 값으로 되돌린다
+    }
   }
 
   function sourceMenuItem({kind, id = '', name, count, sub = '', slot = false}) {
@@ -2227,19 +2324,20 @@ export function createArtistThumbController({
   }
 
   function renderSourceMenu() {
+    if (rangeHeld) { paintRange(); return; }          // 끄는 중 - 손잡이를 갈아 끼우면 끌기가 끊긴다
     const head = document.createElement('div');
     head.className = 'als-head';
     head.textContent = '메인 Random 이 작가를 뽑는 곳';
     const sep = () => Object.assign(document.createElement('div'), {className: 'alp-menu-sep'});
     const tab = linkSourceTab || {};
     const nodes = [head, sourceMenuItem({kind: 'tab', name: '아티스트 탭', sub: tab.filter_name || '',
-      count: Number.isFinite(tab.count) ? tab.count : NaN})];
+      count: Number.isFinite(tab.count) ? tab.count : NaN}), rangeBlock()];
     if (linkSourceRows.length) nodes.push(sep());
     for (const row of linkSourceRows) {
       nodes.push(sourceMenuItem({kind: row.kind, id: row.id || '', name: row.name, count: Number(row.count),
         slot: Boolean(row.slot)}));
     }
-    nodes.push(sep());
+    nodes.push(sep(), skipRow(), sep());
     const open = document.createElement('button');
     open.type = 'button';
     open.className = 'alp-menu-item';
@@ -2255,6 +2353,7 @@ export function createArtistThumbController({
     if (Array.isArray(data.sources)) linkSourceRows = data.sources;
     if (data.tab && typeof data.tab === 'object') linkSourceTab = data.tab;
     takeLinkSource(data.source);
+    takeLinkOptions(data);
   }
 
   async function loadLinkSources() {
@@ -2396,7 +2495,7 @@ export function createArtistThumbController({
     if (!tools || typeof tools !== 'object') return;
     linkHint = Boolean(tools.main_link);
     if (!randomToolsLoaded) {
-      if (tools.source) takeLinkSource(tools.source);
+      if (tools.source) { takeLinkSource(tools.source); takeLinkOptions(tools); }
       if (linkSource.kind === 'group' && !linkSourceRows.some(r => r.id === linkSource.id)) void loadLinkSources();
       syncLinkPill();
       return;
@@ -2404,7 +2503,7 @@ export function createArtistThumbController({
     let saved = {};
     try { saved = JSON.parse(randomToolsSaved || '{}'); } catch (_) { saved = {}; }
     const local = randomToolsPayload();
-    if (tools.source) { takeLinkSource(tools.source); if (!sourceMenuEl.hidden) renderSourceMenu(); }
+    if (tools.source) { takeLinkSource(tools.source); takeLinkOptions(tools); if (!sourceMenuEl.hidden) renderSourceMenu(); }
     const pending = new Set(Object.keys(local).filter(key => JSON.stringify(local[key]) !== JSON.stringify(saved[key])));
     for (const key of ['gen_pick', 'random_weight', 'main_link', 'pin_hold', 'link_pin', 'weight_start', 'weight_end', 'weight_step',
       'pool', 'focus']) {
@@ -2442,6 +2541,53 @@ export function createArtistThumbController({
       if (kind === linkSource.kind && (kind !== 'group' || id === linkSource.id)) { closeSourceMenu(); return; }
       void chooseLinkSource(kind, id);
     });
+    // 구간 손잡이 - 끄는 동안 이름 · 수만 바꾸고, 놓으면 저장한다.
+    sourceMenuEl.addEventListener('input', event => {
+      const input = event.target.closest('[data-als-range]');
+      if (!input) return;
+      let [lo, hi] = linkRange;
+      const value = Math.round(Number(input.value));
+      if (input.dataset.alsRange === 'lo') lo = Math.min(value, hi - 1); else hi = Math.max(value, lo + 1);
+      if (Number(input.value) !== (input.dataset.alsRange === 'lo' ? lo : hi)) input.value = String(input.dataset.alsRange === 'lo' ? lo : hi);
+      linkRange = [lo, hi];
+      paintRange();
+      paintLinkPill();
+    });
+    sourceMenuEl.addEventListener('change', event => {
+      if (event.target.closest('[data-als-range]')) {
+        rangeHeld = false;
+        void saveLinkOptions({range: linkRange});
+        return;
+      }
+      const box = event.target.closest('[data-als-skip]');
+      if (box) {
+        linkSkip = box.checked;
+        void saveLinkOptions({skip_seen: linkSkip});
+      }
+    });
+    // 결과 뷰어(draggable) 안에서 슬라이더를 끌면 뷰어 끌기로 샌다 - 누르는 동안 감싼 뷰어 draggable 을 끈다(작가 패널과 같다).
+    sourceMenuEl.addEventListener('pointerdown', event => {
+      if (event.target.closest('[data-als-range]')) {
+        rangeHeld = true;
+        const release = () => {
+          rangeHeld = false;
+          window.removeEventListener('pointerup', release, true);
+          window.removeEventListener('pointercancel', release, true);
+        };
+        window.addEventListener('pointerup', release, true);
+        window.addEventListener('pointercancel', release, true);
+      }
+      const host = sourceMenuEl.parentElement?.closest('[draggable="true"]');
+      if (!host) return;
+      host.draggable = false;
+      const restore = () => {
+        host.draggable = true;
+        window.removeEventListener('pointerup', restore, true);
+        window.removeEventListener('pointercancel', restore, true);
+      };
+      window.addEventListener('pointerup', restore, true);
+      window.addEventListener('pointercancel', restore, true);
+    });
     document.addEventListener('pointerdown', event => {
       if (sourceMenuEl.hidden) return;
       if (sourceMenuEl.contains(event.target) || linkPillEl?.contains(event.target)) return;
@@ -2476,6 +2622,7 @@ export function createArtistThumbController({
         if (res.ok) {
           linkHint = Boolean(data.main_link);
           takeLinkSource(data.source);
+          takeLinkOptions(data);
           if (linkSource.kind === 'group') void loadLinkSources();   // 그룹 이름은 메뉴 조회가 안다
           syncLinkPill();
         }
@@ -4318,6 +4465,10 @@ export function createArtistThumbController({
      *  `withPrefix` = NAI 의 `artist:` 를 붙일지(삽입 그룹 판의 [a:]). */
     formatArtistToken: (artist, weight, withPrefix = true) => formatArtistToken(artist, weight, {withPrefix}),
     /** 결과 화면 작가 패널이 그룹을 바꿨다 - 그룹을 한 번이라도 연 탭이면 새로 읽어 열린 창이 따라온다. */
+    /** 메인 Random 이 한 번 돌았다 - 뽑는 곳 메뉴가 열려 있으면 '남은 n명' 을 새로 받는다(닫혀 있으면 안 부른다). */
+    refreshLinkSources() {
+      if (!sourceMenuEl.hidden && linkSkip) void loadLinkSources();
+    },
     reloadGroups() {
       if (groupsApi) void groupsApi.store.load().catch(() => {});
       // 출처 메뉴의 이름 · 사람 수도(그룹 이름 · 임시 그룹이 바뀌었을 수 있다).

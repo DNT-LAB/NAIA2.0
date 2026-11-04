@@ -229,6 +229,9 @@ class ArtistThumbnailService:
         self._load_group: dict = {}
         self._load_cancel = False
         self._random_history: dict[tuple[str, str, str, int], list[str]] = {}
+        # [이번 세션 중복 스킵](사용자 지정 2026-11-04) - 메인 Random 이 이미 붙인 작가. 실행하는 동안만 · 체크를 끄면 비운다.
+        self._random_seen: set[str] = set()
+        self._random_seen_lock = threading.Lock()
         self._lock = threading.RLock()
         # generate_options.json 은 읽고-고치고-쓰는 파일이다 - 프리픽스 저장과 랜덤 도구 저장이 겹치면 한쪽이 사라진다.
         self._options_lock = threading.Lock()
@@ -616,7 +619,38 @@ class ArtistThumbnailService:
             # 아티스트 창에서 지금 고른 작가 - 작가 패널 [고정] 중이면 [메인 랜덤 버튼 연결] 이 이 작가를 붙인다.
             "focus": str(source.get("focus") or "").strip()[:300],
             "source": self._normalize_random_source(source.get("source")),
+            # 아티스트 탭 구간(게시물 많은 순 목록을 100칸으로 · 사용자 지정 2026-11-04) · 이번 세션 중복 스킵(모든 출처).
+            "range": self._normalize_random_range(source.get("range")),
+            "skip_seen": bool(source.get("skip_seen", False)),
         }
+
+    @staticmethod
+    def _normalize_random_range(raw: Any) -> list[int]:
+        try:
+            lo, hi = (int(round(float(value))) for value in list(raw)[:2])
+        except Exception:  # noqa: BLE001 - 모르는 값 = 처음부터 끝까지
+            return [0, 100]
+        lo, hi = max(0, min(99, lo)), max(1, min(100, hi))
+        return [lo, hi] if lo < hi else [0, 100]
+
+    @staticmethod
+    def random_range_bounds(total: int, range_pct: Any) -> tuple[int, int]:
+        """목록 길이 · 구간(%) -> [start, end). 화면도 같은 셈(정수 내림)을 한다. 사람이 있으면 적어도 한 명."""
+        lo, hi = ArtistThumbnailService._normalize_random_range(range_pct)
+        total = max(0, int(total or 0))
+        start, end = total * lo // 100, total * hi // 100
+        if total and end <= start:
+            end = min(total, start + 1)
+            start = end - 1
+        return start, end
+
+    def random_seen(self) -> set[str]:
+        with self._random_seen_lock:
+            return set(self._random_seen)
+
+    def _mark_random_seen(self, artist: str) -> None:
+        with self._random_seen_lock:
+            self._random_seen.add(artist)
 
     @classmethod
     def _normalize_random_source(cls, raw: Any) -> dict:
@@ -665,25 +699,35 @@ class ArtistThumbnailService:
         source = tools.get("source") or {"kind": "tab", "id": ""}
         pool = tools.get("pool") or {}
         query = str(pool.get("query") or "").strip().lower().replace("_", " ")
+        skip = bool(tools.get("skip_seen"))
+        seen = self.random_seen() if skip else set()
+
+        def left(names: list[str]) -> int | None:
+            return sum(1 for name in names if name not in seen) if skip else None
+
         try:
             artists, filter_name, _w, _t = self._list_artists(str(pool.get("mode") or ""), pool.get("filter", "all"),
                                                              query, random_sample=True)
-            tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or "")}
+            start, end = self.random_range_bounds(len(artists), tools.get("range"))
+            tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or ""),
+                   "range_count": end - start, "remaining": left(artists[start:end])}
         except Exception:  # noqa: BLE001 - 숫자는 장식이다
-            tab = {"filter_name": "", "count": None, "query": ""}
+            tab = {"filter_name": "", "count": None, "query": "", "range_count": None, "remaining": None}
         groups = self._random_groups() or []
-        rows = [{"kind": "favorites", "id": "", "name": "관심 작가",
-                 "count": len(self.random_source_names({"kind": "favorites"}) or [])}]
+        favorites = self.random_source_names({"kind": "favorites"}) or []
+        rows = [{"kind": "favorites", "id": "", "name": "관심 작가", "count": len(favorites),
+                 "remaining": left(favorites)}]
         # 임시 그룹(작가 패널 [기억] 칸)을 위로 - 나머지는 저장된 순서. 이름 없는 임시 창은 뺀다.
         slot = [g for g in groups if g.get("slot") == "link"]
         named = [g for g in groups if not g.get("temp")]
         for group in slot + named:
             names = self.random_source_names({"kind": "group", "id": group["id"]}, groups) or []
             rows.append({"kind": "group", "id": group["id"], "name": group["name"], "count": len(names),
-                         "slot": group.get("slot") == "link"})
+                         "remaining": left(names), "slot": group.get("slot") == "link"})
         if source.get("kind") == "group" and not any(g.get("id") == source.get("id") for g in groups):
             source = self.set_random_source({"kind": "tab"})
-        return {"source": source, "tab": tab, "sources": rows}
+        return {"source": source, "tab": tab, "sources": rows, "range": tools.get("range") or [0, 100],
+                "skip_seen": skip}
 
     def set_random_source(self, source: Any) -> dict:
         """출처를 바꾼다(정규화한 값을 돌려준다)."""
@@ -691,6 +735,21 @@ class ArtistThumbnailService:
         with self._options_lock:
             self._save_options_locked({"random_tools": {"source": normalized}}, internal=True)
         return normalized
+
+    def set_random_source_options(self, *, range_value: Any = None, skip_seen: Any = None) -> dict:
+        """아티스트 탭 구간 · 이번 세션 중복 스킵. 스킵을 끄면 '이미 뽑힌 작가' 를 비운다(사용자 지정 2026-11-04)."""
+        changes: dict[str, Any] = {}
+        if range_value is not None:
+            changes["range"] = self._normalize_random_range(range_value)
+        if skip_seen is not None:
+            changes["skip_seen"] = bool(skip_seen)
+        if changes:
+            with self._options_lock:
+                self._save_options_locked({"random_tools": changes}, internal=True)
+        if skip_seen is not None and not skip_seen:
+            with self._random_seen_lock:
+                self._random_seen.clear()
+        return self.random_tools()
 
     def draw_random_weight(self, tools: dict) -> float:
         """[랜덤 가중치] 켬 = start ~ end 를 step 간격으로 고른다. 끔 = 저장된 손잡이 값."""
@@ -745,6 +804,9 @@ class ArtistThumbnailService:
             token = self.format_artist_token(artist, weight, api_mode) if artist else ""
             return {"token": token, "artist": artist, "weight": weight, "pick": False} if token else None
         weight = self.draw_random_weight(tools)
+        # [이번 세션 중복 스킵] - 이미 붙인 작가는 건너뛴다. 다 썼으면 `exhausted`(화면이 빨간 토스트) + 중복 허용으로 뽑는다.
+        skip = bool(tools.get("skip_seen"))
+        seen = self.random_seen() if skip else set()
         source = tools.get("source") or {}
         if source.get("kind") in ("favorites", "group"):
             # 관심 작가 · 그룹에서 뽑는다 - 창 격자와 다른 목록이라 창은 넘기지 않는다(`pick` 없음).
@@ -753,18 +815,26 @@ class ArtistThumbnailService:
             if names is None and source.get("kind") == "group":
                 self.set_random_source({"kind": "tab"})
             if names:
-                picked = self._random_sample(names, 1, ("source", source["kind"], source.get("id", ""), 1))
+                fresh = [name for name in names if name not in seen]
+                exhausted = skip and not fresh
+                picked = self._random_sample(fresh or names, 1, ("source", source["kind"], source.get("id", ""), 1))
                 if picked:
+                    if skip:
+                        self._mark_random_seen(picked[0])
                     token = self.format_artist_token(picked[0], weight, api_mode)
                     return {"token": token, "artist": picked[0], "weight": weight, "pick": False,
-                            "source": source["kind"]} if token else None
+                            "source": source["kind"], "exhausted": exhausted} if token else None
         pool = tools.get("pool") or {}
-        item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""))
+        item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""),
+                                       range_pct=tools.get("range"), exclude=seen if skip else None)
         if not item:
             return None
+        if skip:
+            self._mark_random_seen(item["artist"])
         token = self.format_artist_token(item["artist"], weight, api_mode)
         return {"token": token, "artist": item["artist"], "weight": weight, "pick": True,
-                "page": item.get("page"), "image_url": item.get("image_url", "")} if token else None
+                "page": item.get("page"), "image_url": item.get("image_url", ""), "source": "tab",
+                "exhausted": bool(item.get("exhausted"))} if token else None
 
     def load_options(self, mode: str = "") -> dict:
         path = self._options_path()
@@ -1671,14 +1741,24 @@ class ArtistThumbnailService:
         return base_list, filter_name, weights, thumb_data
 
     def pick_random_artist(self, mode: str = "", filter_key: str = "all", query: str = "",
-                           per_page: int = 48) -> dict | None:
+                           per_page: int = 48, *, range_pct: Any = None, exclude: set[str] | None = None) -> dict | None:
         """지금 목록에서 한 명(제외 작가는 빠진다 · 최근에 뽑힌 몇 명은 피한다). 비면 None.
         `page` = 격자(같은 정렬 · `per_page`)에서 그 작가가 있는 쪽 - 화면이 그 쪽으로 넘겨 카드를 고른다(사용자 지시 2026-10-19)."""
         mode_key = str(mode or "").strip()
         filter_key = str(filter_key or "all").strip() or "all"
         query_text = str(query or "").strip().lower().replace("_", " ")
         artists, _name, weights, thumb_data = self._list_artists(mode_key, filter_key, query_text, random_sample=True)
-        picked = self._random_sample(artists, 1, (mode_key, filter_key, query_text, 1))
+        # 메인 Random 만 - 구간(게시물 많은 순 100칸)과 이미 뽑힌 작가(중복 스킵). 다 빠지면 구간 안에서 중복 허용.
+        candidates = artists
+        if range_pct is not None:
+            start, end = self.random_range_bounds(len(artists), range_pct)
+            candidates = artists[start:end]
+        exhausted = False
+        if exclude:
+            fresh = [artist for artist in candidates if artist not in exclude]
+            exhausted = bool(candidates) and not fresh
+            candidates = fresh or candidates
+        picked = self._random_sample(candidates, 1, (mode_key, filter_key, query_text, 1))
         if not picked:
             return None
         artist = picked[0]
@@ -1695,6 +1775,7 @@ class ArtistThumbnailService:
             "total": len(artists),
             "index": index,
             "page": index // per_page,
+            "exhausted": exhausted,
         }
 
     def build_list(

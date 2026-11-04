@@ -21304,6 +21304,31 @@ body.detached-module .mod-grid-3 {
 /* [… 연동됨 ▴] 뽑는 곳 메뉴(사용자 지정 2026-11-04) - 알약 위 · 머리줄은 무엇을 고르는 메뉴인지만. */
 .artist-link-menu .als-head { padding: 4px 8px 5px; color: #9c9682; font-size: 11px; white-space: nowrap; }
 .artist-link-menu .als-name { white-space: nowrap; }
+/* 아티스트 탭 구간 슬라이더 · 이번 세션 중복 스킵(사용자 지정 2026-11-04) - 손잡이 둘을 한 줄에 겹친다. */
+.artist-link-menu .als-range { padding: 2px 10px 8px 26px; }
+.artist-link-menu .als-track { position: relative; height: 16px; }
+.artist-link-menu .als-bar,
+.artist-link-menu .als-fill { position: absolute; top: 6px; height: 4px; border-radius: 2px; }
+.artist-link-menu .als-bar { left: 0; right: 0; background: #3a3d45; }
+.artist-link-menu .als-fill { background: #e9d68a; }
+.artist-link-menu .als-track input[type="range"] {
+  position: absolute; left: 0; top: 0; width: 100%; height: 16px; margin: 0;
+  background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none;
+}
+.artist-link-menu .als-track input[type="range"]::-webkit-slider-runnable-track { background: transparent; height: 16px; }
+.artist-link-menu .als-track input[type="range"]::-webkit-slider-thumb {
+  pointer-events: auto; -webkit-appearance: none; appearance: none; width: 14px; height: 14px; margin-top: 1px;
+  border-radius: 50%; border: 2px solid #e9d68a; background: #f3eedb; cursor: pointer;
+}
+.artist-link-menu .als-track input[type="range"]:focus-visible::-webkit-slider-thumb { outline: 1px solid rgba(255,240,170,0.9); }
+.artist-link-menu .als-range-lab {
+  display: flex; justify-content: space-between; gap: 8px; margin-top: 3px;
+  color: #9c9682; font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.artist-link-menu .als-range-lab b { color: #ffe9a0; font-weight: 600; }
+.artist-link-menu .als-skip { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.artist-link-menu .als-skip:hover { background: rgba(255,255,255,0.08); }
+.artist-link-menu .als-skip input { margin: 0; accent-color: #e9d68a; }
 .artist-link-menu .als-sub {
   min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: #8d887a; font-size: 11px;

@@ -13,6 +13,8 @@ export function createImg2ImgPanel({
   // 이 패널이 지금 화면을 소유하고 있는가. V5 인페인트는 팝업을 열지 않고 Result 안
   // 가상 캔버스에서 고치는데, 마스크 편집기는 여전히 **이 패널의 상태**를 본다.
   isOpen = () => true,
+  // 인페인트 프롬프트 스왑 칩 줄(메인 칸 맨 아래). 상태를 받아 HTML 을 준다 - 클릭은 그 모듈이 문서에서 받는다.
+  renderPromptSwap = () => '',
 }) {
   const MASK_CELL_SIZE = 8;
   // 브러시 한계와 휠 한 칸. 슬라이더의 min/max/step 과 **같은 값**이어야 한다 -
@@ -372,10 +374,14 @@ export function createImg2ImgPanel({
           <span class="mod-checkbox-label">해상도를 1MP로 리사이즈</span>
         </label>
       </div>`;
+    const swapRow = inpaint ? String(renderPromptSwap(state) || '') : '';
     const promptsHtml = `
       <div class="mod-img2img-prompt-block">
         <div class="mod-section-label">메인 프롬프트</div>
-        <textarea class="mod-textarea mod-textarea-lg mod-img2img-main-prompt" id="img2imgMainPrompt" oninput="img2imgText('main_prompt', this.value)">${escHtml(state.main_prompt || '')}</textarea>
+        <div class="mod-img2img-main-wrap${swapRow ? ' has-inpaint-swap' : ''}">
+          <textarea class="mod-textarea mod-textarea-lg mod-img2img-main-prompt" id="img2imgMainPrompt" oninput="img2imgText('main_prompt', this.value)">${escHtml(state.main_prompt || '')}</textarea>
+          ${swapRow}
+        </div>
       </div>
       <div class="mod-img2img-prompt-block">
         <div class="mod-section-label">네거티브 프롬프트</div>

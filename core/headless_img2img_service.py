@@ -7,11 +7,13 @@ container while preserving the existing context-facing API.
 from __future__ import annotations
 
 import base64
+import copy
 import io
 import json
 from typing import Any
 
 from core.headless_image_utils import image_to_png_bytes
+from core.nai_model_contract import nai_key_from_metadata
 from core.resolution_utils import MAX_1MP_PIXELS, MAX_NAI_SOURCE_PIXELS, snap_resolution_to_multiple
 
 
@@ -440,7 +442,16 @@ class HeadlessImg2ImgService:
         session_characters = self._session_characters_from_sources(
             params, prompt_ctx, int(image.width), int(image.height)
         )
+        source_preset = params.get("_pe_preset")
+        if not isinstance(source_preset, dict) or not source_preset.get("name"):
+            source_preset = None
         new_session = {
+            "source_model": nai_key_from_metadata(params.get("model"), params.get("source")),
+            "source_preset": copy.deepcopy(source_preset),
+            "original_main_prompt": main_prompt,
+            "original_negative_prompt": negative_prompt,
+            "model_override": "",
+            "swap": None,
             "active": True,
             "window_id": context._img2img_window_counter,
             "mode": clean_mode,
@@ -562,6 +573,40 @@ class HeadlessImg2ImgService:
             value = 70
         return 1.0 if value == 99 else max(1, min(99, value)) / 100.0
 
+    def validate_model_override(self, value: Any) -> str:
+        """Resolve aliases strictly; an unknown key must never fall back to 4.5."""
+        from core.nai_model_contract import (
+            BUILTIN_NAI_MODEL_SPECS, NAI_LEGACY_KEY_ALIASES,
+            normalize_nai_model_key, resolve_nai_model_spec,
+        )
+
+        if not isinstance(value, str):
+            raise ValueError("Invalid inpaint model")
+        key = normalize_nai_model_key(value)
+        if not key:
+            return ""
+        getter = getattr(self.context, "_nai_model_registry", None)
+        if callable(getter):
+            registry = getter()
+            if not registry.has_key(key):
+                key = NAI_LEGACY_KEY_ALIASES.get(key, key)
+            try:
+                spec = registry.resolve(key)
+            except (KeyError, ValueError) as exc:
+                raise ValueError("Unknown inpaint model") from exc
+        else:
+            key = NAI_LEGACY_KEY_ALIASES.get(key, key)
+            if key not in BUILTIN_NAI_MODEL_SPECS:
+                raise ValueError("Unknown inpaint model")
+            spec = resolve_nai_model_spec(key)
+        if spec.family not in {"v4.5", "v5"}:
+            raise ValueError("Inpaint model must be NAI v4.5 or v5")
+        return spec.key
+
+    def effective_model(self) -> str:
+        state = self.context.img2img_session or {}
+        return str(state.get("model_override") or self.context._current_model_key() or "")
+
     def _anlas_cost_fields(self) -> dict[str, Any]:
         """이 세션으로 생성하면 얼마인가. NAI 가 아니면 뜻이 없으니 0.
 
@@ -620,6 +665,11 @@ class HeadlessImg2ImgService:
             #    같은 답이 나온다.
             **self._anlas_cost_fields(),
             "source_label": str(state.get("source_label") or "Result Image"),
+            "source_model": str(state.get("source_model") or ""),
+            "source_preset": str((state.get("source_preset") or {}).get("name") or ""),
+            "model_override": str(state.get("model_override") or ""),
+            "effective_model": self.effective_model(),
+            "swap": copy.deepcopy(state.get("swap")),
             "width": int(state.get("width", 0) or 0),
             "height": int(state.get("height", 0) or 0),
             "preview": str(state.get("preview") or ""),
@@ -1300,6 +1350,13 @@ class HeadlessImg2ImgService:
             return self.module_state()
         if not context.img2img_session.get("active"):
             return context._toast("No active Img2Img session", level="error")
+        if key == "model_override":
+            try:
+                model = self.validate_model_override(value)
+            except ValueError as exc:
+                return context._toast(str(exc), level="error")
+            context.img2img_session["model_override"] = model
+            return self.module_state()
         if key in self._USER_EDIT_KEYS or key.startswith(self._USER_EDIT_PREFIXES):
             context.img2img_session["user_edited"] = True
         if key == "position_mode":
@@ -1954,6 +2011,8 @@ class HeadlessImg2ImgService:
             "_remote_queue_source": "Inpaint" if mode == "inpaint" else "Img2Img",
             "_remote_queue_label": str(state.get("source_label") or "Result Image"),
         }
+        if state.get("model_override"):
+            overrides["model"] = state["model_override"]
         if mode == "inpaint":
             overrides["mask_bytes"] = state.get("mask_bytes")
         # ⚠️ 예전에는 (prompt, uc) 튜플만 실어 **좌표가 통째로 버려졌다**

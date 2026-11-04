@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 
-from core.auto_generation_flags import apply_interactive_generation_gate
+from core.auto_generation_flags import apply_interactive_generation_gate, is_special_request
 from core.generation_access_policy import access_policy, generation_dispatch, generation_operation
 from core.event_stream_vibe import (
     EVENT_STREAM_VIBE_MARKER_KEY,
@@ -336,6 +336,7 @@ class HeadlessGenerationService:
                 api_mode=api_mode,
                 blocked_reason=f"캐릭터 프롬프트를 보낼 수 없습니다: {exc}",
             )
+        self._capture_pe_preset(params, api_mode)
         params["_api_access_revision"] = access_policy(self.context).revision
         request = GenerationRequest(
             params=params,
@@ -1108,6 +1109,28 @@ class HeadlessGenerationService:
             "artist": None,
             "meta": None,
         }, name="web_headless")
+
+    def _capture_pe_preset(self, params: dict[str, Any], api_mode: str) -> None:
+        """History provenance, captured once at dispatch, never a wire parameter."""
+        params.pop("_pe_preset", None)
+        if (api_mode != "NAI" or is_special_request(params, self._to_bool)
+                or params.get("image_bytes") is not None
+                or self.is_sequence_command_text(params.get("_raw_input"))):
+            return
+        try:
+            from core.prompt_engineering_settings import get_prompt_engineering_store
+
+            store = get_prompt_engineering_store(self.context)
+            name = str(store.state("NAI").get("current_preset") or "")
+            settings = store.collect_settings("NAI")
+            if name:
+                params["_pe_preset"] = {
+                    "name": name,
+                    "pre": str(settings.get("pre_prompt") or ""),
+                    "post": str(settings.get("post_prompt") or ""),
+                }
+        except Exception:
+            pass
 
     def _capture_linked_artist(self, params: dict[str, Any], prompt_run_id: str) -> None:
         """[메인 랜덤 버튼 연결] 이 이 프롬프트에 붙인 작가를 요청에 싣는다 - 히스토리가 그림마다 작가를 안다.

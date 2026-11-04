@@ -4193,7 +4193,7 @@ export function createArtistThumbController({
     if (searchPanel) return searchPanel;
     const remote = getRemoteController?.();
     if (!remote) return null;
-    const mod = await import('./artistSearchPanel.mjs?v=20261012-tagfirst');
+    const mod = await import('./artistSearchPanel.mjs?v=20261104-keep1');
     searchPct = mod.pctText;
     searchPanel = mod.createArtistSearchPanel({
       document, escHtml, showToast, getJson, postJson,
@@ -4208,7 +4208,7 @@ export function createArtistThumbController({
     return searchPanel;
   }
 
-  async function setSearchMode(next) {
+  async function setSearchMode(next, {keepPool = false} = {}) {
     const want = Boolean(next);
     const remote = getRemoteController?.();
     if (want && !remote) { showToast('리모컨에서만 쓸 수 있습니다.', 'error'); return; }
@@ -4225,10 +4225,23 @@ export function createArtistThumbController({
       panel.focus();
       // 켤 때 이미 쌓아 둔 조건이 있으면 그대로 격자에 건다.
       await applySearchQuery(panel.query());
+    } else if (keepPool) {
+      // 창을 닫는다 - 랜덤 풀은 검색 결과 그대로 둔다(다시 열면 되살린다 · 사용자 지정 2026-11-04).
+      searchQuery = null;
     } else {
       // 끄면 격자는 **원래 목록**으로 돌아간다(조건은 판이 그대로 들고 있다).
       await applySearchQuery(null);
     }
+  }
+
+  /** 창을 다시 열었다 - 메인 Random 풀이 검색 결과를 쥐고 있으면 검색 판을 켜고 그 조건을 다시 건다
+   *  (창을 닫으면 판은 사라지지만 풀은 남는다 - 창과 풀이 어긋나지 않게). */
+  async function restoreSearchFromPool() {
+    const saved = randomTools.pool?.search;
+    if (!remoteOnboarded || !randomTools.main_link || searchOn || !saved?.stack?.length) return;
+    await setSearchMode(true);
+    if (!searchOn || !searchPanel?.restore || searchPanel.query()) return;
+    await searchPanel.restore(saved);
   }
 
   /** 검색 조건을 격자에 건다. `null` 이면 원래 목록으로 돌아간다. */
@@ -4436,7 +4449,7 @@ export function createArtistThumbController({
       }
       remoteOnboarded = true;
       // 하단 바가 저장된 토글을 보이게 - 탭을 안 거치고 리모컨부터 열어도.
-      void ensureRandomToolsLoaded().then(paintRandomTools);
+      void ensureRandomToolsLoaded().then(() => { paintRandomTools(); return restoreSearchFromPool(); });
       mountPeHeadButtons();
       syncRemoteSelectTitles();
       // 첫 끌기가 모듈 로딩에 먹히지 않게 미리 올린다(카드를 잡는 순간엔 이미 준비돼 있다).
@@ -4450,7 +4463,8 @@ export function createArtistThumbController({
       //    (여는 단추가 머리줄에 있어서, 남겨 두면 다시 열 길이 없다.)
       if (mixOn) void setMixMode(false);
       // 검색 판은 창 안의 줄에 산다 - 리모컨이 내려가면 그 줄도 함께 사라진다.
-      if (searchOn) void setSearchMode(false);
+      // 랜덤 풀은 그대로(닫는 것은 검색을 끈 것이 아니다 · 사용자 지정 2026-11-04) - 다시 열면 되살린다.
+      if (searchOn) void setSearchMode(false, {keepPool: true});
       searchPanel?.destroy();
       searchPanel = null;
       unmountPeWindow();

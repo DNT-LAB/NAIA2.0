@@ -1000,7 +1000,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261104-rv1')
     });
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
     // 삽입 그룹 판은 패널 바로 위에 붙는다 - 패널이 생긴 뒤에 깐다. 글은 `/pe` 편집창과 같은 길로 고친다.
-    const {installArtistInsertTray} = await import('./js/features/artistInsertTray.mjs?v=20261104-rv1');
+    const {installArtistInsertTray} = await import('./js/features/artistInsertTray.mjs?v=20261104-rv2');
     const peKey = slot => (slot === 'post' ? 'post_prompt' : 'pre_prompt');
     artistInsertTray = installArtistInsertTray({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
@@ -1016,7 +1016,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261104-rv1')
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-asp1')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-keep1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

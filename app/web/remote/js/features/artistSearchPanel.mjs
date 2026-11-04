@@ -688,6 +688,15 @@ export function createArtistSearchPanel({
     isReady: () => packState?.state === 'ready',
     focus: () => { if (isTagKind(kind) && kindUsable(kind)) inputEl.focus(); },
     reset: () => { void run([]); },
+    /** 저장해 둔 조건을 다시 건다(창을 닫았다 연 뒤 - 랜덤 풀이 쥔 검색 · 사용자 지정 2026-11-04).
+     *  정렬 · 범위도 그 조건대로. 서버가 받아 주면 `onQuery` 로 격자에 걸린다. */
+    restore: async query => {
+      if (!query || !Array.isArray(query.stack) || !query.stack.length) return false;
+      order = ['wilson', 'posts', 'count'].includes(query.order) ? query.order : 'wilson';
+      thumbs = query.thumbs === 'all' ? 'all' : 'has';
+      paintForm();
+      return run(query.stack.map(step => ({...step})), {keepNums: true});
+    },
     destroy: () => { seq += 1; suggSeq += 1; if (suggTimer) clearTimeout(suggTimer); el.remove(); },
   };
 }

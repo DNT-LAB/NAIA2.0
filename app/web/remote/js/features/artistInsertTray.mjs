@@ -192,6 +192,9 @@ export function installArtistInsertTray({
     reconcileTimer = setTimeout(() => { reconcileTimer = null; void reconcile(); }, delay);
   }
 
+  // 서버가 거절한 맞추기 - 같은 것을 0.5초마다 다시 보내지 않는다(글이 또 바뀌면 다른 열쇠라 다시 돈다 · Codex 릴리즈 재리뷰).
+  const reconcileRefused = new Set();
+
   async function reconcile() {
     if (working || weightTimers.size) { scheduleReconcile(); return; }
     const items = tracker.items || [];
@@ -209,11 +212,17 @@ export function installArtistInsertTray({
       if (!hit) {
         patch.on = false;
       } else {
-        if (Math.abs(round2(hit.weight) - round2(item.weight)) > 0.001) patch.weight = round2(hit.weight);
+        // 판의 가중치는 0~5 - 글에 그 밖의 값을 적었으면 판은 끝값으로 따라간다(서버가 거절하지 않게).
+        const w = Number(hit.weight);
+        const fit = Number.isFinite(w) ? round2(Math.min(5, Math.max(0, w))) : null;
+        if (fit !== null && Math.abs(fit - round2(item.weight)) > 0.001) patch.weight = fit;
         if (isNai() && hit.withPrefix !== (item.with_prefix !== false)) patch.with_prefix = hit.withPrefix;
       }
       if (!Object.keys(patch).length) continue;
-      await act(null, {op: 'update', id: item.id, ...patch});
+      const key = `${item.id}|${JSON.stringify(patch)}`;
+      if (reconcileRefused.has(key)) continue;
+      const data = await act(null, {op: 'update', id: item.id, ...patch});
+      if (!data) { reconcileRefused.add(key); scheduleReconcile(); }   // 거절된 것은 건너뛰고 다음 항목으로
       return;                                          // 한 번에 하나 - 답이 오면 다시 돈다
     }
   }

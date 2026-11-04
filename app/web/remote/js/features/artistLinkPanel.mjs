@@ -23,6 +23,7 @@ export function installArtistLinkPanel({
   document, fetch = window.fetch.bind(window), showToast, escHtml,
   openGroupWindow = null,          // (groupId) => 그 그룹을 아티스트 그룹 창으로 연다
   onGroupsChanged = null,          // () => 패널이 그룹을 바꿨다 - 열린 그룹 창이 새로 읽는다
+  onBanChanged = null,             // (artist, banned) => [숨김] - 아티스트 창의 [제외 작가] 수 · 카드가 따라온다
   onInsert = null,                 // ({artist, weight}) => PE Prefix 맨 앞에 넣는다(있으면 가중치만)
 }) {
   const el = document.getElementById('artistLinkPanel');
@@ -365,6 +366,7 @@ export function installArtistLinkPanel({
     if (action === 'ban') {
       const wasBanned = Boolean(info?.artist === artist && info.banned);
       const data = await op(wasBanned ? 'unban' : 'ban');
+      if (data) onBanChanged?.(artist, !wasBanned);
       if (data) showToast?.(wasBanned ? `${artist} 를 제외 작가에서 뺐습니다.` : `${artist} 를 숨겼습니다 - 다음부터 뽑히지 않습니다.`, 'info');
     }
   });

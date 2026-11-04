@@ -988,13 +988,14 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261104-grp1')
+import('./js/features/artistLinkPanel.mjs?v=20261104-ban1')
   .then(async ({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
       // [그룹 ▴] 의 임시 그룹 줄 - 아티스트 그룹 창으로 연다 · 패널이 그룹을 바꾸면 열린 그룹 창이 새로 읽는다.
       openGroupWindow: groupId => artistThumbReady.then(() => artistThumbControl?.openGroupWindow?.(groupId)),
       onGroupsChanged: () => artistThumbControl?.reloadGroups?.(),
+      onBanChanged: (artist, banned) => artistThumbControl?.artistBanChanged?.(artist, banned),
       // [삽입 ▴] - Prefix 맨 앞 / Postfix 맨 뒤에 넣고 삽입 그룹 판이 추적한다.
       onInsert: request => artistInsertTray?.insert(request),
     });
@@ -1016,7 +1017,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261104-grp1')
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-keep2')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-keep3')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

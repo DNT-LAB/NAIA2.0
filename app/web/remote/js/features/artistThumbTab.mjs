@@ -4520,6 +4520,21 @@ export function createArtistThumbController({
     refreshLinkSources() {
       if (!sourceMenuEl.hidden && linkSkip) void loadLinkSources();
     },
+    /** 결과 화면 작가 패널의 [숨김] - 서버엔 이미 적혔다. 창의 [제외 작가] 수(필터 목록) · 카드 · 고른 작가를 맞춘다
+     *  (사용자 제보 2026-11-04 - 창의 수가 바로 안 바뀌었다). 창을 아직 안 열었으면 열 때 새로 읽는다. */
+    artistBanChanged(artist, banned) {
+      if (!state) return;
+      void fetchState({force: true}).catch(() => {});
+      if (banned) refreshGroupsQuietly();       // 제외하면 관심에서도 빠진다
+      if (selected?.artist === artist) {
+        selected.banned = banned;
+        renderSelectedMeta(selected);
+        if (banBtn) banBtn.textContent = banLabel(selected);
+      }
+      gridEl?.querySelectorAll('.artist-thumb-card').forEach(card => {
+        if (card.dataset.artist === artist) card.classList.toggle('banned', banned);
+      });
+    },
     reloadGroups() {
       if (groupsApi) void groupsApi.store.load().catch(() => {});
       // 출처 메뉴의 이름 · 사람 수도(그룹 이름 · 임시 그룹이 바뀌었을 수 있다).

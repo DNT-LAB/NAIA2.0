@@ -85,12 +85,20 @@ export function installArtistLinkPanel({
   const weightNumber = () => (Number.isFinite(Number(weight)) && weight !== null ? Number(weight) : 1);
   const weightLabel = () => formatWeight(weightNumber()) || '1';
 
+  /** [그룹 ▴] 메뉴는 그 단추 바로 위에(사용자 지정 2026-11-04 - 패널 왼쪽 끝에 붙어 단추와 멀었다).
+   *  오른쪽이 모자라면 뷰어 안으로 당긴다. */
+  function placeGroupMenu() {
+    const button = el.querySelector('[data-alp="group"]');
+    let left = el.offsetLeft + (button ? button.offsetLeft : 0);
+    const room = menu.offsetParent ? menu.offsetParent.clientWidth - menu.offsetWidth - 4 : Infinity;
+    if (Number.isFinite(room)) left = Math.min(left, room);
+    menu.style.left = `${Math.max(0, left)}px`;
+  }
+
   function place() {
     if (el.hidden || !seedPill) return;
     el.style.left = `${seedPill.offsetLeft + seedPill.offsetWidth + 6}px`;
-    if (!menu.hidden) {
-      menu.style.left = `${el.offsetLeft}px`;
-    }
+    if (!menu.hidden) placeGroupMenu();
     if (!weightPop.hidden) {
       const chip = el.querySelector('[data-alp="weight"]');
       weightPop.style.left = `${el.offsetLeft + (chip ? chip.offsetLeft : 0)}px`;
@@ -214,7 +222,7 @@ export function installArtistLinkPanel({
     closeInsert();
     renderMenu();
     menu.hidden = false;
-    menu.style.left = `${el.offsetLeft}px`;
+    placeGroupMenu();
     el.querySelector('[data-alp="group"]')?.setAttribute('aria-expanded', 'true');
     void loadInfo();                                   // 그룹 창에서 바뀐 것까지 - 열 때 새로 받는다
   }

@@ -192,8 +192,10 @@ export function installArtistInsertTray({
     reconcileTimer = setTimeout(() => { reconcileTimer = null; void reconcile(); }, delay);
   }
 
-  // 서버가 거절한 맞추기 - 같은 것을 0.5초마다 다시 보내지 않는다(글이 또 바뀌면 다른 열쇠라 다시 돈다 · Codex 릴리즈 재리뷰).
-  const reconcileRefused = new Set();
+  // 서버가 거절한(또는 연결이 끊겨 못 보낸) 맞추기 - 같은 것을 0.5초마다 다시 보내지 않는다(Codex 릴리즈 재리뷰).
+  // 열쇠에 글의 조각을 넣는다 - 글을 고치면 새 열쇠라 바로 보낸다. 같은 글이어도 30초 뒤에는 한 번 더 해 본다(일시 오류).
+  const reconcileRefused = new Map();
+  const REFUSED_RETRY_MS = 30000;
 
   async function reconcile() {
     if (working || weightTimers.size) { scheduleReconcile(); return; }
@@ -219,10 +221,11 @@ export function installArtistInsertTray({
         if (isNai() && hit.withPrefix !== (item.with_prefix !== false)) patch.with_prefix = hit.withPrefix;
       }
       if (!Object.keys(patch).length) continue;
-      const key = `${item.id}|${JSON.stringify(patch)}`;
-      if (reconcileRefused.has(key)) continue;
+      const key = `${item.id}|${hit ? hit.piece : ''}|${JSON.stringify(patch)}`;
+      if (Date.now() - (reconcileRefused.get(key) || -Infinity) < REFUSED_RETRY_MS) continue;
       const data = await act(null, {op: 'update', id: item.id, ...patch});
-      if (!data) { reconcileRefused.add(key); scheduleReconcile(); }   // 거절된 것은 건너뛰고 다음 항목으로
+      if (data) reconcileRefused.clear();
+      else { reconcileRefused.set(key, Date.now()); scheduleReconcile(); }   // 거절된 것은 건너뛰고 다음 항목으로
       return;                                          // 한 번에 하나 - 답이 오면 다시 돈다
     }
   }

@@ -4213,6 +4213,12 @@ export function createArtistThumbController({
     const remote = getRemoteController?.();
     if (want && !remote) { showToast('리모컨에서만 쓸 수 있습니다.', 'error'); return; }
     const panel = want ? await ensureSearchPanel() : searchPanel;
+    if (want && !remoteOnboarded) {
+      // 판을 받아 오는 사이 창이 닫혔다 - 켜지 않는다(닫힌 창에 판 · 검색 상태를 남기지 않게 · Codex 릴리즈 3차).
+      searchPanel?.destroy();
+      searchPanel = null;
+      return;
+    }
     if (want && !panel) { showToast('검색 판을 열지 못했습니다.', 'error'); return; }
     searchOn = want;
     searchBtn.classList.toggle('is-on', searchOn);
@@ -4227,10 +4233,20 @@ export function createArtistThumbController({
       await applySearchQuery(panel.query());
     } else if (keepPool) {
       // 창을 닫는다 - 랜덤 풀은 검색 결과 그대로 둔다(다시 열면 되살린다 · 사용자 지정 2026-11-04).
+      if (randomPoolFollow) {
+        // 조건을 바꾸고 목록이 오기 전에 닫았다 - 바꾼 조건을 지금 풀에 남긴다(늦은 답이 null 을 쓰지 않게 · Codex 릴리즈 3차).
+        randomPoolFollow = false;
+        if (randomTools.main_link) { randomTools.pool = currentRandomPool(); scheduleSaveRandomTools(); }
+      }
       searchQuery = null;
     } else {
       // 끄면 격자는 **원래 목록**으로 돌아간다(조건은 판이 그대로 들고 있다).
       await applySearchQuery(null);
+      // ④ 격자는 이미 원래 목록인데 풀만 검색을 쥐고 있다(되살리기 실패 등) - 직접 끈 것이니 풀도 돌린다.
+      if (randomTools.main_link && randomTools.pool?.search) {
+        randomTools.pool = currentRandomPool();
+        scheduleSaveRandomTools();
+      }
     }
   }
 
@@ -4239,8 +4255,11 @@ export function createArtistThumbController({
   async function restoreSearchFromPool() {
     const saved = randomTools.pool?.search;
     if (!remoteOnboarded || !randomTools.main_link || searchOn || !saved?.stack?.length) return;
+    const want = JSON.stringify(saved);
+    const still = () => remoteOnboarded && randomTools.main_link && JSON.stringify(randomTools.pool?.search) === want;
     await setSearchMode(true);
-    if (!searchOn || !searchPanel?.restore || searchPanel.query()) return;
+    // 기다리는 사이 창이 닫혔거나 다른 탭이 풀을 바꿨다 · 연결을 껐다 - 옛 조건을 되살리지 않는다(Codex 릴리즈 3차).
+    if (!still() || !searchOn || !searchPanel?.restore || searchPanel.query()) return;
     await searchPanel.restore(saved);
   }
 

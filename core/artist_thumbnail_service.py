@@ -232,6 +232,9 @@ class ArtistThumbnailService:
         # [이번 세션 중복 스킵](사용자 지정 2026-11-04) - 메인 Random 이 이미 붙인 작가. 실행하는 동안만 · 체크를 끄면 비운다.
         self._random_seen: set[str] = set()
         self._random_seen_lock = threading.Lock()
+        # 아티스트 검색 결과 풀(사용자 지정 2026-11-04) - 같은 조건이면 다시 세지 않는다(조건 문자열 -> (시각, 이름들)).
+        self._search_pool_cache: dict[str, tuple[float, list[str]]] = {}
+        self._search_pool_lock = threading.Lock()
         self._lock = threading.RLock()
         # generate_options.json 은 읽고-고치고-쓰는 파일이다 - 프리픽스 저장과 랜덤 도구 저장이 겹치면 한쪽이 사라진다.
         self._options_lock = threading.Lock()
@@ -615,6 +618,8 @@ class ArtistThumbnailService:
                 "mode": str(pool.get("mode") or "").strip()[:200],
                 "filter": str(pool.get("filter") or "all").strip()[:200] or "all",
                 "query": str(pool.get("query") or "").strip()[:200],
+                # 아티스트 창 [검색](매칭 검색)이 켜져 있으면 그 결과가 풀이다(사용자 지정 2026-11-04).
+                "search": self._normalize_search_pool(pool.get("search")),
             },
             # 아티스트 창에서 지금 고른 작가 - 작가 패널 [고정] 중이면 [메인 랜덤 버튼 연결] 이 이 작가를 붙인다.
             "focus": str(source.get("focus") or "").strip()[:300],
@@ -623,6 +628,69 @@ class ArtistThumbnailService:
             "range": self._normalize_random_range(source.get("range")),
             "skip_seen": bool(source.get("skip_seen", False)),
         }
+
+    @staticmethod
+    def _normalize_search_pool(raw: Any) -> dict | None:
+        """매칭 검색 조건 {stack, order, thumbs}. 조건이 없으면 None(= 모드 · 필터 · 이름 검색 목록)."""
+        if not isinstance(raw, dict):
+            return None
+        stack = raw.get("stack")
+        if not isinstance(stack, list) or not stack:
+            return None
+        order = str(raw.get("order") or "wilson").strip()
+        return {
+            "stack": [step for step in stack[:20] if isinstance(step, dict)],
+            "order": order if order in ("wilson", "posts", "count") else "wilson",
+            "thumbs": "has" if str(raw.get("thumbs") or "").strip().lower() == "has" else "all",
+        }
+
+    def _search_pool_names(self, search: dict, mode_key: str) -> list[str] | None:
+        """매칭 검색 결과 전체(격자와 같은 순서 · 제외 작가 뺌). 팩이 없거나 조건이 틀리면 None.
+        ⚠️ 격자 쪽수와 맞아야 한다 - 같은 `artist_search.search` · 같은 [썸네일 있음] 판정(`image_presence`)."""
+        import time
+
+        from core.artist_affinity import default_pack
+        from core.artist_search import search as artist_search
+
+        key = json.dumps([search, mode_key if search.get("thumbs") == "has" else ""], ensure_ascii=False, sort_keys=True)
+        now = time.monotonic()
+        with self._search_pool_lock:
+            hit = self._search_pool_cache.get(key)
+        if hit and now - hit[0] < 300:
+            names = hit[1]
+        else:
+            only = self.image_presence(mode_key) if search.get("thumbs") == "has" else None
+            try:
+                result = artist_search(default_pack(), search.get("stack"), order=search.get("order") or "wilson",
+                                       limit=10_000_000, offset=0, only=only)
+            except Exception:  # noqa: BLE001 - 조건이 틀렸다 · 팩이 없다 = 원래 목록으로
+                return None
+            if result.get("state") != "ready":
+                return None
+            names = [str(row.get("artist") or "") for row in result.get("rows") or []]
+            with self._search_pool_lock:
+                if len(self._search_pool_cache) >= 8:
+                    self._search_pool_cache.pop(next(iter(self._search_pool_cache)))
+                self._search_pool_cache[key] = (now, names)
+        banned = set(self._banned())
+        return [name for name in names if name and name not in banned]
+
+    def _random_pool_list(self, mode_key: str, filter_key: str, query_text: str, search: Any = None):
+        """랜덤이 뽑는 목록 - 매칭 검색이 걸려 있으면 그 결과, 아니면 모드 · 필터 · 이름 검색 목록(격자와 같은 길).
+        (작가들, 목록 이름, 게시물 수, 그림 자료, 최근 기록 열쇠)"""
+        search = self._normalize_search_pool(search)
+        if search:
+            names = self._search_pool_names(search, mode_key)
+            if names is not None:
+                try:
+                    thumb_data = self.load_data(mode_key) if mode_key else {}
+                except Exception:  # noqa: BLE001 - 그림 자료는 장식이다(풀은 검색 결과 그대로)
+                    thumb_data = {}
+                key = ("search", json.dumps(search, ensure_ascii=False, sort_keys=True), mode_key, 1)
+                return names, "검색 결과", self._artist_weights(mode_key), thumb_data, key
+        artists, filter_name, weights, thumb_data = self._list_artists(mode_key, filter_key, query_text,
+                                                                      random_sample=True)
+        return artists, filter_name, weights, thumb_data, (mode_key, filter_key, query_text, 1)
 
     @staticmethod
     def _normalize_random_range(raw: Any) -> list[int]:
@@ -706,8 +774,8 @@ class ArtistThumbnailService:
             return sum(1 for name in names if name not in seen) if skip else None
 
         try:
-            artists, filter_name, _w, _t = self._list_artists(str(pool.get("mode") or ""), pool.get("filter", "all"),
-                                                             query, random_sample=True)
+            artists, filter_name, _w, _t, _k = self._random_pool_list(
+                str(pool.get("mode") or ""), str(pool.get("filter") or "all"), query, pool.get("search"))
             start, end = self.random_range_bounds(len(artists), tools.get("range"))
             tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or ""),
                    "range_count": end - start, "remaining": left(artists[start:end])}
@@ -826,7 +894,8 @@ class ArtistThumbnailService:
                             "source": source["kind"], "exhausted": exhausted} if token else None
         pool = tools.get("pool") or {}
         item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""),
-                                       range_pct=tools.get("range"), exclude=seen if skip else None)
+                                       range_pct=tools.get("range"), exclude=seen if skip else None,
+                                       search=pool.get("search"))
         if not item:
             return None
         if skip:
@@ -1741,13 +1810,18 @@ class ArtistThumbnailService:
         return base_list, filter_name, weights, thumb_data
 
     def pick_random_artist(self, mode: str = "", filter_key: str = "all", query: str = "",
-                           per_page: int = 48, *, range_pct: Any = None, exclude: set[str] | None = None) -> dict | None:
+                           per_page: int = 48, *, range_pct: Any = None, exclude: set[str] | None = None,
+                           search: Any = None) -> dict | None:
         """지금 목록에서 한 명(제외 작가는 빠진다 · 최근에 뽑힌 몇 명은 피한다). 비면 None.
         `page` = 격자(같은 정렬 · `per_page`)에서 그 작가가 있는 쪽 - 화면이 그 쪽으로 넘겨 카드를 고른다(사용자 지시 2026-10-19)."""
         mode_key = str(mode or "").strip()
         filter_key = str(filter_key or "all").strip() or "all"
         query_text = str(query or "").strip().lower().replace("_", " ")
-        artists, _name, weights, thumb_data = self._list_artists(mode_key, filter_key, query_text, random_sample=True)
+        # 아티스트 창 [검색] 이 켜져 있으면 그 결과(격자와 같은 순서라 `page` 도 그 격자의 쪽이다 · 사용자 지정 2026-11-04).
+        artists, _name, weights, thumb_data, history_key = self._random_pool_list(mode_key, filter_key, query_text,
+                                                                                  search)
+        if history_key[0] == "search":
+            filter_key = "all"
         # 메인 Random 만 - 구간(게시물 많은 순 100칸)과 이미 뽑힌 작가(중복 스킵). 다 빠지면 구간 안에서 중복 허용.
         candidates = artists
         if range_pct is not None:
@@ -1758,7 +1832,7 @@ class ArtistThumbnailService:
             fresh = [artist for artist in candidates if artist not in exclude]
             exhausted = bool(candidates) and not fresh
             candidates = fresh or candidates
-        picked = self._random_sample(candidates, 1, (mode_key, filter_key, query_text, 1))
+        picked = self._random_sample(candidates, 1, history_key)
         if not picked:
             return None
         artist = picked[0]

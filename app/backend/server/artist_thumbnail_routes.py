@@ -1455,13 +1455,14 @@ def register_artist_thumbnail_routes(
         if not isinstance(payload, dict):
             payload = {}
         try:
-            item = await run_in_thread(
+            item = await run_in_thread(partial(
                 artist_thumbnail_service(session_context).pick_random_artist,
                 str(payload.get("mode") or ""),
                 str(payload.get("filter") or "all"),
                 str(payload.get("query") or ""),
                 int(payload.get("per_page") or 48),
-            )
+                search=payload.get("search"),            # 아티스트 창 [검색] 결과에서(사용자 지정 2026-11-04)
+            ))
         except ArtistLoadCancelled as exc:
             return JSONResponse({"error": str(exc), "cancelled": True}, status_code=409)
         except FileNotFoundError as exc:

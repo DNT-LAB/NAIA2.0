@@ -226,6 +226,7 @@ export function createArtistThumbController({
   // 아티스트 탭 구간(게시물 많은 순 목록의 % · 100칸) · 이번 세션 중복 스킵(사용자 지정 2026-11-04).
   let linkRange = [0, 100];
   let linkSkip = false;
+  let linkSearch = false;          // 아티스트 탭 풀이 [검색] 결과다 - 알약 이름이 '검색 결과'
   let rangeHeld = false;           // 슬라이더를 쥐고 있다 - 그동안 메뉴를 다시 그리지 않는다(끌기가 끊긴다)
   let rangeSeq = 0;
   // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
@@ -2126,7 +2127,15 @@ export function createArtistThumbController({
   }
 
   function currentRandomPool() {
-    return {mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim()};
+    return {mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim(),
+      search: currentSearchPool()};
+  }
+
+  /** [검색](매칭 검색)이 격자를 쥐고 있으면 그 조건 - 랜덤 · 메인 Random 이 그 결과에서 뽑는다(사용자 지정 2026-11-04).
+   *  서버가 같은 검색 · 같은 순서로 전체를 센다(`_search_pool_names`). 꺼져 있으면 null. */
+  function currentSearchPool() {
+    if (!searchQuery || !searchQuery.stack?.length) return null;
+    return {stack: searchQuery.stack, order: searchQuery.order || 'wilson', thumbs: searchQuery.thumbs || 'all'};
   }
 
   /** 바뀐 칸만 보낸다 - 통째로 보내면 다른 탭이 끈 연결을 이 탭의 낡은 값이 다시 켰다(Codex 리뷰).
@@ -2189,6 +2198,7 @@ export function createArtistThumbController({
       linkRange = Number.isFinite(lo) && Number.isFinite(hi) && lo >= 0 && hi <= 100 && lo < hi ? [lo, hi] : [0, 100];
     }
     if ('skip_seen' in raw) linkSkip = Boolean(raw.skip_seen);
+    if (raw.pool && typeof raw.pool === 'object') linkSearch = Boolean(raw.pool.search);
   }
 
   function rangeIsFull() { return linkRange[0] === 0 && linkRange[1] === 100; }
@@ -2207,7 +2217,8 @@ export function createArtistThumbController({
       const row = linkSourceRows.find(r => r.kind === 'group' && r.id === linkSource.id);
       return row ? row.name : '그룹';
     }
-    return rangeIsFull() ? '아티스트 탭' : `아티스트 탭 ${linkRange[0]}–${linkRange[1]}%`;
+    const base = linkSearch ? '검색 결과' : '아티스트 탭';
+    return rangeIsFull() ? base : `${base} ${linkRange[0]}–${linkRange[1]}%`;
   }
 
   function paintLinkPill() {
@@ -2351,7 +2362,10 @@ export function createArtistThumbController({
   function applySourcesResponse(data) {
     if (!data || typeof data !== 'object') return;
     if (Array.isArray(data.sources)) linkSourceRows = data.sources;
-    if (data.tab && typeof data.tab === 'object') linkSourceTab = data.tab;
+    if (data.tab && typeof data.tab === 'object') {
+      linkSourceTab = data.tab;
+      if (data.tab.filter_name) linkSearch = data.tab.filter_name === '검색 결과';
+    }
     takeLinkSource(data.source);
     takeLinkOptions(data);
   }
@@ -2431,6 +2445,7 @@ export function createArtistThumbController({
     try {
       return await postJson('/api/artist-thumb/random-pick', {
         mode: currentMode(), filter: currentFilter(), query: String(searchEl?.value || '').trim(), per_page: PAGE_SIZE,
+        search: currentSearchPool(),
       });
     } catch (error) {
       showToast?.(error.message || '랜덤 작가를 뽑지 못했습니다.', 'error');
@@ -2452,7 +2467,7 @@ export function createArtistThumbController({
     const findCard = () => gridEl?.querySelector(`.artist-thumb-card[data-artist="${CSS.escape(picked.artist)}"]`) || null;
     const stale = typeof options.stale === 'function' ? options.stale : () => false;
     let card = findCard();
-    if (!card && !searchQuery && Number.isInteger(picked.page)) {
+    if (!card && Number.isInteger(picked.page)) {
       await loadPage(picked.page, {anchor: 'top'});
       if (stale()) return;                       // 그사이 더 새 뽑기가 왔다 - 옛 것으로 덮지 않는다(Codex 리뷰)
       card = findCard();
@@ -4222,7 +4237,10 @@ export function createArtistThumbController({
     const same = JSON.stringify(next) === JSON.stringify(searchQuery);
     searchQuery = next;
     if (same) return;
+    // 검색을 켜고 끄거나 조건을 바꿨다 - 다음 목록이 오면 그것을 랜덤 풀로 삼는다(사용자 지정 2026-11-04).
+    randomPoolFollow = true;
     if (gridVisible()) await reloadForFilterChange();
+    else if (randomTools.main_link) { randomTools.pool = currentRandomPool(); scheduleSaveRandomTools(); }
   }
 
   /** 지금 화면이 걸러져 있는가. 조건 검색이든 이름 검색이든 하나면 그렇다. */

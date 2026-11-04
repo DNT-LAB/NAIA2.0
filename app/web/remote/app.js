@@ -1016,7 +1016,7 @@ import('./js/features/artistLinkPanel.mjs?v=20261104-cnt1')
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-rng2')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-asp1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,

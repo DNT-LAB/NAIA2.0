@@ -864,6 +864,7 @@ let thumbTabControl = null;
 let artistThumbControl = null;
 // 결과 화면 작가 패널(사용자 지정 2026-11-03) - [메인 랜덤 버튼 연결] 중 보이는 그림의 작가를 고정 · 임시 · 숨김 · 그룹.
 let artistLinkPanel = null;
+let artistInsertTray = null;      // 작가 패널 위의 삽입 그룹 판(js/features/artistInsertTray.mjs)
 let characterViewerControl = null;
 let studioTabControl = null;
 let customSelectsControl = null;
@@ -987,21 +988,35 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261103-alp7')
-  .then(({installArtistLinkPanel}) => {
+import('./js/features/artistLinkPanel.mjs?v=20261104-ait1')
+  .then(async ({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
       // [그룹 ▴] 의 임시 그룹 줄 - 아티스트 그룹 창으로 연다 · 패널이 그룹을 바꾸면 열린 그룹 창이 새로 읽는다.
       openGroupWindow: groupId => artistThumbReady.then(() => artistThumbControl?.openGroupWindow?.(groupId)),
       onGroupsChanged: () => artistThumbControl?.reloadGroups?.(),
-      onInsert: insertLinkedArtistIntoPrefix,
+      // [삽입 ▴] - Prefix 맨 앞 / Postfix 맨 뒤에 넣고 삽입 그룹 판이 추적한다.
+      onInsert: request => artistInsertTray?.insert(request),
     });
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
+    // 삽입 그룹 판은 패널 바로 위에 붙는다 - 패널이 생긴 뒤에 깐다. 글은 `/pe` 편집창과 같은 길로 고친다.
+    const {installArtistInsertTray} = await import('./js/features/artistInsertTray.mjs?v=20261104-ait1');
+    const peKey = slot => (slot === 'post' ? 'post_prompt' : 'pre_prompt');
+    artistInsertTray = installArtistInsertTray({
+      document, fetch: window.fetch.bind(window), showToast, escHtml,
+      readField: slot => peFieldText(peKey(slot)),
+      writeField: (slot, text) => slashPeSetField(peKey(slot), text),
+      formatToken: (artist, weight, withPrefix) => artistThumbControl?.formatArtistToken?.(artist, weight, withPrefix) || '',
+      getPreset: () => slashPeState().preset || '',
+      isNai: () => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() === 'NAI',
+    });
+    await artistThumbReady;                            // 작가 태그 서식은 아티스트 창이 준다
+    artistInsertTray?.reload();
   })
   .catch(error => {
     console.error('Failed to initialize artist link panel', error);
   });
-const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261103-alp7')
+const artistThumbReady = import('./js/features/artistThumbTab.mjs?v=20261104-ait1')
   .then(({createArtistThumbController}) => {
     artistThumbControl = createArtistThumbController({
       document,
@@ -5229,6 +5244,8 @@ function afterWsJsonMessage(m) {
     artistLinkPanel?.receiveTools(m.tools);
     artistThumbControl?.receiveRandomTools?.(m.tools);
   }
+  // 삽입 그룹 판 - 어느 탭의 조작이든 같은 목록을 본다.
+  if (m.type === 'artist_insert_tracker') artistInsertTray?.receive(m.tracker);
 }
 
 function onWsMessageError(error) {
@@ -5918,42 +5935,6 @@ async function refreshResultUnsavedActions() {
   } catch (error) {
     if (requestId === resultUnsavedActionRequestId) renderResultUnsavedActions(null);
   }
-}
-
-/** 작가 패널 [삽입](사용자 지정 2026-11-03) - 이 작가를 지금 가중치로 PE Prefix 맨 앞에(메인 랜덤 연결이 붙이는 자리).
- *  이미 홀로 선 조각으로 있으면 그 자리의 가중치만 바꾼다(두 번 들어가지 않게). Prefix 는 `/pe` 편집창과 같은 길로 고친다. */
-async function insertLinkedArtistIntoPrefix({artist, weight}) {
-  await artistThumbReady;
-  const format = artistThumbControl?.formatArtistToken;
-  const token = typeof format === 'function' ? format(artist, weight) : '';
-  if (!token) { showToast('작가 태그를 만들지 못했습니다.', 'error'); return; }
-  const text = peFieldText('pre_prompt');
-  const replaced = replaceArtistPiece(text, format(artist, 1), token);
-  const value = replaced !== null ? replaced : (text.trim() ? `${token}, ${text.replace(/^\s+/, '')}` : token);
-  if (value === text) { showToast(`Prefix 에 이미 ${token} 이 있습니다.`, 'info'); return; }
-  if (!slashPeSetField('pre_prompt', value)) {
-    showToast('Prefix 를 고치지 못했습니다 - 연결을 확인하세요.', 'error');
-    return;
-  }
-  showToast(replaced !== null ? `Prefix 에 있던 ${artist} 를 ${token} 로 바꿨습니다.` : `Prefix 맨 앞에 ${token} 를 넣었습니다.`,
-    'success');
-}
-
-/** 글에서 이 작가의 **홀로 선** 조각 하나를 새 토큰으로 바꾼 글. 없으면 null.
- *  조각 = 글 처음 · 쉼표 · 줄바꿈 사이. NAI `w::artist:x ::` · `artist:x` / SD `(x:w)` · `x`.
- *  ⚠️ NAI 가중치 묶음(`1.2::artist:a, artist:b ::`) 안의 조각은 건드리지 않는다 - 앞의 `::` 수가 홀수면 묶음 안이다. */
-function replaceArtistPiece(text, bare, token) {
-  const name = String(bare || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (!name) return null;
-  const num = '-?\\d*\\.?\\d+';
-  const re = new RegExp(`(^|[,\\n])([ \\t]*)(${num}::${name}\\s*::|\\(${name}:${num}\\)|${name})(?=[ \\t]*(?:,|\\n|$))`, 'gi');
-  let m;
-  while ((m = re.exec(text))) {
-    const start = m.index + m[1].length + m[2].length;
-    if (((text.slice(0, start).match(/::/g) || []).length % 2) === 1) continue;
-    return text.slice(0, start) + token + text.slice(start + m[3].length);
-  }
-  return null;
 }
 
 function scheduleResultUnsavedActionRefresh(delay = 120) {
@@ -13398,6 +13379,8 @@ function onModuleState(m) {
     // 메인 칸의 [prefix] [postfix] 창도 같은 값을 비춘다.
     try { mainPeQuick?.sync(); } catch (_) {}
     try { peQuickSwitch?.sync(); } catch (_) {}
+    // 삽입 그룹 판 - 손으로 고친 글 · 프리셋 전환(= 확정)을 맞춘다.
+    try { artistInsertTray?.reconcile(); } catch (_) {}
     refreshHiresPresetSwapOptions(m);
   }
   if (m.module_id === 'chunk' && isChunkOpen()) {
@@ -15572,6 +15555,7 @@ import('./js/features/peFieldHub.mjs?v=20261010-review5')
     peFieldHub.subscribe(() => {
       try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
       try { mainPeQuick?.sync(); } catch (_) {}
+      try { artistInsertTray?.reconcile(); } catch (_) {}
     });
   })
   .catch(error => console.error('Failed to initialize PE field hub', error));

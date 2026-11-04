@@ -16,6 +16,7 @@ from core.artist_affinity import default_pack as artist_affinity_pack
 from core.artist_bench_views import ArtistBenchViewError, ArtistBenchViewStore
 from core.artist_groups import LINK_SLOT, LINK_SLOT_NAME, ArtistGroupError, ArtistGroupStore
 from core.artist_mixes import ArtistMixError, ArtistMixStore, MIX_SETTING_KEYS
+from core.artist_insert_tracker import artist_insert_tracker, current_scope
 from core.artist_search import ArtistSearchError, search as artist_search, suggest as artist_suggest
 from core.artist_thumbnail_service import ArtistLoadCancelled, ArtistThumbnailService
 from core.headless_generation_service import HeadlessGenerationService
@@ -718,6 +719,30 @@ def _apply_link_panel_op(context: WebSessionContext, payload: dict) -> bool:
     return False
 
 
+INSERT_TRACKER_OPS = {"add", "update", "remove", "solo", "commit"}
+
+
+def _apply_insert_tracker_op(context, payload):
+    tracker = artist_insert_tracker(context)
+    preset, mode = current_scope(context)
+    tracker.check_scope(preset, mode)
+    op = payload.get("op")
+    if op == "add":
+        return tracker.add(payload.get("artist"), payload.get("weight", 1.0), payload.get("slot", "pre"),
+                           payload.get("with_prefix", True), preset=preset, mode=mode)
+    if op == "update":
+        return tracker.update(payload.get("id"), **{k: v for k, v in payload.items() if k not in ("op", "id")})
+    if op == "remove":
+        return tracker.remove(payload.get("id"))
+    if op == "solo":
+        if "id" not in payload:
+            raise ValueError("id is required (null clears solo)")
+        return tracker.set_solo(payload["id"], payload.get("scope", "all"))
+    if op == "commit":
+        return tracker.clear()
+    raise ValueError("Unknown insert tracker op")
+
+
 async def _broadcast_random_tools(context: WebSessionContext, clients: set[Any], run_in_thread) -> None:
     """랜덤 도구가 바뀌었다 - 결과 화면 작가 패널 · 아티스트 창(다른 탭 포함)이 같은 값을 보게 한다."""
     try:
@@ -1278,6 +1303,39 @@ def register_artist_thumbnail_routes(
             return await run_in_thread(artist_thumbnail_service(session_context).random_tools)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb random tools failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/insert-tracker")
+    async def api_artist_insert_tracker():
+        try:
+            return await run_in_thread(artist_insert_tracker(session_context).snapshot)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist insert tracker failed: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/insert-tracker")
+    async def api_artist_insert_tracker_op(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict) or str(payload.get("op") or "") not in INSERT_TRACKER_OPS:
+            return JSONResponse({"error": f"op must be one of {sorted(INSERT_TRACKER_OPS)}"}, status_code=400)
+        try:
+            snapshot = await run_in_thread(_apply_insert_tracker_op, session_context, payload)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist insert tracker failed: {exc}"}, status_code=500)
+        if payload["op"] in {"solo", "commit", "remove", "update"}:
+            from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+            invalidate_auto_gen_prefetch(session_context)
+        try:
+            from app.backend.server.websocket_broadcast import broadcast_json
+
+            await broadcast_json(clients, {"type": "artist_insert_tracker", "tracker": snapshot})
+        except Exception:  # 알림 실패가 본 요청을 실패시키지 않는다
+            pass
+        return snapshot
 
     @app.get("/api/artist-thumb/link-panel")
     async def api_artist_thumb_link_panel(artist: str = "", mode: str = ""):

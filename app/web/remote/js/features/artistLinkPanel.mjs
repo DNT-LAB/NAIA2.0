@@ -5,7 +5,7 @@
  * 다루는 작가 = **보이는 그림에 붙은 작가**(히스토리 `linked_artist`). Auto Gen 은 다음 컷을 미리 만들므로
  * '마지막으로 뽑힌 작가' 를 쓰면 엉뚱한 작가를 숨긴다.
  *
- *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [삽입] [그룹 ▴]
+ *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [삽입 ▴] [그룹 ▴]
  *
  * - [× 가중치] = 누르면 위에 손잡이(휠 0.01씩). 바꾸면 **랜덤 작가 가중치**(아티스트 창 손잡이)에 바로 반영한다 -
  *   고정하지 않는다(사용자 지정 2026-11-03 · 처음엔 '그 값으로 고정' 이었다). 고정 중이면 고정 작가도 그 값을 쓴다.
@@ -14,7 +14,8 @@
  * - [기억] = 패널 전용 그룹 한 칸(`임시 그룹`) - 와일드카드로 바로 쓰이고 재시작해도 남는다. 이름을 붙이면 저장.
  *   사람이 있으면 [그룹 ▴] 맨 위에 그 칸이 뜨고, 누르면 아티스트 그룹 창으로 연다.
  * - [숨김] = 제외 작가. 고정해 둔 작가를 숨기면 정책이 돌아온다.
- * - [삽입] = 이 작가를 지금 가중치로 PE Prefix 맨 앞에(메인 랜덤 연결이 붙이는 자리). 이미 있으면 가중치만 바꾼다.
+ * - [삽입 ▴] = 이 작가를 지금 가중치로 PE Prefix 맨 앞 / Postfix 맨 뒤에(사용자 지정 2026-11-04). 이미 있으면 가중치만
+ *   바꾼다. 넣은 작가는 위의 삽입 그룹 판(`artistInsertTray.mjs`)이 추적한다.
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
  * ⚠️ 상태는 서버가 주인이다 - 조작 응답과 `artist_random_tools` 알림으로만 그린다(다른 탭 · 아티스트 창과 같은 값).
  */
@@ -57,6 +58,16 @@ export function installArtistLinkPanel({
     <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" aria-label="가중치">
     <div class="alp-weight-foot">휠 ${WEIGHT_STEP}씩 · 랜덤 가중치에 바로 반영</div>`;
   menu.after(weightPop);
+
+  // [삽입 ▴] - Prefix 맨 앞 / Postfix 맨 뒤 중 고른다(사용자 지정 2026-11-04). 넣은 작가는 삽입 그룹 판이 추적한다.
+  const insertMenu = document.createElement('div');
+  insertMenu.className = 'artist-link-menu artist-link-insert';
+  insertMenu.hidden = true;
+  insertMenu.setAttribute('role', 'menu');
+  insertMenu.innerHTML = `
+    <button type="button" class="alp-menu-item" data-alp-insert="pre" role="menuitem">Prefix 맨 앞에</button>
+    <button type="button" class="alp-menu-item" data-alp-insert="post" role="menuitem">Postfix 맨 뒤에</button>`;
+  weightPop.after(insertMenu);
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
   let weightSaving = null;         // 도는 중인 가중치 저장(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
@@ -88,10 +99,11 @@ export function installArtistLinkPanel({
   function render() {
     const show = Boolean(tools?.main_link) && seedShown();
     el.hidden = !show;
-    if (!show) { closeMenu(); closeWeight({commit: false}); return; }
+    if (!show) { closeMenu(); closeInsert(); closeWeight({commit: false}); return; }
     if (!artist) {
       el.innerHTML = '<span class="alp-empty" title="이 그림은 메인 Random 이 작가를 붙이지 않았습니다">붙은 작가 없음</span>';
       closeMenu();
+      closeInsert();
       closeWeight();
       place();
       return;
@@ -115,8 +127,8 @@ export function installArtistLinkPanel({
         title="${esc(`${slot?.name || '임시 그룹'} 에${slot?.has ? '서 뺍니다' : ' 담습니다'} - 와일드카드로 쓰이고 재시작해도 남습니다. [그룹 ▴] 에서 열어 이름을 붙이면 저장됩니다.`)}">기억</button>
       <button type="button" class="alp-btn alp-ban${banned ? ' is-on' : ''}" data-alp="ban" aria-pressed="${Boolean(banned)}"
         title="${banned ? '제외 작가에서 뺍니다' : '제외 작가로 - 다음부터 뽑히지 않습니다'}">숨김</button>
-      <button type="button" class="alp-btn" data-alp="insert"
-        title="${esc(`Prefix 맨 앞에 × ${w} 로 넣습니다 - 이미 있으면 가중치만 바꿉니다`)}">삽입</button>
+      <button type="button" class="alp-btn" data-alp="insert" aria-haspopup="menu" aria-expanded="${!insertMenu.hidden}"
+        title="${esc(`× ${w} 로 Prefix 맨 앞 · Postfix 맨 뒤에 넣습니다 - 이미 있으면 가중치만 바꾸고, 위의 삽입 그룹에서 추적합니다`)}">삽입 ▴</button>
       <button type="button" class="alp-btn" data-alp="group" aria-haspopup="menu" aria-expanded="${!menu.hidden}" title="그룹에 담기">그룹 ▴</button>`;
     place();
   }
@@ -195,11 +207,25 @@ export function installArtistLinkPanel({
   }
 
   function openMenu() {
+    closeInsert();
     renderMenu();
     menu.hidden = false;
     menu.style.left = `${el.offsetLeft}px`;
     el.querySelector('[data-alp="group"]')?.setAttribute('aria-expanded', 'true');
     void loadInfo();                                   // 그룹 창에서 바뀐 것까지 - 열 때 새로 받는다
+  }
+
+  function openInsert(button) {
+    closeMenu();
+    insertMenu.hidden = false;
+    insertMenu.style.left = `${el.offsetLeft + (button ? button.offsetLeft : 0)}px`;
+    el.querySelector('[data-alp="insert"]')?.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeInsert() {
+    if (insertMenu.hidden) return;
+    insertMenu.hidden = true;
+    el.querySelector('[data-alp="insert"]')?.setAttribute('aria-expanded', 'false');
   }
 
   function closeMenu() {
@@ -282,7 +308,7 @@ export function installArtistLinkPanel({
     window.addEventListener('pointerup', restore, true);
     window.addEventListener('pointercancel', restore, true);
   };
-  for (const node of [el, menu, weightPop]) node.addEventListener('pointerdown', holdAncestorDrag);
+  for (const node of [el, menu, weightPop, insertMenu]) node.addEventListener('pointerdown', holdAncestorDrag);
 
   weightRange.addEventListener('input', () => setWeight(weightRange.value));
   weightPop.addEventListener('wheel', event => {
@@ -319,7 +345,7 @@ export function installArtistLinkPanel({
       return;
     }
     if (action === 'insert') {
-      await onInsert?.({artist, weight: weightNumber()});
+      if (insertMenu.hidden) openInsert(button); else closeInsert();
       return;
     }
     if (action === 'ban') {
@@ -357,14 +383,25 @@ export function installArtistLinkPanel({
     if (data) showToast?.(`${name} 그룹을 만들어 담았습니다.`, 'info');
   });
 
+  insertMenu.addEventListener('click', async event => {
+    const item = event.target.closest('[data-alp-insert]');
+    if (!item || stale) return;
+    const gen = assetGen;
+    closeInsert();
+    if (gen !== assetGen) return;
+    await onInsert?.({artist, weight: weightNumber(), slot: item.dataset.alpInsert === 'post' ? 'post' : 'pre'});
+  });
+
   document.addEventListener('pointerdown', event => {
     if (el.contains(event.target)) return;
+    if (!insertMenu.hidden && !insertMenu.contains(event.target)) closeInsert();
     if (!menu.hidden && !menu.contains(event.target)) closeMenu();
     if (!weightPop.hidden && !weightPop.contains(event.target)) closeWeight();
   }, true);
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape') return;
     if (!menu.hidden) { closeMenu(); event.stopPropagation(); }
+    if (!insertMenu.hidden) { closeInsert(); event.stopPropagation(); }
     if (!weightPop.hidden) { closeWeight(); event.stopPropagation(); }
   }, true);
 

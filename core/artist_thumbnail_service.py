@@ -625,7 +625,7 @@ class ArtistThumbnailService:
         return round(start + random.SystemRandom().randint(0, max(0, steps)) * step, 4)
 
     @staticmethod
-    def format_artist_token(artist: str, weight: float, api_mode: str = "NAI") -> str:
+    def format_artist_token(artist: str, weight: float, api_mode: str = "NAI", *, with_prefix: bool = True) -> str:
         """화면의 `formatArtistToken` 과 같은 서식. NAI = `w::artist:x ::` · 그 밖 = `(x:w)`(괄호 이스케이프).
         ⚠️ ANIMA 의 '@' 는 여기서 붙이지 않는다 - 보낼 때 `core.anima_artist_tags` 가 붙인다."""
         name = str(artist or "").strip()
@@ -638,7 +638,7 @@ class ArtistThumbnailService:
         weighted = abs(value - 1.0) > 1e-9
         text = f"{value:.2f}".rstrip("0").rstrip(".") or "0"
         if str(api_mode or "NAI").strip().upper() == "NAI":
-            body = f"artist:{name}"
+            body = f"artist:{name}" if with_prefix else name
             return f"{text}::{body} ::" if weighted else body
         body = re.sub(r"([()])", r"\\\1", name)
         return f"({body}:{text})" if weighted else body

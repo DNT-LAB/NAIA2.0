@@ -333,7 +333,17 @@ class PromptEngineeringHeadlessPostHook:
         # 생성 한 번에만 실려 있다(`core.headless_random_prompt_service.random_artist_link`).
         from core.headless_random_prompt_service import current_random_artist, current_random_artist_token
 
-        artist_token = current_random_artist_token()
+        # 삽입 솔로는 생성 사본에만 적용한다. 프리셋·모드가 바뀌었으면 자동 확정.
+        tracker = getattr(self.app_context, "artist_insert_tracker", None)
+        tracker_state = tracker.snapshot() if tracker is not None else None
+        solo = tracker_state and tracker_state["solo"]
+        if solo:
+            from core.artist_insert_tracker import solo_options
+
+            options = solo_options(self.app_context, options, tracker_state)
+            if isinstance(getattr(context, "metadata", None), dict):
+                context.metadata.pop("linked_artist", None)
+        artist_token = "" if solo else current_random_artist_token()
         if artist_token:
             # 붙인 작가를 이 프롬프트의 맥락에 적는다 - 생성 요청이 같은 프롬프트일 때 그림에 옮겨 담는다
             # (`HeadlessGenerationService._capture_linked_artist`). 미리 만든 컷도 이 맥락째 설치된다.

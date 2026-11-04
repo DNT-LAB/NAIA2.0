@@ -200,9 +200,12 @@ export function installArtistInsertTray({
     const preset = String(getPreset() || '');
     if (tracker.preset && preset && preset !== tracker.preset) { await load(); return; }
     for (const item of items) {
-      if (!item.on) continue;
       const hit = findArtistPiece(readField(item.slot), bodiesOf(item.artist));
       const patch = {};
+      if (!item.on) {
+        if (!hit) continue;
+        patch.on = true;                               // 꺼 둔 작가를 손으로(되돌리기 · 직접 입력) 되살렸다 - 글이 진실
+      }
       if (!hit) {
         patch.on = false;
       } else {
@@ -289,8 +292,11 @@ export function installArtistInsertTray({
       const soloHere = tracker.solo?.id === item.id;
       await act(null, {op: 'solo', id: soloHere ? null : item.id, scope: tracker.solo?.scope || 'all'});
     } else if (action === 'remove') {
-      const data = await act(item.on ? {[item.slot]: withoutItem(item)} : null, {op: 'remove', id: item.id});
-      if (data) showToast?.(`${item.artist} 를 ${SLOT_FIELD[item.slot]} 에서 뺐습니다.`, 'info');
+      // 꺼짐 표시를 믿지 않고 글을 본다 - 있으면 빼고, 없으면 목록에서만 지운다.
+      const had = Boolean(findArtistPiece(readField(item.slot), bodiesOf(item.artist)));
+      const data = await act(had ? {[item.slot]: withoutItem(item)} : null, {op: 'remove', id: item.id});
+      if (data) showToast?.(had ? `${item.artist} 를 ${SLOT_FIELD[item.slot]} 에서 뺐습니다.`
+        : `${item.artist} 를 삽입 그룹에서 지웠습니다.`, 'info');
     }
   });
 

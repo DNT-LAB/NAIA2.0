@@ -79,8 +79,9 @@ export function installArtistLinkPanel({
     return String(Math.round(n * 100) / 100);
   };
   const seedShown = () => Boolean(seedPill && seedPill.offsetParent !== null && seedPill.offsetWidth > 0);
-  // 메인 Random 은 늘 뽑는다 - [고정](`link_pin`) 중일 때만 그 작가(`focus`)를 붙인다(사용자 지시 2026-11-03).
-  const pinnedHere = () => Boolean(tools && artist && tools.link_pin && tools.focus === artist);
+  // 메인 Random 은 늘 뽑는다 - [고정](`link_pin`) 중일 때만 그 작가(`pin_artist`)를 붙인다(사용자 지시 2026-11-03).
+  // `focus`(아티스트 창 격자에서 고른 작가)와 다르다 - 격자를 눌러도 고정은 안 옮겨 간다.
+  const pinnedHere = () => Boolean(tools && artist && tools.link_pin && tools.pin_artist === artist);
   const weightNumber = () => (Number.isFinite(Number(weight)) && weight !== null ? Number(weight) : 1);
   const weightLabel = () => formatWeight(weightNumber()) || '1';
 

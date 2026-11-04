@@ -241,6 +241,9 @@ class ArtistThumbnailService:
         # 리모컨 하단 바의 세 토글은 **실행하는 동안만** 기억한다(사용자 지시 2026-10-19 - 다시 켜면 꺼진 채로).
         # 파일에는 늘 꺼짐으로 쓰고, 읽을 때 이 값을 덮는다(예전 판이 켜진 채 저장한 파일도 꺼짐으로 시작한다).
         self._random_toggles = {key: False for key in self.RANDOM_TOOL_TOGGLES}
+        # 작가 패널 [고정] 이 붙이는 작가 - 격자에서 고른 작가(`focus`)와 따로 둔다(격자를 눌러도 고정이 안 옮겨 간다 ·
+        # Codex 릴리즈 리뷰 11-04). 고정과 같이 이번 실행에만 산다.
+        self._random_pin_artist = ""
         self._download_thread: threading.Thread | None = None
         self._download_cancel = threading.Event()
         self._download_state = {
@@ -570,7 +573,8 @@ class ArtistThumbnailService:
     # ── 랜덤 도구(리모컨 하단 바 · 사용자 지시 2026-10-19) ─────────────────
     #  [생성 버튼 -> 랜덤 아티스트] [랜덤 가중치] [메인 랜덤 버튼 연결]. 셋 다 다음 실행에도 남는다(사용자 결정).
     #  `pool` 은 리모컨이 보고 있던 목록 조건(모드 · 필터 · 이름 검색)이다 - 창을 닫아도 메인 Random 이 이것으로 뽑는다.
-    #  `link_pin` = 결과 화면 작가 패널의 [고정] 이 켜져 있다 - 메인 Random 이 뽑지 않고 `focus` 작가를 붙인다.
+    #  `link_pin` = 결과 화면 작가 패널의 [고정] 이 켜져 있다 - 메인 Random 이 뽑지 않고 `pin_artist` 를 붙인다
+    #  (런타임 · 고정할 때만 바뀐다 - 격자에서 고른 `focus` 와 다르다).
     #  `pin_hold` = 그 [고정] 이 [생성 버튼 -> 랜덤 아티스트] 를 **빌려** 꺼 두었다(사용자 지정 2026-11-03). 토글은 상위
     #  정책이다 - 고정을 풀면 다시 켜고 정책을 돌려준다. 둘 다 이번 실행에만 산다(다른 토글과 같이).
     #  `source` = 메인 Random 이 작가를 뽑는 곳(사용자 지정 2026-11-04 · 결과 화면 [… 연동됨] 메뉴).
@@ -644,8 +648,8 @@ class ArtistThumbnailService:
             "thumbs": "has" if str(raw.get("thumbs") or "").strip().lower() == "has" else "all",
         }
 
-    def _search_pool_names(self, search: dict, mode_key: str) -> list[str] | None:
-        """매칭 검색 결과 전체(격자와 같은 순서 · 제외 작가 뺌). 팩이 없거나 조건이 틀리면 None.
+    def _search_pool_names(self, search: dict, mode_key: str, *, keep_banned: bool = False) -> list[str] | None:
+        """매칭 검색 결과 전체(격자와 같은 순서 · 제외 작가 뺌 - `keep_banned` 면 격자 그대로). 팩이 없거나 조건이 틀리면 None.
         ⚠️ 격자 쪽수와 맞아야 한다 - 같은 `artist_search.search` · 같은 [썸네일 있음] 판정(`image_presence`)."""
         import time
 
@@ -672,6 +676,8 @@ class ArtistThumbnailService:
                 if len(self._search_pool_cache) >= 8:
                     self._search_pool_cache.pop(next(iter(self._search_pool_cache)))
                 self._search_pool_cache[key] = (now, names)
+        if keep_banned:
+            return names                                  # 검색 격자는 제외 작가도 보여 준다 - 쪽 번호는 이 순서로
         banned = set(self._banned())
         return [name for name in names if name and name not in banned]
 
@@ -857,7 +863,7 @@ class ArtistThumbnailService:
 
         - 늘 저장된 목록에서 **무작위** 한 명 - 화면이 그 작가로 격자를 넘겨 고른다(`pick` · `page`).
           [생성 버튼 → 랜덤 아티스트] 와 상관없다(사용자 지시 2026-11-03 - 그 토글은 창의 Generate 단추 몫이다).
-        - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`focus`) · 그 가중치(`weight` - [랜덤 가중치] 여도).
+        - 작가 패널 [고정](`link_pin`) 중이면 뽑지 않고 그 작가(`pin_artist`) · 그 가중치(`weight` - [랜덤 가중치] 여도).
         뽑을 때 가중치는 손잡이 값, [랜덤 가중치] 면 매번 뽑는다. 꺼져 있거나 목록이 비면 None. 창이 닫혀 있어도 돈다."""
         # 고정 표(런타임)와 작가 · 가중치(파일)를 한 시점에서 읽는다 - 저장은 표를 먼저 바꾸고 파일을 쓴다(Codex 리뷰).
         with self._options_lock:
@@ -866,7 +872,7 @@ class ArtistThumbnailService:
             return None
         if tools.get("link_pin"):
             weight = tools["weight"]                # 고정 = 이 작가 · 이 가중치(패널 손잡이로 고친 값)
-            artist = str(tools.get("focus") or "").strip()
+            artist = str(tools.get("pin_artist") or "").strip()   # 격자에서 다른 작가를 골라도 고정은 그대로
             if artist and artist in set(self._banned()):
                 return None                       # 제외 작가는 고른 작가여도 붙이지 않는다(작가 패널 [숨김])
             token = self.format_artist_token(artist, weight, api_mode) if artist else ""
@@ -923,6 +929,7 @@ class ArtistThumbnailService:
         tools = options.get("random_tools")
         if isinstance(tools, dict):
             tools.update(getattr(self, "_random_toggles", {}))
+            tools["pin_artist"] = getattr(self, "_random_pin_artist", "") if tools.get("link_pin") else ""
         return options
 
     def save_options(self, options: dict) -> dict:
@@ -947,7 +954,7 @@ class ArtistThumbnailService:
                 if name in set(self._banned()):
                     # 숨긴 작가는 붙이지 않는다(`main_random_token`) - 고정해도 아무것도 안 붙는 상태를 만들지 않는다.
                     raise ValueError("숨긴 작가는 고정할 수 없습니다 - [숨김] 을 먼저 푸세요.")
-                changes.update(focus=name, link_pin=True)
+                changes.update(focus=name, link_pin=True, pin_artist=name)
                 try:
                     value = float(weight)
                     if math.isfinite(value):
@@ -983,7 +990,7 @@ class ArtistThumbnailService:
             tools = self.load_options().get("random_tools") or {}
             if not tools.get("link_pin") and not tools.get("pin_hold"):
                 return False
-            if artist and str(tools.get("focus") or "").strip() != str(artist).strip():
+            if artist and str(tools.get("pin_artist") or "").strip() != str(artist).strip():
                 return False
             changes: dict = {"link_pin": False}
             if tools.get("pin_hold"):
@@ -1004,6 +1011,7 @@ class ArtistThumbnailService:
             # 랜덤 도구는 보낸 칸만 바꾼다(프리픽스 저장이 이것을 지우지 않게 · 반대도).
             if isinstance(options.get("random_tools"), dict):
                 incoming = dict(options["random_tools"])
+                pin_artist = incoming.pop("pin_artist", None)    # 고정 길(`link_pin`)만 바꾼다
                 previous = current.get("random_tools", {})
                 if not internal:
                     incoming.pop("pin_hold", None)        # 두 표는 고정 길(`link_pin` 메서드)만 다룬다
@@ -1022,6 +1030,11 @@ class ArtistThumbnailService:
                 current["random_tools"] = self._normalize_random_tools({**previous, **incoming})
                 for key in self.RANDOM_TOOL_TOGGLES:
                     self._random_toggles[key] = bool(current["random_tools"].get(key))
+                if internal and pin_artist is not None:
+                    self._random_pin_artist = str(pin_artist).strip()[:300]
+                if not current["random_tools"].get("link_pin"):
+                    self._random_pin_artist = ""
+                current["random_tools"]["pin_artist"] = self._random_pin_artist
         selected = current["modes"].get(mode, {"prefix": "", "postfix": ""})
         current["version"] = 2
         current["mode"] = mode
@@ -1032,7 +1045,8 @@ class ArtistThumbnailService:
         # 파일에는 세 토글을 꺼짐으로 쓴다 - 다시 켜면 꺼진 채 시작한다(돌려주는 값은 이번 실행의 값).
         on_disk = dict(current)
         if isinstance(current.get("random_tools"), dict):
-            on_disk["random_tools"] = {**current["random_tools"], **{key: False for key in self.RANDOM_TOOL_TOGGLES}}
+            on_disk["random_tools"] = {**{k: v for k, v in current["random_tools"].items() if k != "pin_artist"},
+                                       **{key: False for key in self.RANDOM_TOOL_TOGGLES}}
         path.write_text(json.dumps(on_disk, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return current
 
@@ -1820,8 +1834,11 @@ class ArtistThumbnailService:
         # 아티스트 창 [검색] 이 켜져 있으면 그 결과(격자와 같은 순서라 `page` 도 그 격자의 쪽이다 · 사용자 지정 2026-11-04).
         artists, _name, weights, thumb_data, history_key = self._random_pool_list(mode_key, filter_key, query_text,
                                                                                   search)
+        grid = artists                       # 쪽 번호를 세는 목록 = 화면 격자
         if history_key[0] == "search":
             filter_key = "all"
+            # 검색 격자는 제외 작가도 보인다 - 뽑기는 뺀 목록에서, 쪽은 격자 순서로(Codex 릴리즈 리뷰 11-04).
+            grid = self._search_pool_names(self._normalize_search_pool(search), mode_key, keep_banned=True) or artists
         # 메인 Random 만 - 구간(게시물 많은 순 100칸)과 이미 뽑힌 작가(중복 스킵). 다 빠지면 구간 안에서 중복 허용.
         candidates = artists
         if range_pct is not None:
@@ -1837,7 +1854,7 @@ class ArtistThumbnailService:
             return None
         artist = picked[0]
         per_page = max(12, min(96, int(per_page or 48)))       # build_list 와 같은 범위
-        index = artists.index(artist)
+        index = grid.index(artist) if artist in grid else artists.index(artist)
         image_url = self._image_url_resolver(mode_key, filter_key, thumb_data)(artist)
         return {
             "artist": artist,

@@ -2244,7 +2244,7 @@ export function createArtistThumbController({
       </div>
       <div class="als-range-lab"><span data-als-range-text></span><b data-als-range-count></b></div>
       <div class="als-range-posts" data-als-range-posts></div>`;
-    wrap.title = '아티스트 탭에서 뽑을 때만 - 아티스트 창과 같은 순서(게시물 많은 순 · 검색 중이면 검색 결과 순)를 100칸으로 나눈 구간';
+    wrap.title = '아티스트 탭에서 뽑을 때만 - 게시물 많은 순(검색 결과도 게시물 순으로 세운다)을 100칸으로 나눈 구간';
     paintRange(wrap);
     return wrap;
   }
@@ -2259,8 +2259,8 @@ export function createArtistThumbController({
     const fill = wrap.querySelector('.als-fill');
     fill.style.left = `${lo}%`;
     fill.style.right = `${100 - hi}%`;
-    // 검색 결과는 검색 순서(Wilson · 총 Post · 매칭 수)다 - '게시물 많은 순' 이 아니다.
-    wrap.querySelector('[data-als-range-text]').textContent = `${linkSearch ? '검색 결과 순' : '게시물 많은 순'} ${lo}% — ${hi}%`;
+    // 검색 결과도 서버가 게시물 많은 순으로 세워 자른다(사용자 지정 2026-11-04).
+    wrap.querySelector('[data-als-range-text]').textContent = `게시물 많은 순 ${lo}% — ${hi}%`;
     const count = rangeCount(Number((linkSourceTab || {}).count));
     wrap.querySelector('[data-als-range-count]').textContent = count === null ? '' : `${count.toLocaleString('en-US')}명`;
     const posts = rangePosts();

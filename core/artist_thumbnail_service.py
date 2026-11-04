@@ -719,6 +719,15 @@ class ArtistThumbnailService:
         return start, end
 
     @staticmethod
+    def random_range_order(artists: list[str], weights: dict) -> list[str]:
+        """구간 슬라이더가 자르는 순서 = 늘 게시물 많은 순(사용자 지정 2026-11-04 - 검색 결과도 정렬해 자른다).
+        검색 결과는 Wilson 등 검색 순서라 '상위 8%' 에 게시물 19개 작가가 섞였다. 같은 수는 원래 순서 · 수 모름 = 맨 뒤."""
+        def posts(name: str) -> float:
+            value = weights.get(name)
+            return float(value) if isinstance(value, (int, float)) else -1.0
+        return sorted(artists, key=posts, reverse=True)
+
+    @staticmethod
     def random_bucket_posts(artists: list[str], weights: dict) -> list:
         """구간 손잡이가 보여 줄 게시물 수 - 100칸 저마다 [가장 적은, 가장 많은] 게시물 수(사용자 지정 2026-11-04).
         칸 = `random_range_bounds` 와 같은 셈(정수 내림). 사람이 없거나 수를 모르는 칸은 None.
@@ -795,10 +804,11 @@ class ArtistThumbnailService:
         try:
             artists, filter_name, weights, _t, _k = self._random_pool_list(
                 str(pool.get("mode") or ""), str(pool.get("filter") or "all"), query, pool.get("search"))
-            start, end = self.random_range_bounds(len(artists), tools.get("range"))
-            tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or ""),
-                   "range_count": end - start, "remaining": left(artists[start:end]),
-                   "bucket_posts": self.random_bucket_posts(artists, weights)}
+            ranked = self.random_range_order(artists, weights)
+            start, end = self.random_range_bounds(len(ranked), tools.get("range"))
+            tab = {"filter_name": filter_name, "count": len(ranked), "query": str(pool.get("query") or ""),
+                   "range_count": end - start, "remaining": left(ranked[start:end]),
+                   "bucket_posts": self.random_bucket_posts(ranked, weights)}
         except Exception:  # noqa: BLE001 - 숫자는 장식이다
             tab = {"filter_name": "", "count": None, "query": "", "range_count": None, "remaining": None,
                    "bucket_posts": None}
@@ -1856,9 +1866,10 @@ class ArtistThumbnailService:
             grid = self._search_pool_names(self._normalize_search_pool(search), mode_key, keep_banned=True) or artists
         # 메인 Random 만 - 구간(게시물 많은 순 100칸)과 이미 뽑힌 작가(중복 스킵). 다 빠지면 구간 안에서 중복 허용.
         candidates = artists
-        if range_pct is not None:
-            start, end = self.random_range_bounds(len(artists), range_pct)
-            candidates = artists[start:end]
+        if range_pct is not None and self._normalize_random_range(range_pct) != [0, 100]:
+            ranked = self.random_range_order(artists, weights)       # 구간 = 게시물 많은 순(검색 결과도)
+            start, end = self.random_range_bounds(len(ranked), range_pct)
+            candidates = ranked[start:end]
         exhausted = False
         if exclude:
             fresh = [artist for artist in candidates if artist not in exclude]

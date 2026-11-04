@@ -659,10 +659,13 @@ def _link_panel_state(context: WebSessionContext, artist: str, mode: str = "") -
     if not name:
         return out
     image_url = ""
+    count = None
     try:
         items = (service.describe_artists(mode, [name]) or {}).get("items") or []
         image_url = str(items[0].get("image_url") or "") if items else ""
-    except Exception:  # noqa: BLE001 - 그림은 장식이다
+        # 게시물 수(격자 카드에 적힌 그 수 - `weight` 칸) - 이름에 마우스를 올리면 보인다(사용자 지정 2026-11-04).
+        count = int(items[0].get("weight") or 0) if items and items[0].get("known") else None
+    except Exception:  # noqa: BLE001 - 그림 · 수는 장식이다
         pass
     favorite = name in set(service.favorite_artists())
     groups = artist_group_store(context).list()
@@ -674,6 +677,7 @@ def _link_panel_state(context: WebSessionContext, artist: str, mode: str = "") -
     slot = next((g for g in groups if g.get("slot") == LINK_SLOT), None)
     out.update(
         image_url=image_url,
+        count=count,
         banned=name in set(service._banned()),
         slot={"id": slot["id"], "name": slot["name"], "has": has(slot), "count": len(slot.get("items") or [])}
         if slot else {"id": "", "name": LINK_SLOT_NAME, "has": False, "count": 0},

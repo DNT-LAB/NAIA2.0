@@ -114,8 +114,11 @@ export function installArtistLinkPanel({
     const slot = info?.artist === artist ? info.slot : null;
     const banned = info?.artist === artist && info.banned;
     const pinTitle = pin ? '고정 해제 - 다시 무작위로 뽑습니다' : '다음 Random 에도 이 작가를 붙입니다';
+    // 이름 툴팁 = 게시물 수(사용자 지정 2026-11-04 - 가중치는 옆 칩에 이미 있다). 사전에 없는 작가면 이름만.
+    const count = info?.artist === artist && Number.isFinite(info.count) ? info.count : null;
+    const whoTitle = count === null ? artist : `${artist} · 게시물 ${count.toLocaleString('en-US')}`;
     el.innerHTML = `
-      <span class="alp-who" title="${esc(artist)} × ${esc(w)}">
+      <span class="alp-who" title="${esc(whoTitle)}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
     : `<span class="alp-thumb alp-thumb-blank" aria-hidden="true">${esc(artist.slice(0, 1).toUpperCase())}</span>`}
         <span class="alp-name">${esc(artist)}</span>

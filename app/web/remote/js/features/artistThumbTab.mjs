@@ -61,6 +61,13 @@ export function createArtistThumbController({
   const linkPillEl = document.getElementById('artistLinkPill');
   const linkPanelEl = document.getElementById('artistLinkPanel');
   const seedPillEl = document.getElementById('seedLockPill');
+  // [… 연동됨 ▴] 의 뽑는 곳 메뉴(사용자 지정 2026-11-04) - 알약 바로 뒤 형제(같은 자리 기준).
+  const sourceMenuEl = document.createElement('div');
+  sourceMenuEl.className = 'artist-link-menu artist-link-source';
+  sourceMenuEl.hidden = true;
+  sourceMenuEl.setAttribute('role', 'menu');
+  sourceMenuEl.setAttribute('aria-label', '메인 Random 이 작가를 뽑는 곳');
+  linkPillEl?.after(sourceMenuEl);
   const groupsBtn = document.getElementById('artistThumbGroupsBtn');
   const selectBtn = document.getElementById('artistThumbSelectBtn');
   const batchBtn = document.getElementById('artistThumbBatchBtn');
@@ -210,6 +217,12 @@ export function createArtistThumbController({
   let randomPoolFollow = false;
   // 앱을 켠 뒤 아직 아티스트 창을 안 열었을 때의 연결 상태 - 가벼운 조회(`/random-tools`)로 안다.
   let linkHint = false;
+  // 메인 Random 이 작가를 뽑는 곳(사용자 지정 2026-11-04 · 알약 [… 연동됨 ▴] 메뉴) - 서버가 주인이다.
+  // tab = 아티스트 창 목록 · favorites = 관심 작가 · group = 그룹 하나(임시 그룹 포함). 이름은 메뉴 조회가 채운다.
+  let linkSource = {kind: 'tab', id: ''};
+  let linkSourceRows = [];
+  let linkSourceTab = null;
+  let linkSourceSeq = 0;
   // 카드 클릭(격자 이벤트)으로 고르면서 가중치를 새로 뽑지 않을 한 번 - 메인 Random 이 정한 가중치를 보일 때.
   let keepWeightOnce = false;
   // 메인 Random 이 보낸 뽑기의 차례 - 늦게 끝난 옛 것이 새 것을 덮지 않게.
@@ -935,6 +948,7 @@ export function createArtistThumbController({
     if (!randomToolsLoaded && state.options && state.options.random_tools) {
       randomToolsLoaded = true;
       randomTools = {...randomTools, ...state.options.random_tools};
+      takeLinkSource(state.options.random_tools.source);
       // 저장된 손잡이 값도 되살린다 - 안 하면 화면의 1 이 다음 저장 때 저장값을 덮는다(Codex 리뷰).
       const savedWeight = Number(state.options.random_tools.weight);
       if (Number.isFinite(savedWeight)) { paintWeightControls(savedWeight); syncPromptFormat(); }
@@ -2133,7 +2147,8 @@ export function createArtistThumbController({
     if (options.now) flush(); else randomToolsTimer = setTimeout(flush, 400);
   }
 
-  /** [아티스트 탭 연동됨] - 연결이 켜져 있고 리모컨 창이 안 보이면(닫힘 · 리모컨 내림) 시드 고정 알약 옆에 띄운다. */
+  /** [… 연동됨 ▴] - 연결이 켜져 있고 리모컨 창이 안 보이면(닫힘 · 리모컨 내림) 시드 고정 알약 옆에 띄운다.
+   *  출처가 아티스트 탭이 아니면(관심 작가 · 그룹) 창이 보여도 띄운다 - 창 목록에서 뽑지 않는다는 표시다. */
   function syncLinkPill() {
     if (!linkPillEl) return;
     const linked = randomToolsLoaded ? Boolean(randomTools.main_link) : linkHint;
@@ -2141,13 +2156,156 @@ export function createArtistThumbController({
     const windowShown = remoteOnboarded && remote?.isOpen?.() !== false;
     // 시드 알약이 숨는 화면(Interactive Assets 등)에서는 같이 숨긴다 - 붙을 자리가 없다(Codex 리뷰).
     const seedShown = Boolean(seedPillEl && seedPillEl.offsetParent !== null && seedPillEl.offsetWidth > 0);
-    const show = linked && !windowShown && seedShown;
+    const show = linked && (!windowShown || linkSource.kind !== 'tab') && seedShown;
     linkPillEl.hidden = !show;
-    if (!show || !seedPillEl) return;
+    paintLinkPill();
+    if (!show) { closeSourceMenu(); return; }
+    if (!seedPillEl) return;
     // 시드 알약은 켜면 시드 번호만큼 길어진다 - 그 오른쪽 끝에 붙인다.
     // 결과 화면 작가 패널이 떠 있으면 그 오른쪽으로 비켜 선다(사용자 지정 2026-11-03).
     const panel = linkPanelEl && !linkPanelEl.hidden && linkPanelEl.offsetWidth > 0 ? linkPanelEl : seedPillEl;
     linkPillEl.style.left = `${panel.offsetLeft + panel.offsetWidth + 6}px`;
+    if (!sourceMenuEl.hidden) sourceMenuEl.style.left = linkPillEl.style.left;
+  }
+
+  // ── 출처 메뉴(사용자 지정 2026-11-04) - 메뉴 칸(sourceMenuEl)은 맨 위 linkPillEl 옆에서 만든다 ──
+  function takeLinkSource(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    const kind = ['tab', 'favorites', 'group'].includes(raw.kind) ? raw.kind : 'tab';
+    linkSource = {kind, id: kind === 'group' ? String(raw.id || '') : ''};
+  }
+
+  function linkSourceName() {
+    if (linkSource.kind === 'favorites') return '관심 작가';
+    if (linkSource.kind === 'group') {
+      const row = linkSourceRows.find(r => r.kind === 'group' && r.id === linkSource.id);
+      return row ? row.name : '그룹';
+    }
+    return '아티스트 탭';
+  }
+
+  function paintLinkPill() {
+    if (!linkPillEl) return;
+    const name = linkSourceName();
+    const label = `${name} 연동됨 ▴`;
+    if (linkPillEl.textContent !== label) linkPillEl.textContent = label;
+    linkPillEl.title = linkSource.kind === 'tab'
+      ? '메인 Random 이 아티스트 창 목록에서 작가를 뽑아 붙이고 있습니다. 누르면 뽑는 곳을 고릅니다.'
+      : `메인 Random 이 '${name}' 에서 작가를 뽑아 붙이고 있습니다(비었으면 아티스트 탭에서). 누르면 뽑는 곳을 고릅니다.`;
+    linkPillEl.setAttribute('aria-haspopup', 'menu');
+    linkPillEl.setAttribute('aria-expanded', String(!sourceMenuEl.hidden));
+  }
+
+  function sourceMenuItem({kind, id = '', name, count, sub = '', slot = false}) {
+    const on = kind === linkSource.kind && (kind !== 'group' || id === linkSource.id);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `alp-menu-item${slot ? ' alp-menu-slot' : ''}${on ? ' is-on' : ''}`;
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', String(on));
+    button.dataset.alsKind = kind;
+    button.dataset.alsId = id;
+    const check = document.createElement('span');
+    check.className = 'alp-check';
+    check.setAttribute('aria-hidden', 'true');
+    check.textContent = on ? '✓' : '';
+    const label = document.createElement('span');
+    label.className = 'als-name';
+    label.textContent = name;
+    button.append(check, label);
+    if (sub) {
+      const subEl = document.createElement('span');
+      subEl.className = 'als-sub';
+      subEl.textContent = sub;
+      button.append(subEl);
+    }
+    const countEl = document.createElement('span');
+    countEl.className = 'alp-menu-count';
+    countEl.textContent = Number.isFinite(count) ? `${count}명` : '';
+    button.append(countEl);
+    return button;
+  }
+
+  function renderSourceMenu() {
+    const head = document.createElement('div');
+    head.className = 'als-head';
+    head.textContent = '메인 Random 이 작가를 뽑는 곳';
+    const sep = () => Object.assign(document.createElement('div'), {className: 'alp-menu-sep'});
+    const tab = linkSourceTab || {};
+    const nodes = [head, sourceMenuItem({kind: 'tab', name: '아티스트 탭', sub: tab.filter_name || '',
+      count: Number.isFinite(tab.count) ? tab.count : NaN})];
+    if (linkSourceRows.length) nodes.push(sep());
+    for (const row of linkSourceRows) {
+      nodes.push(sourceMenuItem({kind: row.kind, id: row.id || '', name: row.name, count: Number(row.count),
+        slot: Boolean(row.slot)}));
+    }
+    nodes.push(sep());
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'alp-menu-item';
+    open.setAttribute('role', 'menuitem');
+    open.dataset.alsOpen = '1';
+    open.textContent = '아티스트 창 열기 ↗';
+    nodes.push(open);
+    sourceMenuEl.replaceChildren(...nodes);
+  }
+
+  function applySourcesResponse(data) {
+    if (!data || typeof data !== 'object') return;
+    if (Array.isArray(data.sources)) linkSourceRows = data.sources;
+    if (data.tab && typeof data.tab === 'object') linkSourceTab = data.tab;
+    takeLinkSource(data.source);
+  }
+
+  async function loadLinkSources() {
+    const seq = ++linkSourceSeq;
+    try {
+      const res = await fetch('/api/artist-thumb/random-sources', {cache: 'no-store'});
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || seq !== linkSourceSeq) return;
+      applySourcesResponse(data);
+      if (!sourceMenuEl.hidden) renderSourceMenu();
+      syncLinkPill();
+    } catch (_) { /* 이름 · 수는 다음 조회에 */ }
+  }
+
+  function openSourceMenu() {
+    renderSourceMenu();
+    sourceMenuEl.hidden = false;
+    sourceMenuEl.style.left = linkPillEl.style.left;
+    paintLinkPill();
+    void loadLinkSources();                            // 그룹 창에서 바뀐 것까지 - 열 때 새로 받는다
+  }
+
+  function closeSourceMenu() {
+    if (sourceMenuEl.hidden) return;
+    sourceMenuEl.hidden = true;
+    paintLinkPill();
+  }
+
+  async function chooseLinkSource(kind, id) {
+    closeSourceMenu();
+    const seq = ++linkSourceSeq;
+    const previous = linkSource;
+    takeLinkSource({kind, id});                        // 바로 보인다 - 실패하면 되돌린다
+    syncLinkPill();
+    try {
+      const data = await postJson('/api/artist-thumb/random-sources', {kind, id});
+      if (seq !== linkSourceSeq) return;
+      applySourcesResponse(data);
+      syncLinkPill();
+    } catch (error) {
+      if (seq === linkSourceSeq) { linkSource = previous; syncLinkPill(); }
+      showToast?.(error.message || '뽑는 곳을 바꾸지 못했습니다.', 'error');
+    }
+  }
+
+  function openArtistWindowFromPill() {
+    // 리모컨을 다시 올리고, 닫혀 있으면 열고, 접혀 있으면 편다(requestArtistsTab 이 셋 다 한다).
+    requestArtistsTab();
+    const remote = getRemoteController?.();
+    if (remote?.isCollapsed?.()) { remote.expand?.(); remote.raise?.(); }
+    syncLinkPill();
   }
 
   function paintRandomTools() {
@@ -2237,16 +2395,24 @@ export function createArtistThumbController({
   function receiveRandomTools(tools) {
     if (!tools || typeof tools !== 'object') return;
     linkHint = Boolean(tools.main_link);
-    if (!randomToolsLoaded) { syncLinkPill(); return; }
+    if (!randomToolsLoaded) {
+      if (tools.source) takeLinkSource(tools.source);
+      if (linkSource.kind === 'group' && !linkSourceRows.some(r => r.id === linkSource.id)) void loadLinkSources();
+      syncLinkPill();
+      return;
+    }
     let saved = {};
     try { saved = JSON.parse(randomToolsSaved || '{}'); } catch (_) { saved = {}; }
     const local = randomToolsPayload();
+    if (tools.source) { takeLinkSource(tools.source); if (!sourceMenuEl.hidden) renderSourceMenu(); }
     const pending = new Set(Object.keys(local).filter(key => JSON.stringify(local[key]) !== JSON.stringify(saved[key])));
     for (const key of ['gen_pick', 'random_weight', 'main_link', 'pin_hold', 'link_pin', 'weight_start', 'weight_end', 'weight_step',
       'pool', 'focus']) {
       if (!pending.has(key) && key in tools) randomTools[key] = tools[key];
     }
     randomToolsSaved = JSON.stringify(Object.fromEntries(Object.keys(local).map(key => [key, key in tools ? tools[key] : saved[key]])));
+    // 모르는 그룹으로 바뀌었다(다른 탭에서 고름) - 이름을 받아 온다.
+    if (linkSource.kind === 'group' && !linkSourceRows.some(r => r.id === linkSource.id)) void loadLinkSources();
     paintRandomTools();
     if (mixOn) return;
     const focus = String(tools.focus || '');
@@ -2262,13 +2428,30 @@ export function createArtistThumbController({
   }
 
   function bindLinkPill() {
+    // 누르면 뽑는 곳 메뉴(사용자 지정 2026-11-04) - 창 열기는 메뉴 맨 아래 줄로 옮겼다.
     linkPillEl?.addEventListener('click', () => {
-      // 리모컨을 다시 올리고, 닫혀 있으면 열고, 접혀 있으면 편다(requestArtistsTab 이 셋 다 한다).
-      requestArtistsTab();
-      const remote = getRemoteController?.();
-      if (remote?.isCollapsed?.()) { remote.expand?.(); remote.raise?.(); }
-      syncLinkPill();
+      if (sourceMenuEl.hidden) openSourceMenu(); else closeSourceMenu();
     });
+    sourceMenuEl.addEventListener('click', event => {
+      const item = event.target.closest('.alp-menu-item');
+      if (!item) return;
+      if (item.dataset.alsOpen) { closeSourceMenu(); openArtistWindowFromPill(); return; }
+      const kind = item.dataset.alsKind;
+      const id = item.dataset.alsId || '';
+      if (!kind) return;
+      if (kind === linkSource.kind && (kind !== 'group' || id === linkSource.id)) { closeSourceMenu(); return; }
+      void chooseLinkSource(kind, id);
+    });
+    document.addEventListener('pointerdown', event => {
+      if (sourceMenuEl.hidden) return;
+      if (sourceMenuEl.contains(event.target) || linkPillEl?.contains(event.target)) return;
+      closeSourceMenu();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || sourceMenuEl.hidden) return;
+      closeSourceMenu();
+      event.stopPropagation();
+    }, true);
     // 시드 알약 폭이 바뀌면(고정 켜고 끔 · 시드 번호) 옆자리도 따라간다. 크기 감시만으로는 한 박자 늦어 겹쳤다(실측) -
     // 알약의 클래스 · 글자가 바뀌는 것도 본다. 폭은 읽는 순간 배치가 끝나 바로 잰다 - rAF 는 창이 뒤에 있으면 안 돈다(실측).
     if (seedPillEl) {
@@ -2290,7 +2473,12 @@ export function createArtistThumbController({
       try {
         const res = await fetch('/api/artist-thumb/random-tools', {cache: 'no-store'});
         const data = await res.json().catch(() => ({}));
-        if (res.ok) { linkHint = Boolean(data.main_link); syncLinkPill(); }
+        if (res.ok) {
+          linkHint = Boolean(data.main_link);
+          takeLinkSource(data.source);
+          if (linkSource.kind === 'group') void loadLinkSources();   // 그룹 이름은 메뉴 조회가 안다
+          syncLinkPill();
+        }
       } catch (_) { /* 표시는 다음 기회에 */ }
     }, 1500);
   }
@@ -4132,6 +4320,8 @@ export function createArtistThumbController({
     /** 결과 화면 작가 패널이 그룹을 바꿨다 - 그룹을 한 번이라도 연 탭이면 새로 읽어 열린 창이 따라온다. */
     reloadGroups() {
       if (groupsApi) void groupsApi.store.load().catch(() => {});
+      // 출처 메뉴의 이름 · 사람 수도(그룹 이름 · 임시 그룹이 바뀌었을 수 있다).
+      if (linkSource.kind !== 'tab' || !sourceMenuEl.hidden) void loadLinkSources();
     },
     /** 백엔드(NAI/WEBUI/COMFYUI)가 바뀌면 '생성한 모델' 필터와 카드 그림이 그 모드
      *  기준으로 다시 갈려야 한다. 예전에는 프롬프트 표기만 고쳐서, WEBUI 로 바꿔도

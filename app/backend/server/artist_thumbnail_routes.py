@@ -754,6 +754,20 @@ async def _broadcast_random_tools(context: WebSessionContext, clients: set[Any],
         pass
 
 
+async def _reset_deleted_random_source(context: WebSessionContext, clients: set[Any], run_in_thread,
+                                       group_id: Any) -> None:
+    """메인 Random 출처였던 그룹을 지웠다 - 출처를 아티스트 탭으로 되돌리고 알린다(사용자 지정 2026-11-04)."""
+    service = artist_thumbnail_service(context)
+    source = (await run_in_thread(service.random_tools)).get("source") or {}
+    if source.get("kind") != "group" or source.get("id") != str(group_id or ""):
+        return
+    await run_in_thread(service.set_random_source, {"kind": "tab"})
+    from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+    invalidate_auto_gen_prefetch(context)                   # 미리 만든 컷은 지운 그룹에서 뽑았다
+    await _broadcast_random_tools(context, clients, run_in_thread)
+
+
 def _random_service(context: WebSessionContext) -> HeadlessRandomPromptService:
     service = getattr(context, "headless_random_prompt_service", None)
     if service is None:
@@ -1079,6 +1093,8 @@ def register_artist_thumbnail_routes(
                     raise ArtistGroupError("관심 작가 그룹은 새로 만들 수 없습니다")
                 return await run_in_thread(_apply_favorites_op, session_context, payload)
             result = await run_in_thread(_apply_group_op, artist_group_store(session_context), payload)
+            if payload.get("op") == "delete":
+                await _reset_deleted_random_source(session_context, clients, run_in_thread, payload.get("id"))
             await run_in_thread(_sync_group_thumbnails, session_context)
             await run_in_thread(_sync_group_wildcards, session_context)
             if isinstance(result.get("groups"), list):
@@ -1303,6 +1319,34 @@ def register_artist_thumbnail_routes(
             return await run_in_thread(artist_thumbnail_service(session_context).random_tools)
         except Exception as exc:
             return JSONResponse({"error": f"Artist Thumb random tools failed: {exc}"}, status_code=500)
+
+    # 결과 화면 [… 연동됨] 메뉴(사용자 지정 2026-11-04) - 메인 Random 이 작가를 뽑는 곳.
+    @app.get("/api/artist-thumb/random-sources")
+    async def api_artist_thumb_random_sources():
+        try:
+            return await run_in_thread(artist_thumbnail_service(session_context).random_sources)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb random sources failed: {exc}"}, status_code=500)
+
+    @app.post("/api/artist-thumb/random-sources")
+    async def api_artist_thumb_random_source_set(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = None
+        if not isinstance(payload, dict):
+            return JSONResponse({"error": "body must be {kind, id}"}, status_code=400)
+        service = artist_thumbnail_service(session_context)
+        try:
+            await run_in_thread(service.set_random_source, payload)
+            result = await run_in_thread(service.random_sources)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb random source failed: {exc}"}, status_code=500)
+        from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+
+        invalidate_auto_gen_prefetch(session_context)            # 미리 만든 컷은 옛 출처로 뽑았다
+        await _broadcast_random_tools(session_context, clients, run_in_thread)
+        return result
 
     @app.get("/api/artist-thumb/insert-tracker")
     async def api_artist_insert_tracker():

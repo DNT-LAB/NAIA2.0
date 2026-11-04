@@ -567,6 +567,10 @@ class ArtistThumbnailService:
     #  `link_pin` = 결과 화면 작가 패널의 [고정] 이 켜져 있다 - 메인 Random 이 뽑지 않고 `focus` 작가를 붙인다.
     #  `pin_hold` = 그 [고정] 이 [생성 버튼 -> 랜덤 아티스트] 를 **빌려** 꺼 두었다(사용자 지정 2026-11-03). 토글은 상위
     #  정책이다 - 고정을 풀면 다시 켜고 정책을 돌려준다. 둘 다 이번 실행에만 산다(다른 토글과 같이).
+    #  `source` = 메인 Random 이 작가를 뽑는 곳(사용자 지정 2026-11-04 · 결과 화면 [… 연동됨] 메뉴).
+    #  tab = 아티스트 창 목록(`pool`) · favorites = 관심 작가 · group = 그룹 하나(`id` · 임시 그룹 포함).
+    #  가중치는 출처와 상관없이 손잡이 · [랜덤 가중치](사용자 지정 - 그룹에 적힌 가중치는 안 쓴다).
+    RANDOM_SOURCE_KINDS = ("tab", "favorites", "group")
     RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
@@ -611,7 +615,82 @@ class ArtistThumbnailService:
             },
             # 아티스트 창에서 지금 고른 작가 - 작가 패널 [고정] 중이면 [메인 랜덤 버튼 연결] 이 이 작가를 붙인다.
             "focus": str(source.get("focus") or "").strip()[:300],
+            "source": self._normalize_random_source(source.get("source")),
         }
+
+    @classmethod
+    def _normalize_random_source(cls, raw: Any) -> dict:
+        raw = raw if isinstance(raw, dict) else {}
+        kind = str(raw.get("kind") or "tab").strip()
+        if kind not in cls.RANDOM_SOURCE_KINDS:
+            kind = "tab"
+        gid = str(raw.get("id") or "").strip()[:200] if kind == "group" else ""
+        if kind == "group" and not gid:
+            kind = "tab"
+        return {"kind": kind, "id": gid}
+
+    def _random_groups(self) -> list[dict] | None:
+        """작가 그룹 목록(`artist_groups.json` - 라우트의 그룹 저장소와 같은 파일). 못 읽으면 None."""
+        from core.artist_groups import ArtistGroupStore
+        try:
+            return ArtistGroupStore(self.state_root).list()
+        except Exception:  # noqa: BLE001 - 못 읽는 파일은 그룹 쪽이 알린다 · 여기선 아티스트 탭으로 뽑는다
+            return None
+
+    def random_source_names(self, source: dict, groups: list[dict] | None = None) -> list[str] | None:
+        """출처의 작가(제외 작가 뺌 · 원래 순서). tab 이거나 그룹이 없어졌으면 None - 부르는 쪽이 아티스트 탭으로."""
+        kind = source.get("kind")
+        if kind == "favorites":
+            names = self._favorites()
+        elif kind == "group":
+            groups = self._random_groups() if groups is None else groups
+            group = next((g for g in groups or [] if g.get("id") == source.get("id")), None)
+            if group is None:
+                return None
+            names = [str(item.get("artist") or "").strip() for item in group.get("items") or []]
+        else:
+            return None
+        banned = set(self._banned())
+        seen: set[str] = set()
+        out = []
+        for name in names:
+            if name and name not in banned and name not in seen:
+                seen.add(name)
+                out.append(name)
+        return out
+
+    def random_sources(self) -> dict:
+        """결과 화면 [… 연동됨] 메뉴 - 고를 수 있는 출처와 사람 수. 지금 출처가 없어졌으면 tab 으로 되돌려 둔다."""
+        tools = self.random_tools()
+        source = tools.get("source") or {"kind": "tab", "id": ""}
+        pool = tools.get("pool") or {}
+        query = str(pool.get("query") or "").strip().lower().replace("_", " ")
+        try:
+            artists, filter_name, _w, _t = self._list_artists(str(pool.get("mode") or ""), pool.get("filter", "all"),
+                                                             query, random_sample=True)
+            tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or "")}
+        except Exception:  # noqa: BLE001 - 숫자는 장식이다
+            tab = {"filter_name": "", "count": None, "query": ""}
+        groups = self._random_groups() or []
+        rows = [{"kind": "favorites", "id": "", "name": "관심 작가",
+                 "count": len(self.random_source_names({"kind": "favorites"}) or [])}]
+        # 임시 그룹(작가 패널 [기억] 칸)을 위로 - 나머지는 저장된 순서. 이름 없는 임시 창은 뺀다.
+        slot = [g for g in groups if g.get("slot") == "link"]
+        named = [g for g in groups if not g.get("temp")]
+        for group in slot + named:
+            names = self.random_source_names({"kind": "group", "id": group["id"]}, groups) or []
+            rows.append({"kind": "group", "id": group["id"], "name": group["name"], "count": len(names),
+                         "slot": group.get("slot") == "link"})
+        if source.get("kind") == "group" and not any(g.get("id") == source.get("id") for g in groups):
+            source = self.set_random_source({"kind": "tab"})
+        return {"source": source, "tab": tab, "sources": rows}
+
+    def set_random_source(self, source: Any) -> dict:
+        """출처를 바꾼다(정규화한 값을 돌려준다)."""
+        normalized = self._normalize_random_source(source)
+        with self._options_lock:
+            self._save_options_locked({"random_tools": {"source": normalized}}, internal=True)
+        return normalized
 
     def draw_random_weight(self, tools: dict) -> float:
         """[랜덤 가중치] 켬 = start ~ end 를 step 간격으로 고른다. 끔 = 저장된 손잡이 값."""
@@ -666,6 +745,19 @@ class ArtistThumbnailService:
             token = self.format_artist_token(artist, weight, api_mode) if artist else ""
             return {"token": token, "artist": artist, "weight": weight, "pick": False} if token else None
         weight = self.draw_random_weight(tools)
+        source = tools.get("source") or {}
+        if source.get("kind") in ("favorites", "group"):
+            # 관심 작가 · 그룹에서 뽑는다 - 창 격자와 다른 목록이라 창은 넘기지 않는다(`pick` 없음).
+            # 비었으면 이번만 아티스트 탭에서 · 그룹이 지워졌으면 출처도 아티스트 탭으로 되돌린다(사용자 지정).
+            names = self.random_source_names(source)
+            if names is None and source.get("kind") == "group":
+                self.set_random_source({"kind": "tab"})
+            if names:
+                picked = self._random_sample(names, 1, ("source", source["kind"], source.get("id", ""), 1))
+                if picked:
+                    token = self.format_artist_token(picked[0], weight, api_mode)
+                    return {"token": token, "artist": picked[0], "weight": weight, "pick": False,
+                            "source": source["kind"]} if token else None
         pool = tools.get("pool") or {}
         item = self.pick_random_artist(pool.get("mode", ""), pool.get("filter", "all"), pool.get("query", ""))
         if not item:

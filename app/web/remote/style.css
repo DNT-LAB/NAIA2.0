@@ -21301,6 +21301,13 @@ body.detached-module .mod-grid-3 {
 .artist-link-menu .alp-menu-sep { height: 1px; margin: 4px 2px; background: rgba(255,255,255,0.12); }
 .artist-link-menu .alp-menu-slot { background: rgba(255,240,170,0.07); }
 .artist-link-menu .alp-menu-count { margin-left: auto; padding-left: 10px; color: #9c9682; font-size: 11px; }
+/* [… 연동됨 ▴] 뽑는 곳 메뉴(사용자 지정 2026-11-04) - 알약 위 · 머리줄은 무엇을 고르는 메뉴인지만. */
+.artist-link-menu .als-head { padding: 4px 8px 5px; color: #9c9682; font-size: 11px; white-space: nowrap; }
+.artist-link-menu .als-name { white-space: nowrap; }
+.artist-link-menu .als-sub {
+  min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: #8d887a; font-size: 11px;
+}
 .artist-link-weight {
   position: absolute; bottom: calc(42px + var(--inpaint-dock-lift, 0px)); z-index: 7;
   width: 220px; box-sizing: border-box; padding: 8px 10px; border-radius: 8px;

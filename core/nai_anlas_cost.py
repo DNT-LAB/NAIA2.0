@@ -80,14 +80,16 @@ def _pixels(params: dict[str, Any]) -> int:
     return width * height
 
 
-def _is_v5(context: Any, params: dict[str, Any] | None = None) -> bool:
-    """Use the request model, falling back to UI state only without a model."""
-    try:
-        from core.nai_model_contract import context_uses_opus_usage_limit, resolve_nai_model_for_context
+def _is_v5(context: Any) -> bool:
+    """지금 고른 모델이 V5 계열인가.
 
-        key = (params or {}).get("model")
-        if key:
-            return bool(resolve_nai_model_for_context(context, key).uses_opus_usage_limit)
+    판정은 모델 계약이 SSOT 다(`context_uses_opus_usage_limit`) - 사용량 배지·부하
+    분산 정책·무료 집계가 모두 그 함수를 본다. 여기서 따로 문자열을 뒤지면 한쪽만
+    고쳐져 화면이 서로 다른 말을 한다.
+    """
+    try:
+        from core.nai_model_contract import context_uses_opus_usage_limit
+
         return bool(context_uses_opus_usage_limit(context))
     except Exception:   # noqa: BLE001 - 판정 실패가 표시를 막으면 안 된다
         return False
@@ -118,7 +120,7 @@ def estimate_anlas_cost(context: Any, params: dict[str, Any] | None,
     dyn = bool(params.get("DYN"))
     smea = bool(params.get("SMEA")) or dyn
     factor = 1.4 if dyn else (1.2 if smea else 1.0)
-    if _is_v5(context, params):
+    if _is_v5(context):
         # ⚠️ 배수는 **안쪽 ceil 뒤에** 곱한다. 먼저 곱하면 35스텝 1472x1472 이
         #    76 이 되는데 웹은 77 이다(실측). 순서가 값을 바꾼다.
         factor *= _V5_MULTIPLIER
@@ -231,9 +233,6 @@ def cost_params_for_context(context: Any, *, with_inset: bool = True) -> dict[st
        `is_free_generation` 하나에 맡긴다(그쪽 주석에 실측표가 있다).
     """
     params = dict(getattr(context, "remote_params", {}) or {})
-    session = getattr(context, "img2img_session", None)
-    if isinstance(session, dict) and session.get("active") and session.get("model_override"):
-        params["model"] = session["model_override"]
     # 모델이 고정하는 값(Medium: 14스텝)이 있으면 그것이 실제로 나간다 - 저장된 steps 40 으로
     # 값을 매기면 있지도 않은 금액이 뜬다. 사본에만 덧씌운다.
     try:

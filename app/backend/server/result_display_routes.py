@@ -790,108 +790,6 @@ def _metadata_for_disk_image(path: Path, label: str = "", include_full: bool = F
     return payload
 
 
-class _Img2ImgSwapConflict(ValueError):
-    """The session disappeared or changed while a swap was being prepared."""
-
-
-def _img2img_prompt_swap(context, payload: dict[str, Any], *, apply: bool = False) -> dict[str, Any]:
-    from core.headless_img2img_service import HeadlessImg2ImgService
-    from core.prompt_artist_strip import compose_swap, guess_source_preset, preset_tags
-    from core.prompt_engineering_settings import get_prompt_engineering_store
-    from app.backend.server.artist_thumbnail_routes import _mix_known_artists
-
-    session = context.img2img_session
-    if not isinstance(session, dict) or not session.get("active"):
-        raise _Img2ImgSwapConflict("No active Img2Img session")
-    if not isinstance(payload, dict):
-        raise ValueError("Invalid payload")
-    # 화면이 본 세션에만 쓴다. 요청이 오는 사이에 세션을 닫고 다른 그림을 열면, 번호 없이는 새 세션을
-    # 옛 그림의 결과로 덮는다(Codex 리뷰 2026-11-03). 아래의 `is session` 검사는 계산 중의 교체만 본다.
-    window_id = payload.get("window_id")
-    if window_id not in (None, "") and str(window_id) != str(session.get("window_id")):
-        raise _Img2ImgSwapConflict("Img2Img session changed")
-    service = HeadlessImg2ImgService(context)
-    original_main = str(session.get("original_main_prompt") or "")
-    original_negative = str(session.get("original_negative_prompt") or "")
-    if apply and payload.get("original") is True:
-        session.update(main_prompt=original_main, negative_prompt=original_negative,
-                       model_override="", swap=None)
-        return {"ok": True, "main_prompt": original_main, "negative_prompt": original_negative,
-                "model": "", "removed": [], "target_removed": [],
-                "state": service.module_state()}
-
-    name = payload.get("preset")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("Unknown PE preset")
-    name = name.strip()
-    model = service.validate_model_override(payload.get("model"))
-    if not model:
-        raise ValueError("A NAI v4.5 or v5 model is required")
-    artist_mode = payload.get("artist_mode", "preset")
-    negative_mode = payload.get("negative_mode", "preset")
-    if artist_mode not in ("preset", "keep") or negative_mode not in ("preset", "keep"):
-        raise ValueError("Invalid swap mode")
-    keep = payload.get("keep", [])
-    if not isinstance(keep, list) or not all(isinstance(value, str) for value in keep):
-        raise ValueError("keep must be a list of strings")
-
-    store = get_prompt_engineering_store(context)
-    current = str(store.state("NAI").get("current_preset") or "")
-    target = store.read_preset_data(name, "NAI")
-    if not target and name != current:
-        raise ValueError("Unknown PE preset")
-    target_settings = (store.collect_settings("NAI") if name == current
-                       else target.get("module_settings") or {})
-    target_negative = (target.get("main_settings") or {}).get("negative")
-    if name == current and str(context.get_api_mode()).upper() == "NAI":
-        target_negative = context.negative_prompt_text
-    known = _mix_known_artists(context)
-    recorded = session.get("source_preset")
-    source = None
-    source_info = None
-    if (isinstance(recorded, dict) and recorded.get("name")
-            and "pre" in recorded and "post" in recorded):
-        # ⚠️ 기록은 **생성할 때의** 프리셋이다. 랜덤으로 글을 만든 뒤 프리셋을 바꾸고 생성하면 그림의 앞뒤 태그는
-        #    옛 프리셋 것이라 하나도 안 맞는다 - 그때는 기록을 버리고 아래의 추정으로 간다.
-        #    단 앞뒤가 **작가뿐인** 프리셋은 견줄 태그가 없어 늘 0개다 - 그것은 맞는 기록이다. 버리면 남의 프리셋을
-        #    추정해 그림의 본문 태그를 지운다(Codex 리뷰 2026-11-03).
-        recorded = dict(recorded)
-        match = guess_source_preset(original_main, [recorded], known=known)
-        if match or not preset_tags(recorded["pre"], recorded["post"], known=known):
-            source = recorded
-            source_info = dict(match or {"name": recorded["name"], "matched": 0, "total": 0}, recorded=True)
-    if source is None:
-        presets = []
-        for candidate in store.list_preset_names("NAI"):
-            data = store.read_preset_data(candidate, "NAI")
-            settings = data.get("module_settings") or {}
-            presets.append({"name": candidate, "pre": str(settings.get("pre_prompt") or ""),
-                            "post": str(settings.get("post_prompt") or "")})
-        source_info = guess_source_preset(original_main, presets, known=known)
-        if source_info:
-            source = next(preset for preset in presets if preset["name"] == source_info["name"])
-            source_info["recorded"] = False
-    result = compose_swap(
-        original_main, source_pre=(source or {}).get("pre", ""),
-        source_post=(source or {}).get("post", ""),
-        target_pre=str(target_settings.get("pre_prompt") or ""),
-        target_post=str(target_settings.get("post_prompt") or ""),
-        artist_mode=artist_mode, known=known, keep=keep,
-    )
-    result.update(negative_prompt=(str(target_negative) if negative_mode == "preset" and target_negative
-                                   else original_negative), model=model, source_preset=source_info)
-    if apply:
-        # Like restore-prompts, computation runs in one worker. Never write a
-        # result into a different session opened while preset files were read.
-        if context.img2img_session is not session or not session.get("active"):
-            raise _Img2ImgSwapConflict("Img2Img session changed")
-        session.update(main_prompt=result["main_prompt"], negative_prompt=result["negative_prompt"],
-                       model_override=model, swap={"preset": name, "model": model,
-                                                   "artist_mode": artist_mode, "negative_mode": negative_mode})
-        result.update(ok=True, state=service.module_state())
-    return result
-
-
 def register_result_display_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -1822,26 +1720,6 @@ def register_result_display_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
-    async def _prompt_swap_response(req: Request, *, apply: bool):
-        try:
-            payload = await req.json()
-            result = await run_in_thread(lambda: _img2img_prompt_swap(session_context, payload, apply=apply))
-        except _Img2ImgSwapConflict as exc:
-            return JSONResponse({"error": str(exc)}, status_code=409)
-        except (ValueError, TypeError, KeyError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-        if apply:
-            await broadcast_json(clients, result["state"])
-        return result
-
-    @app.post("/api/img2img/prompt-swap/preview")
-    async def api_img2img_prompt_swap_preview(req: Request):
-        return await _prompt_swap_response(req, apply=False)
-
-    @app.post("/api/img2img/prompt-swap/apply")
-    async def api_img2img_prompt_swap_apply(req: Request):
-        return await _prompt_swap_response(req, apply=True)
-
     @app.post("/api/img2img/restore-prompts")
     async def api_img2img_restore_prompts(req: Request):
         """열려 있는 인페인트/img2img 세션에 **프롬프트만** 다른 출처에서 되살린다.
@@ -2038,20 +1916,10 @@ def register_result_display_routes(
                             embedded_negative = str(
                                 embedded.get("negative") or embedded.get("uc") or ""
                             )
-                            from core.nai_model_contract import nai_key_from_metadata
-
-                            embedded_model = nai_key_from_metadata(
-                                embedded.get("model") or embedded.get("model_name"),
-                                " ".join(str(embedded.get(key) or "")
-                                         for key in ("Source", "source", "model_hash")),
-                            )
-                            if embedded_model:
-                                seed_gen_params = {"model": embedded_model}
                             if embedded_prompt:
                                 seed_prompt_ctx = {"main_prompt": embedded_prompt}
                             if embedded_negative:
-                                seed_gen_params = dict(seed_gen_params or {})
-                                seed_gen_params["negative_prompt"] = embedded_negative
+                                seed_gen_params = {"negative_prompt": embedded_negative}
                             # ⚠️ **캐릭터도 넘긴다.** 예전에는 프롬프트/네거티브만 넘겨서
                             #    V5 가상 캐릭터 퀵 프롬프트가 늘 비어 있었다(사용자 제보
                             #    2026-08-26). 조립은 WS 경로와 **같은 함수**가 한다 -

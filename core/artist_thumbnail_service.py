@@ -718,6 +718,19 @@ class ArtistThumbnailService:
             start = end - 1
         return start, end
 
+    @staticmethod
+    def random_bucket_posts(artists: list[str], weights: dict) -> list:
+        """구간 손잡이가 보여 줄 게시물 수 - 100칸 저마다 [가장 적은, 가장 많은] 게시물 수(사용자 지정 2026-11-04).
+        칸 = `random_range_bounds` 와 같은 셈(정수 내림). 사람이 없거나 수를 모르는 칸은 None.
+        검색 결과처럼 게시물 순이 아닌 목록도 맞도록 칸마다 최소 · 최대를 센다(화면이 구간의 칸을 합친다)."""
+        total = len(artists)
+        out: list = []
+        for k in range(100):
+            values = [weights[name] for name in artists[total * k // 100: total * (k + 1) // 100]
+                      if isinstance(weights.get(name), (int, float))]
+            out.append([int(min(values)), int(max(values))] if values else None)
+        return out
+
     def random_seen(self) -> set[str]:
         with self._random_seen_lock:
             return set(self._random_seen)
@@ -780,13 +793,15 @@ class ArtistThumbnailService:
             return sum(1 for name in names if name not in seen) if skip else None
 
         try:
-            artists, filter_name, _w, _t, _k = self._random_pool_list(
+            artists, filter_name, weights, _t, _k = self._random_pool_list(
                 str(pool.get("mode") or ""), str(pool.get("filter") or "all"), query, pool.get("search"))
             start, end = self.random_range_bounds(len(artists), tools.get("range"))
             tab = {"filter_name": filter_name, "count": len(artists), "query": str(pool.get("query") or ""),
-                   "range_count": end - start, "remaining": left(artists[start:end])}
+                   "range_count": end - start, "remaining": left(artists[start:end]),
+                   "bucket_posts": self.random_bucket_posts(artists, weights)}
         except Exception:  # noqa: BLE001 - 숫자는 장식이다
-            tab = {"filter_name": "", "count": None, "query": "", "range_count": None, "remaining": None}
+            tab = {"filter_name": "", "count": None, "query": "", "range_count": None, "remaining": None,
+                   "bucket_posts": None}
         groups = self._random_groups() or []
         favorites = self.random_source_names({"kind": "favorites"}) or []
         rows = [{"kind": "favorites", "id": "", "name": "관심 작가", "count": len(favorites),

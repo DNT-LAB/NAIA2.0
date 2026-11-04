@@ -21326,6 +21326,8 @@ body.detached-module .mod-grid-3 {
   color: #9c9682; font-size: 11px; font-variant-numeric: tabular-nums;
 }
 .artist-link-menu .als-range-lab b { color: #ffe9a0; font-weight: 600; }
+.artist-link-menu .als-range-posts { margin-top: 1px; color: #9c9682; font-size: 11px; font-variant-numeric: tabular-nums; }
+.artist-link-menu .als-range-posts:empty { display: none; }
 .artist-link-menu .als-skip { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
 .artist-link-menu .als-skip:hover { background: rgba(255,255,255,0.08); }
 .artist-link-menu .als-skip input { margin: 0; accent-color: #e9d68a; }

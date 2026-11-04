@@ -2242,8 +2242,9 @@ export function createArtistThumbController({
         <input type="range" min="0" max="100" step="1" data-als-range="lo" aria-label="구간 시작 - 게시물 많은 순 %">
         <input type="range" min="0" max="100" step="1" data-als-range="hi" aria-label="구간 끝 - 게시물 많은 순 %">
       </div>
-      <div class="als-range-lab"><span data-als-range-text></span><b data-als-range-count></b></div>`;
-    wrap.title = '아티스트 탭에서 뽑을 때만 - 아티스트 창과 같은 순서(게시물 많은 순)를 100칸으로 나눈 구간';
+      <div class="als-range-lab"><span data-als-range-text></span><b data-als-range-count></b></div>
+      <div class="als-range-posts" data-als-range-posts></div>`;
+    wrap.title = '아티스트 탭에서 뽑을 때만 - 아티스트 창과 같은 순서(게시물 많은 순 · 검색 중이면 검색 결과 순)를 100칸으로 나눈 구간';
     paintRange(wrap);
     return wrap;
   }
@@ -2258,9 +2259,28 @@ export function createArtistThumbController({
     const fill = wrap.querySelector('.als-fill');
     fill.style.left = `${lo}%`;
     fill.style.right = `${100 - hi}%`;
-    wrap.querySelector('[data-als-range-text]').textContent = `게시물 많은 순 ${lo}% — ${hi}%`;
+    // 검색 결과는 검색 순서(Wilson · 총 Post · 매칭 수)다 - '게시물 많은 순' 이 아니다.
+    wrap.querySelector('[data-als-range-text]').textContent = `${linkSearch ? '검색 결과 순' : '게시물 많은 순'} ${lo}% — ${hi}%`;
     const count = rangeCount(Number((linkSourceTab || {}).count));
     wrap.querySelector('[data-als-range-count]').textContent = count === null ? '' : `${count.toLocaleString('en-US')}명`;
+    const posts = rangePosts();
+    wrap.querySelector('[data-als-range-posts]').textContent = posts
+      ? `게시물 ${posts[0].toLocaleString('en-US')} ~ ${posts[1].toLocaleString('en-US')}개` : '';
+  }
+
+  /** 구간 안 작가들의 게시물 수 [가장 적은, 가장 많은] - 서버가 100칸마다 센 것을 합친다(끄는 동안에도 바로). */
+  function rangePosts() {
+    const buckets = (linkSourceTab || {}).bucket_posts;
+    if (!Array.isArray(buckets)) return null;
+    let low = Infinity;
+    let high = -Infinity;
+    for (let k = linkRange[0]; k < linkRange[1]; k += 1) {
+      const bucket = buckets[k];
+      if (!Array.isArray(bucket)) continue;
+      low = Math.min(low, Number(bucket[0]));
+      high = Math.max(high, Number(bucket[1]));
+    }
+    return Number.isFinite(low) && Number.isFinite(high) ? [low, high] : null;
   }
 
   /** 지금 출처에서 아직 안 뽑힌 수(스킵 켰을 때만 서버가 센다). */

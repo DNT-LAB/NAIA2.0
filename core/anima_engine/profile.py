@@ -40,15 +40,24 @@ SLOTS = {"input": ("11", "text", ""), "negative_prompt": ("12", "text", ""),
 # 샘플러 · 스케줄러는 고를 수 있다(사용자 지정 2026-10-01 핫픽스: "ANIMA 모드의 Params 에서 Sampler / Scheduler 는 사용자가
 # 자유롭게 선택"). 목록은 엔진 고정판 ComfyUI v0.22.0 의 comfy/samplers.py KSampler.SAMPLERS / SCHEDULERS 그대로다(설치본에서
 # AST 로 뽑음) - SpectrumSPDKSampler 의 sampler_name · scheduler 입력이 이 목록이다(노드 _KSAMPLER_INPUTS).
+# 엔진 고정판 ComfyUI v0.22.0 의 KSampler 목록 44개 중 그림이 나오는 27개(사용자 지정 2026-11-05 "전수 확인 후 목록에서
+# 빼기"). 원격 4090 에서 44개 x 시드 2개를 Spectrum 켬 / 끔으로 그려 눈으로 봤다(28스텝 · 표준 CFG · RescaleCFG 0.5).
+# 뺀 것 - 목록 밖 이름은 resolve_sampling 이 기본(euler)으로 돌린다(저장된 프리셋이 깨지지 않는다):
+REMOVED_SAMPLERS = {
+    # Spectrum 을 켜면 깨진다(끄면 멀쩡) - 한 스텝에 모델을 여러 번 부르는 2차 · 다단계 풀이가 예측과 어긋난다
+    "heun": "spectrum", "exp_heun_2_x0": "spectrum", "exp_heun_2_x0_sde": "spectrum", "dpm_2_ancestral": "spectrum",
+    "euler_ancestral_cfg_pp": "spectrum", "euler_cfg_pp": "spectrum", "lcm": "spectrum", "sa_solver_pece": "spectrum",
+    "dpmpp_3m_sde": "spectrum", "dpmpp_3m_sde_gpu": "spectrum",
+    # Spectrum 과 상관없이 이 엔진의 표준 설정에서 그림이 안 나온다(단색 덩어리 · 과노출 - cfg_pp 는 CFG 1~2 용)
+    "dpmpp_2s_ancestral_cfg_pp": "broken", "dpmpp_2m_cfg_pp": "broken", "res_multistep_cfg_pp": "broken",
+    "gradient_estimation_cfg_pp": "broken", "res_multistep_ancestral_cfg_pp": "broken", "ddpm": "broken",
+    "res_multistep_ancestral": "broken",
+}
 SAMPLERS = (
-    "euler", "euler_cfg_pp", "euler_ancestral", "euler_ancestral_cfg_pp", "heun", "heunpp2", "exp_heun_2_x0",
-    "exp_heun_2_x0_sde", "dpm_2", "dpm_2_ancestral", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
-    "dpmpp_2s_ancestral_cfg_pp", "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_cfg_pp", "dpmpp_2m_sde",
-    "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun", "dpmpp_2m_sde_heun_gpu", "dpmpp_3m_sde", "dpmpp_3m_sde_gpu",
-    "ddpm", "lcm", "ipndm", "ipndm_v", "deis", "res_multistep", "res_multistep_cfg_pp",
-    "res_multistep_ancestral", "res_multistep_ancestral_cfg_pp", "gradient_estimation",
-    "gradient_estimation_cfg_pp", "er_sde", "seeds_2", "seeds_3", "sa_solver", "sa_solver_pece", "ddim",
-    "uni_pc", "uni_pc_bh2",
+    "euler", "euler_ancestral", "heunpp2", "dpm_2", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
+    "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun",
+    "dpmpp_2m_sde_heun_gpu", "ipndm", "ipndm_v", "deis", "res_multistep", "gradient_estimation", "er_sde",
+    "seeds_2", "seeds_3", "sa_solver", "ddim", "uni_pc", "uni_pc_bh2",
 )
 SCHEDULERS = (
     "simple", "sgm_uniform", "karras", "exponential", "ddim_uniform", "beta", "normal", "linear_quadratic",

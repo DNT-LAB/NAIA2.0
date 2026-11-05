@@ -3466,7 +3466,7 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize inpaint prompt swap', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261103-ips1')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261105-ips2')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,

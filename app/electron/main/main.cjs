@@ -2582,6 +2582,51 @@ async function maybeAdvanceDanbooruWarmup() {
   }
 }
 
+// 단부루 뷰가 사용자의 브라우저를 여는 길은 이 하나뿐이다.
+//
+// 2026-11-05 제보: Danbooru 점검 페이지 안의 디스코드 위젯 iframe(discordapp.com/widget)이
+// discord.com/widget 으로 301 리다이렉트되자, 하위 프레임 리다이렉트까지 잡던 가드가 그것을
+// "허용 목록 밖 이동" 으로 보고 외부 브라우저로 열었다. 페이지가 주기적으로 다시 읽힐 때마다
+// 탭 둘이 새로 떴고, 창을 닫아도 뷰는 살아 있어 NAIA 를 끌 때까지 계속됐다.
+// 그래서 (1) 창이 보이고 있을 때만 (2) 아무 주소든 1.5초에 하나 (3) 같은 주소는 10초에 하나만 연다.
+const DANBOORU_EXTERNAL_MIN_GAP_MS = 1500;
+const DANBOORU_EXTERNAL_SAME_URL_MS = 10000;
+let danbooruLastExternal = { url: "", at: 0 };
+
+function danbooruViewIsShown() {
+  return !!(danbooruView && danbooruViewAttached && danbooruCssRect && !danbooruCssRect.hidden);
+}
+
+function openDanbooruExternal(url) {
+  if (!isHttpLikeUrl(url) || !danbooruViewIsShown()) {
+    return false;
+  }
+  const now = Date.now();
+  const since = now - danbooruLastExternal.at;
+  if (since < DANBOORU_EXTERNAL_MIN_GAP_MS
+      || (url === danbooruLastExternal.url && since < DANBOORU_EXTERNAL_SAME_URL_MS)) {
+    return false;
+  }
+  danbooruLastExternal = { url, at: now };
+  try {
+    const pending = shell.openExternal(url);
+    if (pending && typeof pending.catch === "function") pending.catch(() => {});
+  } catch (_error) {}
+  return true;
+}
+
+// will-navigate / will-redirect 가 메인 프레임 것인지. Electron 42 는 event 에 isMainFrame 을 싣고,
+// 옛 위치 인자(url, isInPlace, isMainFrame, ...)도 아직 준다.
+function isDanbooruMainFrameEvent(event, positionalIsMainFrame) {
+  if (event && typeof event.isMainFrame === "boolean") {
+    return event.isMainFrame;
+  }
+  if (typeof positionalIsMainFrame === "boolean") {
+    return positionalIsMainFrame;
+  }
+  return true;
+}
+
 function ensureDanbooruView() {
   if (danbooruView) {
     return danbooruView;
@@ -2600,8 +2645,8 @@ function ensureDanbooruView() {
       const host = new URL(url).hostname.toLowerCase();
       if (DANBOORU_VIEW_HOSTS.has(host)) {
         wc.loadURL(url);
-      } else if (isHttpLikeUrl(url)) {
-        shell.openExternal(url);
+      } else {
+        openDanbooruExternal(url);
       }
     } catch (_error) {}
     return { action: "deny" };
@@ -2609,7 +2654,12 @@ function ensureDanbooruView() {
   // Keep the embedded view strictly on http(s) danbooru/safebooru.donmai.us — reject
   // other schemes (javascript:/file:/…) and off-allowlist server redirects. safebooru
   // is allowed because the Cloudflare warm-up hop redirects within its own host.
-  const guardNavigation = (event, url) => {
+  // 잠그는 것은 **메인 프레임**뿐이다 - 페이지 안 iframe(디스코드 위젯 · 광고 등)의 이동은 그 페이지의
+  // 일이다. 서버 리다이렉트는 사용자가 누른 것이 아니므로 막기만 하고 외부 브라우저로 열지 않는다.
+  const guardNavigation = (kind) => (event, url, _isInPlace, positionalIsMainFrame) => {
+    if (!isDanbooruMainFrameEvent(event, positionalIsMainFrame)) {
+      return;
+    }
     let allowed = false;
     try {
       const parsed = new URL(url);
@@ -2620,13 +2670,13 @@ function ensureDanbooruView() {
     }
     if (!allowed) {
       event.preventDefault();
-      if (isHttpLikeUrl(url)) {
-        shell.openExternal(url);
+      if (kind === "navigate") {
+        openDanbooruExternal(url);
       }
     }
   };
-  wc.on("will-navigate", guardNavigation);
-  wc.on("will-redirect", guardNavigation);
+  wc.on("will-navigate", guardNavigation("navigate"));
+  wc.on("will-redirect", guardNavigation("redirect"));
   wc.on("did-navigate", () => sendDanbooruNav());
   wc.on("did-navigate-in-page", () => sendDanbooruNav());
   // Cloudflare 워밍업 진행: 각 로드 완료마다 챌린지 통과 여부를 확인하고, safebooru
@@ -3516,6 +3566,7 @@ module.exports.__test = {
   compareVersions,
   currentAppVersion,
   danbooruViewBounds,
+  openDanbooruExternal,
   parseLatestRelease,
   parseChecksums,
   updatesRoot,

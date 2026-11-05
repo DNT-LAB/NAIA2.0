@@ -1300,6 +1300,7 @@ class HeadlessGenerationService:
         "_session_pool_character", "_session_pool_characters", "_temporary_character",
         "sketchbook_character_prompts", "characters", "character_asset_request",
         "_skip_character_late_binding", "_reference_inset_skip_characters",
+        "_inpaint_session_characters",
     )
 
     def _capture_queued_characters(self, params: dict[str, Any], api_mode: str,

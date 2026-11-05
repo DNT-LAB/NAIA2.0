@@ -71,10 +71,14 @@ export function createTokenDisplay({
   function updateNegativeTokenEstimate() {
     if (!negativeTokenLabel) return;
     const mode = currentMode();
+    // 인페인트 세션 중에는 NEGATIVE 탭에 세션 칸(`#sessionNegEdit`)이 떠 있다 - 보이는 칸을 센다(2026-11-05).
+    // 서버가 센 정확한 수는 진짜 네거티브의 것이라, 글이 같을 때만 쓰는 아래 조건이 세션 글에는 저절로 안 맞는다.
+    const sessionBox = typeof document !== 'undefined' ? document.getElementById('sessionNegEdit') : null;
+    const text = sessionBox && !sessionBox.hidden ? sessionBox.value : negEdit.value;
     const hasExactNegative = lastNegativeTokenCount !== null
-      && lastNegativeTokenSourceText === negEdit.value
+      && lastNegativeTokenSourceText === text
       && lastNegativeTokenMode === mode;
-    const negative = hasExactNegative ? lastNegativeTokenCount : estimateTokenCount(negEdit.value, mode);
+    const negative = hasExactNegative ? lastNegativeTokenCount : estimateTokenCount(text, mode);
     negativeTokenLabel.textContent = formatNegativeTokenLabel(negative);
   }
 

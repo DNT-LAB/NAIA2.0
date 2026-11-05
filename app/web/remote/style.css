@@ -25748,6 +25748,22 @@ button.cq-wcs-row:hover { background: rgba(255,255,255,0.05); }
 .cq-pos-edit:hover {
   border-color: rgb(226,200,122); color: #14141c; background: rgb(226,200,122);
 }
+/* V3 인페인트(위치 규칙 none - 2026-11-05): POS 대신 '보관만' 표. 누를 것이 아니라 상태다. */
+.cq-pos.is-none, .cq-pos.is-none:hover {
+  display: inline-flex; cursor: default;
+  border-color: rgba(255,255,255,0.12); color: var(--text-dim); background: transparent;
+}
+/* 캐릭터는 지우지 않고 흐리게 둔다 - 이번 요청에 안 나간다는 뜻(V4.5 / V5 로 바꾸면 다시 실린다). */
+.cq-box.is-stored-only .cq-slot { opacity: 0.5; }
+/* V4/V4.5 의 5x5 칸 이름(A~E 가로 · 1~5 세로). 무대 안쪽 가장자리에 작게. */
+.cq-grid5-labs { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.cq-grid5-lab {
+  position: absolute; transform: translate(-50%, -50%);
+  font-family: var(--font-mono); font-size: 10px; color: rgba(255,255,255,0.55);
+}
+.cq-grid5-lab.is-col { top: 9px; }
+.cq-grid5-lab.is-row { left: 9px; }
+.cq-gridtoggle.is-fixed { cursor: default; }
 /* 종료 버튼은 띠 왼쪽에 **두 줄 높이**로 선다(사용자 지정) - 칩이 한 줄이든 세 줄이든
    띠의 세로를 놀리지 않고, 칩과 같은 줄에서 눈에 먼저 들어온다. */
 .cq-posdone {
@@ -28379,6 +28395,8 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
    대신 무엇이 줄어들지를 못 박는다 - 안 그러면 flex 가 버튼을 줄여 글자를 세로로
    쪼갠다("초기/화", "격/자"). 줄어드는 것은 **셀렉트 하나**다. */
 .ic-row { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; min-width: 0; }
+/* V3 인페인트는 강도 · 노이즈 줄을 걷는다(2026-11-05) - 위 display:flex 가 [hidden] 을 이기므로 짝을 둔다. */
+.ic-row[hidden] { display: none; }
 .ic-row > .ic-btn,
 .ic-row > .ic-label,
 .ic-row > .ic-val,

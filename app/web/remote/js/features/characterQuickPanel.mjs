@@ -269,9 +269,9 @@ export function createCharacterQuickPanel({
     // "저게 그림의 어느 지점인가" 를 알 수 없다(사용자가 보여 준 그림도 격자가 있다).
     // 캐릭터가 1명이어도 CUSTOM 좌표를 그대로 보낸다(공홈 동기화 2026-11-02 - 공홈이 1명 Custom 을
     // use_coords:true 로 받아 준다). 그래서 예전의 "1명이면 적용되지 않습니다" 알림은 걷었다.
-    stage.innerHTML = (peek ? gridSvg(true) : gridSvg())
+    stage.innerHTML = (posPolicy() === 'grid5' ? grid5Svg() : (peek ? gridSvg(true) : gridSvg()))
       + slots.map(({character, index}, i) => {
-      const p = character.position || { x: 0.5, y: 0.5 };
+      const p = shownPos(character.position);
       const on = !peek && posSelected === index;
       // 무대의 동그라미도 같이 흐려진다 - 띠만 흐리면 무대에서는 여전히 구분이 안 된다.
       const muted = !!(character && character.muted);
@@ -319,6 +319,31 @@ export function createCharacterQuickPanel({
       + `</svg>`;
   }
 
+  /** 0~1 을 5칸의 가운데(0.1 · 0.3 · 0.5 · 0.7 · 0.9)로. 백엔드 `generation_commands` 와 같은 식이어야 한다. */
+  function snap5(v) {
+    const i = Math.min(4, Math.max(0, Math.floor(Number(v) * 5)));
+    return (2 * i + 1) / 10;
+  }
+  /** 화면에 그릴 자리. grid5 면 요청에 실릴 칸 가운데에 세운다 - 저장된 자유 좌표는 그대로 둔다. */
+  function shownPos(p) {
+    const base = p || {x: 0.5, y: 0.5};
+    return posPolicy() === 'grid5' ? {x: snap5(base.x), y: snap5(base.y)} : base;
+  }
+  /** V4/V4.5 의 5x5 칸. 칸 이름은 공홈과 같은 A~E(가로) · 1~5(세로). 해상도와 무관하게 늘 다섯 칸이다. */
+  function grid5Svg() {
+    let lines = '';
+    for (let i = 1; i < 5; i += 1) {
+      lines += `<line x1="${i * 20}" y1="0" x2="${i * 20}" y2="100" class="cq-posgrid-line"/>`
+        + `<line x1="0" y1="${i * 20}" x2="100" y2="${i * 20}" class="cq-posgrid-line"/>`;
+    }
+    const labels = ['A', 'B', 'C', 'D', 'E'].map((c, i) =>
+      `<span class="cq-grid5-lab is-col" style="left:${i * 20 + 10}%">${c}</span>`).join('')
+      + [1, 2, 3, 4, 5].map((n, i) =>
+        `<span class="cq-grid5-lab is-row" style="top:${i * 20 + 10}%">${n}</span>`).join('');
+    return `<svg class="cq-posgrid" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">`
+      + `${lines}</svg><div class="cq-grid5-labs" aria-hidden="true">${labels}</div>`;
+  }
+
   function setPosGrid(on) {
     posGrid = !!on;
     try { localStorage.setItem(POS_GRID_KEY, posGrid ? '1' : '0'); } catch (_) {}
@@ -358,10 +383,13 @@ export function createCharacterQuickPanel({
       + `<div class="cq-chiprow">`
       // 격자 토글은 **칩 줄의 맨 앞**에 둔다. 종료 버튼은 두 줄 높이라 그 옆에 붙이면
       // 세로 가운데가 안 맞고, 칩과 같은 줄에 두면 자리가 모자랄 때 함께 접힌다.
-      + `<button type="button" class="cq-gridtoggle${posGrid ? ' is-on' : ''}" data-cq-grid="1"`
-      + ` aria-pressed="${posGrid ? 'true' : 'false'}">`
-      + `<span class="cq-gridtoggle-box">${posGrid ? '&#10003;' : ''}</span>`
-      + `<span>Show Grid</span></button>`
+      + (posPolicy() === 'grid5'
+        // V4/V4.5 는 5x5 칸이 곧 규칙이라 격자를 늘 깐다 - 끄는 단추 대신 무엇인지 적는다.
+        ? `<span class="cq-gridtoggle is-on is-fixed"><span>5×5 (V4.5)</span></span>`
+        : `<button type="button" class="cq-gridtoggle${posGrid ? ' is-on' : ''}" data-cq-grid="1"`
+          + ` aria-pressed="${posGrid ? 'true' : 'false'}">`
+          + `<span class="cq-gridtoggle-box">${posGrid ? '&#10003;' : ''}</span>`
+          + `<span>Show Grid</span></button>`)
       // 끈 슬롯(`is-muted`)도 띠에 남는다 - 자리는 그대로 두고 좌표만 못 옮기게 하는
       // 것이 아니라, 이번 생성에 안 나갈 뿐이라 어디 서 있었는지는 보여야 한다.
       // 다만 **켠 것과 구분이 안 되면** 안 나갈 인물을 옮기며 시간을 쓴다(사용자 제보).
@@ -422,6 +450,10 @@ export function createCharacterQuickPanel({
         //    (실측: 연달아 끌면 매번 직전 좌표가 보였다).
         const character = (lastState && lastState.characters || [])[index];
         if (character) character.position = { x, y };
+        // grid5 는 놓는 순간 칸 가운데로 보인다(요청에 실릴 자리). 저장은 놓은 자리 그대로다.
+        const seen = shownPos({x, y});
+        dot.style.left = (seen.x * 100) + '%';
+        dot.style.top = (seen.y * 100) + '%';
         setModuleParam('character', `char_pos_${index}`, `${x},${y}`);
       }
       dot.classList.remove('is-drag');
@@ -931,8 +963,11 @@ export function createCharacterQuickPanel({
     //
     // C1 은 지울 수 없다(사용자 지정). 마지막 활성 하나는 남아야 하고, 그 자리가
     // C1 이다. ▼ 도 활성이 하나뿐이면 내주지 않는다 - 내리면 활성이 0이 된다.
-    const canRemove = ordinal > 1;
-    const canDeactivate = activeCount > 1;
+    // 가상(인페인트 세션)은 C1 도 지울 수 있다(사용자 지정 2026-11-05 통합) - 세션 캐릭터 0명 = 캐릭터 없이 인페인트.
+    // ▼(목록에서 내리기)는 가상에 없다 - 켬/끔은 ✔/✘ 가, 지우기는 − 가 맡는다.
+    const isVirtual = !!(lastState && lastState.virtual);
+    const canRemove = ordinal > 1 || isVirtual;
+    const canDeactivate = activeCount > 1 && !isVirtual;
     // ✔/✘ 가 캐럿 자리를 받는다(사용자 지정). 캐럿은 뜻이 없었다 - 머리줄 전체가
     // 이미 접고 펴는 버튼이라 화살표는 상태 표시일 뿐이었고, 그 자리가 NAI 공식
     // 구현에서 켬/끔이 있는 자리다.
@@ -981,6 +1016,14 @@ export function createCharacterQuickPanel({
   const POS_CYCLE = ['auto', 'custom', 'random'];
   // AUTO 의 화면 이름 = 공홈과 같은 AI's Choice(사용자 지정 2026-11-02). 저장 값은 그대로 'auto'.
   const POS_LABEL = {auto: "AI's Choice", custom: 'CUSTOM', random: 'RAND'};
+  /** 가상(인페인트 세션) 캐릭터의 위치 규칙(사용자 지정 2026-11-05).
+   *  `continuous` = V5 자유 좌표 · `grid5` = V4/V4.5 의 5x5 칸 · `none` = V3(위치 없음 · 캐릭터는 보관만).
+   *  메인 패널은 늘 `continuous` 다 - 메인의 모델 규칙은 따로 돈다. */
+  function posPolicy(state = lastState) {
+    if (!(state && state.virtual)) return 'continuous';
+    const p = String(state.position_policy || 'continuous');
+    return (p === 'grid5' || p === 'none') ? p : 'continuous';
+  }
   function posModeOf(state) {
     const raw = state && state.position_mode;
     if (POS_CYCLE.includes(raw)) return raw;
@@ -1039,6 +1082,7 @@ export function createCharacterQuickPanel({
       + `${state && state.virtual_label ? state.virtual_label : ''}`
       + `${state && state.reroll_on_generate ? 1 : 0}`
       + `${posModeOf(state)}${posEditing ? 1 : 0}${posBlockedByRandom() ? 'R' : '-'}`
+      + `${posPolicy(state)}`
       + `${res ? `${res.w}x${res.h}` : '-'}#${slots}`;
   }
 
@@ -3384,8 +3428,12 @@ export function createCharacterQuickPanel({
     } else {
       randomPosForced = false;
     }
+    // V3(위치 규칙 none)는 위치도 캐릭터 캡션도 안 나간다 - POS 를 걷고, 편집 중이면 나간다.
+    const noPos = posPolicy(current) === 'none';
+    if (noPos && posEditing) setPosEditing(false);
+    else if (noPos && posPeek) setPosPeek(false);
     const posMode = posBlockedByRandom() ? 'auto' : posModeOf(current);
-    const custom = posMode === 'custom';
+    const custom = posMode === 'custom' && !noPos;
     const posLocked = hasConnectedSlot(current) || posBlockedByRandom();
     // ⚠️ 이 아래 `innerHTML` 이 `.cq-grid` 를 **새 요소로 갈아치운다** - 스크롤이 0 으로
     //    돌아간다. 서명이 바뀌는 일은 편집 중에도 일어나므로(해상도 변경 · Rnd Res 로
@@ -3393,7 +3441,7 @@ export function createCharacterQuickPanel({
     //    자리를 잃는다(사용자 제보: "프롬 적는데 자꾸 스크롤이 맨 위로 갱신된다").
     //    실측: 해상도 하나만 바꿔도 284 -> 0. 자리는 여기서 쥐고 아래에서 되돌린다.
     const keepScroll = mount.querySelector('.cq-grid')?.scrollTop || 0;
-    mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}">`
+    mount.innerHTML = `<div class="cq-box${open ? ' is-open' : ''}${noPos ? ' is-stored-only' : ''}">`
       + `<div class="cq-head-row">`
       + `<button type="button" class="cq-head" data-cq-head="1"`
       + ` aria-expanded="${open ? 'true' : 'false'}">`
@@ -3417,11 +3465,14 @@ export function createCharacterQuickPanel({
       // 편집 버튼이 생긴다 - RAND 의 자리는 누를 시점에 아직 존재하지 않는다.
       // Connect 중에는 CUSTOM 에 못 박힌다 - 자물쇠를 붙여 "왜 안 바뀌는가" 를
       // 누르기 전에 알려 준다(누르면 토스트가 이유를 말한다).
-      + `<button type="button" class="cq-pos is-${posMode}${posLocked ? ' is-locked' : ''}"`
+      + (noPos
+        ? `<span class="cq-pos is-none" data-naia-guide="V3 는 캐릭터 프롬프트와 위치를 쓰지 않습니다.\n캐릭터는 보관만 되고, V4.5 / V5 로 바꾸면 다시 실립니다.">보관만 (V3)</span>`
+        : '')
+      + (noPos ? '' : `<button type="button" class="cq-pos is-${posMode}${posLocked ? ' is-locked' : ''}"`
       + (posLocked
           ? ' data-naia-guide="Connect 를 쓰는 동안에는 POS 가 CUSTOM 으로 고정됩니다.\\n같은 캐릭터를 칸마다 직접 앉히는 기능이라 AI&#39;s Choice/RAND 가 자리를 정하면 안 됩니다."'
           : '')
-      + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}${posLocked ? ' &#128274;' : ''}</button>`
+      + ` data-cq-posmode="1">POS : ${POS_LABEL[posMode]}${posLocked ? ' &#128274;' : ''}</button>`)
       + (custom
           ? `<button type="button" class="cq-pos cq-pos-edit" data-cq-posedit="1">POS</button>`
           : '')

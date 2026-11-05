@@ -10,10 +10,11 @@ import base64
 import copy
 import io
 import json
+import math
 from typing import Any
 
 from core.headless_image_utils import image_to_png_bytes
-from core.nai_model_contract import nai_key_from_metadata
+from core.nai_model_contract import inpaint_position_policy, nai_key_from_metadata, resolve_nai_model_for_context
 from core.resolution_utils import MAX_1MP_PIXELS, MAX_NAI_SOURCE_PIXELS, snap_resolution_to_multiple
 
 
@@ -430,12 +431,11 @@ class HeadlessImg2ImgService:
         )
         negative_prompt = str(params.get("negative_prompt") or params.get("uc") or context.negative_prompt_text or "")
         clean_mode = "inpaint" if str(mode or "").lower() == "inpaint" else "img2img"
-        # V5 인가. 가상 캔버스는 V5 인페인트 **전용**이다(사용자 지정 2026-08-26:
-        # "V5 모드에서는 별도 팝업이 아니라 Result 안에서 직접 수정").
+        # 모든 NAI 인페인트는 같은 캔버스를 쓴다. 일반 img2img는 팝업을 유지한다.
         # ⚠️ 판정이 실패하면 **예전 길**로 간다. 여기서 예외가 새면 결과 우클릭
         #    인페인트가 통째로 죽는데, 그건 캔버스를 못 쓰는 것보다 훨씬 나쁘다.
         try:
-            canvas_supported = bool(context._is_naid5_model()) and clean_mode == "inpaint"
+            canvas_supported = clean_mode == "inpaint"
         except Exception:
             canvas_supported = False
         # 세션 캐릭터를 **먼저** 만든다 - `position_mode` 를 이것으로 정하기 때문이다.
@@ -607,6 +607,10 @@ class HeadlessImg2ImgService:
         state = self.context.img2img_session or {}
         return str(state.get("model_override") or self.context._current_model_key() or "")
 
+    def position_policy(self) -> str:
+        spec = resolve_nai_model_for_context(self.context, self.effective_model())
+        return inpaint_position_policy(spec.key, {spec.key: spec})
+
     def _anlas_cost_fields(self) -> dict[str, Any]:
         """이 세션으로 생성하면 얼마인가. NAI 가 아니면 뜻이 없으니 0.
 
@@ -724,6 +728,7 @@ class HeadlessImg2ImgService:
             # 화면은 이 값으로 캔버스 패널을 띄울지 정한다. `canvas_active` 로는 안 된다 -
             # 사용자가 캔버스를 끄면 패널까지 사라져 다시 켤 방법이 없어진다.
             "canvas_supported": bool(state.get("canvas_supported")),
+            "position_policy": self.position_policy(),
             "canvas_active": bool(state.get("canvas_active")),
             # 무엇 하러 연 캔버스인가. 화면은 이 값으로 '캐릭터 에셋 액자' 버튼을
             # 그때만 띄운다 - 늘 띄우면 평소 인페인트에 쓸데없는 버튼이 붙는다.
@@ -1181,6 +1186,7 @@ class HeadlessImg2ImgService:
             # 화면이 옛 재개 dock 을 띄울지 정하는 데 쓴다 - V5 캔버스에는 이미
             # 편집/결과 보기/세션 닫기가 있어서 두 경로가 겹치면 안 된다.
             "canvas_supported": bool(state.get("canvas_supported")),
+            "position_policy": self.position_policy(),
             "has_mask": bool(state.get("has_mask")),
             "can_retry": retryable,
             "can_generate": retryable and not generation_busy,
@@ -2015,6 +2021,8 @@ class HeadlessImg2ImgService:
             overrides["model"] = state["model_override"]
         if mode == "inpaint":
             overrides["mask_bytes"] = state.get("mask_bytes")
+            # Empty means zero session characters, never a fallback to the main module.
+            overrides["_inpaint_session_characters"] = True
         # ⚠️ 예전에는 (prompt, uc) 튜플만 실어 **좌표가 통째로 버려졌다**
         #    (api_service: "Sketchbook은 위치 미지원 -> 기본값(0.5, 0.5)").
         #    dict 로 실으면 그쪽이 position 을 함께 읽는다. 좌표를 안 준 캐릭터가
@@ -2025,7 +2033,10 @@ class HeadlessImg2ImgService:
         canvas_w = int(state.get("width") or 0)
         canvas_h = int(state.get("height") or 0)
         char_data = []
+        policy = self.position_policy() if mode == "inpaint" else "continuous"
         for character in state.get("characters") or []:
+            if policy == "none":
+                break
             if not character.get("active", True):
                 continue
             prompt = str(character.get("prompt") or "").strip()
@@ -2043,6 +2054,14 @@ class HeadlessImg2ImgService:
             if isinstance(position, dict):
                 ratio = to_canvas_position(canvas_w, canvas_h, position.get("x"), position.get("y"))
                 if ratio:
+                    if policy == "grid5":
+                        # Use the unrounded ratio: 0.1999 belongs to the first cell.
+                        ratio = {
+                            axis: (2 * min(4, max(0, math.floor(
+                                min(1.0, max(0.0, float(position[axis]) / size)) * 5
+                            ))) + 1) / 10
+                            for axis, size in (("x", canvas_w), ("y", canvas_h))
+                        }
                     entry["position"] = ratio
             char_data.append(entry)
         if char_data:

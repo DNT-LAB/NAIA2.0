@@ -1414,7 +1414,8 @@ class APIService:
                 char_source = None
                 characters, ucs, character_positions, character_ids = [], [], [], []
 
-                if isinstance(params.get("_session_pool_characters"), dict):
+                if (isinstance(params.get("_session_pool_characters"), dict)
+                        and not params.get("_inpaint_session_characters")):
                     # Request-local pool selection outranks the live roll/freeze, but
                     # never becomes either. Preserve UUIDs for session-roll/images.
                     char_source = "SessionPoolRequest"
@@ -1423,7 +1424,8 @@ class APIService:
                     ucs = list(selected["uc"])
                     character_ids = list(selected["character_ids"])
                     character_positions = list(selected["character_positions"])
-                elif params.get('sketchbook_character_prompts'):
+                elif params.get('_inpaint_session_characters') or params.get('sketchbook_character_prompts'):
+                    # An inpaint session owns even an absent/empty list: no main fallback.
                     # 1) Sketchbook / Img2ImgWindow 오버라이드
                     #
                     # ⚠️ **좌표를 함께 읽는다.** 예전엔 여기서 위치를 통째로 버려
@@ -1435,7 +1437,7 @@ class APIService:
                     #    아래 `coords_given` 은 **전원분 좌표가 있을 때만** 켜지므로,
                     #    좌표 없는 캐릭터가 섞이면 예전과 같이 use_order 로 떨어진다.
                     char_source = "Sketchbook"
-                    for item in params['sketchbook_character_prompts']:
+                    for item in params.get('sketchbook_character_prompts') or []:
                         if isinstance(item, tuple):
                             characters.append(item[0])
                             ucs.append(item[1] or "")

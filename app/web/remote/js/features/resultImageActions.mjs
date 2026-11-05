@@ -178,10 +178,10 @@ export function createResultImageActions({
       }
       const data = await response.json().catch(() => ({}));
       if (isDesktopImg2ImgAction(action)) {
-        // V5 인페인트는 팝업을 열지 않는다 - Result 안 가상 캔버스에서 바로 고친다
-        // (사용자 지정 2026-08-26). 백엔드가 세션을 열면서 계열을 판정하므로
-        // 여기서 모델 표를 한 벌 더 들고 있지 않는다.
-        if (data && data.state && data.state.canvas_active) {
+        // NAI 인페인트는 팝업을 열지 않는다 - Result 안 가상 캔버스에서 바로 고친다
+        // (사용자 지정 2026-08-26 V5 · 2026-11-05 모든 모델로 통합). 백엔드가 세션을 열면서 정하므로
+        // 여기서 모델 표를 한 벌 더 들고 있지 않는다. 판정은 다른 진입점과 같은 `canvas_supported` 로 본다.
+        if (data && data.state && data.state.canvas_supported) {
           // ⚠️ 토스트만 띄우고 끝내면 안 된다. 도크가 접혀 있거나 직전 세션이
           //    `결과 보기` 로 끝났으면 화면에 아무 변화가 없어 "버튼이 안 먹는다" 가
           //    된다(사용자 제보 2026-08-26).

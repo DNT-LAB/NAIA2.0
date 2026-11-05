@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261104-rngp1">
+<link rel="stylesheet" href="style.css?v=20261105-ipm2">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -785,8 +785,11 @@
         </div>
         <div class="tab-page" id="tabNegative">
           <span class="section-label">Negative Prompt</span>
+          <!-- 인페인트 세션 중에는 세션 네거티브를 고친다(사용자 지정 2026-11-05). 메인 칸과 같은 녹색 표시. -->
+          <span class="prompt-inpaint-badge" id="negativeInpaintBadge" hidden>Inpaint</span>
           <div class="prompt-highlight-wrap prompt-plain-wrap">
             <textarea class="prompt-edit neg" id="negEdit" placeholder="negative prompt..."></textarea>
+            <textarea class="prompt-edit neg" id="sessionNegEdit" placeholder="인페인트 네거티브..." hidden></textarea>
             <div class="prompt-token-footer" id="negativeTokenFooter">
               <span id="negativeTokenLabel">Estimated Tokens : 0</span>
             </div>
@@ -1581,6 +1584,6 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261104-rngs1"></script>
+<script src="app.js?v=20261105-ipm2"></script>
 </body>
 </html>

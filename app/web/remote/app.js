@@ -591,11 +591,16 @@ function virtualCharacterState(session) {
     // `'custom'` 으로 못 박아 AUTO 로 갈 길이 없었다 - 인페인트는 해상도가 고정이라
     // 좌표가 뜻을 가지므로 AUTO/CUSTOM 을 고를 수 있어야 한다. RAND 는 없다.
     position_mode: String(session.position_mode || 'custom'),
+    // 모델별 위치 규칙(사용자 지정 2026-11-05): V5 = 자유 좌표 · V4/V4.5 = 5x5 칸 · V3 = 위치도 캐릭터도 안 나감(보관만).
+    // 저장된 좌표는 그대로다 - 칸에 붙이는 것은 요청을 만들 때(백엔드)와 화면에 그릴 때뿐이다.
+    position_policy: String(session.position_policy || 'continuous'),
+    // ⚠️ 세션의 `active` 는 **이번 요청에 나가나**(✔/✘)다 - 메인의 `active`(목록에 있나 · ▼)가 아니다.
+    //    예전에는 그대로 `active` 로 옮겨, 꺼진 세션 캐릭터가 목록에서 사라지고 되살릴 길이 없었다.
     characters: (session.characters || []).map(c => ({
       prompt: String(c.prompt || ''),
       uc: String(c.uc || ''),
-      active: c.active !== false,
-      muted: false,
+      active: true,
+      muted: c.active === false,
       position: (c.position && w > 0 && h > 0)
         ? {x: c.position.x / w, y: c.position.y / h}
         : null,
@@ -737,7 +742,7 @@ function applyInpaintSessionLock() {
   };
 
   setLock(modeSelect, locked, reason);
-  setLock(paramEls?.model, locked, 'V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다');
+  setLock(paramEls?.model, locked, '인페인트 세션 중에는 모델을 바꿀 수 없습니다');
   // ⚠️ **이미 켜져 있으면 잠그지 않는다.** 진입만 막으려던 건데 버튼째 얼려 놓으니
   //    Interactive 를 켠 채로 인페인트에 들어간 사람은 **끄지도 못했다**. 진입 거절은
   //    `canEnter` 가 맡고, 나가는 문은 늘 열어 둔다(Codex 리뷰 2026-08-26).
@@ -809,8 +814,11 @@ function virtualSetModuleParam(moduleId, key, value, options) {
     const index = key.slice('char_pos_'.length);
     const [nx, ny] = String(value).split(',').map(Number);
     if (!(w > 0) || !(h > 0) || !Number.isFinite(nx) || !Number.isFinite(ny)) return undefined;
+    // ⚠️ V4/V4.5(grid5)는 반올림하지 않는다 - 832 폭에서 0.2 를 166px 로 줄이면 서버는 166/832 < 0.2 라 옆 칸을 고른다
+    //    (화면은 0.3 칸에 그렸다 - Codex 리뷰 2026-11-05). V5 는 예전 그대로 정수 픽셀이다.
+    const exact = session.position_policy === 'grid5';
     return setModuleParam('img2img', `char_position_${index}`,
-      {x: Math.round(nx * w), y: Math.round(ny * h)});
+      exact ? {x: nx * w, y: ny * h} : {x: Math.round(nx * w), y: Math.round(ny * h)});
   }
   if (key.startsWith('char_slot_state_')) {
     // ⚠️ ▼ 는 슬롯을 목록에서 내려두는 것인데, **되살리는 UI 가 캐릭터 모듈 팝업에만**
@@ -822,6 +830,12 @@ function virtualSetModuleParam(moduleId, key, value, options) {
   if (key.startsWith('remove_character_') || key === 'add_character') {
     return setModuleParam('img2img', key, value);
   }
+  if (key.startsWith('char_muted_')) {
+    // ✔/✘ = 세션 캐릭터의 켬/끔(`char_active_N`). 꺼진 캐릭터는 보관되고 요청에만 안 나간다.
+    const index = key.slice('char_muted_'.length);
+    const muted = value === true || String(value) === 'true';
+    return setModuleParam('img2img', `char_active_${index}`, String(!muted));
+  }
   if (key === 'position_mode') {
     // ⚠️ RAND 는 세션에 없다 - 백엔드도 거절하지만 여기서 먼저 말해 준다.
     if (String(value) === 'random') {
@@ -830,7 +844,7 @@ function virtualSetModuleParam(moduleId, key, value, options) {
     }
     return setModuleParam('img2img', 'position_mode', value);
   }
-  // 세션에 없는 개념(Connect · 음소거 · 활성 토글 · POS 모드)은 조용히 흘리지 않고
+  // 세션에 없는 개념(Connect · 활성 토글)은 조용히 흘리지 않고
   // 말해 준다 - 눌렀는데 아무 일이 없으면 고장으로 읽힌다.
   showToast('가상 캐릭터에는 없는 기능입니다', 'error');
   return undefined;
@@ -1801,7 +1815,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261023-rv1')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261105-ipm2')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -2523,6 +2537,34 @@ function applyVirtualMainPrompt() {
   // ⚠️ `hidden` 은 CSS 에 진다 - 이 배지는 `display:inline-block` 이라 짝이 되는
   //    `[hidden]{display:none}` 규칙을 스타일에 함께 뒀다.
   if (badge) badge.hidden = !session;
+  applyVirtualNegative(session);
+}
+
+/** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
+ *
+ *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
+ *  진짜 네거티브로 서른 곳 넘게 보내지는데(프리셋 저장 · Random · Auto Gen …), 빌리면 그 자리마다 '세션 중이면
+ *  맡긴 값' 을 끼워야 하고 하나만 빠져도 인페인트 문장이 진짜 네거티브로 저장된다. 진짜 칸은 숨긴 채 그대로 둔다.
+ *  ⚠️ 예전에는 V5 캔버스에 세션 네거티브를 고칠 칸이 아예 없었다 - NEGATIVE 탭을 고쳐도 생성에 안 들어갔다. */
+function applyVirtualNegative(session) {
+  const box = document.getElementById('sessionNegEdit');
+  if (!box || !negEdit) return;
+  const on = !!session;
+  box.hidden = !on;
+  negEdit.style.display = on ? 'none' : '';
+  const wrap = box.closest('.prompt-highlight-wrap');
+  if (wrap) wrap.classList.toggle('is-inpaint-owned', on);
+  const badge = document.getElementById('negativeInpaintBadge');
+  if (badge) badge.hidden = !on;
+  // 서버 값이 바뀌면(스왑 · 원본 · 다른 탭) 따라간다 - 단 치는 중이거나 아직 안 보낸 글이 있으면 덮지 않는다.
+  if (on && document.activeElement !== box
+      && !(pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
+    const next = String(session.negative_prompt || '');
+    if (box.value !== next) box.value = next;
+  }
+  // 토큰 수는 보이는 칸을 센다(`tokenDisplay` 가 세션 칸을 먼저 본다) - 켜고 끌 때 · 서버 값이 바뀔 때 다시 센다.
+  // ⚠️ 값을 넣은 **뒤에** 센다 - 앞에서 세면 다른 탭이 바꾼 새 글을 보여 주면서 수는 옛 글의 것이다(Codex 재리뷰).
+  try { updateNegativeTokenEstimate(); } catch (_) {}
 }
 let interactiveStateRestored = false;
 
@@ -2651,7 +2693,7 @@ const promptHighlighterReady = import('./js/features/promptHighlighter.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize prompt highlighter module', error);
   });
-const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20260903-mainchar')
+const tokenDisplayReady = import('./js/features/tokenDisplay.mjs?v=20261105-ipm2')
   .then(({createTokenDisplay}) => {
     tokenDisplayControl = createTokenDisplay({
       promptEdit,
@@ -3035,7 +3077,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261102-aichoice')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261105-ipm2')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -3372,7 +3414,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   });
 // 인페인트 프롬프트 스왑(사용자 지정 2026-11-03) - 칩 줄 + 설정 창. 상태는 img2img 모듈 상태를 그대로 읽는다.
 let inpaintPromptSwap = null;
-const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261103-ips5')
+const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261105-ipm2')
   .then(({createInpaintPromptSwap}) => {
     inpaintPromptSwap = createInpaintPromptSwap({
       document, window, escHtml, showToast,
@@ -3397,7 +3439,9 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
       restorePendingEdit: pending => {
         if (!pending) return;
         // 적용을 기다리는 사이 같은 칸을 더 쳤으면 그 글이 지금의 의사다 - 꺼내 둔 옛 글로 덮지 않는다.
-        const field = document.getElementById(pending.key === 'main_prompt' ? 'img2imgMainPrompt' : 'img2imgNegativePrompt');
+        const popupField = document.getElementById(pending.key === 'main_prompt' ? 'img2imgMainPrompt' : 'img2imgNegativePrompt');
+        const field = popupField?.offsetParent ? popupField
+          : (pending.key === 'negative_prompt' ? document.getElementById('sessionNegEdit') : null);
         if (field && field.value !== String(pending.value ?? '')) return;
         sendPendingModuleEdit(pending);
       },
@@ -3700,7 +3744,7 @@ function watchInpaintDockLift() {
   syncInpaintDockLift();
 }
 
-const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261009-cqpush')
+const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=20261105-ipm2')
   .then(({createInpaintCanvasPanel}) => {
     inpaintCanvasControl = createInpaintCanvasPanel({
       panel: $('inpaintCanvasPanel'),
@@ -6854,7 +6898,7 @@ function setParam(key, value) {
   //    셀렉트만 막았더니 나머지 둘로 그대로 새어, 세션 중에 바뀐 모델로 다음 유료
   //    인페인트가 나갈 수 있었다(Codex 리뷰 2026-08-26). 값이 실리는 목에서 막는다.
   if (key === 'model' && virtualCharacterSession()) {
-    showToast('V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
+    showToast('인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
     return;
   }
   if (isComfyUiFreeWorkflowActive() && COMFYUI_FREE_LOCKED_PARAM_KEYS.has(key)) return;
@@ -13152,7 +13196,7 @@ async function onModelSelectChange(value) {
   if (modelRevertInFlight) return;
   // 모델이 V5 를 벗어나면 캔버스 자체가 성립하지 않는다 - 세션을 닫기 전에는 막는다.
   if (virtualCharacterSession()) {
-    showToast('V5 인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
+    showToast('인페인트 세션 중에는 모델을 바꿀 수 없습니다 (세션 닫기 후 변경)', 'error');
     const back = String(lastBackendModel || '');
     if (paramEls?.model && back) paramEls.model.value = back;
     return;
@@ -15979,6 +16023,11 @@ function applyNegativeAuthoredEdit(text) {
 function syncNegativeMirror() {
   try { artistThumbControl?.syncNegativeField?.(); } catch (_) {}
 }
+// 세션 네거티브 칸은 세션으로만 보낸다(0.5초 묶음 - 팝업의 네거티브 칸과 같은 길).
+$('sessionNegEdit')?.addEventListener('input', event => {
+  if (virtualCharacterSession()) onModTextEdit('img2img', 'negative_prompt', event.target.value);
+  updateNegativeTokenEstimate();
+});
 // 사람이 메인 칸에 직접 친 것도 같은 길로 알린다.
 negEdit.addEventListener('input', syncNegativeMirror);
 

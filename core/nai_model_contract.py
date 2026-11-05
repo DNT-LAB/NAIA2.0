@@ -477,6 +477,15 @@ def resolve_nai_model_spec(
     return BUILTIN_NAI_MODEL_SPECS.get(normalized, DEFAULT_NAI_MODEL_SPEC)
 
 
+def inpaint_position_policy(
+    model_key: Any,
+    custom_models: Mapping[str, NaiModelSpec] | None = None,
+) -> str:
+    """Character placement for an inpaint request; never changes stored positions."""
+    family = resolve_nai_model_spec(model_key, custom_models).family
+    return "continuous" if family == "v5" else "grid5" if family in {"v4", "v4.0", "v4.5"} else "none"
+
+
 def resolve_nai_model_for_context(context: Any, model_key: Any) -> NaiModelSpec:
     """Resolve through the runtime custom registry when the context provides it."""
 

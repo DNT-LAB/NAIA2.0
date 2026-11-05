@@ -596,6 +596,7 @@ export function createInpaintCanvasPanel({
   }
 
   // 팝업이 안 열리므로 인페인트 조작은 전부 여기 있어야 한다.
+  // ⚠️ V3(위치 규칙 `none` - 백엔드가 유효 모델로 정한다)는 강도 · 노이즈 줄을 걷는다(사용자 지정 2026-11-05 통합).
   function runColHtml(editing) {
     const strength = Number.isFinite(Number(state.strength)) ? Number(state.strength) : 99;
     const noise = Number.isFinite(Number(state.noise)) ? Number(state.noise) : 0;
@@ -627,7 +628,7 @@ export function createInpaintCanvasPanel({
             ${(painted && editing) ? '' : 'disabled'}
             title="직접 칠한 것만 지웁니다 (빈 곳은 베이스를 되돌려야 사라집니다)">지우기</button>
         </div>
-        <div class="ic-row">
+        <div class="ic-row"${state.position_policy === 'none' ? ' hidden' : ''}>
           <span class="ic-label">강도</span>
           <input type="range" min="1" max="99" value="${strength}" data-ic-range="strength" aria-label="강도">
           <strong class="ic-val" data-ic-val="strength">${ratio(state.strength_value)}</strong>
@@ -661,9 +662,16 @@ export function createInpaintCanvasPanel({
 
     const {w, h} = canvasSize();
     const preview = state.preview || '';
-    const chars = (state.characters || [])
+    // 위치 규칙(2026-11-05): V3(`none`)는 위치가 안 나가 표식을 걷고, V4/V4.5(`grid5`)는 요청에 실릴 칸 가운데에
+    // 세운다 - 퀵 패널의 POS 무대와 같은 식(`snap5`). 저장된 좌표는 그대로다.
+    const policy = state.position_policy;
+    const snap5 = v => (2 * Math.min(4, Math.max(0, Math.floor(v * 5))) + 1) / 10;
+    const chars = (policy === 'none' ? [] : (state.characters || []))
       .map((c, i) => ({...c, index: i}))
-      .filter(c => c.prompt && c.position);
+      .filter(c => c.prompt && c.position && c.active !== false)
+      .map(c => (policy === 'grid5' && w > 0 && h > 0
+        ? {...c, position: {x: snap5(c.position.x / w) * w, y: snap5(c.position.y / h) * h}}
+        : c));
     plane.innerHTML = `
       <div class="ic-stage" data-ic-stage="1">
         ${preview ? `<img class="ic-canvas" src="${escHtml(preview)}" alt="canvas" draggable="false">` : ''}

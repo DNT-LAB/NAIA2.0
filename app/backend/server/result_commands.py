@@ -371,6 +371,10 @@ def _drop_reference_inset_flags(params: dict[str, Any]) -> None:
     (사용자 지시 2026-10-18: 생성이 끝나면 split screen 을 회수 - 그것을 다시 붙이면 후처리에 부작용)."""
     for key in ("reference_inset_tag_required", "reference_inset_vertical", "_reference_inset_injected_tags"):
         params.pop(key, None)
+    # 인페인트 세션 표식(`_inpaint_session_characters` - 세션 0명이면 0명)도 걷는다. 결과에서 파생된 요청은 세션이 아니다 -
+    # 남기면 캐릭터 없는 인페인트 결과의 Enhance 가 지금 켠 메인 캐릭터까지 막는다(Codex 리뷰 2026-11-05). 세션 캐릭터가
+    # 있던 결과는 `sketchbook_character_prompts` 가 그대로 남아 예전과 같다.
+    params.pop("_inpaint_session_characters", None)
 
 
 def _upscale_token(context: WebSessionContext) -> str:

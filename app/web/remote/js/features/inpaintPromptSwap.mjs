@@ -131,14 +131,17 @@ export function createInpaintPromptSwap({
   }
 
   // 지금 화면에 보이는 세션 글 칸. 친 글은 잠깐(디바운스) 서버보다 앞서 있다 - 상태만 보면 방금 친 것을
-  // 고친 것으로 못 본다. 네거티브 칸은 V4.5 팝업에만 있다(V5 캔버스는 세션 네거티브를 칸에 안 띄운다).
+  // 고친 것으로 못 본다. 캔버스의 네거티브는 NEGATIVE 탭의 세션 칸(`#sessionNegEdit`)이다.
   function visibleTexts() {
     const popup = doc.getElementById('img2imgMainPrompt');
     if (popup && popup.offsetParent) {
       return {main: popup.value, neg: doc.getElementById('img2imgNegativePrompt')?.value ?? null};
     }
     const host = doc.getElementById('inpaintSwapRow');
-    if (host && !host.hidden) return {main: doc.getElementById('promptEdit')?.value ?? null, neg: null};
+    if (host && !host.hidden) {
+      const neg = doc.getElementById('sessionNegEdit');
+      return {main: doc.getElementById('promptEdit')?.value ?? null, neg: neg && !neg.hidden ? neg.value : null};
+    }
     return {main: null, neg: null};
   }
 

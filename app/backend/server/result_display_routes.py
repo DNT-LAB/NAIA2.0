@@ -814,10 +814,14 @@ def _img2img_prompt_swap(context, payload: dict[str, Any], *, apply: bool = Fals
     original_main = str(session.get("original_main_prompt") or "")
     original_negative = str(session.get("original_negative_prompt") or "")
     if apply and payload.get("original") is True:
+        try:
+            original_model = service.validate_model_override(session.get("source_model") or "")
+        except ValueError:
+            original_model = ""
         session.update(main_prompt=original_main, negative_prompt=original_negative,
-                       model_override="", swap=None)
+                       model_override=original_model, swap=None)
         return {"ok": True, "main_prompt": original_main, "negative_prompt": original_negative,
-                "model": "", "removed": [], "target_removed": [],
+                "model": original_model, "removed": [], "target_removed": [],
                 "state": service.module_state()}
 
     name = payload.get("preset")

@@ -19,6 +19,7 @@ from .profile import REF_CORRECTIONS, REF_DEFAULTS, REF_RANGES
 MAX_REFS = 3
 SETTINGS_FILE = "anima_reference.json"
 STITCH_HEIGHT_RANGE = (512, 1536)
+STITCH_MAX_ASPECT = 4          # 한 장의 너비 <= 높이 x 4
 
 
 def _clean(key: str, value: Any):
@@ -71,8 +72,14 @@ def enabled_hashes(context) -> list[str]:
     factory = getattr(context, "_character_reference_service", None)
     if factory is None:
         return []
-    factory()._ensure_loaded()
-    frames = getattr(context, "character_reference_frames", None) or []
+    service = factory()
+    # 칸은 모드별 파일이다 - 이 요청은 ANIMA(COMFYUI) 것이다. 화면이 다른 모드면(NAI 화면에서 COMFYUI 요청) 그 모드의
+    # 칸이 아니라 COMFYUI 파일의 칸을 읽는다(Codex 리뷰 2026-11-05).
+    if service._settings_mode() == "COMFYUI":
+        service._ensure_loaded()
+        frames = getattr(context, "character_reference_frames", None) or []
+    else:
+        frames = service._load_persisted("COMFYUI")
     hashes = [str(f.get("file_hash") or "") for f in frames if f.get("is_enabled")]
     return [h for h in hashes if h][:MAX_REFS]
 
@@ -104,8 +111,11 @@ def stitch(images) -> bytes:
     flat = [_flatten(image) for image in images]
     low, high = STITCH_HEIGHT_RANGE
     height = max(low, min(high, min(image.height for image in flat)))
-    resized = [image if image.height == height else
-               image.resize((max(1, round(image.width * height / image.height)), height), Image.LANCZOS)
+    # 한 장의 너비는 높이의 4배까지 - 극단적으로 납작한 그림(2048x1 등)을 높이 512 로 늘리면 너비가 백만 픽셀이 된다
+    # (Codex 리뷰 2026-11-05). 넘는 것은 그 비율로 눌러 담는다(참조로 쓸 그림이 아니다).
+    resized = [image if image.height == height and image.width <= height * STITCH_MAX_ASPECT else
+               image.resize((max(1, min(height * STITCH_MAX_ASPECT, round(image.width * height / image.height))),
+                             height), Image.LANCZOS)
                for image in flat]
     canvas = Image.new("RGB", (sum(image.width for image in resized), height), (255, 255, 255))
     x = 0

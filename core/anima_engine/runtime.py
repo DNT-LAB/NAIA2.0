@@ -24,6 +24,9 @@ from .settings import load_settings, quick_receipt, read_json, walk_files, write
 REGISTRY = {}
 REGISTRY_LOCK = RLock()
 INSTALLING = set()
+# Ref Adapter(추가 구성 요소)를 받는 엔진 자리 - 엔진 설치 · 복구와 서로 막는다(런타임 폴더를 둘이 동시에 만지지 않게).
+# INSTALLING 과 따로 둔다: 추가 구성 요소를 받는 동안에도 엔진은 생성할 수 있다(INSTALLING 은 엔진을 못 쓰게 한다).
+ADDON_INSTALLING = set()
 # 진단 정보에 싣는 Traceback 의 끝부분 길이(글자) - 어디서 났는지는 끝에 있다
 TRACE_CHARS = 8000
 

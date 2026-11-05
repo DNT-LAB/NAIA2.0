@@ -149,13 +149,15 @@ class RefAdapterInstall:
             self._state.update(updates)
 
     def start(self) -> dict:
-        from .runtime import INSTALLING, REGISTRY_LOCK
-        with REGISTRY_LOCK:
-            if str(self.root) in INSTALLING:
-                raise RuntimeError("ENGINE_INSTALLING")
+        from .runtime import ADDON_INSTALLING, INSTALLING, REGISTRY_LOCK
         with self._lock:
             if self._state["state"] == "installing":
                 return dict(self._state)
+            # 엔진 설치 · 복구와 서로 막는다 - 확인과 등록을 한 자물쇠 안에서(엔진 설치 start 도 같은 자물쇠로 본다)
+            with REGISTRY_LOCK:
+                if str(self.root) in INSTALLING:
+                    raise RuntimeError("ENGINE_INSTALLING")
+                ADDON_INSTALLING.add(str(self.root))
             self._state = {"state": "installing", "percent": 0, "message": "받는 중…", "error": ""}
             self._thread = threading.Thread(target=self._run, daemon=True, name="anima-ref-adapter-install")
             self._thread.start()
@@ -210,6 +212,10 @@ class RefAdapterInstall:
             self._set(state="ready", percent=100, message="Ref Adapter 준비 완료", error="")
         except Exception as exc:          # 화면에 까닭을 보인다 - 다시 누르면 받은 것은 건너뛴다
             self._set(state="failed", message="Ref Adapter 설치에 실패했습니다.", error=f"{type(exc).__name__}: {exc}")
+        finally:
+            from .runtime import ADDON_INSTALLING, REGISTRY_LOCK
+            with REGISTRY_LOCK:
+                ADDON_INSTALLING.discard(str(self.root))
 
 
 def stop_idle_engine(engine_root) -> bool:

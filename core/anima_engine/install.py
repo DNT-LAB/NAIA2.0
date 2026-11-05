@@ -20,7 +20,8 @@ from threading import Event, RLock, Thread
 
 from core.llama_model_download import LlamaModelDownloadService, sha256_of
 from . import manifest
-from .runtime import (AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, TRACE_CHARS, ManagedEngineError,
+from .runtime import (ADDON_INSTALLING, AnimaEngineRuntime, INSTALLING, REGISTRY, REGISTRY_LOCK, TRACE_CHARS,
+                      ManagedEngineError,
                       register_runtime)
 from .settings import LOCK as SETTINGS_LOCK
 from .settings import (AnimaSettings, atomic_json, load_settings, quick_receipt, read_json, save_settings,
@@ -470,6 +471,10 @@ class AnimaInstallJob:
             if not self.settings.engine_root:
                 raise ManagedEngineError("PATH_INVALID", "설치 위치를 먼저 확인해 주세요.")
             validate_root(self.settings.engine_root, forbidden=self.forbidden_roots)
+            with REGISTRY_LOCK:
+                # Ref Adapter 를 받는 중이면 설치 · 복구를 막는다(상태는 그대로 - 엔진은 멀쩡하다)
+                if str(Path(self.settings.engine_root).resolve()) in ADDON_INSTALLING:
+                    raise ManagedEngineError("JOB_RUNNING", "Ref Adapter 를 받는 중입니다 - 끝난 뒤 다시 눌러 주세요.")
             self._cancel.clear()
             self._force, self._select = force_verify, select_on_ready
             self._completed = []

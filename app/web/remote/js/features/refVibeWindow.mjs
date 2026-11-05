@@ -365,7 +365,8 @@ export function createRefVibeWindow({
 
   // ── ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05) ─────────────────────
   //  - 칸은 Char Ref 그대로(서버가 모드별 파일로 NAI 와 따로 둔다). 켤 수 있는 수 = anima.max_refs(3).
-  //  - 여러 장은 서버가 왼쪽부터 나란히 붙여 한 장으로 보낸다 - 켠 차례대로 왼쪽 · 가운데 · 오른쪽 표시.
+  //  - 여러 장은 서버가 왼쪽부터 나란히 붙여 한 장으로 보낸다 - 켠 칸의 목록 차례(R1 -> R3)대로 왼쪽 · 가운데 · 오른쪽 표시
+  //    (서버도 같은 차례 - 켠 시각 차례가 아니다. 자리를 바꾸려면 칸 차례를 바꾼다).
   //  - 설정은 칸마다가 아니라 하나(anima.settings · 기본값 = 제작자 기본값 4.5 + APG).
   //  - 추가 구성 요소가 없으면 [받기] 만 보인다(POST /api/anima-engine/ref-adapter/install · 이 PC 에서만).
   let animaMore = false;

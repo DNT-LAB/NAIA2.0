@@ -174,6 +174,11 @@ def register_anima_engine_routes(app, context, *, run_in_thread):
             return JSONResponse({"ok": False, "code": "LOCAL_ONLY", "error": "폴더 열기는 로컬 PC에서만 가능합니다."}, status_code=403)
         return await call(request, service_for(context).open_model_folder, body=True)
 
+    @app.post("/api/anima-engine/ref-adapter/install")
+    async def ref_adapter_install(request: Request):
+        # REF & VIBE(ANIMA) 의 [받기] - 엔진 설치처럼 이 PC 에서만(약 175MB · 고정 판)
+        return await call(request, service_for(context).ref_adapter_install, local=True, body=True, what="Ref Adapter 받기")
+
     @app.post("/api/anima-engine/settings")
     async def settings(request: Request):
         return await call(request, service_for(context).update_settings, local=True, body=True, what="설정 바꾸기")

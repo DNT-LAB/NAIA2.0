@@ -656,6 +656,9 @@ def write_model_config(settings, model_paths, path):
     # ANIMA 모델 폴더 — 관리형 · 기본 모델 자리 뒤(ComfyUI 는 앞 폴더의 같은 이름을 연다, unet_roots 와 같은 순서)
     for i, folder in enumerate(settings.unet_dirs):
         lines.extend([f"naia_unets_{i}:", "  base_path: " + json.dumps(folder), "  diffusion_models: ."])
+    # Ref Adapter 가중치(ref_adapter.py) - ComfyUI 에는 loras 로 보이되 NAIA 의 LoRA 목록(engine_root/models/loras 를
+    # 훑는다)에는 섞이지 않는 자리. 받기 전에도 적는다(없는 폴더는 ComfyUI 가 빈 목록으로 본다).
+    lines.extend(["naia_ref_adapter:", "  base_path: " + json.dumps(str(root / "models" / "ref_adapter")), "  loras: ."])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)

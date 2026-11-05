@@ -62,6 +62,17 @@ DEFAULT_SCHEDULER = GRAPH_TEMPLATE["48"]["inputs"]["scheduler"]       # simple
 # 어떤 샘플러를 골라도 생성 경로가 같다. 그래프 값은 manifest GRAPH_TEMPLATE["48"]["inputs"]["spd_scale"] 가 진실이다.
 SPD_OFF_SCALE = 1.0
 
+# ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05). 켜면 그래프가 이렇게 바뀐다:
+#   44 -> LoRA(100..) -> 61 AnimaRefAdapter(60 LoadImage · 15 VAE) -> 62 NaiaRefSpectrumKey -> 48 샘플러
+#   RescaleCFG(52)는 빠진다 - 어댑터의 correction(apg / rescale)이 그 몫이다(제작자 워크플로 · 원격 실측과 같은 꼴).
+# 기본값 = 제작자 기본값(ref_guidance 4.5 + APG). 그림은 integration 이 엔진 input 폴더에 올린 이름(naia_ref_<16hex>.png).
+REF_NODES = ("60", "61", "62")
+REF_IMAGE_RE = re.compile(r"naia_ref_[0-9a-f]{16}\.png")
+REF_CORRECTIONS = ("apg", "rescale", "none")
+REF_DEFAULTS = {"ref_guidance": 4.5, "correction": "apg", "strength": 1.0, "ref_end": 1.0, "ref_megapixels": 1.0}
+REF_RANGES = {"ref_guidance": (1.0, 10.0), "strength": (0.0, 2.0), "ref_end": (0.0, 1.0), "ref_megapixels": (0.25, 2.0)}
+REF_LORA = "anima_ref_adapter_v2_r64.safetensors"      # ref_adapter.WEIGHT["filename"] - 여기는 I/O 없는 파일이라 글로
+
 
 def resolve_sampling(params):
     """요청의 샘플러 · 스케줄러 -> 엔진이 받는 값. 목록에 없으면(외부 ComfyUI · WebUI 에서 남은 이름 · 빈 값) 기본값 - PARAMS
@@ -177,9 +188,37 @@ def validate_chain(chain, available_loras):
             raise ProfileError("LORA_NOT_FOUND", field=item["name"])
 
 
+def reference_values(reference):
+    """참조 설정 검사 - {image, ref_guidance, correction, strength, ref_end, ref_megapixels}. None = 참조 없음."""
+    if reference is None:
+        return None
+    if not isinstance(reference, Mapping) or not isinstance(reference.get("image"), str) \
+            or not REF_IMAGE_RE.fullmatch(reference["image"]):
+        raise ProfileError("PARAM_OUT_OF_RANGE", field="reference")
+    values = {"image": reference["image"]}
+    for key, (low, high) in REF_RANGES.items():
+        values[key] = number(reference.get(key, REF_DEFAULTS[key]), "reference." + key, low, high)
+    correction = reference.get("correction", REF_DEFAULTS["correction"])
+    if correction not in REF_CORRECTIONS:
+        raise ProfileError("PARAM_OUT_OF_RANGE", field="reference.correction")
+    values["correction"] = correction
+    return values
+
+
+def _apply_reference(graph, prev, ref):
+    graph["60"] = {"class_type": "LoadImage", "inputs": {"image": ref["image"]}}
+    graph["61"] = {"class_type": "AnimaRefAdapter", "inputs": {
+        "model": [prev, 0], "vae": ["15", 0], "image": ["60", 0], "lora_name": REF_LORA,
+        **{key: ref[key] for key in ("ref_guidance", "correction", "strength", "ref_end", "ref_megapixels")}}}
+    graph["62"] = {"class_type": "NaiaRefSpectrumKey", "inputs": {"model": ["61", 0]}}
+    del graph["52"]
+    graph["48"]["inputs"]["model"] = ["62", 0]
+
+
 def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, Any]], *,
                   available_loras: Collection[str], rng: random.Random | None = None,
-                  model: str | None = None, available_models: Collection[str] | None = None) -> CompiledGraph:
+                  model: str | None = None, available_models: Collection[str] | None = None,
+                  reference: Mapping[str, Any] | None = None) -> CompiledGraph:
     # The existing generation dispatcher calls ordinary text generation "generate".
     if params.get("type") not in (None, "", "generate", "txt2img"):
         raise ProfileError("MANAGED_UNSUPPORTED_REQUEST", field="type")
@@ -190,6 +229,7 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
         values["seed"] = (rng or random.SystemRandom()).randrange(0, 2**32)
     validate_params(values)
     validate_chain(lora_chain, available_loras)
+    ref = reference_values(reference)
     unet = model or DEFAULT_UNET
     if unet not in (available_models if available_models is not None else {DEFAULT_UNET}):
         raise ProfileError("MODEL_NOT_FOUND", field=unet)
@@ -209,13 +249,20 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
         prev = node
         active.append({"name": item["name"], "strength": item.get("strength", 1.0), "sha256": item.get("sha256")})
     graph["52"]["inputs"]["model"] = [prev, 0]
+    if ref:
+        _apply_reference(graph, prev, ref)
     validate_compiled(graph, available_loras=available_loras, available_models=available_models)
-    return CompiledGraph(graph, OUTPUT_NODE_ID, values["seed"], {
+    meta = {
         "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID, "model": unet,
         "sampler": sampler, "scheduler": scheduler, "spd": False, "sampler_actual": sampler,
         "sampler_note": "Spectrum only (SPD off)",
         "loras": active,
-        **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}})
+        **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}}
+    if ref:
+        # 참조를 켜면 RescaleCFG 는 그래프에 없다 - 기록에 남기지 않는다(어댑터의 correction 이 대신)
+        meta.pop("rescale_cfg")
+        meta["reference"] = {key: ref[key] for key in ("ref_guidance", "correction", "strength", "ref_end", "ref_megapixels")}
+    return CompiledGraph(graph, OUTPUT_NODE_ID, values["seed"], meta)
 
 
 def validate_request_slots(params):
@@ -230,10 +277,20 @@ def validate_request_slots(params):
 def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collection[str],
                       available_models: Collection[str] | None = None) -> None:
     try:
-        extra = set(workflow) - set(GRAPH_TEMPLATE)
+        # 참조 그래프 = 60 · 61 · 62 가 다 있고 52 가 없다. 그 밖의 더한 노드는 LoRA(100..) 뿐
+        has_ref = "61" in workflow
+        extra = set(workflow) - set(GRAPH_TEMPLATE) - (set(REF_NODES) if has_ref else set())
         if len(extra) > 32 or extra != {str(100 + i) for i in range(len(extra))}:
             raise ValueError("nodes")
-        values = {key: workflow[node]["inputs"][field] for key, (node, field, _) in SLOTS.items()}
+        ref = None
+        if has_ref:
+            adapter = workflow["61"]["inputs"]
+            ref = reference_values({"image": workflow["60"]["inputs"]["image"],
+                                    **{key: adapter[key] for key in REF_DEFAULTS}})
+        values = {key: (SLOTS[key][2] if has_ref and node == "52" else workflow[node]["inputs"][field])
+                  for key, (node, field, _) in SLOTS.items()}
+        if has_ref:
+            values["rescale_cfg"] = 0.5
         validate_params(values)
         expected = copy.deepcopy(GRAPH_TEMPLATE)
         unet = workflow["44"]["inputs"]["unet_name"]
@@ -257,6 +314,8 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
                 "lora_name": engine_lora_name(name), "strength_model": strength, "model": [prev, 0]}}
             prev = node
         expected["52"]["inputs"]["model"] = [prev, 0]
+        if ref:
+            _apply_reference(expected, prev, ref)
         if json.dumps(workflow, sort_keys=True, allow_nan=False) != json.dumps(expected, sort_keys=True, allow_nan=False):
             raise ValueError("graph")
     except (KeyError, TypeError, ValueError, AttributeError):

@@ -31,6 +31,8 @@ export function createRefVibeWindow({
   importVibeFile,            // (file) => void
   isToolUnsupported = () => false,   // (moduleId) => bool  모델 능력 / NAID3 / 모드
   isInteractive = () => false,
+  isAnima = () => false,     // 내장 ANIMA - Char Ref 만 · Ref Adapter v2(사용자 지정 2026-11-05)
+  installRefAdapter = async () => ({}),
   showToast = () => {},
   confirmDialog = async () => false,
   promptDialog = async () => null,
@@ -227,8 +229,9 @@ export function createRefVibeWindow({
   /** 열기. `toggle` 이면 같은 탭으로 열려 있을 때 닫는다(런처 단추를 두 번 누르는 손버릇). */
   function show({tab: nextTab = '', toggle = false} = {}) {
     return ensurePanel().then(() => {
-      const wanted = nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab;
-      if (toggle && panel.isOpen() && wanted === tab) { panel.close(); return; }
+      // ANIMA 에는 Char Ref 탭뿐 - 무엇을 달라 해도 그 탭(기억된 탭은 그대로 - NAI 로 돌아가면 그 탭)
+      const wanted = isAnima() ? 'cr' : (nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab);
+      if (toggle && panel.isOpen() && wanted === (isAnima() ? 'cr' : tab)) { panel.close(); return; }
       setTab(wanted, {quiet: true});
       panel.open();
       // 이번 실행 첫 열기는 결과 칸 가운데로(사용자 지시 2026-10-23). 공용 규칙(FN | Result 경계)은 퀵 슬롯 ·
@@ -259,6 +262,7 @@ export function createRefVibeWindow({
 
   function setTab(next, {quiet = false} = {}) {
     if (next !== 'vibe' && next !== 'cr') return;
+    if (next === 'vibe' && isAnima()) next = 'cr';
     const changed = next !== tab;
     tab = next;
     try { storage?.setItem(TAB_KEY, tab); } catch (_) { /* 기억 못 해도 된다 */ }
@@ -286,6 +290,8 @@ export function createRefVibeWindow({
       const key = button.dataset.rvwTab;
       button.classList.toggle('on', key === tab);
       button.classList.toggle('is-off', isToolUnsupported(KINDS[key]));
+      // ANIMA 에는 Vibe 가 없다 - 흐리게 남기지 않고 뺀다(사용자 지정 2026-11-05)
+      button.hidden = key === 'vibe' && isAnima();
       const loaded = (key === 'vibe' ? vibeState : crState)?.frames?.length || 0;
       button.textContent = `${key === 'vibe' ? 'Vibe' : 'Char Ref'} ${key === 'vibe' ? vibeOn : crOn}/${loaded}`;
       button.dataset.naiaTitle = key === 'vibe'
@@ -322,6 +328,10 @@ export function createRefVibeWindow({
         + `${tab === 'vibe' ? 'V4 / V4.5' : 'V4.5'} 모델을 고르면 쓸 수 있습니다.</div>`;
       return;
     }
+    if (tab === 'cr' && isAnima()) {
+      renderAnimaActive(host, scrollTop);
+      return;
+    }
     if (tab === 'cr' && isInteractive()) {
       host.innerHTML = `<div class="rvw-notice">Interactive 에서는 캐릭터 헤더의 [Reference] 가 레퍼런스를 맡습니다.</div>`;
       return;
@@ -349,6 +359,106 @@ export function createRefVibeWindow({
       + (frames.length
         ? `<div class="rvw-rows">${rows}</div>`
         : `<div class="rvw-empty">아래 STORAGE 에서 고르거나, 이미지를 올리거나 붙여 넣으세요.</div>`);
+    const list = host.querySelector('.rvw-rows');
+    if (list) list.scrollTop = scrollTop;
+  }
+
+  // ── ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05) ─────────────────────
+  //  - 칸은 Char Ref 그대로(서버가 모드별 파일로 NAI 와 따로 둔다). 켤 수 있는 수 = anima.max_refs(3).
+  //  - 여러 장은 서버가 왼쪽부터 나란히 붙여 한 장으로 보낸다 - 켠 차례대로 왼쪽 · 가운데 · 오른쪽 표시.
+  //  - 설정은 칸마다가 아니라 하나(anima.settings · 기본값 = 제작자 기본값 4.5 + APG).
+  //  - 추가 구성 요소가 없으면 [받기] 만 보인다(POST /api/anima-engine/ref-adapter/install · 이 PC 에서만).
+  let animaMore = false;
+  let addonTimer = 0;
+  const ANIMA_SLIDERS = {
+    ref_guidance: {label: '참조 세기', min: 1, max: 10, step: 0.1, digits: 1,
+      tip: '참조 그림을 얼마나 따를지(ref_guidance) - 1 = 참조 뺀 계산 없음(빠르다) · 높을수록 참조 쪽'},
+    ref_end: {label: '끝 지점', min: 0, max: 1, step: 0.05, digits: 2,
+      tip: '참조 세기를 언제까지 쓸지(전체 과정의 비율) - 생김새 · 그림체는 앞쪽에서 정해진다'},
+    ref_megapixels: {label: '참조 크기', min: 0.25, max: 2, step: 0.05, digits: 2,
+      tip: '참조 그림을 이 넓이(MP)로 줄여 읽는다 - 비율은 그대로'},
+    strength: {label: '어댑터 강도', min: 0, max: 2, step: 0.05, digits: 2,
+      tip: 'Ref Adapter 가중치의 세기'},
+  };
+
+  function animaSlider(key, value) {
+    const spec = ANIMA_SLIDERS[key];
+    const scale = Math.round(1 / spec.step);
+    const number = Number(value);
+    return `<div class="rvw-line"><span class="rvw-k" data-naia-title="${escHtml(spec.tip)}">${spec.label}</span>`
+      + `<input type="range" class="rvw-range is-wide" min="${Math.round(spec.min * scale)}" max="${Math.round(spec.max * scale)}" step="1"`
+      + ` value="${Math.round(number * scale)}" data-rvw-anima="${key}" data-scale="${scale}" data-digits="${spec.digits}">`
+      + `<span class="rvw-v" data-rvw-anima-out="${key}">${fmt(number, spec.digits)}</span></div>`;
+  }
+
+  function animaAddonHtml(addon) {
+    const state = String(addon.state || 'idle');
+    const licenses = (addon.licenses || []).map(item => `${escHtml(item.name)} - ${escHtml(item.license)}`).join(' · ');
+    const action = state === 'installing'
+      ? `<span class="rvw-hint">${escHtml(addon.message || '받는 중…')} ${Number(addon.percent || 0)}%</span>`
+      : `<button type="button" class="rvw-btn is-accent" data-rvw-act="addoninstall">${state === 'failed' ? '다시 받기' : '받기'}</button>`;
+    return `<div class="rvw-sec"><span class="rvw-sec-t">CHAR REF · ANIMA</span></div>`
+      + `<div class="rvw-addon"><div>Character Ref 는 추가 구성 요소(Ref Adapter v2)가 필요합니다.</div>`
+      + `<div class="rvw-hint">약 ${Number(addon.download_mb || 0)} MB · ${licenses}</div>`
+      + `<div class="rvw-line">${action}</div>`
+      + (state === 'failed' ? `<div class="rvw-notice is-warn">${escHtml(addon.message || '')} ${escHtml(addon.error || '')}</div>` : '')
+      + `</div>`;
+  }
+
+  function pollAddon(addon) {
+    win.clearTimeout(addonTimer);
+    if (addon?.state !== 'installing') return;
+    addonTimer = win.setTimeout(() => requestModuleState(KINDS.cr), 1000);
+  }
+
+  function renderAnimaActive(host, scrollTop) {
+    const state = getModuleState(KINDS.cr) || {};
+    const anima = state.anima || {};
+    const addon = anima.addon || {};
+    pollAddon(addon);
+    if (!addon.installed) {
+      host.innerHTML = animaAddonHtml(addon);
+      return;
+    }
+    const frames = state.frames || [];
+    const max = Number(anima.max_refs || 3);
+    const on = frames.map((frame, index) => ({frame, index})).filter(item => item.frame.is_enabled);
+    const places = on.length === 2 ? ['왼쪽', '오른쪽'] : (on.length >= 3 ? ['왼쪽', '가운데', '오른쪽'] : []);
+    const place = new Map(on.map((item, i) => [item.index, places[i] || '']));
+    const rows = frames.map((frame, index) => {
+      const live = frame.is_enabled ? ' is-live' : ' is-off';
+      const where = place.get(index);
+      return `<div class="rvw-row${live}" data-rvw-row="${index}">`
+        + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
+        + thumbHtml(frame)
+        + `<span class="rvw-name">R${index + 1} · ${escHtml(frameName(frame))}</span>`
+        + (where ? `<span class="rvw-pos">${where}</span>` : '')
+        + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
+    }).join('');
+    const settings = anima.settings || {};
+    const tools = `<button type="button" class="rvw-btn" data-rvw-act="upload">+ 업로드</button>`
+      + `<button type="button" class="rvw-btn" data-rvw-act="paste">붙여넣기</button>`;
+    const notice = on.length >= 2
+      ? `<div class="rvw-notice is-warn">${on.length}장을 왼쪽부터 나란히 붙여 보냅니다 - 프롬프트에 누가 어느 쪽인지 적으세요.</div>` : '';
+    const corrections = [['apg', 'APG'], ['rescale', 'Rescale'], ['none', '끔']]
+      .map(([value, label]) => `<option value="${value}"${value === settings.correction ? ' selected' : ''}>${label}</option>`).join('');
+    const more = animaMore
+      ? `<div class="rvw-line"><span class="rvw-k" data-naia-title="높은 CFG · 참조 세기에서 색이 타지 않게 잡는다">보정</span>`
+        + `<select class="rvw-sel" data-rvw-anima-sel="correction">${corrections}</select>`
+        + `<button type="button" class="rvw-btn" data-rvw-act="animareset" data-naia-title="참조 세기 4.5 · APG · 끝 1.00 · 크기 1.00 · 강도 1.00 (제작자 기본값)">기본값</button></div>`
+        + animaSlider('ref_end', settings.ref_end) + animaSlider('ref_megapixels', settings.ref_megapixels)
+        + animaSlider('strength', settings.strength)
+      : '';
+    host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${on.length} / ${max}</span>`
+      + `<span class="rvw-sec-tools">${tools}</span></div>`
+      + notice
+      + (frames.length
+        ? `<div class="rvw-rows">${rows}</div>`
+        : `<div class="rvw-empty">아래 STORAGE 에서 고르거나, 이미지를 올리거나 붙여 넣으세요.</div>`)
+      + `<div class="rvw-anima">`
+      + animaSlider('ref_guidance', settings.ref_guidance).replace('</div>',
+        `<button type="button" class="rvw-btn" data-rvw-act="animamore">${animaMore ? '접기 ▴' : '더 보기 ▾'}</button></div>`)
+      + more + `</div>`;
     const list = host.querySelector('.rvw-rows');
     if (list) list.scrollTop = scrollTop;
   }
@@ -1278,6 +1388,14 @@ export function createRefVibeWindow({
       else if (act === 'clnew') newClusterFromActive();
       else if (act === 'clback') { clusters.openId = ''; renderStore(); }
       else if (act === 'clmore') openClusterMoreMenu(el, el.dataset.id);
+      else if (act === 'animamore') { animaMore = !animaMore; renderActive(); }
+      else if (act === 'animareset') setModuleParam(KINDS.cr, 'anima_reset', '1');
+      else if (act === 'addoninstall') {
+        el.disabled = true;
+        installRefAdapter()
+          .then(() => requestModuleState(KINDS.cr))
+          .catch(error => { showToast(String(error?.message || error), 'error'); el.disabled = false; });
+      }
     }
   }
 
@@ -1720,6 +1838,9 @@ export function createRefVibeWindow({
     } else if (t.matches('[data-rvw-cr]')) {
       const out = panel.body.querySelector(`[data-rvw-cr-out="${t.dataset.rvwCr}:${t.dataset.index}"]`);
       if (out) out.textContent = fmt(Number(t.value) / 20);
+    } else if (t.matches('[data-rvw-anima]')) {
+      const out = panel.body.querySelector(`[data-rvw-anima-out="${t.dataset.rvwAnima}"]`);
+      if (out) out.textContent = fmt(Number(t.value) / Number(t.dataset.scale), Number(t.dataset.digits));
     } else if (t.matches('[data-rvw-mrs]')) {
       const out = panel.body.querySelector(`[data-rvw-mrs-out="${t.dataset.rvwMrs}"]`);
       if (out) out.textContent = fmt(Number(t.value) / 100);
@@ -1752,6 +1873,10 @@ export function createRefVibeWindow({
       setModuleParam(KINDS.cr, `${t.dataset.rvwCr}_${t.dataset.index}`, fmt(Number(t.value) / 20));
     } else if (t.matches('[data-rvw-type]')) {
       setModuleParam(KINDS.cr, `ref_type_${t.dataset.rvwType}`, t.value);
+    } else if (t.matches('[data-rvw-anima]')) {
+      setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnima}`, fmt(Number(t.value) / Number(t.dataset.scale), Number(t.dataset.digits)));
+    } else if (t.matches('[data-rvw-anima-sel]')) {
+      setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnimaSel}`, t.value);
     } else if (t.matches('[data-rvw-normalize]')) {
       setModuleParam(KINDS.vibe, 'normalize', String(t.checked));
     } else if (t.matches('[data-rvw-sort]')) {
@@ -1802,6 +1927,9 @@ export function createRefVibeWindow({
 
   /** 모델 · 모드가 바뀌었다 - 알약과 탭의 '지원 안 함' 표시를 다시. */
   function refresh() {
+    if (isAnima() && tab === 'vibe') tab = 'cr';
+    // Char Ref 칸은 모드별(NAI · ANIMA 따로)이다 - 바뀐 모드의 칸을 다시 묻는다(알약 배지도 그 수)
+    requestModuleState(KINDS.cr);
     paintPill();
     if (!panel || !panel.isOpen()) return;
     if (isToolUnsupported(KINDS.vibe) && isToolUnsupported(KINDS.cr)) {

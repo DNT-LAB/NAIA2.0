@@ -246,14 +246,66 @@ class HeadlessCharacterReferenceService:
                 "fidelity": _as_float(frame.get("fidelity"), 0.8),
                 "thumbnail": frame.get("thumbnail", ""),
             })
-        return self.context._module_state_payload("character_reference", {
-            "is_naid45": self.context._is_naid45_model(),
-            "frames": frames,
-        })
+        state = {"is_naid45": self.context._is_naid45_model(), "frames": frames}
+        anima = self._anima_block()
+        if anima is not None:
+            state["anima"] = anima
+        return self.context._module_state_payload("character_reference", state)
+
+    # ----- ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05) -----
+    # 관리형 ANIMA(COMFYUI 모드 + 내장 엔진)에서만. 칸은 위의 것 그대로(모드별 파일이라 NAI 의 칸과 따로) - 다른 것은
+    # 설정(참조 세기 등 · 칸마다가 아니라 하나) · 켤 수 있는 수(MAX_REFS) · 추가 구성 요소 설치 상태.
+    def _anima_mode(self) -> bool:
+        if self._settings_mode() != "COMFYUI":
+            return False
+        try:
+            from core.anima_engine import integration
+            return integration.managed_selected(self.context)
+        except Exception:
+            return False
+
+    def _anima_engine_root(self) -> str:
+        from core.anima_engine import integration
+        from core.anima_engine.settings import load_settings
+        return load_settings(integration.save_root_of(self.context)).engine_root or ""
+
+    def _anima_block(self) -> dict[str, Any] | None:
+        if not self._anima_mode():
+            return None
+        from core.anima_engine import ref_adapter, reference
+        return {"settings": reference.load_settings(self.context), "defaults": dict(reference.REF_DEFAULTS),
+                "max_refs": reference.MAX_REFS, "addon": ref_adapter.status(self._anima_engine_root())}
+
+    def _anima_param(self, key: str, value: Any) -> dict[str, Any] | list | None:
+        # 추가 구성 요소 받기는 여기가 아니라 POST /api/anima-engine/ref-adapter/install(엔진 설치처럼 이 PC 에서만)
+        from core.anima_engine import reference
+        if not self._anima_mode():
+            return self.context._toast("ANIMA 참조는 내장 ANIMA 엔진에서만 씁니다.", level="info")
+        try:
+            reference.save_setting(self.context, key[len("anima_"):], value)
+        except ValueError:
+            return self.context._toast("참조 설정 값을 확인해 주세요.", level="error")
+        return self.module_state()
+
+    def _anima_limit_reached(self, index: int | None = None) -> bool:
+        """ANIMA 에서 하나 더 켜면 MAX_REFS 를 넘는가(index = 켜려는 칸 - 이미 켜져 있으면 넘지 않는다)."""
+        if not self._anima_mode():
+            return False
+        from core.anima_engine.reference import MAX_REFS
+        frames = self.context.character_reference_frames
+        on = sum(1 for i, f in enumerate(frames) if f.get("is_enabled") and i != index)
+        return on >= MAX_REFS
+
+    def _anima_limit_toast(self):
+        from core.anima_engine.reference import MAX_REFS
+        return [self.context._toast(f"ANIMA 참조는 {MAX_REFS}장까지 켭니다 - 다른 칸을 끄고 켜 주세요.", level="info"),
+                self.module_state()]
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
         self._ensure_loaded()
+        if key.startswith("anima_"):
+            return self._anima_param(key, value)
         if key == "upload_image":
             image_bytes = base64.b64decode(data_url_payload(str(value or "")))
             frame = self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
@@ -276,6 +328,8 @@ class HeadlessCharacterReferenceService:
             index = context._index_from_key(key, "enable_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
                 enabling = context._coerce_bool(value)
+                if enabling and self._anima_limit_reached(index):
+                    return self._anima_limit_toast()
                 context.character_reference_frames[index]["is_enabled"] = enabling
                 if enabling:
                     self.save_storage(context.character_reference_frames[index])
@@ -311,6 +365,8 @@ class HeadlessCharacterReferenceService:
                 settings = reference_settings({**settings, **request["settings"]})
             # 이미 활성에 있으면 새 칸을 만들지 않고 그 칸을 켠다(사용자 제보 2026-10-23 - [적용] 을 누를 때마다 쌓였다).
             existing = next((f for f in context.character_reference_frames if str(f.get("file_hash") or "") == file_hash), None)
+            if self._anima_limit_reached(None if existing is None else context.character_reference_frames.index(existing)):
+                return self._anima_limit_toast()
             if existing is not None:
                 existing["is_enabled"] = True
                 if isinstance(request.get("settings"), dict):

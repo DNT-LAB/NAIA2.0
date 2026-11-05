@@ -352,6 +352,19 @@ class AnimaEngineService:
                 "removed": sorted(before - set(names)), "skipped": catalog["skipped"],
                 "folders": unet_folders(settings), "engine": engine}
 
+    def ref_adapter_install(self, body=None):
+        """Character Ref(ANIMA)의 추가 구성 요소 받기 - core/anima_engine/ref_adapter.py. 진행은 Char Ref 모듈 상태의
+        anima.addon 으로 보인다(화면이 받는 동안 다시 묻는다)."""
+        from core.anima_engine import ref_adapter
+        settings = load_settings(self.save_root)
+        if not quick_receipt(settings):
+            raise ManagedEngineError("ENGINE_NOT_READY", "ANIMA 엔진을 먼저 준비해 주세요.")
+        try:
+            ref_adapter.job_for(settings.engine_root).start()
+        except RuntimeError:
+            raise ManagedEngineError("JOB_RUNNING", "ANIMA 엔진 설치가 끝난 뒤 받아 주세요.") from None
+        return {"ok": True, "addon": ref_adapter.status(settings.engine_root)}
+
     def open_model_folder(self, body):
         """모델 폴더를 탐색기로 — 화면이 보낸 번호(models 의 folders 차례)만 받는다(경로를 받지 않는다)."""
         folders = unet_folders(load_settings(self.save_root))

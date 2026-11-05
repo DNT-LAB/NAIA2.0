@@ -77,6 +77,9 @@ def snapshot_request(context, params):
     params["model"] = params["_anima_model"] = resolve_model(context, params.get("model"))
     # 샘플러 · 스케줄러도 큐에 넣는 순간의 것(10-01) - 목록 밖 이름은 기본값으로(PARAMS 칸이 보여 준 그대로 기록에 남는다)
     params["sampler"], params["scheduler"] = resolve_sampling(params)
+    # 참조(Char Ref · Ref Adapter)도 큐에 넣는 순간의 것 - 켠 칸의 해시 + 설정(reference.py)
+    from . import reference
+    reference.snapshot(context, params)
     params.pop("_anima_submission_attempted", None)
 
 
@@ -112,13 +115,24 @@ def prepare_managed_request(context, params):
     model = params.get("_anima_model") or resolve_model(context, params.get("model"))
     if model not in models:
         raise ManagedEngineError("MODEL_NOT_FOUND", "ANIMA 모델 파일을 찾지 못했습니다.", model)
+    ref_png = ref_graph = None
+    captured = params.get("_anima_reference")
+    if captured:
+        from . import ref_adapter, reference
+        if not ref_adapter.installed(settings.engine_root):
+            raise ManagedEngineError("REF_ADAPTER_NOT_INSTALLED", "Character Ref 를 쓰려면 REF & VIBE 창에서 Ref Adapter 를 먼저 받아 주세요.")
+        ref_png, _name, ref_graph = reference.build(context, captured)
     compiled = compile_graph({**params, "input": text}, chain,
                              available_loras={k for k, v in catalog.items() if not v["conflict"]},
-                             model=model, available_models=models)
+                             model=model, available_models=models, reference=ref_graph)
     runtime = get_runtime(context)
     if runtime is None:
         raise ManagedEngineError("ENGINE_NOT_READY")
     url = runtime.ensure_running()
+    if ref_graph:
+        url = _ensure_reference_nodes(runtime, url)
+        reference.upload(url, ref_png, ref_graph["image"])
+        compiled.meta["reference"].update(count=len(captured["hashes"]), images=list(captured["hashes"]))
     params.update(workflow=compiled.workflow, _comfyui_output_node_id=compiled.output_node_id, model=model,
                   _comfyui_workflow_mode="managed", _anima_meta=compiled.meta, seed=compiled.seed,
                   width=compiled.meta["width"], height=compiled.meta["height"])
@@ -130,6 +144,21 @@ def prepare_managed_request(context, params):
     # 히스토리에 LoRA 서재 전체가 남는다. 이 그림에 실제로 켠 것은 _anima_meta.loras 에 있다.
     params.pop("_anima_lora_keywords", None)
     params["_anima_submission_attempted"] = True
+    return url
+
+
+def _ensure_reference_nodes(runtime, url):
+    """켜진 엔진이 Ref Adapter 노드 · 가중치를 아는가. 모르면(받기 전에 켠 엔진) 한 번 내렸다 켠다 - 노드는 켤 때만
+    읽힌다. 이 요청이 엔진을 쓰는 중(in_use)이라 stop_if_unused 는 못 쓴다 - 엔진 큐가 비었을 때만 내린다."""
+    from . import reference
+    if reference.engine_has_nodes(url):
+        return url
+    if runtime.queue_busy():
+        raise ManagedEngineError("REF_ADAPTER_RESTART_PENDING", "엔진이 다른 그림을 그리는 중입니다 - 끝난 뒤 다시 시도해 주세요.")
+    runtime.stop()
+    url = runtime.ensure_running()
+    if not reference.engine_has_nodes(url):
+        raise ManagedEngineError("REF_ADAPTER_NOT_LOADED", "엔진이 Ref Adapter 를 읽지 못했습니다 - 엔진 로그를 확인해 주세요.")
     return url
 
 

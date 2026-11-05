@@ -2595,7 +2595,8 @@ function syncRefVibePillVisibility() {
   if (!refVibeWindow) return;
   const mode = String(currentMode || modeSelect?.value || 'NAI').toUpperCase();
   const rightTab = document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
-  refVibeWindow.setVisible(mode === 'NAI' && !isDetachedShell && rightTab === 'result');
+  // 내장 ANIMA 도(Char Ref 만 - Ref Adapter v2 · 사용자 지정 2026-11-05)
+  refVibeWindow.setVisible((mode === 'NAI' || isAnimaManagedMode()) && !isDetachedShell && rightTab === 'result');
 }
 
 function applyInteractiveModeGate(isActive) {
@@ -3115,7 +3116,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-crp5')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261105-anima1')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3129,8 +3130,17 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261023-cr
         .then(() => imageModulePanels?.pasteImage(moduleId, options)),
       importVibeFile,
       // 모델 판단은 능력값 한 곳(`naiModelToolUnsupported`)으로 - V5 를 켤 때 화면은 그대로 둔다.
-      isToolUnsupported: moduleId => String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
-        || naiModelBlocksReference() || naiModelToolUnsupported(moduleId),
+      // 내장 ANIMA 에서는 Char Ref 만(Ref Adapter v2 · 사용자 지정 2026-11-05 - Vibe 는 창에서 아예 뺀다)
+      isToolUnsupported: moduleId => (isAnimaManagedMode() ? moduleId !== 'character_reference'
+        : String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
+          || naiModelBlocksReference() || naiModelToolUnsupported(moduleId)),
+      isAnima: () => isAnimaManagedMode(),
+      installRefAdapter: () => fetch('/api/anima-engine/ref-adapter/install', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
+      }).then(response => response.json().catch(() => ({})).then(data => {
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+        return data;
+      })),
       isInteractive: () => !!interactivePanel?.isActive?.(),
       showToast,
       confirmDialog: showConfirmDialog,
@@ -10950,6 +10960,7 @@ function onComfyEngineChanged(engine, {enter = false} = {}) {
   const changed = comfyEngine() !== engine;
   setupController?.noteComfyEngine?.(engine, {animaReady: true});
   if (animaLoraPanel) animaLoraPanel.refresh();   // ANIMA 전용 도구(해상도 프리셋 · LoRA)를 보일지 다시 판단
+  syncNaiReferenceToolChrome();   // REF 알약 · 창 - 외부 ComfyUI 엔 없고 ANIMA 엔 Char Ref 만
   // COMFYUI 도구 ↔ ANIMA 도구가 갈린다 — 떠 있는 모듈은 모드를 바꿀 때처럼 닫는다
   if (changed && currentMode === 'COMFYUI') closeOpenModulesForModeSwitch();
   const wantComfy = enter || currentMode === 'COMFYUI';
@@ -12729,7 +12740,8 @@ function openModule(moduleId, options = {}) {
     return;
   }
   // NAI 전용 모듈 가드
-  if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI') {
+  if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI'
+      && !(moduleId === 'character_reference' && isAnimaManagedMode())) {
     showToast('This module is only available in NAI mode', 'error');
     return;
   }
@@ -13685,8 +13697,10 @@ function updateVibeBadge(m) {
 /** 모델이 못 쓰는 CR · VT 는 켜진 프레임이 있어도 **0 으로 보인다**(사용자 제보 2026-10-23: V4.5 -> V5 프리셋으로 넘어가도
  *  NAI 전용 도구의 V2 칩 · Activated 요약이 그대로 남았다 - 생성 페이로드에는 안 실리는데 화면만 켜진 것처럼). */
 function naiToolShownState(moduleId, m) {
-  const off = String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
-    || naiModelBlocksReference() || naiModelToolUnsupported(moduleId);
+  // 내장 ANIMA 는 Char Ref 만 살아 있다(Ref Adapter v2)
+  const off = isAnimaManagedMode() ? moduleId !== 'character_reference'
+    : (String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
+      || naiModelBlocksReference() || naiModelToolUnsupported(moduleId));
   return off ? {...(m || {}), frames: []} : (m || {});
 }
 
@@ -13698,7 +13712,8 @@ function syncNaiReferenceToolChrome() {
   updateCharRefBadge(moduleStateCache.get('character_reference'));
   if (moduleLauncherControl) moduleLauncherControl.updateState();
   syncRefVibePillVisibility();
-  const key = `${String(currentMode || modeSelect?.value || '')}|${document.getElementById('pModel')?.value || ''}`;
+  // 엔진도 열쇠에 - COMFYUI 의 외부 · 내장(ANIMA)은 창에 보이는 것이 다르다
+  const key = `${String(currentMode || modeSelect?.value || '')}|${comfyEngine()}|${document.getElementById('pModel')?.value || ''}`;
   if (key === naiReferenceToolChromeKey) { refVibeWindow?.paintPill(); return; }
   naiReferenceToolChromeKey = key;
   refVibeWindow?.refresh();

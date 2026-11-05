@@ -378,12 +378,10 @@ class HeadlessAutomationService:
         from core.generation_access_policy import access_policy
         if access_policy(self.context).blocked:
             return access_policy(self.context).reason()
-        from core.headless_generation_service import TOKEN_KEYS
+        from core.headless_generation_service import credential_for_mode
 
         api_mode = str(self.context.get_api_mode() or "NAI").upper()
-        token_key = TOKEN_KEYS.get(api_mode, "nai_token")
-        credential = str(self.context.secure_token_manager.get_token(token_key) or "")
-        if credential:
+        if credential_for_mode(self.context, api_mode):
             return ""
         return f"{api_mode} credential is not configured."
 

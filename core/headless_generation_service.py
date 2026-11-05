@@ -220,6 +220,20 @@ def _isq_crop_result(api_result: dict[str, Any], params: dict[str, Any]) -> None
         print(f"[warn] i.sequence crop failed: {ascii(exc)}", flush=True)
 
 
+def credential_for_mode(context: Any, api_mode: str) -> str:
+    """생성 요청이 실을 자격 - 일반 생성 · Automation · Storyteller 가 같은 판별을 쓴다.
+
+    COMFYUI + 내장 엔진(comfyui_engine=managed) = 내부 식별자. 외부 주소는 보지 않는다.
+    설치 준비 여부는 여기서 묻지 않는다 - 생성 때 ENGINE_NOT_READY 로 처리된다.
+    """
+    from core.anima_engine import integration
+    mode = str(api_mode or "").strip().upper()
+    if mode == "COMFYUI" and integration.managed_selected(context):
+        return integration.MANAGED_CREDENTIAL
+    token_key = TOKEN_KEYS.get(mode, "nai_token")
+    return str(context.secure_token_manager.get_token(token_key) or "")
+
+
 class HeadlessGenerationService:
     """Create queue-ready generation requests without desktop widgets."""
 
@@ -892,11 +906,7 @@ class HeadlessGenerationService:
         return normalized if normalized in TOKEN_KEYS else "NAI"
 
     def _credential_for_mode(self, api_mode: str) -> str:
-        from core.anima_engine import integration
-        if api_mode == "COMFYUI" and integration.managed_selected(self.context):
-            return integration.MANAGED_CREDENTIAL
-        token_key = TOKEN_KEYS.get(api_mode, "nai_token")
-        return str(self.context.secure_token_manager.get_token(token_key) or "")
+        return credential_for_mode(self.context, api_mode)
 
     def _normalized_params(self, command: dict[str, Any], api_mode: str, credential: str) -> dict[str, Any]:
         schema = self.context.generation_param_schema_payload()

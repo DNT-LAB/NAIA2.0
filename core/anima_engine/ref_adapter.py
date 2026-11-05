@@ -188,6 +188,7 @@ class RefAdapterInstall:
             raise OSError(service.snapshot().get("error") or "download failed")
 
     def _run(self):
+        finished = False
         try:
             if not (comfy_dir(self.root) / "main.py").is_file():
                 raise OSError("ANIMA 엔진 설치를 찾지 못했습니다.")
@@ -209,13 +210,25 @@ class RefAdapterInstall:
                 "runtime_id": manifest.RUNTIME_ID, "installed_at": datetime.now().astimezone().isoformat()})
             # 켜져 있는 엔진은 새 노드를 모른다 - 쉬고 있으면 내린다(다음 생성이 새로 켠다)
             (self._stop_idle_engine or stop_idle_engine)(self.root)
-            self._set(state="ready", percent=100, message="Ref Adapter 준비 완료", error="")
+            self._finish(state="ready", percent=100, message="Ref Adapter 준비 완료", error="")
+            finished = True
         except Exception as exc:          # 화면에 까닭을 보인다 - 다시 누르면 받은 것은 건너뛴다
-            self._set(state="failed", message="Ref Adapter 설치에 실패했습니다.", error=f"{type(exc).__name__}: {exc}")
+            self._finish(state="failed", message="Ref Adapter 설치에 실패했습니다.", error=f"{type(exc).__name__}: {exc}")
+            finished = True
         finally:
-            from .runtime import ADDON_INSTALLING, REGISTRY_LOCK
+            # 예외 밖의 탈출(BaseException)만 - 이 작업이 아직 닫히지 않았으면 닫는다. 이미 닫았으면(finished) 손대지
+            # 않는다: 그 뒤에 들어온 재시도 작업의 'installing' 을 이 작업이 닫으면 안 된다.
+            if not finished:
+                self._finish(state="failed", message="Ref Adapter 설치가 중단됐습니다.", error="")
+
+    def _finish(self, **state):
+        """끝 상태를 보이는 일과 표식을 거두는 일을 한 자물쇠 구간에서 - 그 사이에 재시도(start)가 끼어 새 작업의
+        표식을 이 작업이 지우지 않게(start 도 self._lock 안에서 상태를 보고 표식을 적는다 - Codex 재리뷰 2026-11-05)."""
+        from .runtime import ADDON_INSTALLING, REGISTRY_LOCK
+        with self._lock:
             with REGISTRY_LOCK:
                 ADDON_INSTALLING.discard(str(self.root))
+            self._state.update(state)
 
 
 def stop_idle_engine(engine_root) -> bool:

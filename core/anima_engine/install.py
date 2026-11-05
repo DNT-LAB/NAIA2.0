@@ -471,18 +471,21 @@ class AnimaInstallJob:
             if not self.settings.engine_root:
                 raise ManagedEngineError("PATH_INVALID", "설치 위치를 먼저 확인해 주세요.")
             validate_root(self.settings.engine_root, forbidden=self.forbidden_roots)
-            with REGISTRY_LOCK:
-                # Ref Adapter 를 받는 중이면 설치 · 복구를 막는다(상태는 그대로 - 엔진은 멀쩡하다)
-                if str(Path(self.settings.engine_root).resolve()) in ADDON_INSTALLING:
-                    raise ManagedEngineError("JOB_RUNNING", "Ref Adapter 를 받는 중입니다 - 끝난 뒤 다시 눌러 주세요.")
             self._cancel.clear()
             self._force, self._select = force_verify, select_on_ready
             self._completed = []
             self._trace = ""
+            before = dict(self._state)
             self._state.update(state="preparing", phase="inspect", job_id=str(uuid.uuid4()), code=None,
                                message="PC 환경 확인 중", retryable=False, bytes_done=0, bytes_total=0,
                                started_at=datetime.now().astimezone().isoformat())
+            # 상대 작업 확인과 내 등록을 한 자물쇠 구간에서(Ref Adapter 의 start 도 같은 구간에서 INSTALLING 을 보고
+            # ADDON_INSTALLING 에 적는다 - Codex 재리뷰 2026-11-05)
             with REGISTRY_LOCK:
+                if str(Path(self.settings.engine_root).resolve()) in ADDON_INSTALLING:
+                    # Ref Adapter 를 받는 중 - 설치 · 복구를 막는다(상태는 그대로 - 엔진은 멀쩡하다)
+                    self._state.clear(); self._state.update(before)
+                    raise ManagedEngineError("JOB_RUNNING", "Ref Adapter 를 받는 중입니다 - 끝난 뒤 다시 눌러 주세요.")
                 if str(Path(self.settings.engine_root).resolve()) in INSTALLING:
                     self._state["state"] = "not_installed"
                     raise ManagedEngineError("JOB_RUNNING", "이 엔진의 설치가 이미 진행 중입니다.")

@@ -184,7 +184,10 @@ def engine_has_nodes(url: str, *, get=None) -> bool:
             if not info:
                 return False
             required = info["input"]["required"]
-            if name == "AnimaRefAdapter" and not set(REF_DEFAULTS) | {"model", "vae", "image", "lora_name"} <= set(required):
+            # 고정판(99c222e1)은 strength · ref_end · ref_megapixels 가 optional 이다 - 둘을 합쳐 본다
+            # (11-05 원격 e2e: required 만 봐서 노드가 있는데도 '없음' 이라 했다)
+            inputs = set(required) | set(info["input"].get("optional") or {})
+            if name == "AnimaRefAdapter" and not set(REF_DEFAULTS) | {"model", "vae", "image", "lora_name"} <= inputs:
                 return False
             # 가중치가 엔진에 실제로 보이는가 - 어댑터 노드의 목록은 없는 파일도 보이고(없으면 HF 에서 받는다) ComfyUI 의
             # loras 목록(LoraLoaderModelOnly)은 있는 파일만 보인다. 모델 경로 파일의 naia_ref_adapter 칸을 엔진이 읽었는지.

@@ -41,9 +41,12 @@ KEY_NODE_DIR = "naia-ref-spectrum-key"
 KEY_NODE_SOURCE = Path(__file__).resolve().parent / "nodes" / "naia_ref_spectrum_key.py"
 NODE_CLASSES = ("LoadImage", "AnimaRefAdapter", "NaiaRefSpectrumKey")
 # 화면의 [받기] 옆에 보이는 것 - 글은 엔진 묶음에 이미 있는 같은 본문(같은 SHA-256)을 연다.
+# url = 원저자 페이지(사용자 지시 2026-11-05: 우리는 받아 쓰기만 하니 이름을 원저자 페이지 링크로).
 LICENSES = [
-    {"name": "ComfyUI-Anima-Ref-Adapter 0.2.0", "license": "Apache-2.0", "text_id": "apache2_qwen"},
-    {"name": "anima_ref_adapter_v2_r64", "license": "CircleStone Non-Commercial v1.2", "text_id": "circlestone_nc"},
+    {"name": "ComfyUI-Anima-Ref-Adapter 0.2.0", "license": "Apache-2.0", "text_id": "apache2_qwen",
+     "url": "https://github.com/ArcAnima/ComfyUI-Anima-Ref-Adapter"},
+    {"name": "anima_ref_adapter_v2_r64", "license": "CircleStone Non-Commercial v1.2", "text_id": "circlestone_nc",
+     "url": "https://huggingface.co/ElectronGirl/anima-ref-adapter"},
 ]
 DOWNLOAD_BYTES = WEIGHT["size"] + sum(x["size"] for x in NODE_FILES)
 

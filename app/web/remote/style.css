@@ -33000,6 +33000,8 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-anima { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 8px; border-top: 1px solid rgba(255,255,255,.06); }
 .rvw-anima .rvw-k { width: 64px; }
 .rvw-addon { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; line-height: 1.5; }
+.rvw-addon .rvw-link { color: #a99cff; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.rvw-addon .rvw-link:hover { color: #c8c0ff; }
 
 .rvw-chips { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
 .rvw-chip {

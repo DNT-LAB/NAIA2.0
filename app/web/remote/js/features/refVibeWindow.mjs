@@ -397,9 +397,19 @@ export function createRefVibeWindow({
       + `<span class="rvw-v" data-rvw-anima-out="${key}">${fmt(number, spec.digits)}</span></div>`;
   }
 
+  // 구성 요소 이름 = 원저자 페이지 링크(사용자 지시 2026-11-05). https 만 - 그 밖의 값은 글자로만.
+  // data-open-external = app.js 가 가로채 시스템 브라우저로 연다(Electron 의 _blank 는 앱 안 팝업이 된다).
+  function addonNameHtml(item) {
+    const name = escHtml(item?.name || '');
+    const url = String(item?.url || '');
+    if (!/^https:\/\//i.test(url)) return name;
+    return `<a class="rvw-link" href="${escHtml(url)}" target="_blank" rel="noopener noreferrer" data-open-external`
+      + ` title="${escHtml(url)}">${name}</a>`;
+  }
+
   function animaAddonHtml(addon) {
     const state = String(addon.state || 'idle');
-    const licenses = (addon.licenses || []).map(item => `${escHtml(item.name)} - ${escHtml(item.license)}`).join(' · ');
+    const licenses = (addon.licenses || []).map(item => `${addonNameHtml(item)} - ${escHtml(item.license)}`).join(' · ');
     const action = state === 'installing'
       ? `<span class="rvw-hint">${escHtml(addon.message || '받는 중…')} ${Number(addon.percent || 0)}%</span>`
       : `<button type="button" class="rvw-btn is-accent" data-rvw-act="addoninstall">${state === 'failed' ? '다시 받기' : '받기'}</button>`;

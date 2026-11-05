@@ -1,4 +1,4 @@
-"""Pure, closed-world compiler for the managed SPD graph."""
+"""Pure, closed-world compiler for the managed Spectrum graph (SPD off)."""
 from __future__ import annotations
 
 import copy
@@ -56,12 +56,10 @@ SCHEDULERS = (
 )
 DEFAULT_SAMPLER = GRAPH_TEMPLATE["48"]["inputs"]["sampler_name"]      # euler
 DEFAULT_SCHEDULER = GRAPH_TEMPLATE["48"]["inputs"]["scheduler"]       # simple
-# SPD(저해상도로 앞 구간을 돌리다 σ=spd_sigma 에서 원해상도로 넘어가는 노드의 SPEED 경로)는 **Euler 전용**이다 - 노드는 SPD 중에
-# 다른 샘플러를 조용히 Euler 로 바꾼다(spectrum.py "ignoring requested sampler ... using Euler"). 그래서 Euler 밖의 샘플러면 그
-# 생성만 SPD 를 끈다: spd_scale 1.0 = 노드 설명의 "1.0 disables SPD (vanilla Spectrum)" - 고른 샘플러가 실제로 돌고 Spectrum
-# 가속은 남는다. 스케줄러는 SPD 와 함께 쓰인다(SPD 도 고른 스케줄러로 σ 표를 만든다).
-SPD_SAMPLER = "euler"
-SPD_SCALE = GRAPH_TEMPLATE["48"]["inputs"]["spd_scale"]               # 0.5
+# SPD 는 쓰지 않는다 - Spectrum 만(사용자 지정 2026-11-05). spd_scale 1.0 = 노드 설명의 "1.0 disables SPD (vanilla
+# Spectrum)". 같은 시드 비교(One Capture 보고서 10-28)에서 Spectrum 만 켠 그림은 가속 없는 기준과 거의 같았고, SPD 는
+# 저해상도 앞 구간 때문에 구도 · 옷까지 다른 그림이 됐다(시간은 21.8 -> 18.6초 정도뿐). SPD 는 Euler 전용이기도 해서 이제
+# 어떤 샘플러를 골라도 생성 경로가 같다. 그래프 값은 manifest GRAPH_TEMPLATE["48"]["inputs"]["spd_scale"] 가 진실이다.
 SPD_OFF_SCALE = 1.0
 
 
@@ -75,7 +73,8 @@ def resolve_sampling(params):
 
 
 def spd_scale_for(sampler):
-    return SPD_SCALE if sampler == SPD_SAMPLER else SPD_OFF_SCALE
+    """샘플러와 무관하게 SPD 끔(Spectrum 만)."""
+    return SPD_OFF_SCALE
 
 
 def integer_value(value, field):
@@ -213,8 +212,8 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
     validate_compiled(graph, available_loras=available_loras, available_models=available_models)
     return CompiledGraph(graph, OUTPUT_NODE_ID, values["seed"], {
         "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID, "model": unet,
-        "sampler": sampler, "scheduler": scheduler, "spd": sampler == SPD_SAMPLER, "sampler_actual": sampler,
-        "sampler_note": "SPD on (Euler only)" if sampler == SPD_SAMPLER else "SPD off: non-Euler sampler (Spectrum only)",
+        "sampler": sampler, "scheduler": scheduler, "spd": False, "sampler_actual": sampler,
+        "sampler_note": "Spectrum only (SPD off)",
         "loras": active,
         **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}})
 
@@ -246,7 +245,7 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
         sampler, scheduler = workflow["48"]["inputs"]["sampler_name"], workflow["48"]["inputs"]["scheduler"]
         if sampler not in SAMPLERS or scheduler not in SCHEDULERS:
             raise ValueError("sampling")
-        # SPD 는 샘플러가 정한다 - Euler 에 SPD 끔 · 다른 샘플러에 SPD 켬은 고친 그래프다
+        # SPD 는 늘 꺼져 있다(spd_scale 1.0) - 다른 값은 고친 그래프다
         expected["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler, spd_scale=spd_scale_for(sampler))
         prev = "44"
         for i in range(len(extra)):

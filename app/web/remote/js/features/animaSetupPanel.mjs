@@ -1,4 +1,4 @@
-// API 설정 > "04 ANIMA" 탭 — NAIA 가 설치 · 관리하는 전용 ComfyUI(고정 그래프 Spectrum SPD · 모델 naiANIMA2d_v03).
+// API 설정 > "04 ANIMA" 탭 — NAIA 가 설치 · 관리하는 전용 ComfyUI(고정 그래프 Spectrum · SPD 끔 · 모델 naiANIMA2d_v03).
 // 사용자 지정 2026-09-27: 03 COMFYUI 다음 04 자리에(AI ASSIST 05 · GROK 06 으로 밀림).
 // 백엔드 계약 = docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §8(/api/anima-engine/*). 백엔드가 없는 판(404)이면
 // "이 버전에는 없음" 만 보이고 물러난다. 탭 이름 밑 글자 · 점도 여기서 채운다. style.css 는 건드리지 않는다(아래 STYLE).

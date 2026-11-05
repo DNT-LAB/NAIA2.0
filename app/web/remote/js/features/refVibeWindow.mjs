@@ -75,13 +75,13 @@ export function createRefVibeWindow({
     pill = doc.createElement('div');
     pill.className = 'rvp';
     pill.innerHTML = `<button type="button" class="rvp-box" data-rvp-toggle>`
-      + `<span class="rvp-caret" aria-hidden="true">▸</span><span class="rvp-title">REF &amp; VIBE</span>`
+      + `<span class="rvp-caret" aria-hidden="true">▸</span><span class="rvp-title">REFERENCE</span>`
       + `<span class="rvp-note" data-rvp-note hidden></span>`
       + `<span class="rvp-count" data-rvp-count hidden></span></button>`;
     pill.addEventListener('click', event => {
       if (!event.target.closest('[data-rvp-toggle]')) return;
       if (pill.classList.contains('is-unsupported')) {
-        showToast('REF & VIBE 는 V4 / V4.5 모델에서만 씁니다 - 지금 모델은 지원하지 않습니다', 'info');
+        showToast('REFERENCE 는 V4 / V4.5 모델에서만 씁니다 - 지금 모델은 지원하지 않습니다', 'info');
         return;
       }
       show({toggle: true});
@@ -170,7 +170,7 @@ export function createRefVibeWindow({
     panelReady = loadDraggablePanel().then(createDraggablePanel => {
       panel = createDraggablePanel({
         document: doc, window: win,
-        title: 'REF & VIBE',
+        title: 'REFERENCE',
         variant: 'rvw',
         storageKey: 'ref-vibe-window',
         width: 600, height: 640, minWidth: 440, minHeight: 320, maxWidth: 1200,

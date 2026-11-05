@@ -120,7 +120,7 @@ def prepare_managed_request(context, params):
     if captured:
         from . import ref_adapter, reference
         if not ref_adapter.installed(settings.engine_root):
-            raise ManagedEngineError("REF_ADAPTER_NOT_INSTALLED", "Character Ref 를 쓰려면 REF & VIBE 창에서 Ref Adapter 를 먼저 받아 주세요.")
+            raise ManagedEngineError("REF_ADAPTER_NOT_INSTALLED", "Character Ref 를 쓰려면 REFERENCE 창에서 Ref Adapter 를 먼저 받아 주세요.")
         ref_png, _name, ref_graph = reference.build(context, captured)
     compiled = compile_graph({**params, "input": text}, chain,
                              available_loras={k for k, v in catalog.items() if not v["conflict"]},

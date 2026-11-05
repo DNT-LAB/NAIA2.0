@@ -250,6 +250,11 @@ class HeadlessCharacterReferenceService:
         anima = self._anima_block()
         if anima is not None:
             state["anima"] = anima
+            # ANIMA 줄은 칸마다 그 그림의 캐릭터 프롬프트를 보여 주고 고친다(사용자 지시 2026-11-05) - 저장은 그림 쪽
+            # (character_reference/metadata/<해시>.json · NAI 보관함의 '캐릭터 프롬프트' 와 같은 값).
+            prompts = get_ref_vibe_library(self.context).character_prompts([f["file_hash"] for f in frames])
+            for frame in frames:
+                frame.update(prompts.get(frame["file_hash"]) or {"character_prompt": "", "character_uc": ""})
         return self.context._module_state_payload("character_reference", state)
 
     # ----- ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05) -----

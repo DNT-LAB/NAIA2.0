@@ -503,6 +503,21 @@ class RefVibeLibrary:
                 return candidate
         return image_root / "metadata" / (file_hash + ".json")
 
+    def character_prompts(self, file_hashes):
+        """활성 칸이 쓸 그림별 캐릭터 프롬프트(ANIMA 참조 줄 · 2026-11-05) - 보관함 전체를 훑지 않고 그 해시만 읽는다."""
+        out = {}
+        with self._lock:
+            for file_hash in dict.fromkeys(file_hashes):
+                try:
+                    clean = safe_component(file_hash)
+                    root, _image = self._character_image(clean)
+                except LibraryError:
+                    continue
+                meta = self._json(self._character_meta_path(clean, root))
+                out[clean] = {"character_prompt": str(meta.get("character_prompt") or ""),
+                              "character_uc": str(meta.get("character_uc") or "")}
+        return out
+
     def set_character_prompt(self, file_hash, prompt, uc=""):
         file_hash = safe_component(file_hash)
         for name, value in (("prompt", prompt), ("uc", uc)):

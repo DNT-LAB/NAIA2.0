@@ -835,7 +835,8 @@
         "core/wd_tagger_service.py",
         "core/inset_feature_extract.py",
         "app/web/remote/js/features/imageModulePanels.mjs",
-        "app/web/remote/js/features/refVibeWindow.mjs"
+        "app/web/remote/js/features/refVibeWindow.mjs",
+        "app/web/remote/js/features/animaCharPrompt.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [

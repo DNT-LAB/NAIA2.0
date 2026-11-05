@@ -2540,6 +2540,7 @@ function applyVirtualMainPrompt() {
   applyVirtualNegative(session);
 }
 
+let sessionNegDeferred = false;   // 칸에 초점이 있어 건너뛴 서버 값이 있다
 /** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
  *
  *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
@@ -2557,10 +2558,16 @@ function applyVirtualNegative(session) {
   const badge = document.getElementById('negativeInpaintBadge');
   if (badge) badge.hidden = !on;
   // 서버 값이 바뀌면(스왑 · 원본 · 다른 탭) 따라간다 - 단 치는 중이거나 아직 안 보낸 글이 있으면 덮지 않는다.
-  if (on && document.activeElement !== box
-      && !(pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
+  if (on) {
     const next = String(session.negative_prompt || '');
-    if (box.value !== next) box.value = next;
+    if (document.activeElement === box
+        || (pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
+      // 건너뛴 새 값은 칸을 떠날 때 맞춘다 - 안 그러면 다른 탭이 바꾼 글 대신 옛 글이 남고 생성은 새 글로 나간다(Codex 3차).
+      if (box.value !== next) sessionNegDeferred = true;
+    } else {
+      sessionNegDeferred = false;
+      if (box.value !== next) box.value = next;
+    }
   }
   // 토큰 수는 보이는 칸을 센다(`tokenDisplay` 가 세션 칸을 먼저 본다) - 켜고 끌 때 · 서버 값이 바뀔 때 다시 센다.
   // ⚠️ 값을 넣은 **뒤에** 센다 - 앞에서 세면 다른 탭이 바꾼 새 글을 보여 주면서 수는 옛 글의 것이다(Codex 재리뷰).
@@ -3078,7 +3085,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261105-ipm2')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261105-ipm3')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -15994,6 +16001,9 @@ function syncNegativeMirror() {
 $('sessionNegEdit')?.addEventListener('input', event => {
   if (virtualCharacterSession()) onModTextEdit('img2img', 'negative_prompt', event.target.value);
   updateNegativeTokenEstimate();
+});
+$('sessionNegEdit')?.addEventListener('blur', () => {
+  if (sessionNegDeferred) applyVirtualNegative(virtualCharacterSession());
 });
 // 사람이 메인 칸에 직접 친 것도 같은 길로 알린다.
 negEdit.addEventListener('input', syncNegativeMirror);

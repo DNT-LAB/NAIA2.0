@@ -432,8 +432,10 @@ export function createCharacterQuickPanel({
       const y = Math.min(1, Math.max(0, (e.clientY - box.top) / box.height));
       dot.style.left = (x * 100) + '%';
       dot.style.top = (y * 100) + '%';
-      dot.dataset.cqX = x.toFixed(3);
-      dot.dataset.cqY = y.toFixed(3);
+      // grid5 는 반올림하지 않는다 - 0.1999 를 0.200 으로 올리면 칸 가운데가 0.1 이 아니라 0.3 이 된다(Codex 3차).
+      const raw = posPolicy() === 'grid5';
+      dot.dataset.cqX = raw ? String(x) : x.toFixed(3);
+      dot.dataset.cqY = raw ? String(y) : y.toFixed(3);
     };
     const up = () => {
       posDragging = false;

@@ -243,7 +243,9 @@ export function createInpaintPromptSwap({
   function presetsFor(model) {
     const family = FAMILY[model] || '';
     // `*randomized` 같은 `*` 항목은 저장된 프리셋이 아니라 PE 의 가상 줄이다 - 읽을 글이 없다.
+    // `default` 도 같다 - PE 가 예약한 '프리셋 없음' 줄이라 파일이 없어 스왑이 400 이었다(사용자 지정 2026-11-06 목록에서 뺌).
     const rows = (getPresets() || []).filter(p => p && p.name && !String(p.name).startsWith('*')
+      && String(p.name) !== 'default'
       && String(p.api_mode || 'NAI').toUpperCase() === 'NAI');
     const same = rows.filter(p => p.model_key === model);
     const fam = rows.filter(p => p.model_key !== model && p.model_family === family);

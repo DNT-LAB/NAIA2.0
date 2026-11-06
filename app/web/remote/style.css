@@ -33480,13 +33480,18 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .ips-gone.is-kept { text-decoration: none; border-color: var(--border-dim); background: rgba(255,255,255,0.04); color: var(--text-primary); }
 .ips-none { font-size: 10.5px; color: var(--text-muted); }
 .ips-preview {
-  min-height: 64px; max-height: 220px; overflow-y: auto;
+  min-height: 40px;
   padding: 7px 9px; border: 1px solid var(--border-dim); border-radius: 7px;
   background: var(--bg-deep);
   font-family: var(--font-editor, var(--font-mono)); font-size: 11px; line-height: 1.6;
   white-space: pre-wrap; word-break: break-word;
 }
 .ips-preview.is-muted { color: var(--text-muted); }
+/* 인원 태그(1girl · 2boys …) - 적용하면 맨 앞에 선다. */
+.ips-people { color: rgb(143,209,166); }
+.ips-attach { font-size: 10.5px; color: var(--text-muted); }
+.ips-attach b { color: var(--text-primary); font-weight: 600; }
+.ips-attach:empty { display: none; }
 .ips-neg-note[hidden] { display: none !important; }
 .ips-neg-note { font-size: 10.5px; color: var(--text-muted); }
 .ips-actions { display: flex; justify-content: flex-end; padding-top: 4px; }

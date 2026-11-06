@@ -286,8 +286,9 @@ export function createInpaintPromptSwap({
       <div class="ips-sub" data-ipsp-source></div>
       <div class="ips-sub-title">지울 작가 <span>눌러서 남기기</span></div>
       <div class="ips-removed" data-ipsp-removed></div>
-      <div class="ips-sub-title">결과 미리보기</div>
+      <div class="ips-sub-title" data-ipsp-bodytitle>남는 태그</div>
       <div class="ips-preview" data-ipsp-preview></div>
+      <div class="ips-attach" data-ipsp-attach></div>
       <div class="ips-neg-note" data-ipsp-negnote hidden></div>
       <div class="ips-actions"><button type="button" class="ips-apply" data-ipsp-apply>적용</button></div>`;
     content.addEventListener('click', onPanelClick);
@@ -377,11 +378,16 @@ export function createInpaintPromptSwap({
     const removedEl = content.querySelector('[data-ipsp-removed]');
     const previewEl = content.querySelector('[data-ipsp-preview]');
     const sourceEl = content.querySelector('[data-ipsp-source]');
+    const titleEl = content.querySelector('[data-ipsp-bodytitle]');
+    const attachEl = content.querySelector('[data-ipsp-attach]');
     if (error) {
       removedEl.innerHTML = '';
       sourceEl.textContent = '';
+      titleEl.textContent = '남는 태그';
+      attachEl.textContent = '';
       previewEl.textContent = error;
       previewEl.classList.add('is-muted');
+      fitHeight();
       return;
     }
     previewEl.classList.remove('is-muted');
@@ -398,7 +404,42 @@ export function createInpaintPromptSwap({
       ? rows.map(row => `<button type="button" class="ips-gone${row.kept ? ' is-kept' : ''}" data-ipsp-keep="${escHtml(row.raw)}"`
         + ` title="${escHtml(row.kept ? '남기는 중 - 누르면 지웁니다' : (why[row.reason] || ''))}">${escHtml(row.raw)}</button>`).join('')
       : `<span class="ips-none">${draft.artist_mode === 'keep' ? '원본 유지 - 그림의 작가를 지우지 않습니다' : '지울 작가가 없습니다'}</span>`;
-    previewEl.textContent = String(data.main_prompt || '');
+    // 보여 주는 것은 **남는 그림 태그**다(사용자 지정 2026-11-06) - 새 프리셋 앞뒤까지 붙인 전문은 길기만 하고
+    // 무엇이 지워졌는지 읽히지 않았다. 앞뒤는 몇 개 붙는지만 아래 한 줄로 알린다. 인원 태그는 맨 앞(적용 결과와 같은 자리).
+    const people = Array.isArray(data.people) ? data.people.map(String) : [];
+    const body = String(data.body || '');
+    const kept = draft.artist_mode === 'keep';
+    titleEl.innerHTML = `남는 태그 <span>${Number(data.body_tags) || 0}개 · `
+      + `${kept ? '원본 프리셋 앞뒤를 뺀 그림 태그(작가는 그대로)' : '작가와 원본 프리셋 앞뒤를 뺀 그림 태그'}</span>`;
+    const head = people.length ? `<span class="ips-people">${escHtml(people.join(', '))}</span>` : '';
+    previewEl.innerHTML = head + (head && body ? ', ' : '') + escHtml(body);
+    if (!head && !body) {
+      previewEl.textContent = '남는 태그가 없습니다 - 새 프리셋의 앞뒤만 들어갑니다.';
+      previewEl.classList.add('is-muted');
+    }
+    const pre = Number(data.target_pre_tags) || 0;
+    const post = Number(data.target_post_tags) || 0;
+    const parts = [pre ? `앞 태그 ${pre}개` : '', post ? `뒤 태그 ${post}개` : ''].filter(Boolean);
+    attachEl.innerHTML = parts.length
+      ? `적용하면 <b>${escHtml(draft.preset)}</b> 의 ${parts.join(' · ')}가 붙습니다`
+      : `<b>${escHtml(draft.preset)}</b> 에는 앞뒤 태그가 없습니다 - 이 태그만 들어갑니다`;
+    fitHeight();
+  }
+
+  /** 창 높이를 내용에 맞춘다(사용자 지정 2026-11-06) - 남는 태그 칸이 스크롤 없이 다 보이게. 화면 아래를 넘지는 않는다. */
+  function fitHeight() {
+    if (!panel || !content || !panel.isOpen() || panel.isCollapsed?.()) return;
+    // 화면을 못 재는 순간(숨은 탭 · 최소화 - innerHeight 0)에 맞추면 창이 최소 높이로 접힌다 - 그때는 두고 본다.
+    if (!(win.innerHeight > 0)) return;
+    const el = panel.el;
+    const body = panel.body;
+    const style = win.getComputedStyle(body);
+    const pad = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const chrome = el.offsetHeight - body.clientHeight;
+    const top = Math.max(0, el.getBoundingClientRect().top);
+    const room = Math.max(260, (win.innerHeight || 0) - top - 8);
+    const want = Math.max(260, Math.min(room, Math.ceil(chrome + content.offsetHeight + pad)));
+    if (Math.abs(el.offsetHeight - want) > 1) el.style.height = `${want}px`;
   }
 
   async function runPreview() {

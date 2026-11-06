@@ -298,8 +298,22 @@ def compose_swap(image_prompt, *, source_pre, source_post, target_pre, target_po
         main_prompt = _join(target_pre, body, target_post)
     if people:
         main_prompt = _join(", ".join(people), main_prompt)
+    # 창은 이것을 보여 준다 - 작가 · 원본 프리셋 앞뒤를 걷고 **남는 그림 태그**(사용자 지정 2026-11-06).
+    # 새 프리셋의 앞뒤는 몇 개 붙는지만 센다(원본 유지면 그 앞뒤에서도 작가는 빠진 뒤의 수).
+    if artist_mode == "keep":
+        pre_left = strip_artists(target_pre, known=known)["text"]
+        post_left = strip_artists(target_post, known=known)["text"]
+    else:
+        pre_left, post_left = target_pre, target_post
     return {"main_prompt": main_prompt,
-            "removed": removed, "target_removed": target_removed}
+            "removed": removed, "target_removed": target_removed,
+            "people": people, "body": body.strip(" ,\t\r\n"),
+            "body_tags": len(people) + _count_tags(body),
+            "target_pre_tags": _count_tags(pre_left), "target_post_tags": _count_tags(post_left)}
+
+
+def _count_tags(text):
+    return sum(1 for event in _events(str(text or "")) if event.kind == "TAG")
 
 
 def guess_source_preset(image_prompt, presets, *, known=frozenset()) -> dict | None:

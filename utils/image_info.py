@@ -279,6 +279,11 @@ class ImageMetadataExtractor:
             value = sampler_inputs.get(source_key)
             if value is not None:
                 parameters[target_key] = value
+        # 관리형 ANIMA 의 Euler + SPD(2026-11-06) - 엔진엔 euler + spd_scale < 1 로 간다. 되읽을 때 NAIA 이름으로 돌려
+        # 불러오기 · 다시 생성이 SPD 를 잃지 않게 한다.
+        if (sampler_node.get('class_type') == 'SpectrumSPDKSampler' and parameters.get('sampler') == 'euler'
+                and isinstance(sampler_inputs.get('spd_scale'), (int, float)) and sampler_inputs['spd_scale'] < 1):
+            parameters['sampler'] = 'euler_spd'
 
         if latent_node:
             latent_inputs = latent_node.get('inputs', {})

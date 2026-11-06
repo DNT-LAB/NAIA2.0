@@ -991,6 +991,10 @@ class HeadlessGenerationService:
             apply_image_modules(params, api_mode)
         if managed:
             integration.snapshot_request(self.context, params)
+        elif api_mode == "COMFYUI" and params.get("sampler") == "euler_spd":
+            # euler_spd 는 관리형 ANIMA 만의 이름(Euler + SPD · 2026-11-06). 같은 COMFYUI 세션 값을 쓰는 외부 ComfyUI 는
+            # 이 이름을 모른다 - Euler 로 보낸다.
+            params["sampler"] = "euler"
         return params
 
     @staticmethod

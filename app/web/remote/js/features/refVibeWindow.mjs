@@ -37,6 +37,7 @@ export function createRefVibeWindow({
   installRefAdapter = async () => ({}),
   readPrefix = () => null,   // () => 선행 고정(PE pre_prompt) 글 · 모르면 null - 옛 [불러오기] 덩어리를 찾는다
   writePrefix = () => false, // (text) => 보냈는가 - 그 덩어리를 걷는다
+  getSampler = () => '',     // () => PARAMS 의 샘플러 - euler_spd 면 참조를 켠 생성은 SPD 가 꺼진다고 알린다
   showToast = () => {},
   confirmDialog = async () => false,
   promptDialog = async () => null,
@@ -555,6 +556,9 @@ export function createRefVibeWindow({
       ? `<div class="rvw-notice is-warn">${on.length}장을 위 칸부터 왼쪽에 나란히 붙여 보냅니다 - 끌어서 순서를 바꾸면 자리도 바뀝니다.`
         + ` 장면 프롬프트에 인원수(${on.length}girls · 1girl, 1boy 등)를 적으세요${sendPrompts ? '' : ' · 캐릭터 프롬프트를 싣지 않으니 누가 어느 쪽인지 직접 적으세요'}.</div>`
       : '';
+    // Euler + SPD 를 골랐어도 참조를 켜면 그 생성은 Spectrum 만(사용자 지정 2026-11-06 - 참조 2장에서 구도가 무너졌다)
+    const spdNotice = on.length && getSampler() === 'euler_spd'
+      ? `<div class="rvw-notice is-warn">샘플러가 euler + SPD 여도 참조를 켠 생성은 SPD 가속을 끄고 Spectrum 만 씁니다.</div>` : '';
     // 옛 [불러오기] 덩어리가 선행 고정에 남아 있으면 알린다(켠 칸이 있을 때만 - 없으면 생성에 상관없다)
     const prefix = on.length ? readPrefix() : null;
     const oldBlocks = prefix == null ? 0 : findOldBlocks(prefix).length;
@@ -576,7 +580,7 @@ export function createRefVibeWindow({
       : '';
     host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${on.length} / ${max}</span>`
       + `<span class="rvw-sec-tools">${tools}</span></div>`
-      + notice + oldNotice
+      + notice + spdNotice + oldNotice
       + (frames.length
         ? `<div class="rvw-rows">${rows}</div>`
         : `<div class="rvw-empty">아래 STORAGE 에서 고르거나, 이미지를 올리거나 붙여 넣으세요.</div>`)

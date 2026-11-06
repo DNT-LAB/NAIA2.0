@@ -1,4 +1,4 @@
-"""Pure, closed-world compiler for the managed Spectrum graph (SPD off)."""
+"""Pure, closed-world compiler for the managed Spectrum graph (SPD only for euler_spd without a reference)."""
 from __future__ import annotations
 
 import copy
@@ -54,7 +54,7 @@ REMOVED_SAMPLERS = {
     "res_multistep_ancestral": "broken",
 }
 SAMPLERS = (
-    "euler", "euler_ancestral", "heunpp2", "dpm_2", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
+    "euler", "euler_spd", "euler_ancestral", "heunpp2", "dpm_2", "lms", "dpm_fast", "dpm_adaptive", "dpmpp_2s_ancestral",
     "dpmpp_sde", "dpmpp_sde_gpu", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_2m_sde_gpu", "dpmpp_2m_sde_heun",
     "dpmpp_2m_sde_heun_gpu", "ipndm", "ipndm_v", "deis", "res_multistep", "gradient_estimation", "er_sde",
     "seeds_2", "seeds_3", "sa_solver", "ddim", "uni_pc", "uni_pc_bh2",
@@ -70,6 +70,13 @@ DEFAULT_SCHEDULER = GRAPH_TEMPLATE["48"]["inputs"]["scheduler"]       # simple
 # 저해상도 앞 구간 때문에 구도 · 옷까지 다른 그림이 됐다(시간은 21.8 -> 18.6초 정도뿐). SPD 는 Euler 전용이기도 해서 이제
 # 어떤 샘플러를 골라도 생성 경로가 같다. 그래프 값은 manifest GRAPH_TEMPLATE["48"]["inputs"]["spd_scale"] 가 진실이다.
 SPD_OFF_SCALE = 1.0
+# 다시 고를 수 있게(사용자 지정 2026-11-06 "Euler + SPD 샘플러 옵션") - 엔진의 SpectrumSPDKSampler 가 원래 SPD 를 갖고 있어
+# 설치할 것이 없다. NAIA 만의 이름 euler_spd = 엔진엔 euler + spd_scale 0.5(제작자가 잰 점 · spd_sigma 0.7 은 템플릿 그대로).
+# 원격 4090 같은 시드(11-06): 참조 없음 5.83 -> 5.22초 · 참조 1장 10.06 -> 8.71 · 2장 10.20 -> 8.39. 참조 2장은 구도 · 좌우
+# 배치가 무너졌고 1장도 화면이 당겨졌다 -> **참조를 켜면 그 생성만 SPD 끔**(사용자 지정 · 그림은 Spectrum 만과 같다).
+SPD_SAMPLER = "euler_spd"
+SPD_ON_SCALE = 0.5
+ENGINE_SAMPLERS = tuple(name for name in SAMPLERS if name != SPD_SAMPLER)   # 엔진 sampler_name 에 들어가는 이름
 
 # ANIMA 참조(Ref Adapter v2 · 사용자 지정 2026-11-05). 켜면 그래프가 이렇게 바뀐다:
 #   44 -> LoRA(100..) -> 61 AnimaRefAdapter(60 LoadImage · 15 VAE) -> 62 NaiaRefSpectrumKey -> 48 샘플러
@@ -92,9 +99,14 @@ def resolve_sampling(params):
             scheduler if scheduler in SCHEDULERS else DEFAULT_SCHEDULER)
 
 
-def spd_scale_for(sampler):
-    """샘플러와 무관하게 SPD 끔(Spectrum 만)."""
-    return SPD_OFF_SCALE
+def engine_sampler(sampler):
+    """NAIA 의 샘플러 이름 -> 엔진 sampler_name. SPD 는 Euler 전용이다(노드가 다른 이름을 euler 로 돌린다)."""
+    return "euler" if sampler == SPD_SAMPLER else sampler
+
+
+def spd_scale_for(sampler, *, reference=False):
+    """euler_spd 이고 참조가 없을 때만 SPD(0.5) - 나머지는 끔(Spectrum 만)."""
+    return SPD_ON_SCALE if sampler == SPD_SAMPLER and not reference else SPD_OFF_SCALE
 
 
 def integer_value(value, field):
@@ -247,7 +259,8 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
     for key, (node, field, _) in SLOTS.items():
         graph[node]["inputs"][field] = values[key]
     sampler, scheduler = resolve_sampling(params)
-    graph["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler, spd_scale=spd_scale_for(sampler))
+    spd_scale = spd_scale_for(sampler, reference=bool(ref))
+    graph["48"]["inputs"].update(sampler_name=engine_sampler(sampler), scheduler=scheduler, spd_scale=spd_scale)
     prev, active = "44", []
     for item in lora_chain:
         if not item.get("enabled", True):
@@ -263,8 +276,9 @@ def compile_graph(params: Mapping[str, Any], lora_chain: Sequence[Mapping[str, A
     validate_compiled(graph, available_loras=available_loras, available_models=available_models)
     meta = {
         "id": PROFILE_ID, "revision": PROFILE_REVISION, "runtime_id": RUNTIME_ID, "model": unet,
-        "sampler": sampler, "scheduler": scheduler, "spd": False, "sampler_actual": sampler,
-        "sampler_note": "Spectrum only (SPD off)",
+        "sampler": sampler, "scheduler": scheduler, "spd": spd_scale < 1, "sampler_actual": engine_sampler(sampler),
+        "sampler_note": ("Spectrum + SPD" if spd_scale < 1 else
+                         "Spectrum only (SPD off - reference)" if sampler == SPD_SAMPLER else "Spectrum only (SPD off)"),
         "loras": active,
         **{key: values[key] for key in ("seed", "steps", "cfg_scale", "rescale_cfg", "width", "height")}}
     if ref:
@@ -309,10 +323,12 @@ def validate_compiled(workflow: Mapping[str, Any], *, available_loras: Collectio
         for key, (node, field, _) in SLOTS.items():
             expected[node]["inputs"][field] = values[key]
         sampler, scheduler = workflow["48"]["inputs"]["sampler_name"], workflow["48"]["inputs"]["scheduler"]
-        if sampler not in SAMPLERS or scheduler not in SCHEDULERS:
+        if sampler not in ENGINE_SAMPLERS or scheduler not in SCHEDULERS:
             raise ValueError("sampling")
-        # SPD 는 늘 꺼져 있다(spd_scale 1.0) - 다른 값은 고친 그래프다
-        expected["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler, spd_scale=spd_scale_for(sampler))
+        # SPD 는 euler 이고 참조가 없을 때만 0.5 - 그 밖의 값 · 조합은 고친 그래프다
+        spd = workflow["48"]["inputs"]["spd_scale"] == SPD_ON_SCALE and sampler == "euler" and not has_ref
+        expected["48"]["inputs"].update(sampler_name=sampler, scheduler=scheduler,
+                                        spd_scale=SPD_ON_SCALE if spd else SPD_OFF_SCALE)
         prev = "44"
         for i in range(len(extra)):
             node = str(100 + i)

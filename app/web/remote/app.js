@@ -3123,7 +3123,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261106-ref4')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261106-ref5')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3159,6 +3159,7 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261106-re
         return peFieldText('pre_prompt');
       },
       writePrefix: text => slashPeSetField('pre_prompt', text),
+      getSampler: () => String(paramEls.sampler?.value || ''),
       isInteractive: () => !!interactivePanel?.isActive?.(),
       showToast,
       confirmDialog: showConfirmDialog,
@@ -6697,7 +6698,8 @@ function updateParams(m) {
   populateSelect(paramEls.model, m.options_model, m.model, modelLabels);
   // 백엔드가 들고 있는 모델. 모델 변경을 취소했을 때 콤보를 여기로 되돌린다.
   if (m.model !== undefined) lastBackendModel = String(m.model || '');
-  populateSelect(paramEls.sampler, m.options_sampler, m.sampler);
+  // 관리형 ANIMA 의 euler_spd = Euler + SPD(참조를 켜면 그 생성만 SPD 를 끈다 · 2026-11-06)
+  populateSelect(paramEls.sampler, m.options_sampler, m.sampler, {euler_spd: 'euler + SPD'});
   populateSelect(paramEls.scheduler, m.options_scheduler, m.scheduler);
   if (Array.isArray(m.options_resolution) && m.options_resolution.length) {
     baseResolutionOptions = m.options_resolution.slice();

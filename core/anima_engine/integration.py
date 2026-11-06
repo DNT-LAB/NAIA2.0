@@ -180,8 +180,8 @@ def engine_in_use(context, credential):
 
 
 def managed_api_options(context):
-    # 모델은 목록에서 고른다. 샘플러 · 스케줄러도 고른다(10-01) - 엔진 고정판 ComfyUI 의 목록 그대로. SPD 는 늘 꺼져 있어
-    # (11-05, Spectrum 만) 어떤 샘플러든 조건 없이 고른다.
+    # 모델은 목록에서 고른다. 샘플러 · 스케줄러도 고른다(10-01) - 엔진 고정판 ComfyUI 의 목록 + NAIA 의 euler_spd
+    # (Euler + SPD · 11-06 · 참조를 켜면 그 생성만 SPD 끔 - profile.spd_scale_for).
     return {"options_model": managed_models(context), "options_sampler": list(SAMPLERS),
             "options_scheduler": list(SCHEDULERS)}
 

@@ -107,8 +107,6 @@ class AnimaEngineService:
                 raise ManagedEngineError("JOB_RUNNING", "설치가 진행 중입니다.")
             # A normal retry must not inherit the preceding forced preparation.
             job._force = False
-            # 화면이 보여 줄 공간도 prepare 와 같은 상태로 잰다 - previous 만 남은 런타임을 먼저 되돌린다
-            self._restore_interrupted_promote(job)
             plan = job.inspect(body.get("engine_root"), body.get("model_dirs"))
             self.last_checks = plan["checks"]
             return {"ok": True, "plan": plan}
@@ -126,9 +124,6 @@ class AnimaEngineService:
             self.update_settings(updates)
             force = body.get("force_verify", False) is True
             job = self._job()
-            # promote 도중 꺼져 쓰던 런타임이 previous 이름으로만 남았으면 먼저 되돌린다 - 그러면 영수증이 그대로 통과하고,
-            # 아니어도 공간 검사가 '다시 풀기' 몫을 요구하지 않는다(Codex 재리뷰 2026-11-06)
-            self._restore_interrupted_promote(job)
             if not force and quick_receipt(job.settings):
                 return self._use_installed(body)
             job._force = force
@@ -145,13 +140,6 @@ class AnimaEngineService:
                     return self._use_installed(body)
             result = job.start(select_on_ready=body.get("select_on_ready", True) is True, force_verify=force)
             return {"ok": True, "joined": result["joined"], "status": self.status()}
-
-    @staticmethod
-    def _restore_interrupted_promote(job):
-        try:
-            job.restore_interrupted_promote()
-        except (OSError, ManagedEngineError) as exc:
-            print(f"ANIMA: interrupted promote restore failed ({type(exc).__name__})", flush=True)
 
     def _use_installed(self, body):
         """고른 자리에 이미 끝난 설치가 있다('설치 (0KB)') - 받을 것도, PC 검사(설치 공간 · GPU)도, 엔진을 켜서 다시

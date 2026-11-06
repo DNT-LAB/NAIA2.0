@@ -450,7 +450,10 @@ class AnimaInstallJob:
             partial_bytes += have
             remaining_bytes += max(0, item["size"] - have)
         installed = 0
-        if runtime_needs_extract(root, self._force):
+        # previous 로만 남은 온전한 런타임은 설치가 이름만 되돌린다(_cleanup_backups) - 다시 풀 공간을 요구하지 않는다.
+        # 여기서는 되돌리지 않는다: inspect 는 부작용이 없어야 하고, 되돌리기는 설치 상호배제(INSTALLING) 안에서만
+        # 한다(Codex 재리뷰 2026-11-06 - 서비스가 되돌리면 실패한 설치의 finally 정리와 겹치거나 다른 경로를 건드렸다).
+        if runtime_needs_extract(root, self._force) and (self._force or restorable_previous(root / "runtime") is None):
             installed = manifest.ARTIFACTS[0].get("installed_bytes") or 7_000_000_000
         required = math.ceil((remaining_bytes + installed) * 1.1)
         free = self.disk_free(root)
@@ -567,36 +570,20 @@ class AnimaInstallJob:
         if staging.exists():
             remove_tree(staging)
 
-    def restore_interrupted_promote(self) -> bool:
-        """promote 도중 꺼졌으면(active -> previous 뒤 · staging -> active 전) previous 가 하나뿐인 쓸 수 있는 런타임이다 -
-        active 로 되돌린다(Codex 재리뷰 2026-11-06). 설치 라우트는 이것을 공간 검사(inspect) · 영수증 확인보다 먼저 부른다 -
-        이름 하나 바꾸면 되는 상태를 '풀 공간 부족' 으로 막지 않게. 되돌렸으면 True."""
-        if not self.settings.engine_root:
-            return False
-        base = Path(self.settings.engine_root).resolve() / "runtime"
-        if base.resolve() != base:
-            raise ManagedEngineError("PATH_INVALID")
-        active = base / manifest.RUNTIME_ID
-        if not base.exists() or runtime_tree_ok(active):
-            return False
-        previous = sorted((path for path in base.iterdir()
-                           if path.name.startswith(manifest.RUNTIME_ID + ".previous-") and runtime_tree_ok(path)),
-                          key=lambda path: path.stat().st_mtime, reverse=True)
-        if not previous:
-            return False
-        if active.exists() or active.is_symlink():
-            rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
-        rename_with_retry(previous[0], active)
-        return True
-
     def _cleanup_backups(self):
+        """설치 시작(INSTALLING 등록 뒤)에만 부른다. promote 도중 꺼졌으면(active -> previous 뒤 · staging -> active 전)
+        previous 가 하나뿐인 쓸 수 있는 런타임이다 - 지우기 전에 active 로 되돌린다(Codex 재리뷰 2026-11-06)."""
         base = Path(self.settings.engine_root).resolve() / "runtime"
         if base.resolve() != base:
             raise ManagedEngineError("PATH_INVALID")
         if not base.exists():
             return
-        # 지우기 전에 - 하나뿐인 런타임일 수 있다
-        self.restore_interrupted_promote()
+        active = base / manifest.RUNTIME_ID
+        previous = restorable_previous(base)
+        if previous is not None:
+            if active.exists() or active.is_symlink():
+                rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
+            rename_with_retry(previous, active)
         for path in base.iterdir():
             if path.name.startswith((manifest.RUNTIME_ID + ".previous-", manifest.RUNTIME_ID + ".failed-")):
                 self._remove_staging(path)
@@ -751,6 +738,17 @@ class AnimaInstallJob:
                 print(f"ANIMA: staging cleanup failed ({type(exc).__name__})", flush=True)
             with REGISTRY_LOCK:
                 INSTALLING.discard(str(root))
+
+
+def restorable_previous(base: Path):
+    """active 가 없거나 덜 풀렸을 때 되돌릴 온전한 previous(가장 최근 것) - 없으면 None. 읽기만 한다."""
+    active = base / manifest.RUNTIME_ID
+    if not base.is_dir() or runtime_tree_ok(active):
+        return None
+    previous = sorted((path for path in base.iterdir()
+                       if path.name.startswith(manifest.RUNTIME_ID + ".previous-") and runtime_tree_ok(path)),
+                      key=lambda path: path.stat().st_mtime, reverse=True)
+    return previous[0] if previous else None
 
 
 def runtime_tree_ok(path: Path) -> bool:

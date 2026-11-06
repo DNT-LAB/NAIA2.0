@@ -246,9 +246,11 @@ export function createMobileArtistList({
     state = data;
     const modes = (state.modes || []).filter(mode => mode.available || mode.virtual);
     const savedMode = read(MODE_KEY);
-    els.mode.innerHTML = modes.map(mode =>
+    // 기본 = 팩 없이 전체 작가(사용자 지정 2026-11-06 - Curated 는 휴대폰에 무겁다). 그림은 관심 · 그룹 사본과
+    // 직접 만든 썸네일만 뜬다(PC 의 [모드 선택...] 과 같은 목록 - 서버가 빈 mode 를 그렇게 읽는다).
+    els.mode.innerHTML = `<option value="">ALL (만든 썸네일만)</option>` + modes.map(mode =>
       `<option value="${escHtml(mode.key)}">${escHtml(mode.label || mode.key)}</option>`).join('');
-    els.mode.value = modes.some(mode => mode.key === savedMode) ? savedMode : (modes[0]?.key || '');
+    els.mode.value = modes.some(mode => mode.key === savedMode) ? savedMode : '';
     const filters = state.filters || [];
     const savedFilter = read(FILTER_KEY) || 'all';
     els.filter.innerHTML = filters.map(item => item.separator
@@ -292,7 +294,6 @@ export function createMobileArtistList({
   async function loadNext() {
     if (loading || !panel?.isOpen() || panel.isCollapsed()) return;
     if (page > 0 && page >= totalPages) return;
-    if (!els.mode.value) { renderStatus('받아 둔 썸네일 팩이 없습니다 - PC 화면의 Artist Thumbnail 에서 받으세요'); return; }
     const mine = serial;
     loading = true;
     renderStatus(page ? `${count(total)}명 · 더 읽는 중…` : '불러오는 중…');
@@ -541,7 +542,6 @@ export function createMobileArtistList({
 
   /** 켜기 = main_link + 뽑는 목록을 이 판의 목록으로(출처 = 아티스트 탭 · 구간 전체 · 매칭 검색 없음). 끄기 = main_link 만. */
   async function setLink(on, {quiet = false} = {}) {
-    if (on && !els.mode.value) { paintLink(false); showToast?.('받아 둔 썸네일 팩이 없습니다', 'error'); return; }
     if (linkBusy && quiet) return;
     linkBusy = true;
     const randomTools = on

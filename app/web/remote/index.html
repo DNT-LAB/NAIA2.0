@@ -1010,6 +1010,11 @@
           <!-- 결과 화면 작가 패널(사용자 지정 2026-11-03) - [메인 랜덤 버튼 연결] 이 켜져 있으면 늘 시드 알약 오른쪽에.
                보이는 그림에 붙은 작가를 [고정] [임시] [숨김] [그룹] 한다. artistLinkPanel.mjs 가 그린다.
                [아티스트 탭 연동됨] 알약은 이 패널 오른쪽으로 비켜 선다. -->
+          <!-- 모바일 리모트(사용자 지정 2026-11-06) - 시드 고정 새싹의 반대편(오른쪽 아래). 휴대폰(767px 이하)에서만
+               보인다 - 그 폭에서는 오른쪽 탭 줄이 숨어 Characters · Artists 등으로 갈 길이 없다. 누르면 아래에서
+               메뉴가 올라온다(#mobileRemoteSheet). PC 화면을 줄이지 않고 간소판을 따로 만든다. -->
+          <button type="button" class="mobile-remote-btn" id="mobileRemoteBtn" aria-label="리모트"
+                  aria-haspopup="dialog" aria-expanded="false" onclick="toggleMobileRemote()">&#9638;</button>
           <div class="artist-link-panel" id="artistLinkPanel" hidden aria-label="이 그림의 작가"></div>
           <button type="button" class="artist-link-pill" id="artistLinkPill" hidden
                   title="메인 Random 이 아티스트 창 목록에서 작가를 뽑아 붙이고 있습니다. 누르면 뽑는 곳을 고릅니다.">아티스트 탭 연동됨 ▴</button>
@@ -1582,6 +1587,16 @@ function openInSystemBrowser() {
   popup?.focus?.();
 }
 </script>
-<script src="app.js?v=20261106-rv68c"></script>
+<!-- 모바일 리모트 메뉴(사용자 지정 2026-11-06). 항목은 휴대폰용 화면을 연다 - Characters 는 기존 창 그대로,
+     나머지는 간소판을 새로 만든다(만들기 전까지는 알림만). -->
+<div class="mobile-remote-backdrop" id="mobileRemoteBackdrop" hidden onclick="closeMobileRemote()"></div>
+<div class="mobile-remote-sheet" id="mobileRemoteSheet" role="dialog" aria-label="리모트" hidden>
+  <div class="mobile-remote-head"><span>리모트</span>
+    <button type="button" class="mobile-remote-close" aria-label="닫기" onclick="closeMobileRemote()">&#10005;</button></div>
+  <button type="button" class="mobile-remote-item" data-mobile-remote="characters"><span class="mobile-remote-icon" aria-hidden="true">&#128100;</span>Characters</button>
+  <button type="button" class="mobile-remote-item is-pending" data-mobile-remote="artists" data-label="Artists"><span class="mobile-remote-icon" aria-hidden="true">&#127912;</span>Artists<span class="mobile-remote-note">준비 중</span></button>
+  <button type="button" class="mobile-remote-item is-pending" data-mobile-remote="metadata" data-label="Metadata"><span class="mobile-remote-icon" aria-hidden="true">&#128221;</span>Metadata<span class="mobile-remote-note">준비 중</span></button>
+</div>
+<script src="app.js?v=20261106-mrm1"></script>
 </body>
 </html>

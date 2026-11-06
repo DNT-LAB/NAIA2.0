@@ -33503,3 +33503,45 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   font-size: 11.5px; font-weight: 700; cursor: pointer;
 }
 .ips-apply:hover { background: rgba(88,178,120,0.4); }
+
+/* 모바일 리모트(사용자 지정 2026-11-06) - 시드 고정 새싹(.seedlock-pill · 왼쪽 아래)의 반대편. 휴대폰에서만 보인다.
+   같은 높이 · 같은 모양 · 인페인트 도크가 뜨면 새싹처럼 그 위로 비켜 선다(--inpaint-dock-lift). */
+.mobile-remote-btn,
+.mobile-remote-sheet,
+.mobile-remote-backdrop { display: none; }
+@media (max-width: 767px) {
+  .mobile-remote-btn {
+    position: absolute; bottom: calc(10px + var(--inpaint-dock-lift, 0px)); right: 10px; z-index: 6;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; cursor: pointer;
+    border: 1px solid var(--border-dim); border-radius: 6px;
+    background: rgba(12,12,20,0.82); color: var(--text-dim); font-size: 16px; line-height: 1;
+  }
+  .mobile-remote-btn[aria-expanded="true"] { border-color: var(--accent-blue); color: var(--text-primary); }
+  .mobile-remote-backdrop:not([hidden]) {
+    display: block; position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,0.45);
+  }
+  .mobile-remote-sheet:not([hidden]) {
+    display: flex; flex-direction: column; position: fixed; left: 0; right: 0; bottom: 0; z-index: 9001;
+    max-height: 70vh; overflow-y: auto; padding-bottom: env(safe-area-inset-bottom, 0px);
+    background: var(--bg-elevated); border-top: 1px solid var(--border-dim);
+    border-radius: 12px 12px 0 0;
+  }
+  .mobile-remote-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid var(--border-dim);
+    font-size: 14px; color: var(--text-primary);
+  }
+  .mobile-remote-close {
+    width: 32px; height: 32px; border: 0; background: none; color: var(--text-dim); font-size: 16px; cursor: pointer;
+  }
+  .mobile-remote-item {
+    display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 16px;
+    border: 0; border-bottom: 1px solid var(--border-dim); background: none; text-align: left;
+    color: var(--text-primary); font-size: 15px; cursor: pointer;
+  }
+  .mobile-remote-item:active { background: var(--bg-hover); }
+  .mobile-remote-item.is-pending { color: var(--text-dim); }
+  .mobile-remote-icon { width: 22px; text-align: center; }
+  .mobile-remote-note { margin-left: auto; font-size: 12px; color: var(--text-dim); }
+}

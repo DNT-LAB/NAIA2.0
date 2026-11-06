@@ -7305,6 +7305,35 @@ function applySeedResLockResSideEffect(on) {
   return true;
 }
 
+// 모바일 리모트(사용자 지정 2026-11-06) - 휴대폰 폭에서 숨은 오른쪽 탭 화면들로 가는 문. 단추는 CSS 가 휴대폰에서만 보인다.
+function openMobileRemote() {
+  const sheet = $('mobileRemoteSheet');
+  if (!sheet) return;
+  sheet.hidden = false;
+  $('mobileRemoteBackdrop').hidden = false;
+  $('mobileRemoteBtn')?.setAttribute('aria-expanded', 'true');
+}
+function closeMobileRemote() {
+  const sheet = $('mobileRemoteSheet');
+  if (!sheet) return;
+  sheet.hidden = true;
+  $('mobileRemoteBackdrop').hidden = true;
+  $('mobileRemoteBtn')?.setAttribute('aria-expanded', 'false');
+}
+function toggleMobileRemote() {
+  if ($('mobileRemoteSheet')?.hidden === false) closeMobileRemote();
+  else openMobileRemote();
+}
+$('mobileRemoteSheet')?.addEventListener('click', event => {
+  const item = event.target.closest('[data-mobile-remote]');
+  if (!item) return;
+  closeMobileRemote();
+  const target = item.dataset.mobileRemote;
+  // Characters 는 기존 창이 휴대폰 폭에서도 맞는다 - 탭으로 가지 않고 창만 띄운다.
+  if (target === 'characters') { void ensureCharacterWindow().then(win => win?.open()); return; }
+  showToast(`${item.dataset.label || target} 휴대폰 화면은 준비 중입니다`, 'info');
+});
+
 function toggleSeedResLock() {
   const next = !seedResLockEffective();
   let resPinned = false;

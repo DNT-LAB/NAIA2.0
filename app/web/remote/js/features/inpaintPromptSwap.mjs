@@ -251,11 +251,28 @@ export function createInpaintPromptSwap({
     return {same, fam, none};
   }
 
+  /** 프리셋 고름 칸 - NAIA 표준 드롭다운(PE 의 Quick Preset 과 같은 껍데기 · 모델 배지 · 짚으면 미리보기, 사용자 지정 2026-11-06).
+   *  옵션에 싣는 `data-preview-*` · `data-model-*` 는 `promptEngineeringPanel` 의 Quick Preset 과 같은 이름이다.
+   *  ⚠️ `<optgroup>` 은 쓰지 않는다 - 표준 드롭다운이 묶음 머리를 그리지 않아 이름만 사라진다. 순서(같은 모델 ->
+   *     같은 계열 -> 모델 미지정)와 모델 배지로 갈래를 보인다. */
   function presetOptions() {
     const {same, fam, none} = presetsFor(draft.model);
-    const opt = p => `<option value="${escHtml(p.name)}"${p.name === draft.preset ? ' selected' : ''}>${escHtml(p.name)}</option>`;
-    const group = (label, rows) => rows.length ? `<optgroup label="${escHtml(label)}">${rows.map(opt).join('')}</optgroup>` : '';
-    const html = group(shortModel(draft.model), same) + group('같은 계열', fam) + group('모델 미지정', none);
+    const clip = (text, limit) => {
+      const flat = String(text || '').replace(/\s+/g, ' ').trim();
+      return flat.length > limit ? `${flat.slice(0, limit - 3)}...` : flat;
+    };
+    const attr = (name, value) => ` ${name}="${escHtml(String(value ?? ''))}"`;
+    const opt = p => '<option'
+      + attr('value', p.name) + (p.name === draft.preset ? ' selected' : '')
+      + attr('data-preview-name', p.name) + attr('data-preview-mode', p.api_mode || 'NAI')
+      + attr('data-preview-prefix', clip(p.pre_prompt_preview, 1200))
+      + attr('data-preview-postfix', clip(p.post_prompt_preview, 1200))
+      + attr('data-preview-description', clip(p.description, 300))
+      + attr('data-preview-thumbnail', p.thumbnail_url || '')
+      + (p.model_label ? attr('data-model-label', p.model_label) + attr('data-model-family', p.model_family || '')
+        + attr('data-model-variant', p.model_variant || '') : '')
+      + `>${escHtml(p.name)}</option>`;
+    const html = [...same, ...fam, ...none].map(opt).join('');
     return html || '<option value="">이 계열의 프리셋이 없습니다</option>';
   }
 
@@ -280,7 +297,7 @@ export function createInpaintPromptSwap({
       <div class="ips-head" data-ipsp-head></div>
       <div class="ips-line"><span class="ips-k">모델</span><span class="ips-models" data-ipsp-models></span></div>
       <label class="ips-curated"><input type="checkbox" data-ipsp-curated><span>4.5C · 5C 보이기</span></label>
-      <div class="ips-line"><span class="ips-k">프리셋</span><select class="ips-select" data-ipsp-preset></select></div>
+      <div class="ips-line"><span class="ips-k">프리셋</span><select class="ips-select mod-select-sm mod-preset-select" data-ipsp-preset data-preview-kind="prompt-preset" data-preset-detail="1"></select></div>
       <div class="ips-line"><span class="ips-k">작가</span><span class="ips-segs" data-ipsp-artist></span></div>
       <div class="ips-line"><span class="ips-k">네거티브</span><span class="ips-segs" data-ipsp-negative></span></div>
       <div class="ips-sub" data-ipsp-source></div>

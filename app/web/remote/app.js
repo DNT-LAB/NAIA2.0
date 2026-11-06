@@ -3443,7 +3443,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   });
 // 인페인트 프롬프트 스왑(사용자 지정 2026-11-03) - 칩 줄 + 설정 창. 상태는 img2img 모듈 상태를 그대로 읽는다.
 let inpaintPromptSwap = null;
-const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-ipb1')
+const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-ipb2')
   .then(({createInpaintPromptSwap}) => {
     inpaintPromptSwap = createInpaintPromptSwap({
       document, window, escHtml, showToast,

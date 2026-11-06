@@ -33468,6 +33468,8 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .ips-seg.is-on { background: rgba(124,106,239,0.34); border-color: rgba(185,174,255,0.8); }
 .ips-curated { display: inline-flex; align-items: center; gap: 5px; margin-left: 60px; font-size: 10.5px; color: var(--text-muted); cursor: pointer; }
 .ips-select { flex: 1 1 auto; min-width: 0; height: 24px; font-size: 11px; }
+/* 표준 드롭다운 껍데기(customSelects 가 `.ips-select` 를 `.custom-ips-select` 로 감싼다) - 줄의 남는 폭을 다 쓴다. */
+.custom-select.custom-ips-select { flex: 1 1 auto; min-width: 0; width: auto; }
 .ips-sub { font-size: 10.5px; color: var(--text-muted); padding-top: 4px; }
 .ips-sub-title { font-size: 10.5px; color: var(--text-muted); padding-top: 4px; }
 .ips-sub-title span { opacity: 0.7; }

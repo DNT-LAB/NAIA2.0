@@ -139,6 +139,12 @@ def current_random_artist_token() -> str:
     return str(getattr(_RANDOM_ARTIST, "token", None) or "")
 
 
+def current_random_artist_exclusive() -> bool:
+    """[다른 작가 숨김](결과 화면 작가 패널 · 2026-11-06) - 이번에 붙이는 작가만 남기고 다른 작가를 걷는가."""
+    picked = getattr(_RANDOM_ARTIST, "picked", None)
+    return isinstance(picked, dict) and picked.get("exclusive") is True
+
+
 def current_random_artist() -> dict[str, Any] | None:
     """지금 붙이는 작가 {artist, weight} - PE 훅이 프롬프트 맥락에 적는다(히스토리가 그림마다 작가를 안다)."""
     picked = getattr(_RANDOM_ARTIST, "picked", None)

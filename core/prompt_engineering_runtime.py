@@ -333,7 +333,11 @@ class PromptEngineeringHeadlessPostHook:
         options = self._current_options()
         # [메인 랜덤 버튼 연결](아티스트 리모컨 · 2026-10-19) - 이번 생성에 뽑힌 작가를 프리픽스 맨 앞에. 토큰은 이 스레드의
         # 생성 한 번에만 실려 있다(`core.headless_random_prompt_service.random_artist_link`).
-        from core.headless_random_prompt_service import current_random_artist, current_random_artist_token
+        from core.headless_random_prompt_service import (
+            current_random_artist,
+            current_random_artist_exclusive,
+            current_random_artist_token,
+        )
 
         # 삽입 솔로는 생성 사본에만 적용한다. 프리셋·모드가 바뀌었으면 자동 확정.
         tracker = getattr(self.app_context, "artist_insert_tracker", None)
@@ -353,6 +357,11 @@ class PromptEngineeringHeadlessPostHook:
             if linked and isinstance(getattr(context, "metadata", None), dict):
                 context.metadata["linked_artist"] = linked
             options = dict(options)
+            if current_random_artist_exclusive():
+                # [다른 작가 숨김](작가 패널) - 붙일 작가만 남기고 PE · 랜덤 행의 다른 작가를 이번 사본에서 걷는다.
+                from core.artist_insert_tracker import exclusive_options
+
+                options = exclusive_options(self.app_context, options)
             pre = options.get("pre_prompt")
             if isinstance(pre, list):
                 options["pre_prompt"] = [artist_token, *pre]

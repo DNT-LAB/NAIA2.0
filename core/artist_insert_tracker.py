@@ -190,6 +190,32 @@ def replace_artist_pieces(text, artist, api_mode, token=""):
     return pattern.sub(replace, text), found
 
 
+def strip_other_artists_text(context, text):
+    """글에서 작가 토큰을 모두 뺀다(삽입 솔로 '전체' 와 같은 걷기). `artist collaboration` 은 작가가 아니라 남긴다."""
+    from core.artist_mix_preset import strip_artists
+
+    stripped = strip_artists(str(text or ""), known=_known_artists(context), allow_bare=True)
+    collab = [raw for raw in stripped["removed"] if _COLLAB_PIECE.fullmatch(raw.strip())]
+    return ", ".join(part for part in [stripped["text"], *collab] if part)
+
+
+def exclusive_options(context, options):
+    """[다른 작가 숨김](결과 화면 작가 패널 · 사용자 지정 2026-11-06) - 생성 한 번의 사본에서 다른 작가를 걷는다.
+    PE 프리픽스 · 포스트픽스의 작가 토큰을 빼고 랜덤 행의 작가(Remove Author 꺼짐일 때 붙는 것)를 끈다.
+    저장한 PE 글은 그대로다. 와일드카드가 펼쳐 넣는 작가는 못 걷는다(펼치기 전 글만 본다)."""
+    from core.wildcard_processor import split_tags_smart
+
+    result = dict(options)
+    for slot in ("pre", "post"):
+        value = options.get(f"{slot}_prompt") or []
+        text = ", ".join(value) if isinstance(value, list) else str(value)
+        result[f"{slot}_prompt"] = split_tags_smart(strip_other_artists_text(context, text))
+    preprocessing = dict(options.get("preprocessing_options") or {})
+    preprocessing["remove_author"] = True
+    result["preprocessing_options"] = preprocessing
+    return result
+
+
 def solo_options(context, options, snapshot):
     """생성 한 번의 사본만 고친다. 저장한 PE 글·목록은 그대로다."""
     from core.artist_mix_preset import strip_artists

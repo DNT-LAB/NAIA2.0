@@ -5,7 +5,8 @@
  * 다루는 작가 = **보이는 그림에 붙은 작가**(히스토리 `linked_artist`). Auto Gen 은 다음 컷을 미리 만들므로
  * '마지막으로 뽑힌 작가' 를 쓰면 엉뚱한 작가를 숨긴다.
  *
- *   [그림 · 이름 × 가중치] [고정] [기억] [숨김] [삽입 ▴] [그룹 ▴]
+ *   [그림 · 이름 × 가중치] [고정] [기억] [제외] [삽입 ▴] [그룹 ▴] [추가 ▴]
+ *   좁으면(옆 [… 연동됨] 알약까지 한 줄에 안 들어가면) 두 줄 - 위 = 이름 · 가중치(알약은 그 오른쪽), 아래 = 단추들.
  *
  * - [× 가중치] = 누르면 위에 손잡이(휠 0.01씩). 바꾸면 **랜덤 작가 가중치**(아티스트 창 손잡이)에 바로 반영한다 -
  *   고정하지 않는다(사용자 지정 2026-11-03 · 처음엔 '그 값으로 고정' 이었다). 고정 중이면 고정 작가도 그 값을 쓴다.
@@ -13,7 +14,10 @@
  *   풀면 돌려준다(`ArtistThumbnailService.link_pin`).
  * - [기억] = 패널 전용 그룹 한 칸(`임시 그룹`) - 와일드카드로 바로 쓰이고 재시작해도 남는다. 이름을 붙이면 저장.
  *   사람이 있으면 [그룹 ▴] 맨 위에 그 칸이 뜨고, 누르면 아티스트 그룹 창으로 연다.
- * - [숨김] = 제외 작가. 고정해 둔 작가를 숨기면 정책이 돌아온다.
+ * - [제외] = 제외 작가(예전 이름 [숨김] - 아래 [숨김 ▴] 방식과 겹쳐 바꿨다 · 사용자 지정 2026-11-06).
+ *   고정해 둔 작가를 제외하면 정책이 돌아온다.
+ * - [추가 ▴] = 붙인 작가를 다른 작가 앞에 추가(기본) / [숨김 ▴] = 다른 작가 전부 숨김(사용자 지정 2026-11-06).
+ *   서버 `main_exclusive`(이번 실행에만) - PE 훅이 프리픽스 · 포스트픽스 · 랜덤 행의 다른 작가를 걷는다. 숨김이면 노란 강조.
  * - [삽입 ▴] = 이 작가를 지금 가중치로 PE Prefix 맨 앞 / Postfix 맨 뒤에(사용자 지정 2026-11-04). 이미 있으면 가중치만
  *   바꾼다. 넣은 작가는 위의 삽입 그룹 판(`artistInsertTray.mjs`)이 추적한다. 넣으면 [고정] 은 풀린다([기억] 도 같다).
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
@@ -69,6 +73,14 @@ export function installArtistLinkPanel({
     <button type="button" class="alp-menu-item" data-alp-insert="pre" role="menuitem">Prefix 맨 앞에</button>
     <button type="button" class="alp-menu-item" data-alp-insert="post" role="menuitem">Postfix 맨 뒤에</button>`;
   weightPop.after(insertMenu);
+
+  // [추가 ▴] / [숨김 ▴] - 다른 작가를 어떻게 다룰지(사용자 지정 2026-11-06).
+  const modeMenu = document.createElement('div');
+  modeMenu.className = 'artist-link-menu artist-link-mode';
+  modeMenu.hidden = true;
+  modeMenu.setAttribute('role', 'menu');
+  insertMenu.after(modeMenu);
+  const linkPill = document.getElementById('artistLinkPill');
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
   let weightSaving = null;         // 도는 중인 가중치 저장(다른 단추는 이것을 기다린다 - busy 에 버려지지 않게)
@@ -96,9 +108,32 @@ export function installArtistLinkPanel({
     menu.style.left = `${Math.max(0, left)}px`;
   }
 
+  /** 한 줄에 안 들어가면 두 줄(사용자 지정 2026-11-06). 옆 [… 연동됨] 알약 폭까지 센다 - 휴대폰에서 알약이 잘렸다.
+   *  두 줄이면 뷰어에 `--alp-row-lift` 를 실어 메뉴 · 손잡이 · 연동됨 알약이 위 줄 위로 비켜 선다. */
+  function fitRows() {
+    const host = el.offsetParent;
+    if (!host) return;
+    // 클래스를 껐다 켜며 재지 않는다 - [… 연동됨] 알약 쪽이 이 패널의 클래스 변화를 보고 자리를 옮기므로 매번 바꾸면
+    // 서로 부르며 돈다. 두 줄일 때 한 줄 폭 = 두 줄의 폭 합(줄마다 테두리 몇 px 더 셈 - 경계에서 흔들리지 않는 여유).
+    const twoNow = el.classList.contains('is-two-row');
+    const rows = el.querySelectorAll('.alp-row');
+    const oneRowWidth = twoNow
+      ? [...rows].reduce((sum, row) => sum + row.offsetWidth, 0)
+      : Math.max(el.offsetWidth, el.scrollWidth);
+    const pillWidth = linkPill && !linkPill.hidden ? linkPill.offsetWidth + 6 : 0;
+    const room = host.clientWidth - el.offsetLeft - 8;
+    const two = Boolean(artist) && rows.length > 1 && room > 0 && oneRowWidth + pillWidth > room;
+    if (two !== twoNow) el.classList.toggle('is-two-row', two);
+    const lift = two ? `${Math.max(0, el.offsetHeight - 26)}px` : '0px';
+    if (el.parentElement && el.parentElement.style.getPropertyValue('--alp-row-lift') !== lift) {
+      el.parentElement.style.setProperty('--alp-row-lift', lift);
+    }
+  }
+
   function place() {
     if (el.hidden || !seedPill) return;
     el.style.left = `${seedPill.offsetLeft + seedPill.offsetWidth + 6}px`;
+    fitRows();
     if (!menu.hidden) placeGroupMenu();
     if (!weightPop.hidden) {
       const chip = el.querySelector('[data-alp="weight"]');
@@ -109,11 +144,16 @@ export function installArtistLinkPanel({
   function render() {
     const show = Boolean(tools?.main_link) && seedShown();
     el.hidden = !show;
-    if (!show) { closeMenu(); closeInsert(); closeWeight({commit: false}); return; }
+    if (!show) {
+      closeMenu(); closeInsert(); closeMode(); closeWeight({commit: false});
+      el.parentElement?.style.setProperty('--alp-row-lift', '0px');
+      return;
+    }
     if (!artist) {
       el.innerHTML = '<span class="alp-empty" title="이 그림은 메인 Random 이 작가를 붙이지 않았습니다">붙은 작가 없음</span>';
       closeMenu();
       closeInsert();
+      closeMode();
       closeWeight();
       place();
       return;
@@ -127,7 +167,9 @@ export function installArtistLinkPanel({
     // 이름 툴팁 = 게시물 수(사용자 지정 2026-11-04 - 가중치는 옆 칩에 이미 있다). 사전에 없는 작가면 이름만.
     const count = info?.artist === artist && Number.isFinite(info.count) ? info.count : null;
     const whoTitle = count === null ? artist : `${artist} · 게시물 ${count.toLocaleString('en-US')}`;
+    const exclusive = Boolean(tools?.main_exclusive);
     el.innerHTML = `
+      <span class="alp-row alp-row-who">
       <span class="alp-who" title="${esc(whoTitle)}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
     : `<span class="alp-thumb alp-thumb-blank" aria-hidden="true">${esc(artist.slice(0, 1).toUpperCase())}</span>`}
@@ -135,15 +177,66 @@ export function installArtistLinkPanel({
       </span>
       <button type="button" class="alp-weight${weightPop.hidden ? '' : ' is-open'}" data-alp="weight"
         aria-expanded="${!weightPop.hidden}" title="가중치 조절 - 바꾸면 랜덤 작가 가중치에 바로 반영합니다">× ${esc(w)}</button>
+      </span>
+      <span class="alp-row alp-row-btns">
       <button type="button" class="alp-btn${pin ? ' is-on' : ''}" data-alp="pin" aria-pressed="${pin}" title="${esc(pinTitle)}">고정</button>
       <button type="button" class="alp-btn${slot?.has ? ' is-on' : ''}" data-alp="slot" aria-pressed="${Boolean(slot?.has)}"
         title="${esc(`${slot?.name || '임시 그룹'} 에${slot?.has ? '서 뺍니다' : ' 담습니다'} - 와일드카드로 쓰이고 재시작해도 남습니다. [그룹 ▴] 에서 열어 이름을 붙이면 저장됩니다.`)}">기억</button>
       <button type="button" class="alp-btn alp-ban${banned ? ' is-on' : ''}" data-alp="ban" aria-pressed="${Boolean(banned)}"
-        title="${banned ? '제외 작가에서 뺍니다' : '제외 작가로 - 다음부터 뽑히지 않습니다'}">숨김</button>
+        title="${banned ? '제외 작가에서 뺍니다' : '제외 작가로 - 다음부터 뽑히지 않습니다'}">제외</button>
       <button type="button" class="alp-btn" data-alp="insert" aria-haspopup="menu" aria-expanded="${!insertMenu.hidden}"
         title="${esc(`× ${w} 로 Prefix 맨 앞 · Postfix 맨 뒤에 넣습니다 - 이미 있으면 가중치만 바꾸고, 위의 삽입 그룹에서 추적합니다`)}">삽입 ▴</button>
-      <button type="button" class="alp-btn" data-alp="group" aria-haspopup="menu" aria-expanded="${!menu.hidden}" title="그룹에 담기">그룹 ▴</button>`;
+      <button type="button" class="alp-btn" data-alp="group" aria-haspopup="menu" aria-expanded="${!menu.hidden}" title="그룹에 담기">그룹 ▴</button>
+      <button type="button" class="alp-btn alp-mode${exclusive ? ' is-on' : ''}" data-alp="mode" aria-haspopup="menu"
+        aria-expanded="${!modeMenu.hidden}" title="${exclusive
+    ? '다른 작가 전부 숨김 - 붙인 작가만 나갑니다(PE 프리픽스 · 포스트픽스 · 랜덤 행의 작가를 이번 생성에서 뺌)'
+    : '다른 작가 앞에 추가 - 붙인 작가를 PE 프리픽스 맨 앞에 더합니다(기본)'}">${exclusive ? '숨김' : '추가'} ▴</button>
+      </span>`;
     place();
+  }
+
+  // ── 다른 작가 방식 메뉴 ────────────────────────────────────────────────
+  function renderModeMenu() {
+    const exclusive = Boolean(tools?.main_exclusive);
+    const item = (value, label) => `
+      <button type="button" class="alp-menu-item" data-alp-mode="${value}" role="menuitemradio"
+        aria-checked="${exclusive === (value === 'hide')}"><span class="alp-check" aria-hidden="true">${exclusive === (value === 'hide') ? '✓' : ''}</span>
+        <span>${label}</span></button>`;
+    modeMenu.innerHTML = item('add', '다른 작가 앞에 추가 (기본)') + item('hide', '다른 작가 전부 숨김');
+  }
+
+  function openMode(button) {
+    closeMenu();
+    closeInsert();
+    renderModeMenu();
+    modeMenu.hidden = false;
+    let left = el.offsetLeft + (button ? button.offsetLeft : 0);
+    const room = modeMenu.offsetParent ? modeMenu.offsetParent.clientWidth - modeMenu.offsetWidth - 4 : Infinity;
+    if (Number.isFinite(room)) left = Math.min(left, room);
+    modeMenu.style.left = `${Math.max(0, left)}px`;
+    el.querySelector('[data-alp="mode"]')?.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeMode() {
+    if (modeMenu.hidden) return;
+    modeMenu.hidden = true;
+    el.querySelector('[data-alp="mode"]')?.setAttribute('aria-expanded', 'false');
+  }
+
+  async function setExclusive(on) {
+    try {
+      const res = await fetch('/api/artist-thumb/options', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({random_tools: {main_exclusive: on}}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      if (data.random_tools) tools = data.random_tools;
+      render();
+      showToast?.(on ? '다른 작가를 전부 숨기고 붙인 작가만 넣습니다.' : '붙인 작가를 다른 작가 앞에 추가합니다.', 'info');
+    } catch (error) {
+      showToast?.(`바꾸지 못했습니다: ${error.message || error}`, 'error');
+    }
   }
 
   async function loadInfo() {
@@ -221,6 +314,7 @@ export function installArtistLinkPanel({
 
   function openMenu() {
     closeInsert();
+    closeMode();
     renderMenu();
     menu.hidden = false;
     placeGroupMenu();
@@ -230,7 +324,9 @@ export function installArtistLinkPanel({
 
   function openInsert(button) {
     closeMenu();
+    closeMode();
     insertMenu.hidden = false;
+    // 단추는 줄(.alp-row) 안에 있어도 자리는 패널(position:absolute)에서 잰다 - 줄은 위치 기준이 아니다.
     insertMenu.style.left = `${el.offsetLeft + (button ? button.offsetLeft : 0)}px`;
     el.querySelector('[data-alp="insert"]')?.setAttribute('aria-expanded', 'true');
   }
@@ -321,7 +417,7 @@ export function installArtistLinkPanel({
     window.addEventListener('pointerup', restore, true);
     window.addEventListener('pointercancel', restore, true);
   };
-  for (const node of [el, menu, weightPop, insertMenu]) node.addEventListener('pointerdown', holdAncestorDrag);
+  for (const node of [el, menu, weightPop, insertMenu, modeMenu]) node.addEventListener('pointerdown', holdAncestorDrag);
 
   weightRange.addEventListener('input', () => setWeight(weightRange.value));
   weightPop.addEventListener('wheel', event => {
@@ -363,11 +459,15 @@ export function installArtistLinkPanel({
       if (insertMenu.hidden) openInsert(button); else closeInsert();
       return;
     }
+    if (action === 'mode') {
+      if (modeMenu.hidden) openMode(button); else closeMode();
+      return;
+    }
     if (action === 'ban') {
       const wasBanned = Boolean(info?.artist === artist && info.banned);
       const data = await op(wasBanned ? 'unban' : 'ban');
       if (data) onBanChanged?.(artist, !wasBanned);
-      if (data) showToast?.(wasBanned ? `${artist} 를 제외 작가에서 뺐습니다.` : `${artist} 를 숨겼습니다 - 다음부터 뽑히지 않습니다.`, 'info');
+      if (data) showToast?.(wasBanned ? `${artist} 를 제외 작가에서 뺐습니다.` : `${artist} 를 제외했습니다 - 다음부터 뽑히지 않습니다.`, 'info');
     }
   });
 
@@ -399,6 +499,14 @@ export function installArtistLinkPanel({
     if (data) showToast?.(`${name} 그룹을 만들어 담았습니다.`, 'info');
   });
 
+  modeMenu.addEventListener('click', event => {
+    const item = event.target.closest('[data-alp-mode]');
+    if (!item) return;
+    closeMode();
+    const on = item.dataset.alpMode === 'hide';
+    if (on !== Boolean(tools?.main_exclusive)) void setExclusive(on);
+  });
+
   insertMenu.addEventListener('click', async event => {
     const item = event.target.closest('[data-alp-insert]');
     if (!item || stale) return;
@@ -413,6 +521,7 @@ export function installArtistLinkPanel({
   document.addEventListener('pointerdown', event => {
     if (el.contains(event.target)) return;
     if (!insertMenu.hidden && !insertMenu.contains(event.target)) closeInsert();
+    if (!modeMenu.hidden && !modeMenu.contains(event.target)) closeMode();
     if (!menu.hidden && !menu.contains(event.target)) closeMenu();
     if (!weightPop.hidden && !weightPop.contains(event.target)) closeWeight();
   }, true);
@@ -420,6 +529,7 @@ export function installArtistLinkPanel({
     if (event.key !== 'Escape') return;
     if (!menu.hidden) { closeMenu(); event.stopPropagation(); }
     if (!insertMenu.hidden) { closeInsert(); event.stopPropagation(); }
+    if (!modeMenu.hidden) { closeMode(); event.stopPropagation(); }
     if (!weightPop.hidden) { closeWeight(); event.stopPropagation(); }
   }, true);
 
@@ -435,6 +545,16 @@ export function installArtistLinkPanel({
       new MutationObserver(later).observe(seedPill, {attributes: true, childList: true, characterData: true, subtree: true});
     }
   }
+  // [… 연동됨] 알약이 뜨고 지면 한 줄 · 두 줄을 다시 잰다(알약 폭까지 세므로). 폭은 창 크기에도 따른다.
+  if (linkPill && typeof MutationObserver === 'function') {
+    let pillShown = !linkPill.hidden;
+    new MutationObserver(() => {
+      if (pillShown === !linkPill.hidden) return;      // 같은 값을 다시 쓴 것 - 무시(서로 부르며 돌지 않게)
+      pillShown = !linkPill.hidden;
+      if (!el.hidden) place();
+    }).observe(linkPill, {attributes: true, attributeFilter: ['hidden']});
+  }
+  window.addEventListener('resize', () => { if (!el.hidden) place(); });
   // 앱을 켠 직후 - 연결 상태를 안다(가벼운 조회 · 잠깐 뒤에).
   setTimeout(() => { if (!tools) void loadInfo(); }, 1500);
 

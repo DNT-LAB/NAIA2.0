@@ -2179,7 +2179,13 @@ export function createArtistThumbController({
     // 시드 알약은 켜면 시드 번호만큼 길어진다 - 그 오른쪽 끝에 붙인다.
     // 결과 화면 작가 패널이 떠 있으면 그 오른쪽으로 비켜 선다(사용자 지정 2026-11-03).
     const panel = linkPanelEl && !linkPanelEl.hidden && linkPanelEl.offsetWidth > 0 ? linkPanelEl : seedPillEl;
-    linkPillEl.style.left = `${panel.offsetLeft + panel.offsetWidth + 6}px`;
+    // 작가 패널이 두 줄이면(좁은 화면 · 사용자 지정 2026-11-06) 위 줄(이름 · 가중치) 오른쪽 - 높이는 CSS `--alp-row-lift`.
+    const topRow = panel === linkPanelEl && linkPanelEl.classList.contains('is-two-row')
+      ? linkPanelEl.querySelector('.alp-row-who') : null;
+    linkPillEl.style.left = topRow
+      ? `${panel.offsetLeft + topRow.offsetLeft + topRow.offsetWidth + 6}px`
+      : `${panel.offsetLeft + panel.offsetWidth + 6}px`;
+    linkPillEl.classList.toggle('is-top-row', Boolean(topRow));
     if (!sourceMenuEl.hidden) sourceMenuEl.style.left = linkPillEl.style.left;
   }
 
@@ -2645,7 +2651,8 @@ export function createArtistThumbController({
       if (linkPanelEl) {
         if (typeof ResizeObserver === 'function') new ResizeObserver(later).observe(linkPanelEl);
         if (typeof MutationObserver === 'function') {
-          new MutationObserver(later).observe(linkPanelEl, {attributes: true, attributeFilter: ['hidden', 'style']});
+          // class = 두 줄로 접힘(is-two-row) - 그러면 알약은 위 줄 오른쪽으로 간다.
+          new MutationObserver(later).observe(linkPanelEl, {attributes: true, attributeFilter: ['hidden', 'style', 'class']});
         }
       }
     }

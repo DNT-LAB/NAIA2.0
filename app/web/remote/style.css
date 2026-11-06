@@ -21275,8 +21275,23 @@ body.detached-module .mod-grid-3 {
 .artist-link-menu .alp-btn:focus-visible { outline: 1px solid rgba(255,240,170,0.8); outline-offset: 1px; }
 .artist-link-panel .alp-btn.is-on { background: rgba(255,240,170,0.85); color: #3a3000; }
 .artist-link-panel .alp-ban.is-on { background: #c94342; color: #fff; }
+/* 줄 묶음 - 한 줄일 때는 없는 것처럼(예전 그대로). 좁으면 두 줄(사용자 지정 2026-11-06): 위 = 이름 · 가중치 ·
+   아래 = 단추(시드 알약과 같은 줄). 줄마다 제 알약 모양을 입고 패널 자체는 투명해진다. 판정은 artistLinkPanel fitRows(). */
+.artist-link-panel .alp-row { display: contents; }
+.artist-link-panel.is-two-row {
+  height: auto; flex-direction: column; align-items: flex-start; gap: 4px;
+  padding: 0; border: 0; border-radius: 0; background: transparent;
+}
+.artist-link-panel.is-two-row .alp-row {
+  display: flex; align-items: center; gap: 2px; height: 26px; box-sizing: border-box;
+  padding: 0 3px 0 2px; border-radius: 999px;
+  border: 1px solid rgba(255,240,170,0.45); background: rgba(20,22,26,0.86);
+}
+.artist-link-panel.is-two-row .alp-name { max-width: 140px; }
+/* 두 줄이면 [… 연동됨] 알약은 위 줄 오른쪽(left 는 artistThumbTab syncLinkPill) */
+.artist-link-pill.is-top-row { bottom: calc(10px + var(--alp-row-lift, 0px) + var(--inpaint-dock-lift, 0px)); }
 .artist-link-menu {
-  position: absolute; bottom: calc(42px + var(--inpaint-dock-lift, 0px)); z-index: 7;
+  position: absolute; bottom: calc(42px + var(--alp-row-lift, 0px) + var(--inpaint-dock-lift, 0px)); z-index: 7;
   min-width: 170px; max-height: 50vh; overflow-y: auto; padding: 4px; border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.14); background: #24272d; color: #e7e2cf; font-size: 12px;
 }
@@ -21325,7 +21340,7 @@ body.detached-module .mod-grid-3 {
   color: #8d887a; font-size: 11px;
 }
 .artist-link-weight {
-  position: absolute; bottom: calc(42px + var(--inpaint-dock-lift, 0px)); z-index: 7;
+  position: absolute; bottom: calc(42px + var(--alp-row-lift, 0px) + var(--inpaint-dock-lift, 0px)); z-index: 7;
   width: 220px; box-sizing: border-box; padding: 8px 10px; border-radius: 8px;
   border: 1px solid rgba(255,255,255,0.14); background: #24272d; color: #e7e2cf; font-size: 12px;
 }

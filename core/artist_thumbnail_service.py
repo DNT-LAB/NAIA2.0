@@ -581,13 +581,15 @@ class ArtistThumbnailService:
     #  tab = 아티스트 창 목록(`pool`) · favorites = 관심 작가 · group = 그룹 하나(`id` · 임시 그룹 포함).
     #  가중치는 출처와 상관없이 손잡이 · [랜덤 가중치](사용자 지정 - 그룹에 적힌 가중치는 안 쓴다).
     RANDOM_SOURCE_KINDS = ("tab", "favorites", "group")
-    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin")
+    # main_exclusive = [다른 작가 숨김](결과 화면 작가 패널 · 사용자 지정 2026-11-06) - 붙인 작가 말고 다른 작가를 걷는다.
+    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin", "main_exclusive")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
         "random_weight": False,
         "main_link": False,
         "pin_hold": False,
         "link_pin": False,
+        "main_exclusive": False,
         "weight_start": 0.85,
         "weight_end": 1.15,
         "weight_step": 0.05,
@@ -614,6 +616,7 @@ class ArtistThumbnailService:
             "main_link": bool(source.get("main_link", False)),
             "pin_hold": bool(source.get("pin_hold", False)),
             "link_pin": bool(source.get("link_pin", False)),
+            "main_exclusive": bool(source.get("main_exclusive", False)),
             "weight_start": number("weight_start", 0.0, 5.0),
             "weight_end": number("weight_end", 0.0, 5.0),
             "weight_step": number("weight_step", 0.01, 5.0),

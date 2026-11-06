@@ -643,7 +643,11 @@ def _main_random_artist_override(context: WebSessionContext, clients: set[Any] |
     {token, artist, weight, pick, page?} · 꺼져 있으면 None.
     [이번 세션 중복 스킵] 으로 뽑을 작가가 바닥났으면 뽑을 때마다 화면에 알린다(빨간 토스트 · 사용자 지정 2026-11-04).
     Auto Gen 이 미리 만드는 컷도 이 길이라 장마다 뜬다."""
-    picked = artist_thumbnail_service(context).main_random_token(context.get_api_mode())
+    service = artist_thumbnail_service(context)
+    picked = service.main_random_token(context.get_api_mode())
+    if isinstance(picked, dict) and service.random_tools().get("main_exclusive"):
+        # [다른 작가 숨김] - PE 훅이 이 표식을 보고 다른 작가를 걷는다(`artist_insert_tracker.exclusive_options`).
+        picked = {**picked, "exclusive": True}
     if isinstance(picked, dict) and picked.get("exhausted") and clients:
         _announce_pool_exhausted(context, clients, str(picked.get("source") or "tab"))
     return picked
@@ -1480,16 +1484,11 @@ def register_artist_thumbnail_routes(
         - 랜덤 행의 작가(Remove Author 가 꺼져 있을 때 앞에 붙는 것)를 이번에만 끈다.
         - 메인 랜덤 버튼 연결 작가는 따로 막지 않는다 - 이 길은 PE 오버라이드를 걸므로 원래 안 붙는다.
         ⚠️ 와일드카드가 펼쳐 넣는 작가는 못 걷는다(펼치기 전 글만 본다)."""
-        from core.artist_insert_tracker import _COLLAB_PIECE, _known_artists
-        from core.artist_mix_preset import strip_artists
+        from core.artist_insert_tracker import strip_other_artists_text
 
         settings = dict(module_settings or {})
-        known = _known_artists(session_context)
         for key in ("pre_prompt", "post_prompt"):
-            stripped = strip_artists(str(settings.get(key) or ""), known=known, allow_bare=True)
-            # `artist collaboration` 은 작가가 아니다 - 솔로와 같이 남긴다.
-            collab = [raw for raw in stripped["removed"] if _COLLAB_PIECE.fullmatch(raw.strip())]
-            settings[key] = ", ".join(part for part in [stripped["text"], *collab] if part)
+            settings[key] = strip_other_artists_text(session_context, settings.get(key))
         options = dict(settings.get("preprocessing_options") or {})
         options["remove_author"] = True
         settings["preprocessing_options"] = options

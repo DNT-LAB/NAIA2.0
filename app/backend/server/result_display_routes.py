@@ -746,6 +746,10 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
             summary[key] = extracted_params.get(key)
         elif parsed_info.get(key) not in ("", None):
             summary[key] = parsed_info.get(key)
+    # 관리형 ANIMA 의 Euler + SPD - 추출기가 그래프로 정한 euler_spd 를 원본 청크의 'euler'(v2.0.67 이하는 SPD 가 늘
+    # 켜져 있었다)가 덮지 않게. [설정 복원]이 이 요약을 먼저 읽는다(Codex 재리뷰 2026-11-06).
+    if extracted_params.get("sampler") == "euler_spd" and summary.get("sampler") == "euler":
+        summary["sampler"] = "euler_spd"
 
     raw_payload: dict[str, Any] = {
         "image": {

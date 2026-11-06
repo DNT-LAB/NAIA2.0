@@ -1433,6 +1433,11 @@ async def _maybe_continue_auto_generation(
 
     request_id = f"auto-{uuid.uuid4().hex}"
     prompt = str(params.get("input") or params.get("_raw_input") or context.prompt_text or "")
+    # 관리형 ANIMA 참조의 캐릭터 문장은 snapshot 이 그 생성에 붙인 것이다 - 다음 생성은 지금의 칸으로 다시 싣는다
+    # (그대로 두면 칸을 바꿨을 때 옛 문장과 새 문장이 함께 · 참조를 끄면 옛 문장이 남는다 - Codex 재리뷰 2026-11-06)
+    if isinstance(params.get("_anima_reference"), dict):
+        from core.anima_engine.reference import strip_appended
+        prompt = strip_appended(prompt, params["_anima_reference"])
     negative = base_negative
 
     # Storyteller 다음 페이지의 스텝별 해상도 계획. carry(의상/배경 유지)는 더 이상

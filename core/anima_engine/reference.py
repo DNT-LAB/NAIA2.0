@@ -153,15 +153,27 @@ def with_block(text: str, block: str) -> str:
     return f"{head}, {block}" if head else block
 
 
+def strip_appended(text, captured) -> str:
+    """지난번 snapshot 이 **붙인** 캐릭터 문장을 글 끝에서 걷는다(재시도 · Prompt Fixed 자동 생성이 지난 글을 다시 쓸 때).
+    사용자가 직접 적어 둔 같은 문장(appended=False)은 건드리지 않는다. 옛 큐 항목(appended 없음)은 붙였을 때만
+    prompt 를 적었다 - 붙인 것으로 본다."""
+    text = str(text or "")
+    if not isinstance(captured, dict):
+        return text
+    block = captured.get("prompt") or ""
+    if not block or not captured.get("appended", True) or not text.endswith(block):
+        return text
+    return text[:-len(block)].rstrip().rstrip(",").rstrip()
+
+
 def snapshot(context, params: dict) -> None:
     """큐에 넣는 순간의 참조 - 기다리는 동안 칸을 바꿔도 이 생성은 그대로(LoRA · 모델과 같은 규칙).
     캐릭터 에셋처럼 '레퍼런스를 붙이지 마라' 고 표시한 요청은 건너뛴다(NAI Char Ref 와 같은 표식).
     칸의 캐릭터 프롬프트도 이때 읽어 input 끝에 싣는다(기다리는 동안 글을 고쳐도 이 생성은 그대로)."""
     captured = params.pop("_anima_reference", None)
     # 같은 요청을 다시 잡으면(재시도 등) 지난번에 실은 글부터 걷는다 - 겹쳐 붙지 않게
-    previous = captured.get("prompt") if isinstance(captured, dict) else ""
-    if previous and isinstance(params.get("input"), str) and params["input"].endswith(previous):
-        params["input"] = params["input"][:-len(previous)].rstrip().rstrip(",").rstrip()
+    if isinstance(params.get("input"), str):
+        params["input"] = strip_appended(params["input"], captured)
     if params.get("_skip_character_reference_late_binding"):
         return
     hashes = enabled_hashes(context)
@@ -173,6 +185,7 @@ def snapshot(context, params: dict) -> None:
         if block:
             before = str(params.get("input") or "")
             params["input"] = with_block(before, block)
+            # 블록은 늘 적는다 - 시퀀스의 다른 컷이 이것을 다시 싣는다(첫 컷에 이미 들어 있어도 · Codex 재리뷰 2026-11-06)
             if params["input"] != before:
                 captured["prompt"] = block
     params["_anima_reference"] = captured

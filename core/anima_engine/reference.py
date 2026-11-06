@@ -186,8 +186,8 @@ def snapshot(context, params: dict) -> None:
             before = str(params.get("input") or "")
             params["input"] = with_block(before, block)
             # 블록은 늘 적는다 - 시퀀스의 다른 컷이 이것을 다시 싣는다(첫 컷에 이미 들어 있어도 · Codex 재리뷰 2026-11-06)
-            if params["input"] != before:
-                captured["prompt"] = block
+            captured["prompt"] = block
+            captured["appended"] = params["input"] != before
     params["_anima_reference"] = captured
 
 

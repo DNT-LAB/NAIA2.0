@@ -573,6 +573,17 @@ class AnimaInstallJob:
             raise ManagedEngineError("PATH_INVALID")
         if not base.exists():
             return
+        active = base / manifest.RUNTIME_ID
+        # promote 도중 꺼졌으면(active -> previous 뒤 · staging -> active 전) previous 가 하나뿐인 쓸 수 있는 런타임이다 -
+        # 지우기 전에 되돌린다(Codex 재리뷰 2026-11-06).
+        if not runtime_tree_ok(active):
+            previous = sorted((path for path in base.iterdir()
+                               if path.name.startswith(manifest.RUNTIME_ID + ".previous-") and runtime_tree_ok(path)),
+                              key=lambda path: path.stat().st_mtime, reverse=True)
+            if previous:
+                if active.exists() or active.is_symlink():
+                    rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
+                rename_with_retry(previous[0], active)
         for path in base.iterdir():
             if path.name.startswith((manifest.RUNTIME_ID + ".previous-", manifest.RUNTIME_ID + ".failed-")):
                 self._remove_staging(path)
@@ -705,18 +716,36 @@ class AnimaInstallJob:
                           message=getattr(exc, "message", "ANIMA 준비에 실패했습니다."), detail=getattr(exc, "detail", "") or str(exc),
                           retryable=code not in ("UNSUPPORTED_OS", "GPU_UNSUPPORTED"))
         finally:
+            # 셋은 서로 막지 않는다 - 하나가 실패해도(잠금 · 읽기 전용) 나머지는 한다. 백업 되돌리기가 먼저다: staging 이
+            # 안 지워져 예외가 나도 쓰던 런타임은 제자리에 돌아와야 한다(Codex 재리뷰 2026-11-06). 못 지운 staging 은
+            # 다음 설치의 extract 가, 못 되돌린 previous 는 다음 시작의 _cleanup_backups 가 처리한다.
             try:
                 if not success and self._runtime:
                     self._runtime.stop()
-                if staging.exists():
-                    self._remove_staging(staging)
+            except Exception as exc:
+                print(f"ANIMA: runtime stop after a failed install failed ({type(exc).__name__})", flush=True)
+            try:
                 if not success and backup and backup.exists():
                     if active.exists():
                         rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
                     rename_with_retry(backup, active)
-            finally:
-                with REGISTRY_LOCK:
-                    INSTALLING.discard(str(root))
+            except Exception as exc:
+                print(f"ANIMA: runtime backup restore failed ({type(exc).__name__})", flush=True)
+            try:
+                if staging.exists():
+                    self._remove_staging(staging)
+            except Exception as exc:
+                print(f"ANIMA: staging cleanup failed ({type(exc).__name__})", flush=True)
+            with REGISTRY_LOCK:
+                INSTALLING.discard(str(root))
+
+
+def runtime_tree_ok(path: Path) -> bool:
+    """폴더가 다 푼 런타임인가(extract 의 판정과 같다) - 링크 · 정션은 아니다."""
+    if path.is_symlink() or getattr(path, "is_junction", lambda: False)():
+        return False
+    rt = path / "ComfyUI_windows_portable"
+    return (rt / "python_embeded/python.exe").is_file() and (rt / "ComfyUI/main.py").is_file()
 
 
 # 갓 푼 런타임 폴더(수천 개의 exe · dll)는 백신 실시간 검사가 잠깐 쥔다 - 그동안 폴더 이름 바꾸기가 WinError 5 로

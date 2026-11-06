@@ -25,6 +25,8 @@ const MIN_ROWS = {prompt: 4, uc: 2};
 // 그리드가 침범하면 안 되는 아래 경계. 결과 정보 패널("GENERATION INFO")이다.
 const BOTTOM_ANCHOR = '#resultInfoPanel';
 const BOTTOM_GAP = 10;
+// GENERATION INFO 가 숨었을 때(휴대폰 확대보기) 무대 바닥에 남겨 둘 높이 - 새싹 · 작가 패널 줄.
+const ZOOM_BOTTOM_ROW = 56;
 // 그림을 패널 오른쪽 끝에서 이만큼 띄운다.
 const VIEWER_GAP = 8;
 // 무대의 최소 크기. 이보다 얕은 뷰어는 POS 편집을 담기엔 너무 작다 - 그때만
@@ -1191,7 +1193,11 @@ export function createCharacterQuickPanel({
     const grid = mount && mount.querySelector('.cq-grid');
     if (!grid) return;
     const anchor = document.querySelector(BOTTOM_ANCHOR);
-    const limit = anchor ? anchor.getBoundingClientRect().top : window.innerHeight;
+    // ⚠️ 휴대폰 확대보기(⤢)는 GENERATION INFO 를 숨긴다 - 숨은 요소의 top 은 0 이라 그리드가 최소 120px 로
+    //    잘렸다(사용자 제보 2026-11-06: C5 까지만 보임). 그때는 결과 무대 바닥에서 아래 단추 줄(새싹 · 작가)만큼 띄운다.
+    const limit = anchor && anchor.getClientRects().length
+      ? anchor.getBoundingClientRect().top
+      : host().getBoundingClientRect().bottom - ZOOM_BOTTOM_ROW;
     const top = grid.getBoundingClientRect().top;
     // 아래에 랜덤 캐릭터 줄이 붙어 있으면 그만큼 덜 자란다.
     const roll = mount.querySelector('.cq-roll');

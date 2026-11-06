@@ -634,8 +634,11 @@ export function createTagAssistController({
     const viewLeft = vv ? vv.offsetLeft : 0;
     const viewWidth = vv ? vv.width : window.innerWidth;
     const viewHeight = vv ? vv.height : window.innerHeight;
-    const expanded = !acMode && dockExpanded;
-    tagTooltip.classList.toggle('dock-collapsed', !acMode && !dockExpanded);
+    // 접고 펴기는 태그 카드에만. '자동완성 준비 중…' 안내는 acMode 가 꺼져 있어도 ac-mode 판이다 - 변수로 가르면
+    // 접힌 카드 규칙이 그 안내까지 숨겨 빈 띠가 됐다(Codex 리뷰 2026-11-06).
+    const isCard = !tagTooltip.classList.contains('ac-mode');
+    const expanded = isCard && dockExpanded;
+    tagTooltip.classList.toggle('dock-collapsed', isCard && !dockExpanded);
     tagTooltip.classList.toggle('dock-expanded', expanded);
     const maxHeight = Math.max(80, Math.round(viewHeight * (expanded ? 0.5 : 0.4)));
     tagTooltip.style.left = `${Math.round(viewLeft)}px`;

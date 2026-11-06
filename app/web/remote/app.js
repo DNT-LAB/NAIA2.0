@@ -3124,7 +3124,7 @@ const characterPanelReady = import('./js/features/characterPanel.mjs?v=20261021-
 // ⚠️ `?v=` 는 이 파일을 고칠 때마다 **함께 바꾼다.** 안 바꾸면 브라우저가 옛
 //    모듈을 계속 쓴다 - 서버가 새 코드를 줘도 import 는 URL 로 캐시된다(실측:
 //    ResizeObserver 를 넣었는데 새로고침해도 안 붙었다).
-const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261105-ipm3')
+const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v=20261106-zoomfit1')
   .then(({createCharacterQuickPanel}) => {
     characterQuickPanel = createCharacterQuickPanel({
       document, escHtml,
@@ -3599,7 +3599,7 @@ const tagSearchReady = import('./js/features/tagSearch.mjs?v=20260609-scrollfix1
   .catch(error => {
     console.error('Failed to initialize tag search module', error);
   });
-const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20260606-mobile-ui3')
+const mobileViewportReady = import('./js/features/mobileViewport.mjs?v=20261106-rv1')
   .then(({createMobileViewportController}) => {
     mobileViewportControl = createMobileViewportController({
       window,
@@ -7340,7 +7340,7 @@ function closeMobileRemote() {
 let mobileArtistListReady = null;
 function ensureMobileArtistList() {
   if (!mobileArtistListReady) {
-    mobileArtistListReady = import('./js/features/mobileArtistList.mjs?v=20261106-mal11')
+    mobileArtistListReady = import('./js/features/mobileArtistList.mjs?v=20261106-rv1')
       .then(({createMobileArtistList}) => createMobileArtistList({
         document, window, escHtml, showToast, storage: localStorage,
         // 태그 복사 서식(PC 탭과 같다) - NAI = artist: · ANIMA = @ · 그 밖 = 이름
@@ -7371,6 +7371,9 @@ const MOBILE_ZOOM_KEY = 'naia.mobileZoom';
 function setMobileZoom(on) {
   document.body.classList.toggle('mobile-zoom', Boolean(on));
   $('mobileZoomBtn')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+  // 결과 무대 높이가 바뀐다 - 그 높이로 자리를 재는 것들(캐릭터 목록 높이 · 무대)이 다시 재게 한다. 창은 그대로라
+  // 진짜 resize 는 오지 않는다(2026-11-06 - 켜도 캐릭터 목록이 옛 높이에 남았다).
+  window.dispatchEvent(new Event('resize'));
   try { localStorage.setItem(MOBILE_ZOOM_KEY, on ? '1' : ''); } catch (_) { /* 기억 못 해도 지금 화면은 바뀐다 */ }
 }
 function toggleMobileZoom() {
@@ -15928,7 +15931,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261106-dock1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261106-rv1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

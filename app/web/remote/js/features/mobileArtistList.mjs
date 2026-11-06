@@ -43,7 +43,7 @@ export function createMobileArtistList({
   let state = null;
   let items = [];
   let selected = null;
-  let page = 0;          // 마지막으로 읽은 쪽(0 = 아직)
+  let page = 0;          // 읽은 쪽 수(0 = 아직). 서버 쪽 번호는 0 부터라 다음에 물을 쪽 번호와 같다.
   let totalPages = 0;
   let total = 0;
   let loading = false;
@@ -283,7 +283,7 @@ export function createMobileArtistList({
     els.scroll.scrollTop = 0;
     void loadNext();
     // 연결이 켜져 있으면 뽑는 목록도 지금 보는 목록을 따라간다.
-    if (linkOn) void setLink(true, {quiet: true});
+    syncLinkPool();
   }
 
   function nearBottom() {
@@ -295,20 +295,28 @@ export function createMobileArtistList({
     if (loading || !panel?.isOpen() || panel.isCollapsed()) return;
     if (page > 0 && page >= totalPages) return;
     const mine = serial;
+    const want = page;     // 서버 쪽 번호는 0 부터(Codex 리뷰 2026-11-06 - 1 부터 물어 첫 48명이 빠지고 끝 쪽이 되풀이됐다)
+    let ok = false;
     loading = true;
     renderStatus(page ? `${count(total)}명 · 더 읽는 중…` : '불러오는 중…');
     try {
-      const response = await fetch(listUrl(page + 1), {cache: 'no-store'});
+      const response = await fetch(listUrl(want), {cache: 'no-store'});
       const data = await response.json().catch(() => ({}));
       if (mine !== serial) return;
       if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
-      const start = items.length;
-      const added = Array.isArray(data.items) ? data.items : [];
-      items.push(...added);
-      page = Number(data.page || page + 1);
       totalPages = Number(data.total_pages || 0);
       total = Number(data.total || 0);
-      els.grid.insertAdjacentHTML('beforeend', added.map((item, i) => cardHtml(item, start + i)).join(''));
+      // 그새 목록이 줄어 서버가 마지막 쪽으로 당겨 답하면(page < want) 이미 본 줄이다 - 붙이지 않고 끝낸다.
+      if (Number(data.page ?? want) !== want) {
+        page = totalPages;
+      } else {
+        const start = items.length;
+        const added = Array.isArray(data.items) ? data.items : [];
+        items.push(...added);
+        page = want + 1;
+        els.grid.insertAdjacentHTML('beforeend', added.map((item, i) => cardHtml(item, start + i)).join(''));
+      }
+      ok = true;
       renderStatus();
     } catch (error) {
       if (mine !== serial) return;
@@ -317,7 +325,8 @@ export function createMobileArtistList({
       if (mine === serial) loading = false;
     }
     // 읽는 동안 이미 끝까지 내렸거나 첫 쪽이 화면을 다 못 채우면(창을 키움) 스크롤이 다시 안 온다 - 직접 이어 읽는다.
-    if (mine === serial && page < totalPages && nearBottom()) void loadNext();
+    // 실패했을 때는 잇지 않는다 - 잇면 서버가 앓는 동안 끝없이 다시 묻는다(Codex 리뷰). 다시 내리면 또 묻는다.
+    if (ok && mine === serial && page < totalPages && nearBottom()) void loadNext();
   }
 
   function cardHtml(item, index) {
@@ -541,8 +550,22 @@ export function createMobileArtistList({
   }
 
   /** 켜기 = main_link + 뽑는 목록을 이 판의 목록으로(출처 = 아티스트 탭 · 구간 전체 · 매칭 검색 없음). 끄기 = main_link 만. */
+  // 보내는 중에 들어온 바꿈은 버리지 않고 하나만 남겨 두었다가 끝나면 보낸다(Codex 리뷰 2026-11-06 - 목록 A 를 보내는 중에
+  // B 로 바꾸면 B 가 버려져 화면은 B 인데 Random 은 A 에서 뽑았다). 나중 것이 이긴다. 목록 따라가기(sync)는 그때의 스위치를 본다.
+  let linkPending = null;
+  function syncLinkPool() {
+    if (linkBusy) {
+      if (!linkPending) linkPending = {sync: true};
+      return;
+    }
+    if (linkOn) void setLink(true, {quiet: true});
+  }
+
   async function setLink(on, {quiet = false} = {}) {
-    if (linkBusy && quiet) return;
+    if (linkBusy) {
+      linkPending = {on, quiet};
+      return;
+    }
     linkBusy = true;
     const randomTools = on
       ? {main_link: true, pool: currentPool(), source: {kind: 'tab', id: ''}, range: [0, 100]}
@@ -562,6 +585,10 @@ export function createMobileArtistList({
       showToast?.(`연결을 바꾸지 못했습니다: ${error.message || error}`, 'error');
     } finally {
       linkBusy = false;
+      const next = linkPending;
+      linkPending = null;
+      if (next?.sync) syncLinkPool();
+      else if (next) void setLink(next.on, {quiet: next.quiet});
     }
   }
 

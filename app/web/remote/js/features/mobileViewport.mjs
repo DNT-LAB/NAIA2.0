@@ -23,7 +23,9 @@ export function createMobileViewportController({
       relayoutFloatingPanels();
       positionTagTooltip();
       const tagTooltip = getTagTooltip();
-      if (tagTooltip) {
+      // 휴대폰 자동완성 띠(.phone-dock)는 tagAssist 가 키보드 윗변에 붙인다 - 여기서 위로 끌어올리면 안 된다
+      // (Codex 리뷰 2026-11-06 - 두 처리기의 등록 순서에 따라 띠가 화면 맨 위로 갔다).
+      if (tagTooltip && !tagTooltip.classList.contains('phone-dock')) {
         tagTooltip.style.top = (visualViewport.offsetTop + 4) + 'px';
         tagTooltip.style.maxHeight = Math.min(visualViewport.height * 0.4, 200) + 'px';
       }
@@ -60,7 +62,7 @@ export function createMobileViewportController({
       relayoutFloatingPanels();
       positionTagTooltip();
       const tagTooltip = getTagTooltip();
-      if (tagTooltip) {
+      if (tagTooltip && !tagTooltip.classList.contains('phone-dock')) {
         tagTooltip.style.top = '';
         tagTooltip.style.maxHeight = '';
       }

@@ -3087,7 +3087,7 @@ const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize save directory panel module', error);
   });
-const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats.mjs?v=20260829-mark0')
+const sessionGenerationStatsReady = import('./js/features/sessionGenerationStats.mjs?v=20261106-norate1')
   .then(({createSessionGenerationStats}) => {
     sessionGenerationStats = createSessionGenerationStats({
       statsGenCount,

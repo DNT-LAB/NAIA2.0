@@ -1,32 +1,17 @@
+// 이번 세션의 생성 수. 분당 생성 속도 `(1.9/m)` 는 거뒀다(사용자 지정 2026-11-06 - "거추장스러움").
+// 수는 남긴다 - 휴대폰에서는 이 알약이 히스토리 레일을 여는 단추다.
 export function createSessionGenerationStats({
   statsGenCount,
-  now = () => Date.now(),
 }) {
   let total = 0;
-  const timestamps = [];
 
   function update() {
     if (!statsGenCount) return;
-    const current = now();
-    while (timestamps.length > 0 && timestamps[0] < current - 3600000) {
-      timestamps.shift();
-    }
-
-    const tenMinAgo = current - 600000;
-    const recent = timestamps.filter(timestamp => timestamp > tenMinAgo);
-    let rateStr = '';
-    if (recent.length >= 2) {
-      const windowMs = current - recent[0];
-      if (windowMs >= 60000) {
-        rateStr = ' (' + (recent.length / (windowMs / 60000)).toFixed(1) + '/m)';
-      }
-    }
-    statsGenCount.textContent = total + rateStr;
+    statsGenCount.textContent = String(total);
   }
 
   function record() {
     total += 1;
-    timestamps.push(now());
     update();
   }
 

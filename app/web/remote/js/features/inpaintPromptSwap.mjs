@@ -517,6 +517,11 @@ export function createInpaintPromptSwap({
       });
       buildContent();
       panel.body.appendChild(content);
+      // 접힌 동안 미리보기가 바뀌면 그때의 `fitHeight` 는 건너뛴다 - 펼쳐 내용이 다시 놓일 때 맞춘다(Codex 4차).
+      // 내용의 높이는 창 높이와 무관하게(본문이 스크롤 상자) 정해지므로 맞춘 결과가 다시 이 관찰을 부르지 않는다.
+      if (typeof win.ResizeObserver === 'function') {
+        new win.ResizeObserver(() => fitHeight()).observe(content);
+      }
       return panel;
     })();
     try { return await opening; } finally { opening = null; }

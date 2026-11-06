@@ -313,7 +313,9 @@ def compose_swap(image_prompt, *, source_pre, source_post, target_pre, target_po
 
 
 def _count_tags(text):
-    return sum(1 for event in _events(str(text or "")) if event.kind == "TAG")
+    # 다른 칸에서 연 가중치를 닫는 `}` · `]` · `::` 만 남은 칸은 붙는 태그가 아니다(Codex 4차: 뒤 태그 1개 오안내).
+    return sum(1 for event in _events(str(text or ""))
+               if event.kind == "TAG" and event.body.strip(" {}[]():"))
 
 
 def guess_source_preset(image_prompt, presets, *, known=frozenset()) -> dict | None:

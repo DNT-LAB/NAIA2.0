@@ -2541,6 +2541,10 @@ function applyVirtualMainPrompt() {
 }
 
 let sessionNegDeferred = false;   // 칸에 초점이 있어 건너뛴 서버 값이 있다
+// 이 탭이 친 세션 네거티브 중 **서버가 아직 되돌려 주지 않은 글**. 그 전에 오는 상태는 보내기 전의 옛 값일 수 있다 -
+// 그것으로 칸을 덮으면 친 글이 사라지고, 이어 치면 옛 글 + 새 글자가 나간다(Codex 4차). 4초가 지나면 놓아 준다.
+let sessionNegSent = null;
+let sessionNegSentAt = 0;
 /** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
  *
  *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
@@ -2560,14 +2564,18 @@ function applyVirtualNegative(session) {
   // 서버 값이 바뀌면(스왑 · 원본 · 다른 탭) 따라간다 - 단 치는 중이거나 아직 안 보낸 글이 있으면 덮지 않는다.
   if (on) {
     const next = String(session.negative_prompt || '');
-    if (document.activeElement === box
+    if (sessionNegSent !== null && (next === sessionNegSent || Date.now() - sessionNegSentAt > 4000)) sessionNegSent = null;
+    if (document.activeElement === box || sessionNegSent !== null
         || (pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
       // 건너뛴 새 값은 칸을 떠날 때 맞춘다 - 안 그러면 다른 탭이 바꾼 글 대신 옛 글이 남고 생성은 새 글로 나간다(Codex 3차).
-      if (box.value !== next) sessionNegDeferred = true;
+      sessionNegDeferred = box.value !== next;
     } else {
       sessionNegDeferred = false;
       if (box.value !== next) box.value = next;
     }
+  } else {
+    sessionNegDeferred = false;
+    sessionNegSent = null;
   }
   // 토큰 수는 보이는 칸을 센다(`tokenDisplay` 가 세션 칸을 먼저 본다) - 켜고 끌 때 · 서버 값이 바뀔 때 다시 센다.
   // ⚠️ 값을 넣은 **뒤에** 센다 - 앞에서 세면 다른 탭이 바꾼 새 글을 보여 주면서 수는 옛 글의 것이다(Codex 재리뷰).
@@ -3443,7 +3451,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   });
 // 인페인트 프롬프트 스왑(사용자 지정 2026-11-03) - 칩 줄 + 설정 창. 상태는 img2img 모듈 상태를 그대로 읽는다.
 let inpaintPromptSwap = null;
-const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-ipb3')
+const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-ipb4')
   .then(({createInpaintPromptSwap}) => {
     inpaintPromptSwap = createInpaintPromptSwap({
       document, window, escHtml, showToast,
@@ -16002,7 +16010,11 @@ function syncNegativeMirror() {
 }
 // 세션 네거티브 칸은 세션으로만 보낸다(0.5초 묶음 - 팝업의 네거티브 칸과 같은 길).
 $('sessionNegEdit')?.addEventListener('input', event => {
-  if (virtualCharacterSession()) onModTextEdit('img2img', 'negative_prompt', event.target.value);
+  if (virtualCharacterSession()) {
+    sessionNegSent = event.target.value;
+    sessionNegSentAt = Date.now();
+    onModTextEdit('img2img', 'negative_prompt', event.target.value);
+  }
   updateNegativeTokenEstimate();
 });
 $('sessionNegEdit')?.addEventListener('blur', () => {

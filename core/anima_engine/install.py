@@ -567,23 +567,36 @@ class AnimaInstallJob:
         if staging.exists():
             remove_tree(staging)
 
+    def restore_interrupted_promote(self) -> bool:
+        """promote 도중 꺼졌으면(active -> previous 뒤 · staging -> active 전) previous 가 하나뿐인 쓸 수 있는 런타임이다 -
+        active 로 되돌린다(Codex 재리뷰 2026-11-06). 설치 라우트는 이것을 공간 검사(inspect) · 영수증 확인보다 먼저 부른다 -
+        이름 하나 바꾸면 되는 상태를 '풀 공간 부족' 으로 막지 않게. 되돌렸으면 True."""
+        if not self.settings.engine_root:
+            return False
+        base = Path(self.settings.engine_root).resolve() / "runtime"
+        if base.resolve() != base:
+            raise ManagedEngineError("PATH_INVALID")
+        active = base / manifest.RUNTIME_ID
+        if not base.exists() or runtime_tree_ok(active):
+            return False
+        previous = sorted((path for path in base.iterdir()
+                           if path.name.startswith(manifest.RUNTIME_ID + ".previous-") and runtime_tree_ok(path)),
+                          key=lambda path: path.stat().st_mtime, reverse=True)
+        if not previous:
+            return False
+        if active.exists() or active.is_symlink():
+            rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
+        rename_with_retry(previous[0], active)
+        return True
+
     def _cleanup_backups(self):
         base = Path(self.settings.engine_root).resolve() / "runtime"
         if base.resolve() != base:
             raise ManagedEngineError("PATH_INVALID")
         if not base.exists():
             return
-        active = base / manifest.RUNTIME_ID
-        # promote 도중 꺼졌으면(active -> previous 뒤 · staging -> active 전) previous 가 하나뿐인 쓸 수 있는 런타임이다 -
-        # 지우기 전에 되돌린다(Codex 재리뷰 2026-11-06).
-        if not runtime_tree_ok(active):
-            previous = sorted((path for path in base.iterdir()
-                               if path.name.startswith(manifest.RUNTIME_ID + ".previous-") and runtime_tree_ok(path)),
-                              key=lambda path: path.stat().st_mtime, reverse=True)
-            if previous:
-                if active.exists() or active.is_symlink():
-                    rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
-                rename_with_retry(previous[0], active)
+        # 지우기 전에 - 하나뿐인 런타임일 수 있다
+        self.restore_interrupted_promote()
         for path in base.iterdir():
             if path.name.startswith((manifest.RUNTIME_ID + ".previous-", manifest.RUNTIME_ID + ".failed-")):
                 self._remove_staging(path)

@@ -87,15 +87,24 @@ class ImageMetadataExtractor:
                 result.update(info)
             
             # 1. parameters 필드 확인 (Stable Diffusion WebUI) - 우선순위 높음
+            graph_sampler = None
             if any(key in info for key in ('prompt', 'workflow', 'workflow_api')):
                 parsed = ImageMetadataExtractor._parse_comfyui_metadata(info, img)
                 if parsed:
                     result.update(parsed)
+                    graph_sampler = (parsed.get('parameters') or {}).get('sampler')
 
             if any(key in info for key in ('naia_generation_params', 'naia_prompt_context', 'naia_api_metadata')):
                 parsed = ImageMetadataExtractor._parse_naia_metadata(info, img)
                 if parsed:
                     result.update(parsed)
+                    # 관리형 ANIMA 의 Euler + SPD - 그래프가 SPD 를 켠 채 돌았으면(euler_spd) NAIA 청크의 'euler'
+                    # (SPD 가 늘 켜져 있던 v2.0.67 이하)로 덮지 않는다. 다시 생성이 SPD 를 잃지 않게(Codex 리뷰 2026-11-06).
+                    merged = result.get('parameters')
+                    if graph_sampler == 'euler_spd' and isinstance(merged, dict):
+                        for key in ('sampler', 'sampler_name'):
+                            if merged.get(key) == 'euler':
+                                merged[key] = 'euler_spd'
 
             if 'parameters' in info:
                 parsed = ImageMetadataExtractor._parse_parameters(info['parameters'])

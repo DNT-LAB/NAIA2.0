@@ -499,6 +499,10 @@ class HeadlessGenerationService:
         # 먼저 잡히고, 값 없는 컷이 end 의 값을 집는다(Codex 리뷰). prompt_sets 와 1:1 이다.
         cut_sources = list(parsed.get("sequences") or [])
         seed_fixed = self._to_bool(params.get("seed_fixed"))
+        # 관리형 ANIMA 참조의 캐릭터 문장(reference.snapshot 이 input 끝에 실었다) - 컷 글로 input 을 바꾸면 빠지므로
+        # 컷마다 다시 싣는다. 참조 칸(해시)은 params 의 _anima_reference 로 그대로 넘어간다(Codex 리뷰 2026-11-06).
+        captured_ref = params.get("_anima_reference")
+        ref_block = captured_ref.get("prompt") if isinstance(captured_ref, dict) else ""
         shared_nai: tuple | None = None
         shared_capture: dict | None = None
         first: HeadlessGenerationDispatch | None = None
@@ -516,8 +520,11 @@ class HeadlessGenerationService:
             own = str(cut_sources[index - 1]) if index - 1 < len(cut_sources) else ""
             cut_width, cut_height = self._sequence_resolution(own, params, fallback=(width, height))
             text = self._SEQ_RESOLUTION_RE.sub("", text).strip().strip(",").strip()
-            cut["input"] = text
             cut["_raw_input"] = text
+            if ref_block:
+                from core.anima_engine.reference import with_block
+                text = with_block(text, ref_block)
+            cut["input"] = text
             cut["width"] = cut_width
             cut["height"] = cut_height
             cut["resolution"] = f"{cut_width} x {cut_height}"

@@ -1324,7 +1324,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   function dndTypes(event) {
     const types = event.dataTransfer?.types || [];
     const has = type => Array.prototype.indexOf.call(types, type) >= 0;
-    return {item: has(DND_ITEM), cat: has(DND_CAT), row: has(DND_ROW) || drag?.type === 'row'};
+    return {item: has(DND_ITEM), cat: has(DND_CAT), row: has(DND_ROW)};
   }
 
   // ANIMA 활성 칸 끌어 놓기 - 놓은 줄의 위/아래 반으로 앞/뒤를 정한다. 보낼 때는 해시 + 새 자리(백엔드 move_frame).
@@ -1449,7 +1449,6 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       const target = rowDropTarget(event);
       let hash = '';
       try { hash = event.dataTransfer.getData(DND_ROW) || ''; } catch (_) { hash = ''; }
-      hash = hash || (drag?.type === 'row' ? drag.hash : '');
       onDragEnd();
       if (target && hash) dropRow(hash, target);
       return;

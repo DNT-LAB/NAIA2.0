@@ -8,7 +8,9 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import time
 import traceback
 import uuid
@@ -563,7 +565,7 @@ class AnimaInstallJob:
         if base.resolve() != base or staging.is_symlink() or getattr(staging, "is_junction", lambda: False)() or staging.resolve().parent != base:
             raise ManagedEngineError("PATH_INVALID", "스테이징 경로를 확인해 주세요.")
         if staging.exists():
-            shutil.rmtree(staging)
+            remove_tree(staging)
 
     def _cleanup_backups(self):
         base = Path(self.settings.engine_root).resolve() / "runtime"
@@ -648,8 +650,8 @@ class AnimaInstallJob:
                 if fresh:
                     if active.exists():
                         backup = active.with_name(active.name + ".previous-" + uuid.uuid4().hex)
-                        active.rename(backup)
-                    staging.rename(active)
+                        rename_with_retry(active, backup, cancel=self._cancel)
+                    rename_with_retry(staging, active, cancel=self._cancel)
             self._phase("promote", promote)
             def start():
                 self._runtime = self.runtime_factory(root, manifest.RUNTIME_ID)
@@ -710,11 +712,61 @@ class AnimaInstallJob:
                     self._remove_staging(staging)
                 if not success and backup and backup.exists():
                     if active.exists():
-                        active.rename(active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
-                    backup.rename(active)
+                        rename_with_retry(active, active.with_name(active.name + ".failed-" + uuid.uuid4().hex))
+                    rename_with_retry(backup, active)
             finally:
                 with REGISTRY_LOCK:
                     INSTALLING.discard(str(root))
+
+
+# 갓 푼 런타임 폴더(수천 개의 exe · dll)는 백신 실시간 검사가 잠깐 쥔다 - 그동안 폴더 이름 바꾸기가 WinError 5 로
+# 실패한다(최초 설치 실측 2026-11-06: 4GB 를 다 받고 푼 뒤 promote 에서 실패 · 0.1초 뒤엔 그대로 됐다). 쥔 것이 놓일 때까지
+# 잠깐씩 기다렸다 다시 바꾼다. 다른 까닭의 실패(경로 없음 등)는 곧바로 올린다.
+RENAME_RETRY_SECONDS = 60.0
+
+
+def rename_with_retry(source: Path, target: Path, *, cancel=None, budget=None, sleep=time.sleep, clock=time.monotonic):
+    deadline = clock() + (RENAME_RETRY_SECONDS if budget is None else budget)
+    delay = 0.25
+    while True:
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if clock() + delay > deadline:
+                raise
+        if cancel is not None and cancel.is_set():
+            raise InterruptedError()
+        sleep(delay)
+        delay = min(delay * 2, 4.0)
+
+
+def _clear_readonly_and_retry(func, path, _exc):
+    """ComfyUI 묶음의 .git/objects/pack/* 는 읽기 전용이다 - Windows 의 rmtree 는 그 파일을 못 지운다(WinError 5).
+    속성을 풀고 한 번 더 지운다. 그래도 안 되면(잠금) 그 예외가 remove_tree 의 다시 시도로 간다."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def remove_tree(path: Path, *, budget=None, sleep=time.sleep, clock=time.monotonic):
+    """런타임 폴더 지우기 - 읽기 전용 파일까지(최초 설치 실측 2026-11-06: 그것 때문에 한 번 실패한 설치는 [다시 시작]이
+    지난 staging 을 못 지워 매번 실패했다). 백신이 잠깐 쥔 파일은 rename_with_retry 와 같이 기다렸다 다시."""
+    deadline = clock() + (RENAME_RETRY_SECONDS if budget is None else budget)
+    delay = 0.25
+    while True:
+        try:
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(path, onexc=_clear_readonly_and_retry)
+            else:
+                shutil.rmtree(path, onerror=_clear_readonly_and_retry)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if clock() + delay > deadline:
+                raise
+        sleep(delay)
+        delay = min(delay * 2, 4.0)
 
 
 def app_version():

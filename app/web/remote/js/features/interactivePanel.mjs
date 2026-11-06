@@ -1498,7 +1498,12 @@ export function createInteractivePanel({
 
   // 팝업의 CSS 기본 top. 버튼 줄은 여기에 깔고 팝업을 그 아래로 내린다.
   const PANEL_TOP = 46;
-  const PANEL_LEFT = 494;   // .ia-panel 의 CSS 기본 left
+  // .ia-panel 의 CSS 기본 left = 왼쪽 칸 끝 + 14. 왼쪽 칸 폭이 화면에 따라 줄어서(--left-col,
+  // 2026-11-06) 고정 494 가 아니라 그때그때 잰다. 넓은 PC 에서는 494 그대로다.
+  const panelLeft = () => {
+    const rect = document.querySelector('.control-panel')?.getBoundingClientRect();
+    return rect && rect.width ? Math.round(rect.right) + 14 : 494;
+  };
   // 팝업 가로. **CSS 가 아니라 여기가 실제로 정한다** — positionPopup/
   // positionPresetPanel 이 인라인 width 를 넣으므로 style.css 의 width 는 초기값일
   // 뿐이다(CSS 만 380 으로 줄였더니 화면은 560 그대로였다).
@@ -2252,7 +2257,7 @@ export function createInteractivePanel({
     // 컬럼 여백을 파고든다(실측: 컬럼 바깥 끝 480). `.ia-panel` 의 CSS 기본
     // left(494)가 이미 그 여백을 감안한 값이라 하한으로 쓴다.
     const box = blocksMount.getBoundingClientRect();
-    const left = Math.max(Math.round(box.right + 12), PANEL_LEFT);
+    const left = Math.max(Math.round(box.right + 12), panelLeft());
     host.style.left = left + 'px';
     host.style.top = PANEL_TOP + 'px';
     // 오른쪽 끝은 **히스토리 레일 앞**까지다. 예전에는 `window.innerWidth` 에서
@@ -4413,7 +4418,7 @@ export function createInteractivePanel({
     }
     const W = Math.min(PANEL_W, vw - 32);
     const host = blocksMount.getBoundingClientRect();
-    let left = Math.max(host.right + 12, PANEL_LEFT);
+    let left = Math.max(host.right + 12, panelLeft());
     if (left + W > vw - 12) left = Math.max(12, vw - 12 - W);
     presetPanel.style.width = W + 'px';
     presetPanel.style.left = left + 'px';
@@ -6424,7 +6429,7 @@ export function createInteractivePanel({
     // 오른쪽 반투명 패널이 받으므로 역시 좁다(사용자 결정 2026-08-17).
     const wide = !!openThumbAxis;
     const host = blocksMount.getBoundingClientRect();
-    let left = Math.max(host.right + 12, PANEL_LEFT);
+    let left = Math.max(host.right + 12, panelLeft());
     let W = Math.min(wide ? PANEL_W : PANEL_W_IDLE, vw - 32);
     // ⚠️ **잴 수 없으면 넓히기'만' 건너뛴다.** 다른 탭(Metadata·Studio…)이 떠 있으면
     // 결과 판이 `display:none` 이라 뷰어 폭이 0 이다. 그 0 으로 `spare` 를 구하면 항상

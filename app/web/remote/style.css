@@ -12143,12 +12143,12 @@ body.resizing-result-info {
 @media (min-width: 768px) {
   .module-popup {
     /* PC: viewer 영역(우측)에 표시 — 프롬프트 패널을 가리지 않음 */
-    top: 12px; left: 492px; bottom: auto; right: auto;
-    width: min(420px, calc(100vw - 504px));
+    top: 12px; left: calc(var(--left-col) + 12px); bottom: auto; right: auto;
+    width: min(420px, calc(100vw - var(--left-col) - 24px));
     max-height: calc(100dvh - 24px);
   }
   .module-popup.module-popup-e621 {
-    left: 492px;
+    left: calc(var(--left-col) + 12px);
     right: 148px;
     top: 12px;
     bottom: 12px;
@@ -12158,13 +12158,13 @@ body.resizing-result-info {
     border-radius: 10px;
   }
   .module-popup.module-popup-img2img {
-    width: min(860px, calc(100vw - 520px));
+    width: min(860px, calc(100vw - var(--left-col) - 40px));
     max-height: calc(100dvh - 24px);
   }
   /* 캐릭터 워크스페이스는 **Result 영역 폭**을 쓴다(사용자 지정 2026-09-01).
      e621 과 같은 기하다 - 좌측 프롬프트 패널(480px)을 비켜서고 우측 레일을 남긴다. */
   .module-popup.module-popup-character {
-    left: 492px;
+    left: calc(var(--left-col) + 12px);
     /* ⚠️ **히스토리 레일까지 덮는다**(사용자 지정 2026-09-01: "공간이 협소하니").
        e621 은 148px 을 비워 두는데, 그 자리는 히스토리 패널이 **열렸을 때만**
        쓰인다(평소 width 0). 캐릭터는 좌우 두 칸을 나눠 써야 해서 그 136px 이
@@ -19185,11 +19185,15 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 ::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
 
 /* ---- PC layout (>=768px) ---- */
+/* 왼쪽 프롬프트 칸 폭. 넓은 PC(1143px 이상)는 480 그대로, 그보다 좁으면(폴드 가로 · 태블릿 · 좁힌 창)
+   화면의 42% 로 줄어 결과 칸에 자리를 준다(사용자 지정 2026-11-06 - 세 번째 배치를 만들지 않는다).
+   왼쪽 칸을 비켜 서는 팝업들도 이 값을 따른다. */
+:root { --left-col: clamp(380px, 42vw, 480px); }
 @media (min-width: 768px) {
   /* Grid on body: header shares left column with controls, viewer gets full height */
   body {
     display: grid;
-    grid-template-columns: 480px 1fr;
+    grid-template-columns: var(--left-col) 1fr;
     grid-template-rows: auto 1fr;
   }
   header {
@@ -19409,8 +19413,8 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 @media (min-width: 768px) {
   .tag-filter-popup {
     /* PC: viewer 영역(우측)에 표시 */
-    top: 12px; left: 492px; bottom: auto;
-    width: min(380px, calc(100vw - 504px));
+    top: 12px; left: calc(var(--left-col) + 12px); bottom: auto;
+    width: min(380px, calc(100vw - var(--left-col) - 24px));
     max-height: calc(100dvh - 24px);
   }
 }
@@ -22509,8 +22513,8 @@ body.detached-module .mod-grid-3 {
   .seq-popup {
     /* PC: 프롬프트 패널 오른쪽(viewer 영역). 내용 높이에 맞추되 너비·높이 상한.
        bottom/right 를 풀어 콘텐츠 크기로 줄이고(2컷이면 작게), 넘치면 body 만 스크롤. */
-    top: 12px; left: 492px; right: auto; bottom: auto;
-    width: min(350px, calc(100vw - 516px));
+    top: 12px; left: calc(var(--left-col) + 12px); right: auto; bottom: auto;
+    width: min(350px, calc(100vw - var(--left-col) - 36px));
     max-height: calc(100dvh - 24px);
   }
 }
@@ -23585,8 +23589,8 @@ body.detached-module .mod-grid-3 {
    폭 560 -> 380, 그리고 **화면 아래까지 늘이지 않는다** — 남는 아래 공간은
    태그 사전 플로트가 쓴다(예전에는 팝업 오른쪽에 세로로 서서 결과를 또 가렸다). */
 .ia-panel {
-  position: fixed; top: 46px; left: 494px;
-  width: min(380px, calc(100vw - 520px));
+  position: fixed; top: 46px; left: calc(var(--left-col) + 14px);
+  width: min(380px, calc(100vw - var(--left-col) - 40px));
   /* 세로 상한은 JS(positionPopup)가 **실제 top 과 씬 태그 판 위치에서 재서** 넣는다.
      여기 62dvh 로 묶어 뒀더니 화면 아래 267px 를 비워 두고 그리드가 2.6줄만
      보였다(실측). top 은 씬 버튼 줄 유무로 36px 달라지고 씬 태그 판은 사용자가

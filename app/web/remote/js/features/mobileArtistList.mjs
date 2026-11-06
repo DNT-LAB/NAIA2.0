@@ -133,8 +133,8 @@ export function createMobileArtistList({
       write(COLS_KEY, button.dataset.malCols);
       paintCols();
     });
-    q('[data-mal-viewer-close]').addEventListener('click', closeViewer);
-    viewer.addEventListener('click', event => { if (event.target === viewer) closeViewer(); });
+    // 크게 보기는 **아무 데나** 누르면 닫힌다(사용자 지정 2026-11-06 - 그림 위를 눌러도).
+    viewer.addEventListener('click', closeViewer);
     els.mode.addEventListener('change', () => { write(MODE_KEY, els.mode.value); reload(); });
     els.filter.addEventListener('change', () => { write(FILTER_KEY, els.filter.value); reload(); });
     els.query.addEventListener('input', () => {

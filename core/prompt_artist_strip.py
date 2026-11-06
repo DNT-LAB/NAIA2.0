@@ -233,6 +233,34 @@ def _join(*parts):
     return ", ".join(clean for part in parts if (clean := str(part or "").strip(" ,\t\r\n")))
 
 
+def _hoist_people(text):
+    """그림 본문의 인원 수 태그(1girl · 2boys …)를 꺼낸다 - 스왑 결과의 **맨 앞**에 다시 세운다.
+
+    메인 생성은 최종 포맷에서 인원 수 태그를 프리셋 앞머리(pre_prompt)보다 앞으로 옮긴다(`prompt_processor`
+    의 `_step_final_format`). 스왑은 그 결과에 새 프리셋 앞머리를 다시 붙이므로, 그대로 두면 `1girl` 이 작가
+    줄 뒤 · 본문 한가운데로 밀린다(사용자 제보 2026-11-06). 순서도 같은 규칙(boys -> girls -> others).
+    가중치 · 괄호 안에 든 것은 사용자가 일부러 감싼 것이라 건드리지 않는다.
+    """
+    from core.prompt_processor import ALL_PERSON_TAGS, PERSON_TAG_SETS
+
+    events = _events(text)
+    found = []
+    for i, event in enumerate(events):
+        if event.kind != "TAG" or event.groups:
+            continue
+        name = " ".join(event.text.split()).lower()
+        if name in ALL_PERSON_TAGS and name == " ".join(event.body.split()).lower():
+            found.append((i, name))
+    if not found:
+        return [], text
+    rank = {**{t: 0 for t in PERSON_TAG_SETS["boys"]}, **{t: 1 for t in PERSON_TAG_SETS["girls"]}}
+    people = []
+    for _, name in sorted(found, key=lambda row: rank.get(row[1], 2)):
+        if name not in people:
+            people.append(name)
+    return people, _remove(text, events, {i for i, _ in found})
+
+
 def preset_tags(pre, post, *, known=frozenset()) -> list[str]:
     keys = _known_keys(known)
     return [event.body for event in _events(_join(pre, post)) if event.kind == "TAG"
@@ -258,6 +286,7 @@ def compose_swap(image_prompt, *, source_pre, source_post, target_pre, target_po
         result = strip_artists(_join(target_pre, marker, target_post), known=known)
         target_removed = result["removed"]
     body = strip_tags(body, preset_tags(source_pre, source_post, known=known))
+    people, body = _hoist_people(body)
     if artist_mode == "keep":
         if body.strip():
             main_prompt = result["text"].replace(marker, body.strip())
@@ -267,6 +296,8 @@ def compose_swap(image_prompt, *, source_pre, source_post, target_pre, target_po
                                   {i for i, event in enumerate(events) if event.body == marker})
     else:
         main_prompt = _join(target_pre, body, target_post)
+    if people:
+        main_prompt = _join(", ".join(people), main_prompt)
     return {"main_prompt": main_prompt,
             "removed": removed, "target_removed": target_removed}
 

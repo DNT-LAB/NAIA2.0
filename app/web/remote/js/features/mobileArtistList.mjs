@@ -52,6 +52,8 @@ export function createMobileArtistList({
   let linkOn = false;    // 서버의 main_link(이 판이 마지막으로 안 값)
   let linkBusy = false;
   let genBusy = false;
+  let reopenBtn = null;   // [다시 열기] - 생성하려고 창을 치웠을 때 리모트 단추 옆에 뜬다
+  let hidingForGen = false;
 
   const read = key => { try { return storage?.getItem(key) || ''; } catch { return ''; } };
   const write = (key, value) => { try { storage?.setItem(key, value); } catch { /* 저장 못 해도 화면은 돈다 */ } };
@@ -87,6 +89,9 @@ export function createMobileArtistList({
       edgeSnap: 10,
       initial: {x: 6, y: 52},
       onCollapse: () => paintLink(linkOn),
+      // 다시 열리거나 × 로 닫으면 [다시 열기] 는 내린다(생성하려고 치운 경우만 남긴다).
+      onOpen: () => showReopen(false),
+      onClose: () => { if (!hidingForGen) showReopen(false); },
     });
 
     // 머리줄 = [Artists] [1 2 3 4] [●연결] ... [–] [×]
@@ -453,6 +458,9 @@ export function createMobileArtistList({
     if (genBusy || !item) return;
     const tag = artistTag(item.artist);
     if (!tag) return;
+    // 누르면 창을 치워 결과 그림이 보이게 한다(사용자 지정 2026-11-06) - 목록 · 고른 작가는 그대로 두고
+    // 리모트 단추 옆 [다시 열기] 로 되찾는다. 실패 알림은 토스트로 온다.
+    hideForGeneration();
     genBusy = true;
     paintGen('뽑는 중');
     try {
@@ -486,6 +494,29 @@ export function createMobileArtistList({
       genBusy = false;
       paintGen('');
     }
+  }
+
+  function hideForGeneration() {
+    if (!panel?.isOpen()) return;
+    closeViewer();
+    hidingForGen = true;
+    try { panel.close(); } finally { hidingForGen = false; }
+    showReopen(true);
+  }
+
+  /** [다시 열기] 는 리모트 단추와 같은 자리(그 부모)에 붙어 단추 왼쪽에 선다. */
+  function showReopen(on) {
+    if (on && !reopenBtn) {
+      const anchor = document.getElementById('mobileRemoteBtn');
+      reopenBtn = document.createElement('button');
+      reopenBtn.type = 'button';
+      reopenBtn.className = 'mal-reopen';
+      reopenBtn.textContent = '다시 열기';
+      reopenBtn.setAttribute('aria-label', 'Artists 다시 열기');
+      reopenBtn.addEventListener('click', () => void open());
+      (anchor?.parentElement || document.body).appendChild(reopenBtn);
+    }
+    if (reopenBtn) reopenBtn.hidden = !on;
   }
 
   // ── 랜덤 생성 연결 ───────────────────────────────────────────────────────

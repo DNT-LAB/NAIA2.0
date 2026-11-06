@@ -33647,6 +33647,15 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 }
 .mal-gen:disabled { opacity: 0.6; cursor: progress; }
 .mal-gen:not(:disabled):active, .mal-gen-row .mal-copy:active { opacity: 0.75; }
+/* [다시 열기] - [생성] 을 누르면 창이 비켜 서고 리모트 단추(.mobile-remote-btn · 오른쪽 아래 32px) 왼쪽에 뜬다 */
+.mal-reopen:not([hidden]) {
+  position: absolute; bottom: calc(10px + var(--inpaint-dock-lift, 0px)); right: 48px; z-index: 6;
+  display: inline-flex; align-items: center; height: 32px; padding: 0 12px; cursor: pointer;
+  border: 1px solid rgba(40,120,216,0.85); border-radius: 6px;
+  background: rgba(40,120,216,0.35); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap;
+  backdrop-filter: blur(2px); touch-action: manipulation;
+}
+.mal-reopen:active { background: rgba(40,120,216,0.6); }
 .mal-pick-thumb {
   width: 34px; height: 34px; flex: none; padding: 0; border: 1px solid var(--border-dim); border-radius: 5px;
   overflow: hidden; background: var(--bg-card, #1b1b26); cursor: zoom-in;

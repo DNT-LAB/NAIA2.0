@@ -15944,7 +15944,7 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261106-rv1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-wintouch1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

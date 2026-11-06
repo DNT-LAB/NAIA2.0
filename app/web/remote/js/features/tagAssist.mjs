@@ -607,11 +607,21 @@ export function createTagAssistController({
   function isPhoneDockSurface() {
     if (!tagTooltip?.classList.contains('open')) return false;
     if (tagTooltip.classList.contains('preset-event-mode') || tagTooltip.classList.contains('chunk-ac-mode')) return false;
+    // 터치 화면 윈도 노트북 · 태블릿(ASUS Z Flow 등)도 coarse / hover:none 으로 잡힌다 - 그건 PC 다(사용자 제보 2026-11-07,
+    // 2.0.68 부터 후보가 화면 맨 아래로 갔다). 윈도는 화상 키보드가 보이는 화면을 줄이지 않아 띠가 키보드에 가리기도 한다.
+    // '모바일 OS 일 때만' 으로 좁히지 않는 까닭: 안드로이드 크롬의 데스크톱 사이트 모드는 UA 가 Linux 라 폴드가 빠진다.
+    if (isWindowsHost()) return false;
     try {
       return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches;
     } catch (_) {
       return false;
     }
+  }
+
+  function isWindowsHost() {
+    const nav = window.navigator || {};
+    const platform = String(nav.userAgentData?.platform || nav.platform || '');
+    return /^win/i.test(platform) || /Windows NT/i.test(String(nav.userAgent || ''));
   }
 
   function setPhoneDock(on) {

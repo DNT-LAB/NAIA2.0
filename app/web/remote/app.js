@@ -7329,7 +7329,20 @@ function openMobileRemote() {
   sheet.hidden = false;
   $('mobileRemoteBackdrop').hidden = false;
   $('mobileRemoteBtn')?.setAttribute('aria-expanded', 'true');
+  placeMobileRemoteMenu();
 }
+// 리모트 단추 왼쪽에 드롭다운으로(사용자 지정 2026-11-06). 단추는 인페인트 도크 · 확대보기에 따라 오르내리므로
+// 열 때마다 잰다. 아래 끝 = 단추 아래 끝, 오른쪽 끝 = 단추 왼쪽 6px.
+function placeMobileRemoteMenu() {
+  const sheet = $('mobileRemoteSheet');
+  const btn = $('mobileRemoteBtn');
+  if (!sheet || sheet.hidden || !btn) return;
+  const rect = btn.getBoundingClientRect();
+  if (!rect.width) return;
+  sheet.style.right = `${Math.max(4, Math.round(window.innerWidth - rect.left + 6))}px`;
+  sheet.style.bottom = `${Math.max(4, Math.round(window.innerHeight - rect.bottom))}px`;
+}
+window.addEventListener('resize', () => placeMobileRemoteMenu());
 function closeMobileRemote() {
   const sheet = $('mobileRemoteSheet');
   if (!sheet) return;

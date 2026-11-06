@@ -493,9 +493,24 @@ function initNaiaTitleTooltips() {
     if (pendingTarget && !pendingTarget.isConnected) cancelPending();
   }).observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['title']});
 
+  // 손가락으로 누를 때는 툴팁을 띄우지 않는다(사용자 제보 2026-11-06 - 휴대폰에서 메뉴 · 단추를 가렸다).
+  // 누르면 pointerover 가 오고, 단추가 초점을 쥔 채 남아 focusin 툴팁이 **닫히지 않았다**. 그래서 누른 직후의
+  // 초점도 건너뛴다. 명시적 [ⓘ 가이드] 단추만은 손가락으로도 연다. 마우스 · 키보드(PC)는 그대로다.
+  const TOUCH_FOCUS_WINDOW_MS = 1000;
+  let lastTouchAt = 0;
+  const isGuideButtonTarget = target => !!target?.classList?.contains('header-guide-btn');
+  document.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+    lastTouchAt = Date.now();
+    // pointerover 가 pointerdown 보다 먼저 온다 - 방금 연 [ⓘ 가이드] 를 여기서 닫으면 안 된다.
+    const tapped = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
+    if (!isGuideButtonTarget(tapped)) hideTooltip();
+  }, true);
   document.addEventListener('pointerover', event => {
     const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
-    if (target) showTooltip(target);
+    if (!target) return;
+    if ((event.pointerType === 'touch' || event.pointerType === 'pen') && !isGuideButtonTarget(target)) return;
+    showTooltip(target);
   });
   document.addEventListener('pointerout', event => {
     const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
@@ -503,7 +518,9 @@ function initNaiaTitleTooltips() {
   });
   document.addEventListener('focusin', event => {
     const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');
-    if (target) showTooltip(target);
+    if (!target) return;
+    if (Date.now() - lastTouchAt < TOUCH_FOCUS_WINDOW_MS && !isGuideButtonTarget(target)) return;
+    showTooltip(target);
   });
   document.addEventListener('focusout', event => {
     const target = event.target?.closest?.('[data-naia-title],[data-naia-guide],[data-naia-thumb]');

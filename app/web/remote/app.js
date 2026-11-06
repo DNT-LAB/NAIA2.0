@@ -2549,6 +2549,9 @@ let sessionNegRecheck = 0;
 // 스왑이 꺼내 쥔(아직 안 보낸) 네거티브 편집. 스왑이 도는 동안 오는 옛 상태로 칸을 덮으면 실패했을 때 되살릴
 // 글이 사라진다 - 스왑이 끝날 때(releasePendingEdit) 내린다(Codex 재리뷰 11-06 NEW-3).
 let sessionNegHeld = null;
+// 스왑이 꺼내 쥔 편집의 칸과 '그 뒤 사용자가 그 칸을 쳤는가'. 칸의 값은 옛 상태 렌더로도 바뀌므로 친 것은
+// 입력 이벤트(onModTextEdit)로만 센다 - 실패 때 되살릴지 가르는 기준이다(Codex 3차 재리뷰 R1).
+let swapHeldEdit = null;
 /** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
  *
  *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
@@ -3489,21 +3492,26 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
           sessionNegSent = null;
           sessionNegHeld = String(pending.value ?? '');
         }
+        swapHeldEdit = {key: pending.key, typed: false};
         return pending;
       },
       // 스왑이 끝났다(성공 · 실패 모두, 실패면 restorePendingEdit 뒤) - 지키던 표식을 내리고 지금 서버 값에 맞춘다.
       releasePendingEdit: () => {
+        swapHeldEdit = null;
         if (sessionNegHeld === null) return;
         sessionNegHeld = null;
         applyVirtualNegative(virtualCharacterSession());
       },
       restorePendingEdit: pending => {
         if (!pending) return;
-        // 적용을 기다리는 사이 같은 칸을 더 쳤으면 그 글이 지금의 의사다 - 꺼내 둔 옛 글로 덮지 않는다.
+        // 적용을 기다리는 사이 같은 칸을 **사용자가** 더 쳤으면 그 글이 지금의 의사다 - 꺼내 둔 옛 글로 덮지 않는다.
+        // ⚠️ 칸의 값으로 견주지 않는다 - 그사이 온 옛 상태로 팝업이 다시 그려지면 값만 바뀌고 친 것은 없다(R1).
+        if (swapHeldEdit?.typed) return;
+        const value = String(pending.value ?? '');
         const popupField = document.getElementById(pending.key === 'main_prompt' ? 'img2imgMainPrompt' : 'img2imgNegativePrompt');
-        const field = popupField?.offsetParent ? popupField
-          : (pending.key === 'negative_prompt' ? document.getElementById('sessionNegEdit') : null);
-        if (field && field.value !== String(pending.value ?? '')) return;
+        if (popupField && popupField.value !== value) popupField.value = value;
+        const sessionBox = pending.key === 'negative_prompt' ? document.getElementById('sessionNegEdit') : null;
+        if (sessionBox && sessionBox.value !== value) sessionBox.value = value;
         if (pending.key === 'negative_prompt') {
           sessionNegSent = String(pending.value ?? '');
           sessionNegSentAt = Date.now();
@@ -14088,6 +14096,7 @@ function setModuleParam(moduleId, key, value, options = {}) {
 // `slotUuid` = 이 글을 친 캐릭터 칸의 uuid(그 칸을 **그릴 때** 적어 둔 값). 묵히는 동안 배열이 바뀌어도
 // 서버가 그 칸을 찾아가게 한다 - 번호만 보내면 낡은 번호가 남의 칸(보관해 둔 캐릭터)을 덮는다.
 function onModTextEdit(moduleId, key, value, stamp, slotUuid) {
+  if (swapHeldEdit && moduleId === 'img2img' && key === swapHeldEdit.key) swapHeldEdit.typed = true;
   // 모듈 창의 PE 글칸에 글자가 쳐졌다 - 같은 값을 비추는 창들(리모컨 · 메인의 작은 창)이 **묶어 보내기 전의**
   // 그 글을 곧바로 따라온다. 안 알리면 0.5초 + 왕복 동안 옛 글을 보여 주고, 그 위에 친 것이 이 수정을 덮는다.
   if (moduleId === 'prompt_engineering' && Object.hasOwn(PE_FIELD_ELEMENTS, key)) {

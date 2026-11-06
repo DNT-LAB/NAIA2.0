@@ -1324,11 +1324,29 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   }
 
   // ANIMA 활성 칸 끌어 놓기 - 놓은 줄의 위/아래 반으로 앞/뒤를 정한다. 보낼 때는 해시 + 새 자리(백엔드 move_frame).
+  //  줄 위만 받으면 모서리를 넘기기가 어렵다(사용자 제보 2026-11-06) - 활성 칸 전체(안내문 · 싣기 줄 · 슬라이더)와
+  //  그 둘레 ROW_SLACK 까지 받고, 자리는 포인터 높이로만 정한다: 첫 줄보다 위 = 맨 앞 · 마지막 줄보다 아래 = 맨 뒤.
+  //  목록이 넘치면 위/아래 모서리 근처에서 저절로 굴린다(dragover 는 멈춰 있어도 계속 온다).
+  const ROW_SLACK = 48;
+  const ROW_EDGE = 28;
   function rowDropTarget(event) {
-    const row = event.target.closest?.('[data-rvw-rowdrag]');
-    if (!row || !panel?.body.querySelector('[data-rvw-active]')?.contains(row)) return null;
-    const box = row.getBoundingClientRect();
-    return {row, after: event.clientY >= box.top + box.height / 2};
+    const host = panel?.body.querySelector('[data-rvw-active]');
+    const rows = host ? [...host.querySelectorAll('[data-rvw-rowdrag]')] : [];
+    if (!rows.length) return null;
+    const box = host.getBoundingClientRect();
+    const {clientX: x, clientY: y} = event;
+    if (x < box.left - ROW_SLACK || x > box.right + ROW_SLACK || y < box.top - ROW_SLACK || y > box.bottom + ROW_SLACK) return null;
+    const list = host.querySelector('.rvw-rows');
+    if (list && list.scrollHeight > list.clientHeight) {
+      const edge = list.getBoundingClientRect();
+      if (y < edge.top + ROW_EDGE) list.scrollTop -= 12;
+      else if (y > edge.bottom - ROW_EDGE) list.scrollTop += 12;
+    }
+    for (const row of rows) {
+      const r = row.getBoundingClientRect();
+      if (y < r.top + r.height / 2) return {row, after: false};
+    }
+    return {row: rows[rows.length - 1], after: true};
   }
 
   function dropRow(hash, target) {

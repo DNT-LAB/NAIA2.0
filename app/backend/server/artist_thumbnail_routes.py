@@ -1473,6 +1473,28 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"error": "지금 목록에 뽑을 작가가 없습니다."}, status_code=404)
         return item
 
+    def _exclusive_artist_settings(module_settings):
+        """[이 작가만] - PE 설정 **사본**에서 다른 작가를 걷는다(저장한 PE 는 그대로).
+
+        - 프리픽스 · 포스트픽스의 작가 토큰(삽입 그룹 판이 넣은 것 포함)을 뺀다 - 삽입 솔로 '전체' 와 같은 걷기다.
+        - 랜덤 행의 작가(Remove Author 가 꺼져 있을 때 앞에 붙는 것)를 이번에만 끈다.
+        - 메인 랜덤 버튼 연결 작가는 따로 막지 않는다 - 이 길은 PE 오버라이드를 걸므로 원래 안 붙는다.
+        ⚠️ 와일드카드가 펼쳐 넣는 작가는 못 걷는다(펼치기 전 글만 본다)."""
+        from core.artist_insert_tracker import _COLLAB_PIECE, _known_artists
+        from core.artist_mix_preset import strip_artists
+
+        settings = dict(module_settings or {})
+        known = _known_artists(session_context)
+        for key in ("pre_prompt", "post_prompt"):
+            stripped = strip_artists(str(settings.get(key) or ""), known=known, allow_bare=True)
+            # `artist collaboration` 은 작가가 아니다 - 솔로와 같이 남긴다.
+            collab = [raw for raw in stripped["removed"] if _COLLAB_PIECE.fullmatch(raw.strip())]
+            settings[key] = ", ".join(part for part in [stripped["text"], *collab] if part)
+        options = dict(settings.get("preprocessing_options") or {})
+        options["remove_author"] = True
+        settings["preprocessing_options"] = options
+        return settings
+
     @app.post("/api/artist-thumb/random-prompt")
     async def api_artist_thumb_random_prompt(req: Request):
         try:
@@ -1495,12 +1517,18 @@ def register_artist_thumbnail_routes(
             module_settings = get_prompt_engineering_store(session_context).collect_settings(
                 session_context.get_api_mode()
             )
+            # [이 작가만](휴대폰 Artists · 사용자 지정 2026-11-06) - 이번 한 장에는 고른 작가만 나가게 한다.
+            exclusive = payload.get("exclusive_artist") is True
+            if exclusive:
+                module_settings = await run_in_thread(_exclusive_artist_settings, module_settings)
             peng_override = await run_in_thread(
                 artist_thumbnail_service(session_context).random_prompt_override,
                 artist_prompt,
                 module_settings,
                 raw_groups,
             )
+            if exclusive:
+                peng_override["exclusive_artist"] = True
         except ValueError as exc:
             return JSONResponse({"error": str(exc)}, status_code=400)
         except Exception as exc:

@@ -291,6 +291,8 @@ class PromptEngineeringHeadlessPostHook:
                 "preprocessing_options": dict(session_override.get("preprocessing_options") or {}),
                 # 앵커 그룹은 오버라이드에 얹혀 온다 - 수명·복원 경로를 하나로 둔다.
                 "anchor_groups": dict(session_override.get("anchor_groups") or {}),
+                # [이 작가만](휴대폰 Artists) - 삽입 솔로가 다른 작가를 다시 넣지 않게 한다.
+                "exclusive_artist": session_override.get("exclusive_artist") is True,
             }
 
         controller = getattr(self.app_context, "middle_section_controller", None)
@@ -336,7 +338,7 @@ class PromptEngineeringHeadlessPostHook:
         # 삽입 솔로는 생성 사본에만 적용한다. 프리셋·모드가 바뀌었으면 자동 확정.
         tracker = getattr(self.app_context, "artist_insert_tracker", None)
         tracker_state = tracker.snapshot() if tracker is not None else None
-        solo = tracker_state and tracker_state["solo"]
+        solo = tracker_state and tracker_state["solo"] and not options.get("exclusive_artist")
         if solo:
             from core.artist_insert_tracker import solo_options
 

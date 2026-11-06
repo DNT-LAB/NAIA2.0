@@ -1,6 +1,8 @@
 // 휴대폰용 Artists 판(사용자 지정 2026-11-06) - PC 의 Artist Thumbnail 탭을 줄이지 않고 따로 만든 간소판.
-// 하는 일은 둘뿐이다(사용자 지정):
+// 하는 일은 셋뿐이다(사용자 지정):
 //   1) 보고 태그 복사 - 누르면 고르기만(잘못 눌러도 복사되지 않게) · 아래 줄 [태그 복사] 로 복사.
+//   1.5) [이 작가로 생성] - 랜덤 프롬프트 + 고른 작가(PC 의 [with random] 과 같은 길) · 가중치 [− 1.00 +] ·
+//      [이 작가만] 을 켜면 이번 한 장은 PE 프리픽스/포스트픽스 · 랜덤 행의 다른 작가를 걷는다(서버 `exclusive_artist`).
 //   2) 랜덤 생성에 이 목록 연결 - PC 의 [메인 랜덤 버튼 연결](main_link)과 **같은 서버 설정**이다. 켜면 뽑는 목록을
 //      이 판의 모드 · 목록 · 이름 검색으로 바꾼다(PC 에 저장된 매칭 검색 · 구간은 풀린다 - 사용자 결정 2026-11-06).
 //      메인 Random 을 누를 때마다 서버가 그 목록에서 한 명을 뽑는다 - 판을 접어도 · 닫아도 돈다.
@@ -15,12 +17,26 @@ const PAGE_SIZE = 48;
 const MODE_KEY = 'naia.mobileArtists.mode';
 const FILTER_KEY = 'naia.mobileArtists.filter';
 const COLS_KEY = 'naia.mobileArtists.cols';
+const WEIGHT_KEY = 'naia.mobileArtists.weight';
+const SOLO_KEY = 'naia.mobileArtists.solo';
+const WEIGHT_MIN = 0.5;
+const WEIGHT_MAX = 1.5;
+const WEIGHT_STEP = 0.05;
+const RANDOM_PROMPT_TIMEOUT_MS = 60000;
+// PC 탭(artistThumbTab ACTIVE_RESOLUTION_PARAM_KEYS)과 같은 목록 - [with random] 은 지금 생성 설정의 해상도를 따른다.
+const ACTIVE_RESOLUTION_PARAM_KEYS = [
+  'api_mode', 'resolution', 'width', 'height', 'random_resolution', 'auto_fit_resolution',
+  'resolution_preset_enabled', 'resolution_preset', 'enable_hr', 'hr_scale', 'hr_upscaler',
+  'denoising_strength', 'hires_steps', 'hr_cfg', 'hires_preset_swap', 'webui_hiresfix_assist',
+  'webui_hiresfix_assist_target',
+];
 const COL_CHOICES = [1, 2, 3, 4];     // 한 줄 최대 4칸(사용자 지정)
 const DEFAULT_COLS = 3;
 
 export function createMobileArtistList({
   document, window, escHtml, showToast, storage,
   getGenerationMode = () => 'NAI', isAnimaArtistMode = () => false,
+  getCurrentGenerationParams = null, setPromptFields = null, getNegativePrompt = () => '',
 }) {
   let panel = null;
   let els = {};
@@ -35,6 +51,7 @@ export function createMobileArtistList({
   let searchTimer = 0;
   let linkOn = false;    // 서버의 main_link(이 판이 마지막으로 안 값)
   let linkBusy = false;
+  let genBusy = false;
 
   const read = key => { try { return storage?.getItem(key) || ''; } catch { return ''; } };
   const write = (key, value) => { try { storage?.setItem(key, value); } catch { /* 저장 못 해도 화면은 돈다 */ } };
@@ -43,6 +60,13 @@ export function createMobileArtistList({
     const n = Number.parseInt(read(COLS_KEY), 10);
     return COL_CHOICES.includes(n) ? n : DEFAULT_COLS;
   };
+  const clampWeight = value => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 1;
+    return Math.round(Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, n)) * 100) / 100;
+  };
+  let weight = clampWeight(read(WEIGHT_KEY) || 1);   // 작가를 바꿔도 그대로 - 같은 세기로 여러 명을 비교한다
+  let soloOn = read(SOLO_KEY) === '1';
 
   // ── 만들기 ───────────────────────────────────────────────────────────────
   function build() {
@@ -87,9 +111,23 @@ export function createMobileArtistList({
         <div class="mal-more" data-mal-more></div>
       </div>
       <div class="mal-pick" data-mal-pick hidden>
-        <button type="button" class="mal-pick-thumb" data-mal-zoom aria-label="크게 보기"></button>
-        <span class="mal-pick-text"><b data-mal-pick-name></b><span data-mal-pick-meta></span></span>
-        <button type="button" class="mal-copy" data-mal-copy>태그 복사</button>
+        <div class="mal-pick-row">
+          <button type="button" class="mal-pick-thumb" data-mal-zoom aria-label="크게 보기"></button>
+          <span class="mal-pick-text"><b data-mal-pick-name></b><span data-mal-pick-meta></span>
+            <code class="mal-pick-tag" data-mal-pick-tag></code></span>
+          <button type="button" class="mal-copy" data-mal-copy>태그 복사</button>
+        </div>
+        <div class="mal-gen-row">
+          <span class="mal-weight" role="group" aria-label="가중치">
+            <button type="button" class="mal-wbtn" data-mal-weight="-1" aria-label="가중치 낮추기">&minus;</button>
+            <button type="button" class="mal-wval" data-mal-weight="reset" title="누르면 1.00">1.00</button>
+            <button type="button" class="mal-wbtn" data-mal-weight="1" aria-label="가중치 높이기">+</button>
+          </span>
+          <label class="mal-solo" title="이번 생성은 PE 프리픽스·포스트픽스와 랜덤 행의 다른 작가를 빼고 이 작가만 넣습니다">
+            <input type="checkbox" data-mal-solo><span>이 작가만</span>
+          </label>
+          <button type="button" class="mal-gen" data-mal-gen>이 작가로 생성</button>
+        </div>
       </div>
       <label class="mal-link">
         <input type="checkbox" data-mal-link>
@@ -120,6 +158,10 @@ export function createMobileArtistList({
       pickThumb: q('[data-mal-zoom]'),
       pickName: q('[data-mal-pick-name]'),
       pickMeta: q('[data-mal-pick-meta]'),
+      pickTag: q('[data-mal-pick-tag]'),
+      weightValue: q('.mal-wval'),
+      solo: q('[data-mal-solo]'),
+      gen: q('[data-mal-gen]'),
       link: q('[data-mal-link]'),
       linkDot: q('[data-mal-linkdot]'),
       viewer,
@@ -154,6 +196,15 @@ export function createMobileArtistList({
     });
     els.pickThumb.addEventListener('click', () => openViewer(selected));
     q('[data-mal-copy]').addEventListener('click', () => void copySelected());
+    q('.mal-weight').addEventListener('click', event => {
+      const button = event.target.closest('[data-mal-weight]');
+      if (!button) return;
+      const step = button.dataset.malWeight;
+      setWeight(step === 'reset' ? 1 : weight + Number(step) * WEIGHT_STEP);
+    });
+    els.solo.checked = soloOn;
+    els.solo.addEventListener('change', () => { soloOn = els.solo.checked; write(SOLO_KEY, soloOn ? '1' : '0'); });
+    els.gen.addEventListener('click', () => void generateSelected());
     els.link.addEventListener('change', () => void setLink(els.link.checked));
     // 아래 끝에 다가가면 다음 쪽을 읽는다. 스크롤 이벤트로 잰다 - IntersectionObserver 는 그리기 프레임에
     // 묶여 있어 창이 가려진 동안 안 불린다.
@@ -295,18 +346,37 @@ export function createMobileArtistList({
     els.grid.querySelector(`[data-mal-index="${index}"]`)?.classList.add('is-selected');
     els.pickThumb.innerHTML = selected.image_url ? `<img src="${escHtml(selected.image_url)}" alt="">` : '';
     els.pickName.textContent = selected.artist || '';
-    const weight = Number(selected.weight || 0);
-    els.pickMeta.textContent = weight ? `게시물 ${count(weight)}` : '';
+    const posts = Number(selected.weight || 0);   // 목록의 weight = 게시물 수(가중치 아님)
+    els.pickMeta.textContent = posts ? `게시물 ${count(posts)}` : '';
+    paintWeight();
   }
 
-  /** PC 탭의 기본 서식과 같다(artistThumbTab.baseArtistPrompt): NAI = artist:이름 · ANIMA = @이름 · 그 밖 = 이름.
-   *  SD 계열은 괄호를 이스케이프한다. */
-  function artistTag(name) {
+  function setWeight(value) {
+    weight = clampWeight(value);
+    write(WEIGHT_KEY, String(weight));
+    paintWeight();
+  }
+
+  function paintWeight() {
+    if (!els.weightValue) return;
+    els.weightValue.textContent = weight.toFixed(2);
+    els.weightValue.classList.toggle('is-changed', weight !== 1);
+    els.pickTag.textContent = artistTag(selected?.artist);
+  }
+
+  /** PC 탭의 formatArtistToken 과 같은 서식: NAI = artist:이름 / `1.1::artist:이름 ::` ·
+   *  그 밖 = 이름(괄호 이스케이프 · ANIMA 는 @) / `(이름:1.1)`. 가중치 1 이면 가중치를 안 붙인다. */
+  function artistTag(name, value = weight) {
     const artist = String(name || '').trim();
     if (!artist) return '';
-    if (String(getGenerationMode?.() || 'NAI').trim().toUpperCase() === 'NAI') return `artist:${artist}`;
+    const w = clampWeight(value);
+    const text = w.toFixed(2).replace(/\.?0+$/, '');
+    if (String(getGenerationMode?.() || 'NAI').trim().toUpperCase() === 'NAI') {
+      return w !== 1 ? `${text}::artist:${artist} ::` : `artist:${artist}`;
+    }
     const escaped = artist.replace(/[()]/g, '\\$&');
-    return isAnimaArtistMode?.() ? `@${escaped}` : escaped;
+    const body = isAnimaArtistMode?.() ? `@${escaped}` : escaped;
+    return w !== 1 ? `(${body}:${text})` : body;
   }
 
   /** 휴대폰은 LAN 주소(http)로 들어온다 - 안전한 출처가 아니라 navigator.clipboard 가 없다. 그때는 옛 길(execCommand). */
@@ -334,6 +404,88 @@ export function createMobileArtistList({
     if (!tag) return;
     const ok = await copyText(tag);
     showToast?.(ok ? `${tag} 복사됨` : '복사하지 못했습니다', ok ? 'success' : 'error');
+  }
+
+  // ── 이 작가로 생성(랜덤 프롬프트 + 이 작가) ──────────────────────────────
+  async function postJson(url, body, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) throw new Error(data.error || data.message || `HTTP ${response.status}`);
+      return data;
+    } catch (error) {
+      if (error?.name === 'AbortError') throw new Error('응답이 늦어 멈췄습니다');
+      throw error;
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
+  /** PC 탭 [with random] 의 해상도 - 지금 생성 설정(Rnd Res 면 이번 추첨) 그대로. 못 읽으면 서버 기본. */
+  function activeResolution() {
+    let params = null;
+    try { params = getCurrentGenerationParams?.(); } catch { params = null; }
+    if (!params || typeof params !== 'object') return {};
+    const out = {};
+    ACTIVE_RESOLUTION_PARAM_KEYS.forEach(key => { if (Object.prototype.hasOwnProperty.call(params, key)) out[key] = params[key]; });
+    let w = Number.parseInt(out.width, 10);
+    let h = Number.parseInt(out.height, 10);
+    if (!(w > 0 && h > 0)) {
+      const m = String(out.resolution || '').match(/(\d+)\s*x\s*(\d+)/);
+      if (m) { w = Number(m[1]); h = Number(m[2]); }
+    }
+    if (!(w > 0 && h > 0)) return {};
+    return {...out, width: w, height: h, artist_thumb_use_active_resolution: true};
+  }
+
+  function paintGen(text) {
+    els.gen.disabled = Boolean(text);
+    els.gen.textContent = text || '이 작가로 생성';
+  }
+
+  async function generateSelected() {
+    const item = selected;
+    if (genBusy || !item) return;
+    const tag = artistTag(item.artist);
+    if (!tag) return;
+    genBusy = true;
+    paintGen('프롬프트 뽑는 중…');
+    try {
+      const random = await postJson('/api/artist-thumb/random-prompt', {
+        artist_prompt: tag,
+        ...(soloOn ? {exclusive_artist: true} : {}),
+        timeout: 45,
+      }, RANDOM_PROMPT_TIMEOUT_MS);
+      const positive = String(random.prompt || '');
+      if (!positive.trim()) throw new Error('랜덤 프롬프트가 비었습니다');
+      const negative = String(random.negative_prompt || getNegativePrompt?.() || '');
+      // PC 와 같이 메인 프롬프트 칸에도 싣는다 - 무엇이 나갔는지 보이고 [다시 생성] 이 같은 글로 돈다.
+      setPromptFields?.(positive, negative);
+      paintGen('보내는 중…');
+      const resolution = activeResolution();
+      await postJson('/api/artist-thumb/generate', {
+        ...resolution,
+        request_id: `mal-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+        artist: item.artist,
+        prefix: '',
+        positive,
+        postfix: '',
+        negative_prompt: negative,
+        width: resolution.width || 832,
+        height: resolution.height || 1216,
+      });
+      showToast?.(`${tag} 생성 요청을 보냈습니다${soloOn ? ' (이 작가만)' : ''}`, 'success');
+    } catch (error) {
+      showToast?.(`생성하지 못했습니다: ${error.message || error}`, 'error');
+    } finally {
+      genBusy = false;
+      paintGen('');
+    }
   }
 
   // ── 랜덤 생성 연결 ───────────────────────────────────────────────────────

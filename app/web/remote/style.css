@@ -33650,9 +33650,9 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 /* [다시 열기] - [생성] 을 누르면 창이 비켜 서고 리모트 단추(.mobile-remote-btn · 오른쪽 아래 32px) 왼쪽에 뜬다 */
 .mal-reopen:not([hidden]) {
   position: absolute; bottom: calc(10px + var(--inpaint-dock-lift, 0px)); right: 48px; z-index: 6;
-  display: inline-flex; align-items: center; height: 32px; padding: 0 12px; cursor: pointer;
+  display: inline-flex; align-items: center; box-sizing: border-box; height: 32px; padding: 0 10px; cursor: pointer;
   border: 1px solid rgba(40,120,216,0.85); border-radius: 6px;
-  background: rgba(40,120,216,0.35); color: #fff; font-size: 13px; font-weight: 600; white-space: nowrap;
+  background: rgba(40,120,216,0.35); color: #fff; font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap;
   backdrop-filter: blur(2px); touch-action: manipulation;
 }
 .mal-reopen:active { background: rgba(40,120,216,0.6); }

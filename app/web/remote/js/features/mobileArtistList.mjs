@@ -517,6 +517,10 @@ export function createMobileArtistList({
       (anchor?.parentElement || document.body).appendChild(reopenBtn);
     }
     if (reopenBtn) reopenBtn.hidden = !on;
+    // 높이는 리모트 단추를 재서 맞춘다(사용자 지정 2026-11-06 - 옆에 서는 단추라 높이가 같아야 한 줄로 보인다).
+    const anchor = document.getElementById('mobileRemoteBtn');
+    const height = anchor?.offsetHeight || 0;
+    if (on && reopenBtn && height) reopenBtn.style.height = `${height}px`;
   }
 
   // ── 랜덤 생성 연결 ───────────────────────────────────────────────────────

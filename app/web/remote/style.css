@@ -33546,43 +33546,46 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   .mobile-remote-note { margin-left: auto; font-size: 12px; color: var(--text-dim); }
 }
 
-/* 휴대폰 Artists 목록(사용자 지정 2026-11-06) - 모바일 리모트에서만 열린다. 화면 전체를 덮는 보기 전용 판. */
-html.mal-open, html.mal-open body { overflow: hidden; }
+/* 휴대폰 Artists 판(사용자 지정 2026-11-06) - 모바일 리모트에서 연다. 떠 있는 창(머리를 끌어 옮김) · 접으면 알약.
+   콤보박스 = NAIA 표준(mod-select -> customSelects) · 손가락 높이만 키운다. */
 .mal-panel:not([hidden]) {
-  position: fixed; inset: 0; z-index: 9100; display: flex; flex-direction: column;
-  background: var(--bg-deep, #0b0b12); color: var(--text-primary);
-  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+  position: fixed; left: 6px; top: 52px; z-index: 9100; display: flex; flex-direction: column;
+  width: min(calc(100vw - 12px), 560px); height: min(72dvh, calc(100dvh - 60px));
+  background: var(--bg-elevated); color: var(--text-primary);
+  border: 1px solid var(--border-dim); border-radius: 10px; overflow: hidden;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
 }
 .mal-head {
-  display: flex; align-items: center; justify-content: space-between; flex: none;
-  padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--border-dim);
+  display: flex; align-items: center; gap: 6px; flex: none; padding: 4px 4px 4px 12px;
+  border-bottom: 1px solid var(--border-dim); touch-action: none; cursor: grab; user-select: none;
 }
-.mal-title { font-size: 15px; font-weight: 600; }
-.mal-close {
-  width: 40px; height: 40px; border: 0; background: none; color: var(--text-dim); font-size: 18px; cursor: pointer;
+.mal-grip { width: 24px; height: 4px; border-radius: 2px; background: var(--text-dim); opacity: 0.6; }
+.mal-title { font-size: 14px; font-weight: 600; margin-right: auto; }
+.mal-icon {
+  width: 40px; height: 36px; border: 0; background: none; color: var(--text-dim); font-size: 17px; line-height: 1; cursor: pointer;
 }
-.mal-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px 0; flex: none; }
-/* 콤보박스 = 나이아 표준(mod-select → customSelects) · 손가락 크기만 키운다 */
-.mal-controls .custom-mod-select .custom-select-button { height: 40px; }
+.mal-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 8px 10px 0; flex: none; }
+.mal-controls .custom-mod-select .custom-select-button { height: 38px; }
+.mal-search-row { padding: 6px 10px 0; flex: none; }
 .mal-search {
-  width: 100%; min-width: 0; height: 40px; padding: 0 10px;
-  border: 1px solid var(--border-dim); border-radius: 8px;
-  background: var(--bg-surface, #15151f); color: var(--text-primary);
+  width: 100%; min-width: 0; height: 38px; padding: 0 10px; font-size: 16px; /* 16px 미만이면 iOS 가 확대한다 */
+  border: 1px solid var(--border-dim); border-radius: 6px; background: var(--bg-deep); color: var(--text-primary);
 }
-.mal-search-row { padding: 8px 12px 0; flex: none; }
-.mal-search { font-size: 16px; } /* 16px 미만이면 iOS 가 확대한다 */
-.mal-status { padding: 8px 14px; font-size: 12px; color: var(--text-dim); flex: none; font-variant-numeric: tabular-nums; }
-.mal-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 10px 16px; }
-.mal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
+.mal-status { padding: 6px 12px; font-size: 12px; color: var(--text-dim); flex: none; font-variant-numeric: tabular-nums; }
+.mal-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 8px 10px; }
+.mal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
 .mal-card {
-  display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0; border: 0;
+  display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 0; border: 0;
   background: none; color: inherit; text-align: left; cursor: pointer;
 }
 .mal-card.is-banned { opacity: 0.45; }
 .mal-thumb {
   position: relative; display: flex; align-items: center; justify-content: center;
   aspect-ratio: 1 / 1; overflow: hidden; border-radius: 6px; background: var(--bg-card, #1b1b26);
+  outline: 2px solid transparent; outline-offset: -2px;
 }
+.mal-card.is-selected .mal-thumb { outline-color: var(--accent-blue); }
+.mal-card.is-selected .mal-name { color: var(--accent-blue); }
 .mal-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .mal-noimg { font-size: 11px; color: var(--text-dim); }
 .mal-mark {
@@ -33593,12 +33596,52 @@ html.mal-open, html.mal-open body { overflow: hidden; }
 .mal-fav { color: #f5c542; }
 .mal-ban { color: #ff7a7a; top: auto; bottom: 4px; }
 .mal-name { font-size: 12px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mal-more { min-height: 40px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-dim); }
+.mal-more { min-height: 32px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-dim); }
+.mal-pick:not([hidden]) {
+  display: flex; align-items: center; gap: 10px; flex: none; padding: 8px 10px;
+  border-top: 1px solid var(--border-dim); background: var(--bg-deep);
+}
+.mal-pick-thumb {
+  width: 40px; height: 40px; flex: none; padding: 0; border: 1px solid var(--border-dim); border-radius: 5px;
+  overflow: hidden; background: var(--bg-card, #1b1b26); cursor: zoom-in;
+}
+.mal-pick-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.mal-pick-text { display: flex; flex-direction: column; min-width: 0; flex: 1; font-size: 12px; color: var(--text-dim); }
+.mal-pick-text b { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mal-copy {
+  flex: none; height: 36px; padding: 0 14px; border: 1px solid var(--accent-blue); border-radius: 6px;
+  background: var(--accent-blue); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.mal-copy:active { opacity: 0.8; }
+.mal-link {
+  display: flex; align-items: center; gap: 10px; flex: none; min-height: 44px; padding: 0 12px;
+  border-top: 1px solid var(--border-dim); font-size: 13px; cursor: pointer; user-select: none;
+}
+.mal-link input { position: absolute; opacity: 0; pointer-events: none; }
+.mal-switch {
+  position: relative; width: 34px; height: 20px; flex: none; border-radius: 10px;
+  background: var(--bg-hover); border: 1px solid var(--border-dim); transition: background 0.15s;
+}
+.mal-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-dim); transition: transform 0.15s, background 0.15s;
+}
+.mal-link input:checked + .mal-switch { background: var(--accent-blue); border-color: var(--accent-blue); }
+.mal-link input:checked + .mal-switch::after { transform: translateX(14px); background: #fff; }
+.mal-link input:focus-visible + .mal-switch { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
 .mal-viewer:not([hidden]) {
   position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; padding: 48px 12px 24px; background: rgba(0,0,0,0.92);
+  gap: 10px; padding: 44px 10px 16px; background: rgba(0,0,0,0.94);
 }
-.mal-viewer-close { position: absolute; top: calc(4px + env(safe-area-inset-top, 0px)); right: 4px; color: #ddd; }
-.mal-viewer-img { max-width: 100%; max-height: calc(100% - 64px); object-fit: contain; border-radius: 6px; }
+.mal-viewer-close { position: absolute; top: 2px; right: 2px; color: #ddd; }
+.mal-viewer-img { max-width: 100%; max-height: calc(100% - 56px); object-fit: contain; border-radius: 6px; }
 .mal-viewer-info { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; font-size: 13px; color: #ccc; }
 .mal-viewer-info b { width: 100%; text-align: center; font-size: 15px; color: #fff; word-break: break-all; }
+.mal-pill:not([hidden]) {
+  position: fixed; right: 10px; top: 40%; z-index: 9100; display: inline-flex; align-items: center; gap: 6px;
+  height: 36px; padding: 0 12px; border: 1px solid var(--accent-blue); border-radius: 18px;
+  background: var(--bg-elevated); color: var(--text-primary); font-size: 13px; cursor: pointer;
+  touch-action: none; user-select: none; box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+.mal-pill-icon { font-size: 15px; }
+.mal-pill-dot:not([hidden]) { width: 7px; height: 7px; border-radius: 50%; background: var(--accent-blue); }

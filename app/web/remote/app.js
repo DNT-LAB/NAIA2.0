@@ -7323,9 +7323,12 @@ function closeMobileRemote() {
 let mobileArtistListReady = null;
 function ensureMobileArtistList() {
   if (!mobileArtistListReady) {
-    mobileArtistListReady = import('./js/features/mobileArtistList.mjs?v=20261106-mal2')
+    mobileArtistListReady = import('./js/features/mobileArtistList.mjs?v=20261106-mal3')
       .then(({createMobileArtistList}) => createMobileArtistList({
         document, window, escHtml, showToast, storage: localStorage,
+        // 태그 복사 서식(PC 탭과 같다) - NAI = artist: · ANIMA = @ · 그 밖 = 이름
+        getGenerationMode: () => currentMode || modeSelect.value || 'NAI',
+        isAnimaArtistMode,
       }))
       .catch(error => {
         mobileArtistListReady = null;

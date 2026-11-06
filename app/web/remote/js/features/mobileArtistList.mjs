@@ -1,28 +1,44 @@
-// 휴대폰용 Artists 목록(사용자 지정 2026-11-06) - PC 의 Artist Thumbnail 탭을 줄이지 않고 따로 만든 간소판.
-// 지금은 **보기만** 한다: 모드 · 목록(전체/관심/제외/모델) · 이름 검색 · 썸네일 격자(아래로 내리면 더 읽음) ·
-// 누르면 크게 보기. 데이터는 PC 탭과 같은 라우트(/api/artist-thumb/state · /list)를 그대로 쓴다.
-// 서버 상태를 바꾸는 요청은 하나도 보내지 않는다.
+// 휴대폰용 Artists 판(사용자 지정 2026-11-06) - PC 의 Artist Thumbnail 탭을 줄이지 않고 따로 만든 간소판.
+// 하는 일은 둘뿐이다(사용자 지정):
+//   1) 보고 태그 복사 - 누르면 고르기만(잘못 눌러도 복사되지 않게) · 아래 줄 [태그 복사] 로 복사.
+//   2) 랜덤 생성에 이 목록 연결 - PC 의 [메인 랜덤 버튼 연결](main_link)과 **같은 서버 설정**이다. 켜면 뽑는 목록을
+//      이 판의 모드 · 목록 · 이름 검색으로 바꾼다(PC 에 저장된 매칭 검색 · 구간은 풀린다 - 사용자 결정 2026-11-06).
+//      메인 Random 을 누를 때마다 서버가 그 목록에서 한 명을 뽑는다 - 판을 접어도 · 닫아도 돈다.
+// 판은 떠 있는 창이다 - 머리를 끌어 옮기고, ⌄ 로 접으면 끌어 둘 수 있는 알약이 된다(누르면 그대로 다시 펼침).
+// 데이터는 PC 탭과 같은 라우트(/api/artist-thumb/state · /list · /random-tools · /options)를 쓴다.
 
 const PAGE_SIZE = 48;
 const MODE_KEY = 'naia.mobileArtists.mode';
 const FILTER_KEY = 'naia.mobileArtists.filter';
+const PANEL_POS_KEY = 'naia.mobileArtists.panelPos';
+const PILL_POS_KEY = 'naia.mobileArtists.pillPos';
+const DRAG_SLOP = 6;
 
-export function createMobileArtistList({document, window, escHtml, showToast, storage}) {
+export function createMobileArtistList({
+  document, window, escHtml, showToast, storage,
+  getGenerationMode = () => 'NAI', isAnimaArtistMode = () => false,
+}) {
   let root = null;
+  let pill = null;
   let els = {};
   let state = null;
   let items = [];
+  let selected = null;
   let page = 0;          // 마지막으로 읽은 쪽(0 = 아직)
   let totalPages = 0;
   let total = 0;
   let loading = false;
   let serial = 0;        // 조건이 바뀌면 올린다 - 늦게 온 옛 응답은 버린다
   let searchTimer = 0;
+  let linkOn = false;    // 서버의 main_link(이 판이 마지막으로 안 값)
+  let linkBusy = false;
 
   const read = key => { try { return storage?.getItem(key) || ''; } catch { return ''; } };
   const write = (key, value) => { try { storage?.setItem(key, value); } catch { /* 저장 못 해도 화면은 돈다 */ } };
+  const readPos = key => { try { const v = JSON.parse(read(key) || 'null'); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null; } catch { return null; } };
   const count = value => Number(value || 0).toLocaleString();
 
+  // ── 만들기 ───────────────────────────────────────────────────────────────
   function build() {
     root = document.createElement('div');
     root.className = 'mal-panel';
@@ -30,9 +46,11 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     root.setAttribute('role', 'dialog');
     root.setAttribute('aria-label', 'Artists');
     root.innerHTML = `
-      <div class="mal-head">
+      <div class="mal-head" data-mal-drag>
+        <span class="mal-grip" aria-hidden="true"></span>
         <span class="mal-title">Artists</span>
-        <button type="button" class="mal-close" data-mal-close aria-label="닫기">&#10005;</button>
+        <button type="button" class="mal-icon" data-mal-fold aria-label="접기">&#8964;</button>
+        <button type="button" class="mal-icon" data-mal-close aria-label="닫기">&#10005;</button>
       </div>
       <div class="mal-controls">
         <select class="mod-select" data-mal-mode aria-label="모드"></select>
@@ -47,13 +65,33 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
         <div class="mal-grid" data-mal-grid></div>
         <div class="mal-more" data-mal-more></div>
       </div>
+      <div class="mal-pick" data-mal-pick hidden>
+        <button type="button" class="mal-pick-thumb" data-mal-zoom aria-label="크게 보기"></button>
+        <span class="mal-pick-text"><b data-mal-pick-name></b><span data-mal-pick-meta></span></span>
+        <button type="button" class="mal-copy" data-mal-copy>태그 복사</button>
+      </div>
+      <label class="mal-link">
+        <input type="checkbox" data-mal-link>
+        <span class="mal-switch" aria-hidden="true"></span>
+        <span class="mal-link-text">랜덤 생성에 이 목록 연결</span>
+      </label>
       <div class="mal-viewer" data-mal-viewer hidden>
-        <button type="button" class="mal-close mal-viewer-close" data-mal-viewer-close aria-label="닫기">&#10005;</button>
+        <button type="button" class="mal-icon mal-viewer-close" data-mal-viewer-close aria-label="닫기">&#10005;</button>
         <img class="mal-viewer-img" data-mal-viewer-img alt="">
         <div class="mal-viewer-info" data-mal-viewer-info></div>
       </div>`;
     document.body.appendChild(root);
+
+    pill = document.createElement('button');
+    pill.type = 'button';
+    pill.className = 'mal-pill';
+    pill.hidden = true;
+    pill.setAttribute('aria-label', 'Artists 펼치기');
+    pill.innerHTML = '<span class="mal-pill-icon" aria-hidden="true">&#127912;</span>Artists<span class="mal-pill-dot" data-mal-pill-dot hidden></span>';
+    document.body.appendChild(pill);
+
     els = {
+      head: root.querySelector('[data-mal-drag]'),
       mode: root.querySelector('[data-mal-mode]'),
       filter: root.querySelector('[data-mal-filter]'),
       query: root.querySelector('[data-mal-query]'),
@@ -61,11 +99,19 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
       scroll: root.querySelector('[data-mal-scroll]'),
       grid: root.querySelector('[data-mal-grid]'),
       more: root.querySelector('[data-mal-more]'),
+      pick: root.querySelector('[data-mal-pick]'),
+      pickThumb: root.querySelector('[data-mal-zoom]'),
+      pickName: root.querySelector('[data-mal-pick-name]'),
+      pickMeta: root.querySelector('[data-mal-pick-meta]'),
+      link: root.querySelector('[data-mal-link]'),
       viewer: root.querySelector('[data-mal-viewer]'),
       viewerImg: root.querySelector('[data-mal-viewer-img]'),
       viewerInfo: root.querySelector('[data-mal-viewer-info]'),
+      pillDot: pill.querySelector('[data-mal-pill-dot]'),
     };
+
     root.querySelector('[data-mal-close]').addEventListener('click', close);
+    root.querySelector('[data-mal-fold]').addEventListener('click', fold);
     root.querySelector('[data-mal-viewer-close]').addEventListener('click', closeViewer);
     els.viewer.addEventListener('click', event => { if (event.target === els.viewer) closeViewer(); });
     els.mode.addEventListener('change', () => { write(MODE_KEY, els.mode.value); reload(); });
@@ -80,20 +126,80 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
       els.query.blur();   // 휴대폰 자판을 내린다
       reload();
     });
+    // 누르면 고르기만 한다 - 복사는 아래 줄 단추로(사용자 지정: 넘겨 보다 잘못 눌러도 복사되지 않게).
     els.grid.addEventListener('click', event => {
       const card = event.target.closest('[data-mal-index]');
-      if (card) openViewer(items[Number(card.dataset.malIndex)]);
+      if (card) select(Number(card.dataset.malIndex));
     });
-    // 아래 끝에 다가가면 다음 쪽을 읽는다(쪽 단추 대신 - 휴대폰에서는 내리는 쪽이 손에 익다).
-    // 스크롤 이벤트로 잰다 - IntersectionObserver 는 그리기 프레임에 묶여 있어 창이 가려진 동안 안 불린다.
+    els.pickThumb.addEventListener('click', () => openViewer(selected));
+    root.querySelector('[data-mal-copy]').addEventListener('click', () => void copySelected());
+    els.link.addEventListener('change', () => void setLink(els.link.checked));
+    // 아래 끝에 다가가면 다음 쪽을 읽는다. 스크롤 이벤트로 잰다 - IntersectionObserver 는 그리기 프레임에
+    // 묶여 있어 창이 가려진 동안 안 불린다.
     els.scroll.addEventListener('scroll', () => { if (nearBottom()) void loadNext(); }, {passive: true});
+
+    makeDraggable(els.head, root, PANEL_POS_KEY, {onTap: null, skip: target => target.closest('button')});
+    makeDraggable(pill, pill, PILL_POS_KEY, {onTap: expand});
+    window.addEventListener('resize', () => {
+      if (!root.hidden) placeAt(root, readPos(PANEL_POS_KEY));
+      if (!pill.hidden) placeAt(pill, readPos(PILL_POS_KEY));
+    });
   }
 
-  function nearBottom() {
-    const {scrollTop, scrollHeight, clientHeight} = els.scroll;
-    return scrollHeight - scrollTop - clientHeight < 600;
+  // ── 끌기 ─────────────────────────────────────────────────────────────────
+  /** 화면 안에 들어오게 자리를 잡는다. pos 가 없으면 CSS 기본 자리(판 = 위쪽 · 알약 = 오른쪽 가운데). */
+  function placeAt(el, pos) {
+    if (!pos) { el.style.left = ''; el.style.top = ''; return; }
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    // 판은 머리(44px)만 화면에 남아도 되고, 알약은 통째로 화면 안에 둔다.
+    const minVisibleH = el === root ? 44 : h;
+    const x = Math.max(0, Math.min(vw - w, pos.x));
+    const y = Math.max(0, Math.min(vh - minVisibleH, pos.y));
+    el.style.left = `${Math.round(x)}px`;
+    el.style.top = `${Math.round(y)}px`;
   }
 
+  function makeDraggable(handle, target, key, {onTap = null, skip = null} = {}) {
+    let start = null;
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || skip?.(event.target)) return;
+      const rect = target.getBoundingClientRect();
+      start = {px: event.clientX, py: event.clientY, x: rect.left, y: rect.top, moved: false, id: event.pointerId};
+      try { handle.setPointerCapture(event.pointerId); } catch { /* 일부 브라우저 */ }
+    });
+    handle.addEventListener('pointermove', event => {
+      if (!start || event.pointerId !== start.id) return;
+      const dx = event.clientX - start.px;
+      const dy = event.clientY - start.py;
+      if (!start.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
+      start.moved = true;
+      placeAt(target, {x: start.x + dx, y: start.y + dy});
+    });
+    const finish = event => {
+      if (!start || event.pointerId !== start.id) return;
+      const moved = start.moved;
+      start = null;
+      if (moved) {
+        write(key, JSON.stringify({x: parseFloat(target.style.left) || 0, y: parseFloat(target.style.top) || 0}));
+        target.dataset.malJustDragged = '1';
+        window.setTimeout(() => { delete target.dataset.malJustDragged; }, 0);
+      }
+    };
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+    if (onTap) {
+      // 끌고 난 뒤의 click 은 누름이 아니다.
+      handle.addEventListener('click', event => {
+        if (target.dataset.malJustDragged) { event.preventDefault(); return; }
+        onTap();
+      });
+    }
+  }
+
+  // ── 목록 ─────────────────────────────────────────────────────────────────
   async function loadState() {
     const response = await fetch('/api/artist-thumb/state', {cache: 'no-store'});
     const data = await response.json().catch(() => ({}));
@@ -112,13 +218,14 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     els.filter.value = filters.some(item => !item.separator && item.key === savedFilter) ? savedFilter : 'all';
   }
 
+  function currentPool() {
+    return {mode: els.mode.value || '', filter: els.filter.value || 'all', query: els.query.value.trim(), search: null};
+  }
+
   function listUrl(pageNo) {
+    const pool = currentPool();
     const params = new URLSearchParams({
-      mode: els.mode.value || '',
-      filter: els.filter.value || 'all',
-      query: els.query.value.trim(),
-      page: String(pageNo),
-      per_page: String(PAGE_SIZE),
+      mode: pool.mode, filter: pool.filter, query: pool.query, page: String(pageNo), per_page: String(PAGE_SIZE),
     });
     return `/api/artist-thumb/list?${params}`;
   }
@@ -130,9 +237,17 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     totalPages = 0;
     total = 0;
     loading = false;
+    select(-1);
     els.grid.innerHTML = '';
     els.scroll.scrollTop = 0;
     void loadNext();
+    // 연결이 켜져 있으면 뽑는 목록도 지금 보는 목록을 따라간다.
+    if (linkOn) void setLink(true, {quiet: true});
+  }
+
+  function nearBottom() {
+    const {scrollTop, scrollHeight, clientHeight} = els.scroll;
+    return scrollHeight - scrollTop - clientHeight < 600;
   }
 
   async function loadNext() {
@@ -188,6 +303,98 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     els.more.textContent = page < totalPages ? '' : '끝';
   }
 
+  // ── 고르기 · 복사 ────────────────────────────────────────────────────────
+  function select(index) {
+    els.grid.querySelector('.mal-card.is-selected')?.classList.remove('is-selected');
+    selected = items[index] || null;
+    els.pick.hidden = !selected;
+    if (!selected) return;
+    els.grid.querySelector(`[data-mal-index="${index}"]`)?.classList.add('is-selected');
+    els.pickThumb.innerHTML = selected.image_url ? `<img src="${escHtml(selected.image_url)}" alt="">` : '';
+    els.pickName.textContent = selected.artist || '';
+    const weight = Number(selected.weight || 0);
+    els.pickMeta.textContent = weight ? `게시물 ${count(weight)}` : '';
+  }
+
+  /** PC 탭의 기본 서식과 같다(artistThumbTab.baseArtistPrompt): NAI = artist:이름 · ANIMA = @이름 · 그 밖 = 이름.
+   *  SD 계열은 괄호를 이스케이프한다. */
+  function artistTag(name) {
+    const artist = String(name || '').trim();
+    if (!artist) return '';
+    if (String(getGenerationMode?.() || 'NAI').trim().toUpperCase() === 'NAI') return `artist:${artist}`;
+    const escaped = artist.replace(/[()]/g, '\\$&');
+    return isAnimaArtistMode?.() ? `@${escaped}` : escaped;
+  }
+
+  /** 휴대폰은 LAN 주소(http)로 들어온다 - 안전한 출처가 아니라 navigator.clipboard 가 없다. 그때는 옛 길(execCommand). */
+  async function copyText(text) {
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(text); return true; } catch { /* 옛 길로 */ }
+    }
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;font-size:16px';
+    document.body.appendChild(area);
+    let ok = false;
+    try {
+      area.focus();
+      area.select();
+      area.setSelectionRange(0, text.length);
+      ok = document.execCommand('copy');
+    } catch { ok = false; } finally { area.remove(); }
+    return ok;
+  }
+
+  async function copySelected() {
+    const tag = artistTag(selected?.artist);
+    if (!tag) return;
+    const ok = await copyText(tag);
+    showToast?.(ok ? `${tag} 복사됨` : '복사하지 못했습니다', ok ? 'success' : 'error');
+  }
+
+  // ── 랜덤 생성 연결 ───────────────────────────────────────────────────────
+  async function refreshLink() {
+    try {
+      const response = await fetch('/api/artist-thumb/random-tools', {cache: 'no-store'});
+      const tools = await response.json().catch(() => ({}));
+      if (response.ok && !tools.error) paintLink(Boolean(tools.main_link));
+    } catch { /* 표시는 다음 기회에 */ }
+  }
+
+  function paintLink(on) {
+    linkOn = on;
+    els.link.checked = on;
+    els.pillDot.hidden = !on;
+  }
+
+  /** 켜기 = main_link + 뽑는 목록을 이 판의 목록으로(출처 = 아티스트 탭 · 구간 전체 · 매칭 검색 없음). 끄기 = main_link 만. */
+  async function setLink(on, {quiet = false} = {}) {
+    if (on && !els.mode.value) { paintLink(false); showToast?.('받아 둔 썸네일 팩이 없습니다', 'error'); return; }
+    if (linkBusy && quiet) return;
+    linkBusy = true;
+    const randomTools = on
+      ? {main_link: true, pool: currentPool(), source: {kind: 'tab', id: ''}, range: [0, 100]}
+      : {main_link: false};
+    try {
+      const response = await fetch('/api/artist-thumb/options', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({random_tools: randomTools}),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.error) throw new Error(data.error || `HTTP ${response.status}`);
+      paintLink(Boolean(data.random_tools?.main_link ?? on));
+      if (!quiet) {
+        showToast?.(on ? '메인 Random 마다 이 목록에서 작가 한 명을 붙입니다' : '랜덤 작가 연결을 껐습니다', 'info');
+      }
+    } catch (error) {
+      paintLink(linkOn);   // 서버는 그대로다 - 스위치를 되돌린다
+      showToast?.(`연결을 바꾸지 못했습니다: ${error.message || error}`, 'error');
+    } finally {
+      linkBusy = false;
+    }
+  }
+
+  // ── 크게 보기 ────────────────────────────────────────────────────────────
   function openViewer(item) {
     if (!item) return;
     els.viewerImg.src = item.image_url || '';
@@ -205,14 +412,11 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     els.viewerImg.removeAttribute('src');
   }
 
+  // ── 열기 · 접기 · 닫기 ───────────────────────────────────────────────────
   async function open() {
     if (!root) build();
-    root.hidden = false;
-    document.documentElement.classList.add('mal-open');
-    if (state) {
-      if (!items.length) reload();
-      return;
-    }
+    expand();
+    if (state) return;
     renderStatus('불러오는 중…');
     try {
       await loadState();
@@ -223,12 +427,27 @@ export function createMobileArtistList({document, window, escHtml, showToast, st
     }
   }
 
+  function expand() {
+    pill.hidden = true;
+    root.hidden = false;
+    placeAt(root, readPos(PANEL_POS_KEY));
+    void refreshLink();
+    if (state && !items.length && !loading) reload();
+  }
+
+  function fold() {
+    closeViewer();
+    root.hidden = true;
+    pill.hidden = false;
+    placeAt(pill, readPos(PILL_POS_KEY));
+  }
+
   function close() {
     if (!root) return;
     closeViewer();
     root.hidden = true;
-    document.documentElement.classList.remove('mal-open');
+    pill.hidden = true;
   }
 
-  return {open, close, isOpen: () => Boolean(root && !root.hidden)};
+  return {open, close, fold, isOpen: () => Boolean(root && !root.hidden)};
 }

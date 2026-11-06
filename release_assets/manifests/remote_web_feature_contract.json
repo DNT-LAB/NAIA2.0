@@ -931,6 +931,8 @@
         {"method": "POST", "path": "/api/result/action/delete", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/img2img/restore-prompts", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/img2img/layer", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/img2img/prompt-swap/preview", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/img2img/prompt-swap/apply", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/image-action/{action}", "smoke": "external_live"}
       ]
     },

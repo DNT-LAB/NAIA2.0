@@ -113,9 +113,8 @@ export function createMobileArtistList({
       <div class="mal-pick" data-mal-pick hidden>
         <div class="mal-pick-row">
           <button type="button" class="mal-pick-thumb" data-mal-zoom aria-label="크게 보기"></button>
-          <span class="mal-pick-text"><b data-mal-pick-name></b><span data-mal-pick-meta></span>
+          <span class="mal-pick-text"><span class="mal-pick-head"><b data-mal-pick-name></b><span data-mal-pick-meta></span></span>
             <code class="mal-pick-tag" data-mal-pick-tag></code></span>
-          <button type="button" class="mal-copy" data-mal-copy>태그 복사</button>
         </div>
         <div class="mal-gen-row">
           <span class="mal-weight" role="group" aria-label="가중치">
@@ -126,7 +125,8 @@ export function createMobileArtistList({
           <label class="mal-solo" title="이번 생성은 PE 프리픽스·포스트픽스와 랜덤 행의 다른 작가를 빼고 이 작가만 넣습니다">
             <input type="checkbox" data-mal-solo><span>이 작가만</span>
           </label>
-          <button type="button" class="mal-gen" data-mal-gen>이 작가로 생성</button>
+          <button type="button" class="mal-copy" data-mal-copy title="가중치를 실은 태그를 복사">복사</button>
+          <button type="button" class="mal-gen" data-mal-gen title="랜덤 프롬프트 + 이 작가로 생성">생성</button>
         </div>
       </div>
       <label class="mal-link">
@@ -347,7 +347,7 @@ export function createMobileArtistList({
     els.pickThumb.innerHTML = selected.image_url ? `<img src="${escHtml(selected.image_url)}" alt="">` : '';
     els.pickName.textContent = selected.artist || '';
     const posts = Number(selected.weight || 0);   // 목록의 weight = 게시물 수(가중치 아님)
-    els.pickMeta.textContent = posts ? `게시물 ${count(posts)}` : '';
+    els.pickMeta.textContent = posts ? `· ${count(posts)}장` : '';
     paintWeight();
   }
 
@@ -445,7 +445,7 @@ export function createMobileArtistList({
 
   function paintGen(text) {
     els.gen.disabled = Boolean(text);
-    els.gen.textContent = text || '이 작가로 생성';
+    els.gen.textContent = text || '생성';
   }
 
   async function generateSelected() {
@@ -454,7 +454,7 @@ export function createMobileArtistList({
     const tag = artistTag(item.artist);
     if (!tag) return;
     genBusy = true;
-    paintGen('프롬프트 뽑는 중…');
+    paintGen('뽑는 중');
     try {
       const random = await postJson('/api/artist-thumb/random-prompt', {
         artist_prompt: tag,
@@ -466,7 +466,7 @@ export function createMobileArtistList({
       const negative = String(random.negative_prompt || getNegativePrompt?.() || '');
       // PC 와 같이 메인 프롬프트 칸에도 싣는다 - 무엇이 나갔는지 보이고 [다시 생성] 이 같은 글로 돈다.
       setPromptFields?.(positive, negative);
-      paintGen('보내는 중…');
+      paintGen('보내는 중');
       const resolution = activeResolution();
       await postJson('/api/artist-thumb/generate', {
         ...resolution,

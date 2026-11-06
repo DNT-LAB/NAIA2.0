@@ -59,6 +59,39 @@ def collect_electron_backend_files(source_root: str | Path) -> list[Path]:
     ]
 
 
+# 사용자가 Codex · Claude 같은 AI 에이전트에게 NAIA 를 맡길 때 에이전트가 읽는 안내(2026-11-06 사용자 지시).
+# 에이전트가 읽으므로 영어로 쓴다. 상세는 `NAIA_cli.py --help` 와 `capabilities` 가 스스로 알려 준다.
+AGENT_CLI_README = [
+    "Using NAIA from an AI agent (Codex, Claude, other CLI agents)",
+    "",
+    "NAIA ships a command-line tool for agents. Run it with the bundled Python, from this folder:",
+    "  resources\\python\\python.exe resources\\naia-backend\\NAIA_cli.py --help",
+    "Every command prints one JSON object on stdout ({\"ok\": ..., \"result\" or \"error\": ...}).",
+    "",
+    "1. NAIA window open (recommended): talk to the running app and its current settings.",
+    "     NAIA_cli.py capabilities overview --server http://127.0.0.1:7243",
+    "     NAIA_cli.py capabilities search \"character reference\" --server http://127.0.0.1:7243",
+    "     NAIA_cli.py capabilities describe <id> --server http://127.0.0.1:7243",
+    "     NAIA_cli.py call <id> --server http://127.0.0.1:7243 --input @request.json",
+    "   http://127.0.0.1:7243 is the default address; use the address the NAIA window shows if it differs.",
+    "2. NAIA closed: add --user-data with this folder's user-data, or the CLI reads %APPDATA%\\NAIA instead.",
+    "     NAIA_cli.py --user-data \"<this folder>\\user-data\" presets",
+    "     NAIA_cli.py --user-data \"<this folder>\\user-data\" generate --prompt \"...\" --output out.png --dry-run",
+    "     NAIA_cli.py --user-data \"<this folder>\\user-data\" capabilities overview --standalone",
+    "",
+    "Rules for agents:",
+    "- Use the user's current preset. Do not pass --preset/--model/size/steps unless the user asks for them.",
+    "- Run generate with --dry-run first: it shows the preset, final parameters and the Anlas cost.",
+    "  Ask the user before any generation that costs Anlas.",
+    "- dispatch_complete means the command was accepted, not that an image is finished. Never blindly retry",
+    "  a generation after a timeout; check the result first.",
+    "- set_prompt changes only the fields you send (prompt and/or negative_prompt).",
+    "- Never print or paste tokens. auth reports only whether a provider is configured.",
+    "- NAIA does not filter content. The calling agent's own policy applies.",
+    "",
+]
+
+
 def _write_release_readme(target: Path) -> None:
     (target / "README_RELEASE.txt").write_text(
         "\n".join(
@@ -79,6 +112,7 @@ def _write_release_readme(target: Path) -> None:
                 "- RELEASE_MANIFEST.json lists staged files, sizes, and SHA-256 hashes.",
                 "- CHECKSUMS.sha256 contains release payload checksums.",
                 "",
+                *AGENT_CLI_README,
             ]
         ),
         encoding="utf-8",

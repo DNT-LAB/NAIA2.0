@@ -281,6 +281,11 @@ async def handle_session_command(
         )
         return True
     if command_type == "set_prompt":
+        # 외부 에이전트(NAIA_cli call/batch - 상관 ID 소켓)의 호출은 **보낸 칸만** 바꾼다. 화면은 늘 두 칸을
+        # 함께 보내지만 에이전트는 한 칸만 보내기 쉽고, 빠진 칸을 "" 로 받으면 네거티브가 소리없이 지워진다.
+        agent_call = isinstance(getattr(ws, "call_id", None), str) and bool(getattr(ws, "call_id", ""))
+        has_prompt = not agent_call or "prompt" in command
+        has_negative = not agent_call or "negative_prompt" in command or "negative" in command
         # ⚠️ **어느 프리셋을 보고 친 글인가를 먼저 본다.** 예전에는 프롬프트를 먼저
         #    싣고 나중에 표식을 봤는데, 그러면 프리셋 파일은 지켜져도 **살아 있는
         #    세션 프롬프트**가 앞 프리셋의 글로 바뀐다 - 재접속하거나 다시 편집하면
@@ -291,7 +296,7 @@ async def handle_session_command(
             str(command.get("prompt_origin") or ""),
             str(command.get("prompt_preset") or ""),
         )
-        if not stale_prompt:
+        if not stale_prompt and has_prompt:
             context.prompt_text = str(command.get("prompt") or "")
         # 네거티브도 같다. `negative_preset` = 그 네거티브를 **치기 시작했을 때** 화면이 믿던 프리셋.
         # 다른 탭이 프리셋을 바꾼 뒤에 닿은 편집을 받으면 그 글이 **새 프리셋**에 써진다 - 통째로 버리고
@@ -301,7 +306,7 @@ async def handle_session_command(
             str(command.get("origin") or ""),
             str(command.get("negative_preset") or ""),
         )
-        if not stale_negative:
+        if not stale_negative and has_negative:
             context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
         context.save_remote_ui_state()
         # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
@@ -331,6 +336,14 @@ async def handle_session_command(
             # 그것까지 지우면 방금 친 글자가 소리없이 사라진다(Codex 리뷰 2026-08-27).
             **({"force": True, "stale_correction": True} if (stale_prompt or stale_negative) else {}),
         }, ensure_ascii=False))
+        if agent_call:
+            # 열린 탭들도 에이전트가 바꾼 칸을 받는다(force 없음 - 사람이 치는 중인 탭은 기존 규칙대로 자기 글을 지킨다).
+            synced = {"type": "prompt_sync"}
+            if has_prompt:
+                synced["prompt"] = context.prompt_text
+            if has_negative:
+                synced.update(negative=context.negative_prompt_text, negative_prompt=context.negative_prompt_text)
+            await broadcast_json(clients, synced)
         return True
     if command_type == "get_prompt":
         # 재연결 시 좌측 패널을 '현재 적용 프롬프트'로 강제 재동기(force) — session 메시지가 누락/레이스

@@ -32,6 +32,10 @@ REMOTE_OPTION_DEFAULTS = {
     # 외부 ComfyUI(API 모드)에서 Generate 동안 결과 칸 아래에 ComfyUI 서버 출력을 띄운다(10-01 추가 기능).
     # 결과 이미지를 가려서 **기본 꺼짐** - 필요한 사람만 Settings 에서 켠다(사용자 지시 2026-10-07).
     "show_comfyui_server_console": False,
+    # 태그 자동완성 끄기(사용자 지시 2026-11-07) - **NAIA 를 실행한 PC 화면에만** 건다.
+    # 원격 접속(LAN · Tailscale · Cloudflared) 화면은 짝 옵션을 켰을 때만 같이 꺼진다(비추천 - 손가락 입력에 특히 쓸모 있다).
+    "disable_tag_autocomplete": False,
+    "disable_tag_autocomplete_remote": False,
 }
 # **세션 옵션** - 프로그램이 도는 동안만 산다. 다시 켜면 전부 기본값(꺼짐)이다.
 # ⚠️ **어디에도 저장하지 않는다**(사용자 지정 2026-10-10: "기억은 휘발성으로 어디에도 저장되지 않아야").

@@ -22119,6 +22119,16 @@ body.detached-module .mod-grid-3 {
 .settings-action-btn { flex: 0 0 auto; align-self: flex-start; }
 .settings-toggle-desc { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0; max-width: 520px; }
 .settings-toggle-note { display: inline; color: var(--accent); }
+/* 자동완성 묶음(2026-11-07) - 위 토글에 딸린 줄은 한 단 들여 쓰고, 꺼진 동안은 흐리게. */
+.settings-toggle-row.settings-subrow { padding-left: 22px; }
+.settings-toggle-row .opt-toggle.settings-toggle:disabled { opacity: 0.45; cursor: default; }
+.settings-seg-field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.settings-seg-label { font-size: 13px; color: var(--text-primary); }
+.settings-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.settings-seg button { background: transparent; border: 0; color: var(--text-muted); font-size: 12px; padding: 5px 12px; cursor: pointer; }
+.settings-seg button + button { border-left: 1px solid var(--border); }
+.settings-seg button.is-on { background: var(--accent-blue); color: #fff; }
+.settings-seg.is-disabled { opacity: 0.45; }
 
 /* ===== Settings > 폰트 (fontSettingsPanel.mjs) ===== */
 .font-settings { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }

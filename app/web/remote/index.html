@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261106-rdd2">
+<link rel="stylesheet" href="style.css?v=20261107-acset1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -1473,6 +1473,37 @@
             </div>
           </div>
           <div class="settings-group">
+            <h3 class="settings-group-title">자동완성</h3>
+            <div class="settings-toggle-row">
+              <button type="button" class="opt-toggle settings-toggle" id="optDisableTagAutocomplete"
+                      data-option="disable_tag_autocomplete" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('disable_tag_autocomplete')">
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">태그 자동완성 끄기</span>
+              </button>
+              <p class="settings-toggle-desc">프롬프트 · 네거티브 · 캐릭터 · 모듈 칸처럼 프롬프트를 쓰는 모든 칸에서 태그 후보 목록과 태그 카드를 띄우지 않습니다. <b>NAIA 를 실행한 PC 화면</b>에만 적용됩니다. <span class="settings-toggle-note">검색창(태그 검색 · Tag Filter · E621)의 후보는 그대로입니다.</span></p>
+            </div>
+            <div class="settings-toggle-row settings-subrow">
+              <button type="button" class="opt-toggle settings-toggle" id="optDisableTagAutocompleteRemote"
+                      data-option="disable_tag_autocomplete_remote" data-checked="false" aria-pressed="false"
+                      onclick="toggleOptionButton('disable_tag_autocomplete_remote')" disabled>
+                <span class="opt-box" aria-hidden="true"></span>
+                <span class="opt-label">원격 접속에도 같이 적용 (비추천)</span>
+              </button>
+              <p class="settings-toggle-desc">휴대폰이나 다른 PC 에서 LAN · Tailscale · Cloudflared 로 접속한 화면에서도 자동완성을 끕니다. <span class="settings-toggle-note">원격 화면은 손가락 입력이 많아 자동완성이 특히 쓸모 있습니다.</span></p>
+            </div>
+            <div class="settings-toggle-row">
+              <div class="settings-seg-field">
+                <span class="settings-seg-label" id="acTouchPlacementLabel">터치 기기에서 후보 위치</span>
+                <div class="settings-seg" id="acTouchPlacement" role="radiogroup" aria-labelledby="acTouchPlacementLabel">
+                  <button type="button" role="radio" aria-checked="false" data-ac-placement="bottom">화면 아래</button>
+                  <button type="button" role="radio" aria-checked="false" data-ac-placement="caret">커서 옆</button>
+                </div>
+              </div>
+              <p class="settings-toggle-desc">손가락으로 쓰는 기기(휴대폰 · 태블릿)에서 후보를 어디에 띄울지 고릅니다. <b>화면 아래</b>는 화상 키보드 바로 위 한 줄, <b>커서 옆</b>은 PC 와 같습니다. 마우스를 쓰는 PC 는 늘 커서 옆입니다. <span class="settings-toggle-note">이 기기에만 저장됩니다 - 기본은 화면 아래, 윈도 기기는 커서 옆.</span></p>
+            </div>
+          </div>
+          <div class="settings-group">
             <h3 class="settings-group-title">폰트</h3>
             <div class="settings-toggle-row">
               <div class="font-settings" id="fontSettings"></div>
@@ -1601,6 +1632,6 @@ function openInSystemBrowser() {
   <button type="button" class="mobile-remote-item" data-mobile-remote="artists" data-label="Artists"><span class="mobile-remote-icon" aria-hidden="true">&#127912;</span>Artists</button>
   <button type="button" class="mobile-remote-item is-pending" hidden data-mobile-remote="metadata" data-label="Metadata"><span class="mobile-remote-icon" aria-hidden="true">&#128221;</span>Metadata<span class="mobile-remote-note">준비 중</span></button>
 </div>
-<script src="app.js?v=20261106-rdd1"></script>
+<script src="app.js?v=20261107-acset1"></script>
 </body>
 </html>

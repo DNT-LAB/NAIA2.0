@@ -239,11 +239,19 @@ export function createTagAssistController({
   // 태그 정보 툴팁(캐럿 위 태그 설명 + RELATED)을 억제할지 묻는 훅. Interactive 편집 팝업처럼
   // 화면을 이미 점유한 UI 위에 큰 툴팁이 겹치면 방해가 된다. 자동완성 드롭다운은 영향 없다.
   isTagInfoSuppressed = () => false,
+  // 설정 > 자동완성(사용자 지시 2026-11-07). false 면 후보 목록 · 태그 카드를 띄우지 않는다(실행 PC / 원격 판정은 app.js).
+  isAutocompleteEnabled = () => true,
+  // 손가락 기기의 후보 자리 - 'bottom'(키보드 위 띠) | 'caret'(PC 와 같음). 기기마다 저장 · 기본값은 app.js 가 정한다.
+  getTouchPlacement = () => 'bottom',
 }) {
   const tagTooltip = tooltip;
   // 떠 있는 팝업의 원래 자리. 칸이 inlineHost 를 가지면 그 안으로 옮겨 붙이고(창 안 빈 곳에
   // 그린다), 다른 칸으로 넘어가면 여기로 되돌린다.
   const tooltipHome = tagTooltip ? tagTooltip.parentNode : null;
+
+  function autocompleteOn() {
+    try { return isAutocompleteEnabled() !== false; } catch (_) { return true; }
+  }
 
   /** 태그 정보 툴팁 억제 여부. 훅이 던져도 툴팁 로직이 죽지 않게 감싼다. */
   function suppressedTagInfo() {
@@ -607,21 +615,17 @@ export function createTagAssistController({
   function isPhoneDockSurface() {
     if (!tagTooltip?.classList.contains('open')) return false;
     if (tagTooltip.classList.contains('preset-event-mode') || tagTooltip.classList.contains('chunk-ac-mode')) return false;
-    // 터치 화면 윈도 노트북 · 태블릿(ASUS Z Flow 등)도 coarse / hover:none 으로 잡힌다 - 그건 PC 다(사용자 제보 2026-11-07,
-    // 2.0.68 부터 후보가 화면 맨 아래로 갔다). 윈도는 화상 키보드가 보이는 화면을 줄이지 않아 띠가 키보드에 가리기도 한다.
-    // '모바일 OS 일 때만' 으로 좁히지 않는 까닭: 안드로이드 크롬의 데스크톱 사이트 모드는 UA 가 Linux 라 폴드가 빠진다.
-    if (isWindowsHost()) return false;
+    // 자리는 설정 > 자동완성 > [터치 기기에서 후보 위치] 가 정한다(기기마다 저장). 기본값은 app.js 가 기기로 고른다 -
+    // 터치 화면 윈도 노트북 · 태블릿(ASUS Z Flow 등)도 coarse / hover:none 으로 잡혀 2.0.68 에서 후보가 맨 아래로 갔다
+    // (사용자 제보 2026-11-07). 그래서 윈도 기본 = 커서 옆, 나머지 = 화면 아래. 8인치 윈도 태블릿은 화면 아래로 바꿔 쓴다.
+    let placement = 'bottom';
+    try { placement = getTouchPlacement() === 'caret' ? 'caret' : 'bottom'; } catch (_) { /* 기본 */ }
+    if (placement !== 'bottom') return false;
     try {
       return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches;
     } catch (_) {
       return false;
     }
-  }
-
-  function isWindowsHost() {
-    const nav = window.navigator || {};
-    const platform = String(nav.userAgentData?.platform || nav.platform || '');
-    return /^win/i.test(platform) || /Windows NT/i.test(String(nav.userAgent || ''));
   }
 
   function setPhoneDock(on) {
@@ -1754,6 +1758,7 @@ export function createTagAssistController({
 
   function checkTagHint() {
     if (acMode) return;
+    if (!autocompleteOn()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     // 호스트가 억제 중이면 조회 자체를 하지 않는다(WS 왕복도 아낀다).
     if (suppressedTagInfo()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     const target = acTarget || promptEdit;
@@ -1782,6 +1787,7 @@ export function createTagAssistController({
   }
 
   function openPresetAutocompleteAtCursor(textarea) {
+    if (!autocompleteOn()) return false;
     const target = textarea || acTarget || promptEdit;
     const info = getActiveTokenInfo(target);
     if (!info || !isLocalPresetQuery(info.stripped)) return false;
@@ -2167,6 +2173,10 @@ export function createTagAssistController({
   }
 
   function scheduleAutocomplete(options = {}) {
+    if (!autocompleteOn()) {
+      if (acMode) hideAutocomplete();
+      return;
+    }
     const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
@@ -2320,6 +2330,7 @@ export function createTagAssistController({
   }
 
   function onAutocompleteResult(m) {
+    if (!autocompleteOn()) return;                        // 끄기 직전에 보낸 요청의 늦은 답
     if (Object.prototype.hasOwnProperty.call(m || {}, 'translated_query')) {
       const requestId = String(m.requestId || '');
       if (requestId && requestId !== lastTranslationRequestId) {
@@ -4150,9 +4161,22 @@ export function createTagAssistController({
   window.addEventListener('resize', followAssistWindow);
   window.addEventListener('scroll', followAssistWindow, true);
 
+  // 설정이 바뀌면 떠 있는 것을 바로 맞춘다 - 끄면 닫고, 자리를 바꾸면 다시 놓는다.
+  function refreshAutocompleteSetting() {
+    if (!tagTooltip) return;
+    if (!autocompleteOn()) {
+      if (acMode) hideAutocomplete();
+      closeTagInfoTooltips();
+      lastLookupTag = '';
+      return;
+    }
+    if (tagTooltip.classList.contains('open')) positionTagTooltip();
+  }
+
   return {
     bindDefaultTextareas,
     bindTagAssist,
+    refreshAutocompleteSetting,
     openSlashCommandByName,
     bindTagChipInfoHover,
     lookupPromptInfoTag,

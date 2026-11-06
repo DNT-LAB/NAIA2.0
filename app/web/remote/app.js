@@ -5017,6 +5017,8 @@ const optBoxes = {
   hide_staging_button: $('optHideStagingTab'),
   hide_assist_button: $('optHideAssistTab'),
   show_comfyui_server_console: $('optShowComfyServerConsole'),
+  disable_tag_autocomplete: $('optDisableTagAutocomplete'),
+  disable_tag_autocomplete_remote: $('optDisableTagAutocompleteRemote'),
 };
 // 하단 옵션 줄의 톱니 > 확장 기능. 체크 줄을 **옵션 통로에 그대로 물린다**(`optBoxes` 에 등록) - 켜고 끄기 ·
 // 서버 동기 · 다른 창과의 맞춤이 세 단추와 같은 길로 간다. 줄은 팝업이 만들어 돌려준다.
@@ -10716,6 +10718,13 @@ function applyOptionState(key, value, options = {}) {
   }
   // 팝업 안의 옵션은 닫혀 있으면 안 보인다 - 켜져 있다는 것을 톱니 단추가 알린다.
   if (optionExtras?.owns(key)) optionExtras.paint();
+  if (key === 'disable_tag_autocomplete' || key === 'disable_tag_autocomplete_remote') {
+    // 원격 짝은 본 토글이 켜졌을 때만 뜻이 있다 - 꺼져 있으면 잠근다(값은 그대로 둔다).
+    const remote = optBoxes.disable_tag_autocomplete_remote;
+    if (remote) remote.disabled = !getOptionChecked('disable_tag_autocomplete');
+    paintTouchPlacementSetting();
+    tagAssist?.refreshAutocompleteSetting?.();
+  }
   if (key === 'show_comfyui_server_console' && !next) {
     // 끄면 지금 떠 있는 것(실패로 남겨 둔 것 포함)도 닫는다 - 다음 Generate 부터가 아니라 바로.
     comfyServerConsole?.hide?.();
@@ -15944,7 +15953,55 @@ window.naia.commands = {
   },
 };
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-wintouch1')
+// ── 설정 > 자동완성(사용자 지시 2026-11-07) ────────────────────────────────────────────────────────────
+// [태그 자동완성 끄기] 는 NAIA 를 실행한 PC 화면에만 건다. 원격 접속(LAN · Tailscale · Cloudflared)은
+// [원격 접속에도 같이 적용](비추천)을 켰을 때만 같이 꺼진다. 실행 PC = 앱 창이거나 루프백 주소로 연 화면.
+// 함수로 둔다 - applyOptionState 가 이 줄보다 먼저 불려도 TDZ 에 걸리지 않게.
+function isLocalClient() {
+  if (window.naiaShell) return true;
+  const host = String(window.location?.hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  return host === 'localhost' || host === '::1' || /^127\./.test(host);
+}
+function tagAutocompleteEnabled() {
+  if (!getOptionChecked('disable_tag_autocomplete')) return true;
+  return !(isLocalClient() || getOptionChecked('disable_tag_autocomplete_remote'));
+}
+// [터치 기기에서 후보 위치] - 기기마다(localStorage). 기본 = 화면 아래, 윈도 기기만 커서 옆 - 터치 화면 윈도 노트북에서
+// 후보가 맨 아래로 간다는 제보(2026-11-07). 8인치 윈도 태블릿처럼 아래가 나은 기기는 여기서 바꾼다.
+var AC_TOUCH_PLACEMENT_KEY = 'naia.tagAutocomplete.touchPlacement';
+function isWindowsDevice() {
+  const nav = window.navigator || {};
+  const platform = String(nav.userAgentData?.platform || nav.platform || '');
+  return /^win/i.test(platform) || /Windows NT/i.test(String(nav.userAgent || ''));
+}
+function touchAutocompletePlacement() {
+  try {
+    const saved = window.localStorage.getItem(AC_TOUCH_PLACEMENT_KEY);
+    if (saved === 'bottom' || saved === 'caret') return saved;
+  } catch (_) { /* 저장소를 못 쓰면 기본값 */ }
+  return isWindowsDevice() ? 'caret' : 'bottom';
+}
+function paintTouchPlacementSetting() {
+  const root = $('acTouchPlacement');
+  if (!root) return;
+  const current = touchAutocompletePlacement();
+  root.querySelectorAll('[data-ac-placement]').forEach(button => {
+    const on = button.dataset.acPlacement === current;
+    button.classList.toggle('is-on', on);
+    button.setAttribute('aria-checked', on ? 'true' : 'false');
+  });
+  root.classList.toggle('is-disabled', !tagAutocompleteEnabled());
+}
+$('acTouchPlacement')?.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-ac-placement]');
+  if (!button) return;
+  try { window.localStorage.setItem(AC_TOUCH_PLACEMENT_KEY, button.dataset.acPlacement); } catch (_) { /* 이번 화면만 */ }
+  paintTouchPlacementSetting();
+  tagAssist?.refreshAutocompleteSetting?.();
+});
+paintTouchPlacementSetting();
+
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-acset1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,
@@ -15976,6 +16033,8 @@ const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-wintouch1'
       // 거기서는 이벤트 맵의 작은 툴팁 카드가 부품을 설명한다(characterBuilderV5.mjs).
       isTagInfoSuppressed: () => document.body.classList.contains('interactive-editing')
         || document.body.classList.contains('assets-v5-mode'),
+      isAutocompleteEnabled: tagAutocompleteEnabled,
+      getTouchPlacement: touchAutocompletePlacement,
     });
     tagAssist.bindDefaultTextareas();
     // 자동완성 팝업은 body 직속이라 리모컨이 '바깥' 으로 친다 - 후보를 누르는

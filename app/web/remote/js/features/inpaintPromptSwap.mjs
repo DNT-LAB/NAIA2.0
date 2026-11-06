@@ -57,6 +57,7 @@ export function createInpaintPromptSwap({
   fetchFn = (...args) => fetch(...args),
   takePendingEdit = () => null,    // 아직 안 보낸(0.5초 묶음) 메인 · 네거티브 편집을 꺼내 쥔다(다른 칸 것은 보낸다)
   restorePendingEdit = () => {},   // 꺼내 쥔 편집을 보낸다 - 스왑이 실패했을 때
+  releasePendingEdit = () => {},   // 스왑이 끝났다(성공 · 실패) - 꺼내 쥔 동안 칸을 지키던 표식을 내린다
 } = {}) {
   let store = readStore();
   // 창별 기준 글: 마지막으로 서버가 넣어 준 메인 · 네거티브. 지금 글이 이것과 다르면 사람이 고친 것이다.
@@ -193,6 +194,7 @@ export function createInpaintPromptSwap({
       return false;
     } finally {
       busy = false;
+      if (held) releasePendingEdit(held);
     }
   }
 

@@ -337,8 +337,10 @@ class AgentClient:
                 continue
             if not isinstance(frame, dict):
                 continue
+            # 짝 판정은 가리기 전의 원본 필드로 한다 - 가린 뒤에 견주면 비밀값 치환이 ID 를 바꿔 ACK 를 놓친다(NEW-1).
+            frame_call_id = frame.get(CALL_ID_KEY)
             frame = sanitize(frame, self.secrets)
-            if frame.get(CALL_ID_KEY) == call_id:
+            if frame_call_id == call_id:
                 if frame.get("type") == ACK_TYPE:
                     ack = frame
                     if not observe:

@@ -65,10 +65,42 @@ class UrlCredentialTests(unittest.TestCase):
 
     def test_command_url_parts_become_secrets(self):
         # 서버가 주소를 다른 모양으로 되돌려 줘도(조각만) 가린다.
-        secrets = secret_values({"type": "set_webui_url", "url": "http://bob:hunter2@h:7860/?auth=Z9"})
+        secrets = secret_values({"type": "set_webui_url", "url": "http://bob:hunter2@h:7860/?auth=Z9Q8W7E6"})
         self.assertIn("bob:hunter2", secrets)
-        self.assertIn("Z9", secrets)
+        self.assertIn("Z9Q8W7E6", secrets)
         self.assertEqual(sanitize("user was bob:hunter2", secrets), "user was [REDACTED]")
+
+    def test_percent_encoded_query_value_masked_in_place(self):
+        # 재리뷰 H1: 디코딩한 값으로 찾으면 인코딩된 원문이 남는다.
+        text = "failed https://example.invalid/?token=FAKE%2FREVIEW%2BTOKEN&x=1"
+        masked = mask_url_credentials(text)
+        self.assertNotIn("FAKE", masked)
+        self.assertTrue(masked.endswith("?token=[REDACTED]&x=1"))
+        secrets = secret_values({"url": "https://example.invalid/?token=FAKE%2FREVIEW%2BTOKEN"})
+        self.assertIn("FAKE/REVIEW+TOKEN", secrets)  # 서버가 디코딩해 되돌려 준 꼴도 가린다
+        self.assertNotIn("FAKE", sanitize({"error": "bad token FAKE/REVIEW+TOKEN"}, secrets)["error"])
+
+    def test_fragment_token_masked(self):
+        self.assertNotIn("SECRETFRAG", mask_url_credentials("http://h/cb#access_token=SECRETFRAG&state=ok"))
+
+    def test_short_or_non_secret_params_do_not_corrupt_reply(self):
+        # 재리뷰 NEW-1: api_version=1 의 "1" 을 전역으로 바꾸면 IP 와 상관 ID 가 깨진다.
+        command = {"type": "set_webui_url", "url": "http://127.0.0.1:7860/?api_version=1&x_key=1"}
+        secrets = secret_values(command)
+        self.assertNotIn("1", secrets)
+        reply = sanitize({"_agent_call_id": "1" * 32, "url": "http://127.0.0.1:7860/?api_version=1"}, secrets + ["1111"])
+        self.assertEqual(reply["_agent_call_id"], "1" * 32)
+        self.assertEqual(reply["url"], "http://127.0.0.1:7860/?api_version=1")
+        self.assertEqual(mask_url_credentials("http://127.0.0.1:7860/?x_key=1"), "http://127.0.0.1:7860/?x_key=[REDACTED]")
+
+    def test_long_url_free_string_is_linear(self):
+        # 재리뷰 NEW-2: URL 없는 긴 영문 덩어리에서 정규식이 길이의 제곱으로 돌던 것.
+        import time
+        payload = {"items": ["A" * 16000 + " see http://h/a" for _ in range(32)], "u": "Z" * 20000 + " https://h/?token=" + "T" * 10}
+        start = time.perf_counter()
+        out = redact(sanitize(payload), [])
+        self.assertLess(time.perf_counter() - start, 0.5)
+        self.assertTrue(out["u"].endswith("token=[REDACTED]"))
 
 
 class AccessBroadcastTests(unittest.TestCase):

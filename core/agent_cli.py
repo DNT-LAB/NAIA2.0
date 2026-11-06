@@ -463,7 +463,7 @@ def redact(value, secrets):
         return [redact(item, secrets) for item in value]
     if isinstance(value, str):
         from core.agent_protocol import mask_url_credentials
-        for secret in sorted(secrets, key=len, reverse=True):
+        for secret in sorted((s for s in secrets if isinstance(s, str) and len(s) >= 4), key=len, reverse=True):
             value = value.replace(secret, "[REDACTED]")
         value = mask_url_credentials(value)
     return value

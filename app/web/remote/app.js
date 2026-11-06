@@ -2546,6 +2546,9 @@ let sessionNegDeferred = false;   // 칸에 초점이 있어 건너뛴 서버 �
 let sessionNegSent = null;
 let sessionNegSentAt = 0;
 let sessionNegRecheck = 0;
+// 스왑이 꺼내 쥔(아직 안 보낸) 네거티브 편집. 스왑이 도는 동안 오는 옛 상태로 칸을 덮으면 실패했을 때 되살릴
+// 글이 사라진다 - 스왑이 끝날 때(releasePendingEdit) 내린다(Codex 재리뷰 11-06 NEW-3).
+let sessionNegHeld = null;
 /** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
  *
  *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
@@ -2566,7 +2569,7 @@ function applyVirtualNegative(session) {
   if (on) {
     const next = String(session.negative_prompt || '');
     if (sessionNegSent !== null && (next === sessionNegSent || Date.now() - sessionNegSentAt > 4000)) sessionNegSent = null;
-    if (document.activeElement === box || sessionNegSent !== null
+    if (document.activeElement === box || sessionNegSent !== null || sessionNegHeld !== null
         || (pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
       // 건너뛴 새 값은 칸을 떠날 때 맞춘다 - 안 그러면 다른 탭이 바꾼 글 대신 옛 글이 남고 생성은 새 글로 나간다(Codex 3차).
       sessionNegDeferred = box.value !== next;
@@ -2583,6 +2586,7 @@ function applyVirtualNegative(session) {
   } else {
     sessionNegDeferred = false;
     sessionNegSent = null;
+    sessionNegHeld = null;
   }
   // 토큰 수는 보이는 칸을 센다(`tokenDisplay` 가 세션 칸을 먼저 본다) - 켜고 끌 때 · 서버 값이 바뀔 때 다시 센다.
   // ⚠️ 값을 넣은 **뒤에** 센다 - 앞에서 세면 다른 탭이 바꾼 새 글을 보여 주면서 수는 옛 글의 것이다(Codex 재리뷰).
@@ -3458,7 +3462,7 @@ const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=202
   });
 // 인페인트 프롬프트 스왑(사용자 지정 2026-11-03) - 칩 줄 + 설정 창. 상태는 img2img 모듈 상태를 그대로 읽는다.
 let inpaintPromptSwap = null;
-const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-ipb4')
+const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=20261106-rv68b')
   .then(({createInpaintPromptSwap}) => {
     inpaintPromptSwap = createInpaintPromptSwap({
       document, window, escHtml, showToast,
@@ -3480,8 +3484,18 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
         discardPendingModuleEdit('img2img');
         // 버린 네거티브 편집은 '서버가 아직 안 돌려준 글' 표식도 함께 내린다 - 남겨 두면 스왑 결과가 와도
         // 칸이 그 글을 지키느라 옛 글을 보여 주고, 생성은 새 서버 값으로 나간다(Codex 리뷰 11-06 M2).
-        if (pending.key === 'negative_prompt') sessionNegSent = null;
+        // 대신 스왑이 끝날 때까지는 꺼낸 글을 칸이 지킨다(sessionNegHeld · NEW-3).
+        if (pending.key === 'negative_prompt') {
+          sessionNegSent = null;
+          sessionNegHeld = String(pending.value ?? '');
+        }
         return pending;
+      },
+      // 스왑이 끝났다(성공 · 실패 모두, 실패면 restorePendingEdit 뒤) - 지키던 표식을 내리고 지금 서버 값에 맞춘다.
+      releasePendingEdit: () => {
+        if (sessionNegHeld === null) return;
+        sessionNegHeld = null;
+        applyVirtualNegative(virtualCharacterSession());
       },
       restorePendingEdit: pending => {
         if (!pending) return;

@@ -19,46 +19,102 @@ def sensitive_key(key):
             or key.endswith(("_token", "_password", "_secret", "_api_key")))
 
 
-_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
-_URL_SECRET_PARAM = re.compile(r"token|key|auth|secret|pass|sig|session|cred|api", re.I)
+# 앞이 스킴 글자가 아닌 자리에서만 시작하고 스킴 길이를 묶는다 - 긴 영문 덩어리에서 시작점마다 다시 훑으면
+# 길이의 제곱이 든다(Codex 재리뷰 11-06 NEW-2).
+_URL_RE = re.compile(r"(?<![A-Za-z0-9+.-])[A-Za-z][A-Za-z0-9+.-]{0,31}://[^\s'\"<>]+")
+_SECRET_PARAM_WORDS = frozenset({
+    "token", "key", "apikey", "auth", "authorization", "secret", "pass", "passwd", "password", "pwd",
+    "sig", "signature", "session", "sessionid", "sid", "cred", "credential", "credentials", "jwt", "bearer",
+})
+# 주소에서 모은 조각을 응답 전체에서 바꿀 때의 최소 길이 - `?x_key=1` 의 "1" 을 전역으로 바꾸면 IP · 호출 ID 가 깨진다
+# (NEW-1). 주소 안의 자리는 길이와 상관없이 제자리에서 가린다.
+_MIN_GLOBAL_SECRET = 6
+
+
+def _secret_param(name):
+    from urllib.parse import unquote_plus
+
+    name = unquote_plus(name).lower()
+    return (any(word in _SECRET_PARAM_WORDS for word in re.split(r"[^a-z0-9]+", name))
+            or name.endswith(("token", "secret", "password", "apikey")))
+
+
+def _mask_params(text):
+    pieces = []
+    for piece in text.split("&"):
+        name, eq, value = piece.partition("=")
+        pieces.append(f"{name}=[REDACTED]" if eq and value and _secret_param(name) else piece)
+    return "&".join(pieces)
+
+
+def _split_url(url):
+    """(scheme://, userinfo or None, rest-of-authority, path, query or None, fragment or None) - raw, never decoded."""
+    scheme, sep, rest = url.partition("://")
+    authority = re.match(r"[^/?#]*", rest).group(0)
+    tail = rest[len(authority):]
+    userinfo, at, host = authority.rpartition("@")
+    tail, hash_sep, fragment = tail.partition("#")
+    path, q_sep, query = tail.partition("?")
+    return (scheme + sep, userinfo if at else None, host, path,
+            query if q_sep else None, fragment if hash_sep else None)
+
+
+def _mask_url(url):
+    prefix, userinfo, host, path, query, fragment = _split_url(url)
+    out = prefix + ("[REDACTED]@" if userinfo is not None else "") + host + path
+    if query is not None:
+        out += "?" + _mask_params(query)
+    if fragment is not None:
+        out += "#" + (_mask_params(fragment) if "=" in fragment else fragment)
+    return out
 
 
 def url_credentials(text):
-    """Credential parts of URLs inside a string: userinfo and sensitive-looking query values.
+    """Credential parts of URLs inside a string (raw and decoded forms), for replacing echoes elsewhere.
 
     WebUI/ComfyUI addresses may carry `user:pass@` or `?token=` (Codex review 2026-11-06 H1). The
     verifiers echo the address in their error text, so these parts are secrets, the host is not.
+    Short parts are left out: the URL itself is masked in place by `mask_url_credentials`.
     """
-    from urllib.parse import parse_qsl, urlsplit
+    from urllib.parse import unquote, unquote_plus
 
+    text = str(text or "")
+    if "://" not in text:
+        return []
     found = []
-    for match in _URL_RE.finditer(str(text or "")):
-        try:
-            parts = urlsplit(match.group(0))
-        except ValueError:
-            continue
-        if "@" in parts.netloc:
-            found.append(parts.netloc.rsplit("@", 1)[0])
-        found.extend(value for key, value in parse_qsl(parts.query, keep_blank_values=False)
-                     if value and _URL_SECRET_PARAM.search(key))
+    for match in _URL_RE.finditer(text):
+        _, userinfo, _, _, query, fragment = _split_url(match.group(0))
+        raw = []
+        if userinfo:
+            raw.append(userinfo)
+            raw.append(userinfo.partition(":")[2])
+        for params in (query, fragment):
+            for piece in (params or "").split("&"):
+                name, eq, value = piece.partition("=")
+                if eq and value and _secret_param(name):
+                    raw.append(value)
+        for value in raw:
+            found.extend(form for form in {value, unquote(value), unquote_plus(value)}
+                         if len(form) >= _MIN_GLOBAL_SECRET)
     return found
 
 
 def mask_url_credentials(text):
-    """Replace URL userinfo and sensitive query values in a string with [REDACTED]."""
-    for secret in sorted(set(url_credentials(text)), key=len, reverse=True):
-        text = text.replace(secret, "[REDACTED]")
-    return text
+    """Mask URL userinfo and sensitive query/fragment values in place (raw text, encoded or not)."""
+    if "://" not in text:
+        return text
+    return _URL_RE.sub(lambda match: _mask_url(match.group(0)), text)
 
 
 def sanitize(value, secrets=()):
     if isinstance(value, dict):
-        return {key: "[REDACTED]" if sensitive_key(key) else sanitize(item, secrets)
+        # 상관 ID 는 프로토콜 필드다 - 비밀값 치환이 건드리면 짝을 못 찾는다(NEW-1).
+        return {key: item if key == CALL_ID_KEY else "[REDACTED]" if sensitive_key(key) else sanitize(item, secrets)
                 for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [sanitize(item, secrets) for item in value]
     if isinstance(value, str):
-        for secret in sorted((s for s in secrets if isinstance(s, str) and s), key=len, reverse=True):
+        for secret in sorted((s for s in secrets if isinstance(s, str) and len(s) >= 4), key=len, reverse=True):
             value = value.replace(secret, "[REDACTED]")
         value = mask_url_credentials(value)
     return value

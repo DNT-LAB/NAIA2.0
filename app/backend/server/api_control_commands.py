@@ -38,7 +38,11 @@ async def _send_setup_blocked(ws: WebSocket, command_type: str, reason: str) -> 
 
 async def _broadcast_access(context, ws, clients, client_host):
     """Keep every tab on the same process-local policy, preserving setup permissions."""
-    for client in set(clients or ()) | {ws}:
+    # 에이전트 호출이면 `ws` 는 원래 소켓을 감싼 AgentReplySocket 이다 - 집합에 둘 다 넣으면 같은 연결에
+    # 두 번(하나는 상관 ID · 가림 없이) 간다. 요청자의 원래 소켓 자리를 감싼 것으로 바꿔 한 번만 보낸다(Codex 리뷰 11-06 M3).
+    requester = getattr(ws, "socket", ws)
+    targets = [client for client in (clients or ()) if client is not requester and client is not ws] + [ws]
+    for client in targets:
         host = getattr(getattr(client, "client", None), "host", None) or client_host
         try:
             await _send_json(client, context.api_status_payload(host))

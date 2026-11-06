@@ -2545,6 +2545,7 @@ let sessionNegDeferred = false;   // 칸에 초점이 있어 건너뛴 서버 �
 // 그것으로 칸을 덮으면 친 글이 사라지고, 이어 치면 옛 글 + 새 글자가 나간다(Codex 4차). 4초가 지나면 놓아 준다.
 let sessionNegSent = null;
 let sessionNegSentAt = 0;
+let sessionNegRecheck = 0;
 /** 세션 네거티브 칸(사용자 지정 2026-11-05). 세션 중에는 NEGATIVE 탭이 **세션 네거티브**를 보여 주고 고친다.
  *
  *  메인 칸과 달리 `negEdit` 을 빌리지 않고 **같은 자리에 세션 전용 칸을 겹쳐 띄운다.** `negEdit.value` 는 사용자의
@@ -2569,6 +2570,12 @@ function applyVirtualNegative(session) {
         || (pendingModuleEdit?.moduleId === 'img2img' && pendingModuleEdit.key === 'negative_prompt')) {
       // 건너뛴 새 값은 칸을 떠날 때 맞춘다 - 안 그러면 다른 탭이 바꾼 글 대신 옛 글이 남고 생성은 새 글로 나간다(Codex 3차).
       sessionNegDeferred = box.value !== next;
+      // 칸을 떠나지 않은 채 '안 돌려받은 글' 표식만 남았으면 4초 판정이 다음 호출 때까지 미뤄진다 - 그때 다시 본다(M2).
+      clearTimeout(sessionNegRecheck);
+      if (sessionNegDeferred && sessionNegSent !== null && document.activeElement !== box) {
+        sessionNegRecheck = setTimeout(() => applyVirtualNegative(virtualCharacterSession()),
+          Math.max(0, 4000 - (Date.now() - sessionNegSentAt)) + 50);
+      }
     } else {
       sessionNegDeferred = false;
       if (box.value !== next) box.value = next;
@@ -3471,6 +3478,9 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
           return null;
         }
         discardPendingModuleEdit('img2img');
+        // 버린 네거티브 편집은 '서버가 아직 안 돌려준 글' 표식도 함께 내린다 - 남겨 두면 스왑 결과가 와도
+        // 칸이 그 글을 지키느라 옛 글을 보여 주고, 생성은 새 서버 값으로 나간다(Codex 리뷰 11-06 M2).
+        if (pending.key === 'negative_prompt') sessionNegSent = null;
         return pending;
       },
       restorePendingEdit: pending => {
@@ -3480,6 +3490,10 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
         const field = popupField?.offsetParent ? popupField
           : (pending.key === 'negative_prompt' ? document.getElementById('sessionNegEdit') : null);
         if (field && field.value !== String(pending.value ?? '')) return;
+        if (pending.key === 'negative_prompt') {
+          sessionNegSent = String(pending.value ?? '');
+          sessionNegSentAt = Date.now();
+        }
         sendPendingModuleEdit(pending);
       },
     });

@@ -886,7 +886,8 @@ def _img2img_prompt_swap(context, payload: dict[str, Any], *, apply: bool = Fals
         target_post=str(target_settings.get("post_prompt") or ""),
         artist_mode=artist_mode, known=known, keep=keep,
     )
-    result.update(negative_prompt=(str(target_negative) if negative_mode == "preset" and target_negative
+    # 비워 둔 프리셋 네거티브("")도 그 프리셋의 값이다 - 원본을 지키는 것은 값이 아예 없을 때뿐(Codex 리뷰 11-06 M1).
+    result.update(negative_prompt=(str(target_negative) if negative_mode == "preset" and target_negative is not None
                                    else original_negative), model=model, source_preset=source_info)
     if apply:
         # Like restore-prompts, computation runs in one worker. Never write a

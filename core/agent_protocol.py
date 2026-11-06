@@ -19,6 +19,38 @@ def sensitive_key(key):
             or key.endswith(("_token", "_password", "_secret", "_api_key")))
 
 
+_URL_RE = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
+_URL_SECRET_PARAM = re.compile(r"token|key|auth|secret|pass|sig|session|cred|api", re.I)
+
+
+def url_credentials(text):
+    """Credential parts of URLs inside a string: userinfo and sensitive-looking query values.
+
+    WebUI/ComfyUI addresses may carry `user:pass@` or `?token=` (Codex review 2026-11-06 H1). The
+    verifiers echo the address in their error text, so these parts are secrets, the host is not.
+    """
+    from urllib.parse import parse_qsl, urlsplit
+
+    found = []
+    for match in _URL_RE.finditer(str(text or "")):
+        try:
+            parts = urlsplit(match.group(0))
+        except ValueError:
+            continue
+        if "@" in parts.netloc:
+            found.append(parts.netloc.rsplit("@", 1)[0])
+        found.extend(value for key, value in parse_qsl(parts.query, keep_blank_values=False)
+                     if value and _URL_SECRET_PARAM.search(key))
+    return found
+
+
+def mask_url_credentials(text):
+    """Replace URL userinfo and sensitive query values in a string with [REDACTED]."""
+    for secret in sorted(set(url_credentials(text)), key=len, reverse=True):
+        text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def sanitize(value, secrets=()):
     if isinstance(value, dict):
         return {key: "[REDACTED]" if sensitive_key(key) else sanitize(item, secrets)
@@ -28,6 +60,7 @@ def sanitize(value, secrets=()):
     if isinstance(value, str):
         for secret in sorted((s for s in secrets if isinstance(s, str) and s), key=len, reverse=True):
             value = value.replace(secret, "[REDACTED]")
+        value = mask_url_credentials(value)
     return value
 
 
@@ -43,6 +76,9 @@ def secret_values(value):
                 values.append(item)
             else:
                 values.extend(secret_values(item))
+    elif isinstance(value, str):
+        # 입력한 주소의 userinfo · 인증 쿼리 값 - 서버가 주소 모양을 바꿔 되돌려 줘도 조각으로 가린다.
+        values.extend(url_credentials(value))
     elif isinstance(value, list):
         for item in value:
             values.extend(secret_values(item))

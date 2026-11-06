@@ -272,6 +272,8 @@ export function createTagAssistController({
   let promptInfoAnchor = null;
   let lastPromptInfoRawTag = '';
   let acMode = false;
+  // 휴대폰 띠의 [ⓘ] - 태그 카드를 다 펴 보이는가(이 페이지 동안 기억 - 펴 두고 쓰는 사람은 계속 편다).
+  let dockExpanded = false;
   let acResults = [];
   let acSel = -1;
   let acTimer = null;
@@ -533,6 +535,7 @@ export function createTagAssistController({
     tagTooltip.style.removeProperty('right');
     tagTooltip.style.removeProperty('max-width');
     tagTooltip.style.removeProperty('max-height');
+    tagTooltip.style.removeProperty('width');
   }
 
   function copyCaretMirrorStyle(source, mirror) {
@@ -595,6 +598,77 @@ export function createTagAssistController({
     return point;
   }
 
+  // ── 휴대폰 = 키보드 바로 위 띠(사용자 지정 2026-11-06) ─────────────────────────────────────────
+  // 손가락 기기에서는 자동완성 후보와 태그 카드를 **보이는 화면의 맨 아래**(= 화상 키보드 바로 위)에 붙인다.
+  // 커서 밑에 뜨던 후보는 키보드에 가렸고, 위에 붙던 카드는 치고 있는 칸을 덮었다.
+  //  - 후보 = 옆으로 미는 알약 한 줄 + 그 위 한 줄 설명.
+  //  - 카드 = 한 줄 설명 + 관련 칩 한 줄. [ⓘ] 를 누르면 RELATED · RATING 까지 다 편다.
+  // 마우스 기기(PC)는 그대로다. 프리셋 · 덩어리(chunk) 팝업은 제 모양이 따로 있어 건드리지 않는다.
+  function isPhoneDockSurface() {
+    if (!tagTooltip?.classList.contains('open')) return false;
+    if (tagTooltip.classList.contains('preset-event-mode') || tagTooltip.classList.contains('chunk-ac-mode')) return false;
+    try {
+      return window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function setPhoneDock(on) {
+    if (!tagTooltip) return false;
+    if (on) {
+      tagTooltip.classList.add('phone-dock');
+      tagTooltip.classList.remove('left-side');
+      return true;
+    }
+    if (tagTooltip.classList.contains('phone-dock')) {
+      tagTooltip.classList.remove('phone-dock', 'dock-collapsed', 'dock-expanded');
+      tagTooltip.style.removeProperty('width');
+    }
+    return false;
+  }
+
+  function positionDockedTooltip() {
+    const vv = window.visualViewport;
+    const viewTop = vv ? vv.offsetTop : 0;
+    const viewLeft = vv ? vv.offsetLeft : 0;
+    const viewWidth = vv ? vv.width : window.innerWidth;
+    const viewHeight = vv ? vv.height : window.innerHeight;
+    const expanded = !acMode && dockExpanded;
+    tagTooltip.classList.toggle('dock-collapsed', !acMode && !dockExpanded);
+    tagTooltip.classList.toggle('dock-expanded', expanded);
+    const maxHeight = Math.max(80, Math.round(viewHeight * (expanded ? 0.5 : 0.4)));
+    tagTooltip.style.left = `${Math.round(viewLeft)}px`;
+    tagTooltip.style.right = 'auto';
+    tagTooltip.style.width = `${Math.round(viewWidth)}px`;
+    tagTooltip.style.maxWidth = `${Math.round(viewWidth)}px`;
+    tagTooltip.style.maxHeight = `${maxHeight}px`;
+    // 폭 · 상한을 먼저 걸고 잰다 - 바닥을 보이는 화면 맨 아래(키보드 윗변)에 맞춘다.
+    const height = Math.min(maxHeight, tagTooltip.getBoundingClientRect().height || 0);
+    tagTooltip.style.top = `${Math.round(viewTop + viewHeight - height)}px`;
+  }
+
+  // 키보드가 오르내리거나 화면이 밀리면 보이는 화면이 바뀐다 - 띠를 따라 붙인다.
+  function onDockViewportChange() {
+    if (tagTooltip?.classList.contains('phone-dock') && tagTooltip.classList.contains('open')) positionDockedTooltip();
+  }
+  window.visualViewport?.addEventListener('resize', onDockViewportChange);
+  window.visualViewport?.addEventListener('scroll', onDockViewportChange);
+  // 띠의 빈 곳을 눌러도 입력칸이 초점을 잃지 않게(잃으면 키보드가 내려가며 띠도 닫힌다).
+  tagTooltip?.addEventListener('mousedown', event => {
+    if (tagTooltip.classList.contains('phone-dock') && !event.target.closest?.('input, textarea, select')) {
+      event.preventDefault();
+    }
+  });
+
+  // 접힌 카드에 남길 칩 한 줄 - 맨 앞의 관계 줄(implies · related · 추천 줄의 첫 줄).
+  function markDockStrip(root) {
+    const strip = root.querySelector(':scope > .tag-tooltip-extra:not(.char-details-row), .tag-reco .tag-reco-row');
+    if (!strip) return;
+    strip.classList.add('tt-dock-strip');
+    if (strip.parentElement && strip.parentElement !== root) strip.parentElement.classList.add('tt-dock-strip-host');
+  }
+
   function positionAutocompleteTooltip() {
     if (!tagTooltip) return;
     const target = acTarget || promptEdit;
@@ -639,6 +713,7 @@ export function createTagAssistController({
 
   function positionTagTooltip() {
     if (syncTooltipHost()) {
+      setPhoneDock(false);
       // 창 안 자리에서는 흐름대로 놓인다 - 떠 있는 팝업의 좌표·상한을 전부 걷는다.
       clearAutocompletePositionStyles();
       for (const name of ['--tag-tooltip-top', '--tag-tooltip-left', '--tag-tooltip-max-width', '--tag-tooltip-max-height']) {
@@ -652,6 +727,10 @@ export function createTagAssistController({
       return;
     }
     syncTooltipLayer();
+    if (setPhoneDock(isPhoneDockSurface())) {
+      positionDockedTooltip();
+      return;
+    }
     if (acMode) {
       positionAutocompleteTooltip();
       return;
@@ -1731,6 +1810,8 @@ export function createTagAssistController({
       `<span class="tag-tooltip-count">${fmtCount(m.count || 0)}</span>` +
       (groupText ? ` <span class="tag-tooltip-group">${escHtml(groupText)}</span>` : '') +
       (m.desc ? `<span class="tag-tooltip-desc">${escHtml(m.desc)}</span>` : '') +
+      // 휴대폰 띠에서만 보인다(CSS) - 접힌 카드를 다 편다.
+      '<button type="button" class="tt-dock-more" data-dock-more aria-label="태그 정보 더 보기">ⓘ</button>' +
       '</div>';
     if (m.implications && m.implications.length) {
       html += '<div class="tag-tooltip-extra"><span class="tag-tooltip-extra-label">implies</span>' +
@@ -1789,6 +1870,13 @@ export function createTagAssistController({
     tooltipRoot.innerHTML = html;
     tooltipRoot.classList.remove('ac-mode');
     tooltipRoot.classList.add('open');
+    markDockStrip(tooltipRoot);
+    tooltipRoot.querySelector('[data-dock-more]')?.addEventListener('mousedown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      dockExpanded = !dockExpanded;
+      if (tooltipRoot === tagTooltip) positionTagTooltip();
+    });
     if (tagLookupReadOnly) {
       tagTooltip.classList.remove('open', 'ac-mode', 'left-side', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
       positionPromptInfoTooltip();
@@ -2984,6 +3072,14 @@ export function createTagAssistController({
     }
     const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster');
     let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
+    // 휴대폰 띠에서만 보이는 한 줄 설명(CSS) - 고른 후보(없으면 첫 후보)의 뜻. 태그 후보에만.
+    const dockRow = chunkMode ? null : acResults[acSel >= 0 ? acSel : 0];
+    if (dockRow && !dockRow._wc_type && dockRow.desc) {
+      html = '<div class="tag-ac-dockinfo">'
+        + `<span class="tag-ac-dockinfo-tag">${escHtml(dockRow.tag || '')}</span>`
+        + `<span class="tag-ac-dockinfo-count">${escHtml(fmtCount(dockRow.count || 0))}</span>`
+        + `<span class="tag-ac-dockinfo-desc">${escHtml(dockRow.desc)}</span></div>` + html;
+    }
     acResults.forEach((r, i) => {
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;

@@ -33710,3 +33710,113 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .mal-viewer-img { max-width: 100%; max-height: calc(100% - 56px); object-fit: contain; border-radius: 6px; }
 .mal-viewer-info { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; font-size: 13px; color: #ccc; }
 .mal-viewer-info b { width: 100%; text-align: center; font-size: 15px; color: #fff; word-break: break-all; }
+
+/* ── 휴대폰 자동완성 = 키보드 바로 위 띠(사용자 지정 2026-11-06 · tagAssist.mjs positionDockedTooltip) ──────────
+   손가락 기기에서만 .phone-dock 이 붙는다. 자리(top · left · width)는 스크립트가 보이는 화면 맨 아래로 놓는다.
+   후보 = 옆으로 미는 알약 한 줄 + 위 한 줄 설명 · 카드 = 한 줄 설명 + 관련 칩 한 줄([ⓘ] = 전부 펴기). */
+.tag-ac-dockinfo, .tt-dock-more { display: none; }
+.tag-tooltip.phone-dock {
+  pointer-events: auto;
+  padding: 0;
+  gap: 0;
+  font-size: 12px;
+  border: 0;
+  border-top: 1px solid rgba(139,118,255,0.45);
+  border-radius: 0;
+  background: rgba(22, 21, 32, 0.98);
+  box-shadow: 0 -6px 18px rgba(0,0,0,0.45);
+}
+.tag-tooltip.phone-dock.ac-mode.open {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  overflow: hidden;
+  padding: 0;
+}
+.tag-tooltip.phone-dock .tag-ac-dockinfo {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 10px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tag-ac-dockinfo-tag { flex: none; font-family: var(--font-mono); color: var(--accent-light); }
+.tag-ac-dockinfo-count { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.tag-ac-dockinfo-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); }
+.tag-tooltip.phone-dock .tag-ac-list {
+  flex-direction: row;
+  gap: 6px;
+  min-width: 0;
+  padding: 7px 8px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.tag-tooltip.phone-dock .tag-ac-list::-webkit-scrollbar { display: none; }
+.tag-tooltip.phone-dock .tag-ac-item {
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 7px 12px;
+  border: 1px solid #3a3850;
+  border-radius: 16px;
+  background: #22213a;
+}
+.tag-tooltip.phone-dock .tag-ac-item.selected { border-color: var(--accent-light); background: rgba(124,106,239,0.28); }
+.tag-tooltip.phone-dock .tag-ac-tag { font-size: 13px; overflow: visible; }
+.tag-tooltip.phone-dock .tag-ac-group { display: none; }
+.tag-tooltip.phone-dock .tag-ac-count { font-size: 10.5px; }
+.tag-tooltip.phone-dock .tag-ac-footer { padding: 0 8px 0 0; border-top: 0; }
+.tag-tooltip.phone-dock:not(.ac-mode) { padding: 6px 10px 8px; gap: 5px; overflow-y: auto; }
+.tag-tooltip.phone-dock .tag-tooltip-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; font-size: 13px; }
+.tag-tooltip.phone-dock .tag-tooltip-tag { flex: none; }
+.tag-tooltip.phone-dock .tag-tooltip-count { flex: none; margin-left: 0; font-size: 11px; }
+.tag-tooltip.phone-dock .tt-dock-more {
+  display: inline-flex;
+  flex: none;
+  margin-left: auto;
+  align-self: center;
+  padding: 1px 10px;
+  border: 1px solid #3a3850;
+  border-radius: 12px;
+  background: #1f1e30;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.tag-tooltip.phone-dock.dock-expanded .tt-dock-more { border-color: var(--accent-light); color: var(--text-primary); }
+.tag-tooltip.phone-dock.dock-collapsed .tag-tooltip-main { white-space: nowrap; overflow: hidden; }
+.tag-tooltip.phone-dock.dock-collapsed .tag-tooltip-group { display: none; }
+.tag-tooltip.phone-dock.dock-collapsed .tag-tooltip-desc {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+}
+.tag-tooltip.phone-dock.dock-expanded .tag-tooltip-main { flex-wrap: wrap; }
+.tag-tooltip.phone-dock.dock-expanded .tag-tooltip-desc { order: 1; flex-basis: 100%; font-size: 13px; }
+/* 접힌 카드 = 설명 줄 + 관계 칩 한 줄(옆으로 민다)만 */
+.tag-tooltip.phone-dock.dock-collapsed > :not(.tag-tooltip-main):not(.tt-dock-strip):not(.tt-dock-strip-host) { display: none; }
+.tag-tooltip.phone-dock.dock-collapsed .tt-dock-strip-host > :not(.tt-dock-strip) { display: none; }
+.tag-tooltip.phone-dock.dock-collapsed .tt-dock-strip {
+  flex-wrap: nowrap;
+  align-items: center;
+  overflow-x: auto;
+  padding-top: 2px;
+  border-top: 0;
+  scrollbar-width: none;
+}
+.tag-tooltip.phone-dock.dock-collapsed .tt-dock-strip::-webkit-scrollbar { display: none; }
+.tag-tooltip.phone-dock.dock-collapsed .tt-dock-strip .tag-tooltip-extra-label { flex: none; width: auto; }
+.tag-tooltip.phone-dock .tag-tooltip-extra { gap: 6px; font-size: 12px; }
+.tag-tooltip.phone-dock .tag-tooltip-extra-label { font-size: 10px; }
+.tag-tooltip.phone-dock .tag-tooltip-extra-tag { flex: none; padding: 5px 11px; border-radius: 14px; font-size: 12px; }

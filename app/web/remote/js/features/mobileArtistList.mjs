@@ -4,22 +4,25 @@
 //   2) 랜덤 생성에 이 목록 연결 - PC 의 [메인 랜덤 버튼 연결](main_link)과 **같은 서버 설정**이다. 켜면 뽑는 목록을
 //      이 판의 모드 · 목록 · 이름 검색으로 바꾼다(PC 에 저장된 매칭 검색 · 구간은 풀린다 - 사용자 결정 2026-11-06).
 //      메인 Random 을 누를 때마다 서버가 그 목록에서 한 명을 뽑는다 - 판을 접어도 · 닫아도 돈다.
-// 판은 떠 있는 창이다 - 머리를 끌어 옮기고, ⌄ 로 접으면 끌어 둘 수 있는 알약이 된다(누르면 그대로 다시 펼침).
+// 창은 앱 표준 떠 있는 창(draggablePanel)이다 - 머리줄 끌기 · 오른쪽 아래 손잡이로 크기 · [–] 접기(머리줄만 남는다) ·
+// 화면 밖 방지 · 가장자리 붙기를 그대로 쓴다. 이 판은 손가락 크기만 키운다(style.css `.dragpanel.mal`).
 // 데이터는 PC 탭과 같은 라우트(/api/artist-thumb/state · /list · /random-tools · /options)를 쓴다.
+
+// ⚠️ 다른 창들과 **같은 주소**로 읽는다 - 주소가 다르면 모듈이 둘이 되어 창 앞뒤 순서(REGISTRY)가 갈린다.
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
 const PAGE_SIZE = 48;
 const MODE_KEY = 'naia.mobileArtists.mode';
 const FILTER_KEY = 'naia.mobileArtists.filter';
-const PANEL_POS_KEY = 'naia.mobileArtists.panelPos';
-const PILL_POS_KEY = 'naia.mobileArtists.pillPos';
-const DRAG_SLOP = 6;
+const COLS_KEY = 'naia.mobileArtists.cols';
+const COL_CHOICES = [1, 2, 3, 4];     // 한 줄 최대 4칸(사용자 지정)
+const DEFAULT_COLS = 3;
 
 export function createMobileArtistList({
   document, window, escHtml, showToast, storage,
   getGenerationMode = () => 'NAI', isAnimaArtistMode = () => false,
 }) {
-  let root = null;
-  let pill = null;
+  let panel = null;
   let els = {};
   let state = null;
   let items = [];
@@ -35,23 +38,41 @@ export function createMobileArtistList({
 
   const read = key => { try { return storage?.getItem(key) || ''; } catch { return ''; } };
   const write = (key, value) => { try { storage?.setItem(key, value); } catch { /* 저장 못 해도 화면은 돈다 */ } };
-  const readPos = key => { try { const v = JSON.parse(read(key) || 'null'); return v && Number.isFinite(v.x) && Number.isFinite(v.y) ? v : null; } catch { return null; } };
   const count = value => Number(value || 0).toLocaleString();
+  const savedCols = () => {
+    const n = Number.parseInt(read(COLS_KEY), 10);
+    return COL_CHOICES.includes(n) ? n : DEFAULT_COLS;
+  };
 
   // ── 만들기 ───────────────────────────────────────────────────────────────
   function build() {
-    root = document.createElement('div');
-    root.className = 'mal-panel';
-    root.hidden = true;
-    root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-label', 'Artists');
-    root.innerHTML = `
-      <div class="mal-head" data-mal-drag>
-        <span class="mal-grip" aria-hidden="true"></span>
-        <span class="mal-title">Artists</span>
-        <button type="button" class="mal-icon" data-mal-fold aria-label="접기">&#8964;</button>
-        <button type="button" class="mal-icon" data-mal-close aria-label="닫기">&#10005;</button>
-      </div>
+    const vw = window.innerWidth || 412;
+    const vh = window.innerHeight || 800;
+    panel = createDraggablePanel({
+      document, window, escHtml,
+      title: 'Artists',
+      variant: 'mal',
+      storageKey: 'mobile-artists',
+      storage,
+      width: Math.max(260, Math.min(vw - 12, 560)),
+      height: Math.round(vh * 0.7),
+      minWidth: 240,
+      minHeight: 220,
+      maxWidth: 1600,
+      resizable: true,
+      edgeSnap: 10,
+      initial: {x: 6, y: 52},
+      onCollapse: () => paintLink(linkOn),
+    });
+
+    // 머리줄 = [Artists] [1 2 3 4] [●연결] ... [–] [×]
+    panel.slot.innerHTML = `
+      <span class="mal-cols" role="group" aria-label="한 줄에 몇 칸">
+        ${COL_CHOICES.map(n => `<button type="button" class="mal-col" data-mal-cols="${n}" aria-label="한 줄 ${n}칸">${n}</button>`).join('')}
+      </span>
+      <span class="mal-linkdot" data-mal-linkdot hidden title="랜덤 생성에 연결됨"></span>`;
+
+    panel.body.innerHTML = `
       <div class="mal-controls">
         <select class="mod-select" data-mal-mode aria-label="모드"></select>
         <select class="mod-select" data-mal-filter aria-label="목록"></select>
@@ -74,46 +95,46 @@ export function createMobileArtistList({
         <input type="checkbox" data-mal-link>
         <span class="mal-switch" aria-hidden="true"></span>
         <span class="mal-link-text">랜덤 생성에 이 목록 연결</span>
-      </label>
-      <div class="mal-viewer" data-mal-viewer hidden>
-        <button type="button" class="mal-icon mal-viewer-close" data-mal-viewer-close aria-label="닫기">&#10005;</button>
-        <img class="mal-viewer-img" data-mal-viewer-img alt="">
-        <div class="mal-viewer-info" data-mal-viewer-info></div>
-      </div>`;
-    document.body.appendChild(root);
+      </label>`;
 
-    pill = document.createElement('button');
-    pill.type = 'button';
-    pill.className = 'mal-pill';
-    pill.hidden = true;
-    pill.setAttribute('aria-label', 'Artists 펼치기');
-    pill.innerHTML = '<span class="mal-pill-icon" aria-hidden="true">&#127912;</span>Artists<span class="mal-pill-dot" data-mal-pill-dot hidden></span>';
-    document.body.appendChild(pill);
+    // 크게 보기는 창 전체(머리줄 아래)를 덮는다 - 본문은 스크롤 상자라 창에 붙인다.
+    const viewer = document.createElement('div');
+    viewer.className = 'mal-viewer';
+    viewer.hidden = true;
+    viewer.innerHTML = `
+      <button type="button" class="mal-viewer-close" data-mal-viewer-close aria-label="닫기">&#10005;</button>
+      <img class="mal-viewer-img" data-mal-viewer-img alt="">
+      <div class="mal-viewer-info" data-mal-viewer-info></div>`;
+    panel.el.appendChild(viewer);
 
+    const q = sel => panel.el.querySelector(sel);
     els = {
-      head: root.querySelector('[data-mal-drag]'),
-      mode: root.querySelector('[data-mal-mode]'),
-      filter: root.querySelector('[data-mal-filter]'),
-      query: root.querySelector('[data-mal-query]'),
-      status: root.querySelector('[data-mal-status]'),
-      scroll: root.querySelector('[data-mal-scroll]'),
-      grid: root.querySelector('[data-mal-grid]'),
-      more: root.querySelector('[data-mal-more]'),
-      pick: root.querySelector('[data-mal-pick]'),
-      pickThumb: root.querySelector('[data-mal-zoom]'),
-      pickName: root.querySelector('[data-mal-pick-name]'),
-      pickMeta: root.querySelector('[data-mal-pick-meta]'),
-      link: root.querySelector('[data-mal-link]'),
-      viewer: root.querySelector('[data-mal-viewer]'),
-      viewerImg: root.querySelector('[data-mal-viewer-img]'),
-      viewerInfo: root.querySelector('[data-mal-viewer-info]'),
-      pillDot: pill.querySelector('[data-mal-pill-dot]'),
+      mode: q('[data-mal-mode]'),
+      filter: q('[data-mal-filter]'),
+      query: q('[data-mal-query]'),
+      status: q('[data-mal-status]'),
+      scroll: q('[data-mal-scroll]'),
+      grid: q('[data-mal-grid]'),
+      more: q('[data-mal-more]'),
+      pick: q('[data-mal-pick]'),
+      pickThumb: q('[data-mal-zoom]'),
+      pickName: q('[data-mal-pick-name]'),
+      pickMeta: q('[data-mal-pick-meta]'),
+      link: q('[data-mal-link]'),
+      linkDot: q('[data-mal-linkdot]'),
+      viewer,
+      viewerImg: q('[data-mal-viewer-img]'),
+      viewerInfo: q('[data-mal-viewer-info]'),
     };
 
-    root.querySelector('[data-mal-close]').addEventListener('click', close);
-    root.querySelector('[data-mal-fold]').addEventListener('click', fold);
-    root.querySelector('[data-mal-viewer-close]').addEventListener('click', closeViewer);
-    els.viewer.addEventListener('click', event => { if (event.target === els.viewer) closeViewer(); });
+    panel.slot.addEventListener('click', event => {
+      const button = event.target.closest('[data-mal-cols]');
+      if (!button) return;
+      write(COLS_KEY, button.dataset.malCols);
+      paintCols();
+    });
+    q('[data-mal-viewer-close]').addEventListener('click', closeViewer);
+    viewer.addEventListener('click', event => { if (event.target === viewer) closeViewer(); });
     els.mode.addEventListener('change', () => { write(MODE_KEY, els.mode.value); reload(); });
     els.filter.addEventListener('change', () => { write(FILTER_KEY, els.filter.value); reload(); });
     els.query.addEventListener('input', () => {
@@ -132,71 +153,33 @@ export function createMobileArtistList({
       if (card) select(Number(card.dataset.malIndex));
     });
     els.pickThumb.addEventListener('click', () => openViewer(selected));
-    root.querySelector('[data-mal-copy]').addEventListener('click', () => void copySelected());
+    q('[data-mal-copy]').addEventListener('click', () => void copySelected());
     els.link.addEventListener('change', () => void setLink(els.link.checked));
     // 아래 끝에 다가가면 다음 쪽을 읽는다. 스크롤 이벤트로 잰다 - IntersectionObserver 는 그리기 프레임에
     // 묶여 있어 창이 가려진 동안 안 불린다.
     els.scroll.addEventListener('scroll', () => { if (nearBottom()) void loadNext(); }, {passive: true});
-
-    makeDraggable(els.head, root, PANEL_POS_KEY, {onTap: null, skip: target => target.closest('button')});
-    makeDraggable(pill, pill, PILL_POS_KEY, {onTap: expand});
-    window.addEventListener('resize', () => {
-      if (!root.hidden) placeAt(root, readPos(PANEL_POS_KEY));
-      if (!pill.hidden) placeAt(pill, readPos(PILL_POS_KEY));
-    });
+    // 크기를 늘려도 오른쪽 아래 손잡이는 화면 안에 남긴다 - 휴대폰은 화면 밖으로 넘친 손잡이를 다시 잡을 길이 없다
+    // (표준 창은 PC 용이라 넘침을 허용한다). 끄는 동안마다 오는 `dragpanel-resize` 에서 깎는다.
+    panel.el.addEventListener('dragpanel-resize', keepGripOnScreen);
+    paintCols();
   }
 
-  // ── 끌기 ─────────────────────────────────────────────────────────────────
-  /** 화면 안에 들어오게 자리를 잡는다. pos 가 없으면 CSS 기본 자리(판 = 위쪽 · 알약 = 오른쪽 가운데). */
-  function placeAt(el, pos) {
-    if (!pos) { el.style.left = ''; el.style.top = ''; return; }
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    // 판은 머리(44px)만 화면에 남아도 되고, 알약은 통째로 화면 안에 둔다.
-    const minVisibleH = el === root ? 44 : h;
-    const x = Math.max(0, Math.min(vw - w, pos.x));
-    const y = Math.max(0, Math.min(vh - minVisibleH, pos.y));
-    el.style.left = `${Math.round(x)}px`;
-    el.style.top = `${Math.round(y)}px`;
+  function keepGripOnScreen() {
+    const rect = panel.el.getBoundingClientRect();
+    const maxW = Math.floor((window.innerWidth || 0) - Math.max(0, rect.left) - 4);
+    const maxH = Math.floor((window.innerHeight || 0) - Math.max(0, rect.top) - 4);
+    if (maxW > 200 && rect.width > maxW) panel.el.style.width = `${maxW}px`;
+    if (maxH > 160 && rect.height > maxH && !panel.isCollapsed()) panel.el.style.height = `${maxH}px`;
   }
 
-  function makeDraggable(handle, target, key, {onTap = null, skip = null} = {}) {
-    let start = null;
-    handle.addEventListener('pointerdown', event => {
-      if (event.button !== 0 || skip?.(event.target)) return;
-      const rect = target.getBoundingClientRect();
-      start = {px: event.clientX, py: event.clientY, x: rect.left, y: rect.top, moved: false, id: event.pointerId};
-      try { handle.setPointerCapture(event.pointerId); } catch { /* 일부 브라우저 */ }
+  function paintCols() {
+    const cols = savedCols();
+    els.grid.style.setProperty('--mal-cols', String(cols));
+    panel.slot.querySelectorAll('[data-mal-cols]').forEach(button => {
+      button.setAttribute('aria-pressed', String(Number(button.dataset.malCols) === cols));
     });
-    handle.addEventListener('pointermove', event => {
-      if (!start || event.pointerId !== start.id) return;
-      const dx = event.clientX - start.px;
-      const dy = event.clientY - start.py;
-      if (!start.moved && Math.hypot(dx, dy) < DRAG_SLOP) return;
-      start.moved = true;
-      placeAt(target, {x: start.x + dx, y: start.y + dy});
-    });
-    const finish = event => {
-      if (!start || event.pointerId !== start.id) return;
-      const moved = start.moved;
-      start = null;
-      if (moved) {
-        write(key, JSON.stringify({x: parseFloat(target.style.left) || 0, y: parseFloat(target.style.top) || 0}));
-        target.dataset.malJustDragged = '1';
-        window.setTimeout(() => { delete target.dataset.malJustDragged; }, 0);
-      }
-    };
-    handle.addEventListener('pointerup', finish);
-    handle.addEventListener('pointercancel', finish);
-    if (onTap) {
-      // 끌고 난 뒤의 click 은 누름이 아니다.
-      handle.addEventListener('click', event => {
-        if (target.dataset.malJustDragged) { event.preventDefault(); return; }
-        onTap();
-      });
-    }
+    // 칸을 줄이면 읽은 것이 화면을 못 채울 수 있다 - 이어 읽는다.
+    if (state && nearBottom()) void loadNext();
   }
 
   // ── 목록 ─────────────────────────────────────────────────────────────────
@@ -251,7 +234,7 @@ export function createMobileArtistList({
   }
 
   async function loadNext() {
-    if (loading || !root || root.hidden) return;
+    if (loading || !panel?.isOpen() || panel.isCollapsed()) return;
     if (page > 0 && page >= totalPages) return;
     if (!els.mode.value) { renderStatus('받아 둔 썸네일 팩이 없습니다 - PC 화면의 Artist Thumbnail 에서 받으세요'); return; }
     const mine = serial;
@@ -276,7 +259,7 @@ export function createMobileArtistList({
     } finally {
       if (mine === serial) loading = false;
     }
-    // 읽는 동안 이미 끝까지 내렸거나 첫 쪽이 화면을 다 못 채우면(펼친 폴드) 스크롤이 다시 안 온다 - 직접 이어 읽는다.
+    // 읽는 동안 이미 끝까지 내렸거나 첫 쪽이 화면을 다 못 채우면(창을 키움) 스크롤이 다시 안 온다 - 직접 이어 읽는다.
     if (mine === serial && page < totalPages && nearBottom()) void loadNext();
   }
 
@@ -364,8 +347,9 @@ export function createMobileArtistList({
 
   function paintLink(on) {
     linkOn = on;
+    if (!els.link) return;
     els.link.checked = on;
-    els.pillDot.hidden = !on;
+    els.linkDot.hidden = !on;
   }
 
   /** 켜기 = main_link + 뽑는 목록을 이 판의 목록으로(출처 = 아티스트 탭 · 구간 전체 · 매칭 검색 없음). 끄기 = main_link 만. */
@@ -408,15 +392,21 @@ export function createMobileArtistList({
   }
 
   function closeViewer() {
+    if (!els.viewer) return;
     els.viewer.hidden = true;
     els.viewerImg.removeAttribute('src');
   }
 
-  // ── 열기 · 접기 · 닫기 ───────────────────────────────────────────────────
+  // ── 열기 · 닫기 ──────────────────────────────────────────────────────────
   async function open() {
-    if (!root) build();
-    expand();
-    if (state) return;
+    if (!panel) build();
+    panel.open();
+    if (panel.isCollapsed()) panel.expand();   // 리모트에서 다시 부르면 펼쳐서 보여 준다
+    void refreshLink();
+    if (state) {
+      if (!items.length && !loading) reload();
+      return;
+    }
     renderStatus('불러오는 중…');
     try {
       await loadState();
@@ -427,27 +417,10 @@ export function createMobileArtistList({
     }
   }
 
-  function expand() {
-    pill.hidden = true;
-    root.hidden = false;
-    placeAt(root, readPos(PANEL_POS_KEY));
-    void refreshLink();
-    if (state && !items.length && !loading) reload();
-  }
-
-  function fold() {
-    closeViewer();
-    root.hidden = true;
-    pill.hidden = false;
-    placeAt(pill, readPos(PILL_POS_KEY));
-  }
-
   function close() {
-    if (!root) return;
     closeViewer();
-    root.hidden = true;
-    pill.hidden = true;
+    panel?.close();
   }
 
-  return {open, close, fold, isOpen: () => Boolean(root && !root.hidden)};
+  return {open, close, isOpen: () => Boolean(panel?.isOpen())};
 }

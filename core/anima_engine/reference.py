@@ -6,6 +6,10 @@
 - 여러 장(최대 MAX_REFS)은 NAIA 가 높이를 맞춰 왼쪽부터 나란히 붙여 한 장으로 보낸다(어댑터는 그림 하나를 받고, 두
   캐릭터는 나란히 붙인 그림으로 그리는 방식 - 원격 실측 11-05: 2 · 3장 모두 제자리에 나왔고 시간은 1장과 같다).
 - 큐에 넣을 때 켠 칸(해시)과 설정을 잡고(snapshot), 보낼 때 그림을 읽어 붙이고 엔진 input 에 올린다(upload).
+- 칸마다 저장한 캐릭터 프롬프트는 큐에 넣을 때 프롬프트 끝에 싣는다(사용자 지정 2026-11-06 · 선행 고정 칸을 고치지
+  않는다). 1장 = (character at center: 태그:0.8) · 2~3장 = 칸 차례대로 'the girl on the left is a girl with 태그…'.
+  원격 실측 11-06: 여러 장에서 자리를 정하는 것은 붙인 그림의 차례가 아니라 이 글이다 - 태그 목록 그대로나
+  (character at left: …:0.8) 은 맞바꿔도 자리가 그대로였고, 문장형은 맞바꾼 것까지 8/8. top/bottom 은 0/4 라 쓰지 않는다.
 """
 from __future__ import annotations
 
@@ -18,6 +22,11 @@ from .profile import REF_CORRECTIONS, REF_DEFAULTS, REF_RANGES
 
 MAX_REFS = 3
 SETTINGS_FILE = "anima_reference.json"
+PROMPT_OPTION = "character_prompts"   # 같은 파일의 켜고 끄기 - 칸의 캐릭터 프롬프트를 싣는가(기본 켬)
+CHARACTER_WEIGHT = "0.8"              # 1장 덩어리의 가중치(사용자 지정 2026-11-05)
+PLACES = {2: ("on the left", "on the right"), 3: ("on the left", "in the middle", "on the right")}
+SUBJECTS = {"girl": "girl", "1girl": "girl", "boy": "boy", "1boy": "boy", "woman": "woman", "man": "man",
+            "1woman": "woman", "1man": "man"}
 STITCH_HEIGHT_RANGE = (512, 1536)
 STITCH_MAX_ASPECT = 4          # 한 장의 너비 <= 높이 x 4
 
@@ -37,25 +46,40 @@ def _clean(key: str, value: Any):
     return round(min(high, max(low, number)), 2)
 
 
-def load_settings(context) -> dict:
-    values = dict(REF_DEFAULTS)
+def _read_raw(context) -> dict:
     try:
         raw = json.loads(context._existing_save_path(SETTINGS_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError, AttributeError):
         raw = {}
-    if isinstance(raw, dict):
-        for key in REF_DEFAULTS:
-            cleaned = _clean(key, raw.get(key))
-            if cleaned is not None:
-                values[key] = cleaned
+    return raw if isinstance(raw, dict) else {}
+
+
+def load_settings(context) -> dict:
+    """그래프로 가는 값(참조 세기 등)만 - 켜고 끄기(PROMPT_OPTION)는 load_prompt_option."""
+    values = dict(REF_DEFAULTS)
+    raw = _read_raw(context)
+    for key in REF_DEFAULTS:
+        cleaned = _clean(key, raw.get(key))
+        if cleaned is not None:
+            values[key] = cleaned
     return values
 
 
+def load_prompt_option(context) -> bool:
+    value = _read_raw(context).get(PROMPT_OPTION)
+    return value if isinstance(value, bool) else True
+
+
 def save_setting(context, key: str, value: Any) -> dict:
-    """한 값만 바꾼다. 'reset' 은 전부 기본값으로."""
+    """한 값만 바꾼다. 'reset' 은 그래프 값을 전부 제작자 기본값으로(싣기 켜고 끄기는 그대로)."""
     values = load_settings(context)
+    prompts = load_prompt_option(context)
     if key == "reset":
         values = dict(REF_DEFAULTS)
+    elif key == PROMPT_OPTION:
+        if not isinstance(value, bool) and str(value).strip().lower() not in {"true", "false", "1", "0"}:
+            raise ValueError(key)
+        prompts = value if isinstance(value, bool) else str(value).strip().lower() in {"true", "1"}
     else:
         cleaned = _clean(key, value)
         if cleaned is None:
@@ -63,7 +87,7 @@ def save_setting(context, key: str, value: Any) -> dict:
         values[key] = cleaned
     path = context._save_path(SETTINGS_FILE)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(values, indent=2), encoding="utf-8")
+    path.write_text(json.dumps({**values, PROMPT_OPTION: prompts}, indent=2), encoding="utf-8")
     return values
 
 
@@ -84,15 +108,74 @@ def enabled_hashes(context) -> list[str]:
     return [h for h in hashes if h][:MAX_REFS]
 
 
+def _tags(prompt: str) -> list[str]:
+    body = " ".join(str(prompt or "").split())
+    return [part.strip() for part in body.split(",") if part.strip()]
+
+
+def prompt_block(prompts: list[str]) -> str:
+    """칸 차례대로의 캐릭터 프롬프트 -> 프롬프트 끝에 실을 글. 빈 칸은 건너뛴다(자리 이름은 칸 차례 그대로).
+    1장 = (character at center: 태그:0.8). 2~3장 = the <주어> on the left is a <주어> with 태그, … - 주어는 태그 중
+    처음 나온 girl/boy/woman/man(1girl 등 포함 · 그 태그는 문장에서 뺀다), 없으면 girl."""
+    if len(prompts) == 1:
+        tags = _tags(prompts[0])
+        return f"(character at center: {', '.join(tags)}:{CHARACTER_WEIGHT})" if tags else ""
+    places = PLACES.get(len(prompts))
+    if not places:
+        return ""
+    parts = []
+    for prompt, place in zip(prompts, places):
+        tags = _tags(prompt)
+        if not tags:
+            continue
+        at = next((i for i, tag in enumerate(tags) if tag.lower() in SUBJECTS), None)
+        noun = SUBJECTS[tags[at].lower()] if at is not None else "girl"
+        rest = [tag for i, tag in enumerate(tags) if i != at]
+        parts.append(f"the {noun} {place} is a {noun}" + (f" with {', '.join(rest)}" if rest else ""))
+    return ", ".join(parts)
+
+
+def character_prompts(context, hashes: list[str]) -> list[str]:
+    from core.ref_vibe_library import get_ref_vibe_library
+    try:
+        saved = get_ref_vibe_library(context).character_prompts(hashes)
+    except Exception:            # 보관함을 못 읽었다 - 그림은 그대로 보내고 글만 싣지 않는다
+        return ["" for _ in hashes]
+    return [str((saved.get(file_hash) or {}).get("character_prompt") or "") for file_hash in hashes]
+
+
+def with_block(text: str, block: str) -> str:
+    """프롬프트 끝에 붙인다. 이미 그대로 들어 있으면(히스토리에서 불러온 글 등) 다시 붙이지 않는다."""
+    text = str(text or "")
+    if not block or block in text:
+        return text
+    head = text.rstrip().rstrip(",").rstrip()
+    return f"{head}, {block}" if head else block
+
+
 def snapshot(context, params: dict) -> None:
     """큐에 넣는 순간의 참조 - 기다리는 동안 칸을 바꿔도 이 생성은 그대로(LoRA · 모델과 같은 규칙).
-    캐릭터 에셋처럼 '레퍼런스를 붙이지 마라' 고 표시한 요청은 건너뛴다(NAI Char Ref 와 같은 표식)."""
-    params.pop("_anima_reference", None)
+    캐릭터 에셋처럼 '레퍼런스를 붙이지 마라' 고 표시한 요청은 건너뛴다(NAI Char Ref 와 같은 표식).
+    칸의 캐릭터 프롬프트도 이때 읽어 input 끝에 싣는다(기다리는 동안 글을 고쳐도 이 생성은 그대로)."""
+    captured = params.pop("_anima_reference", None)
+    # 같은 요청을 다시 잡으면(재시도 등) 지난번에 실은 글부터 걷는다 - 겹쳐 붙지 않게
+    previous = captured.get("prompt") if isinstance(captured, dict) else ""
+    if previous and isinstance(params.get("input"), str) and params["input"].endswith(previous):
+        params["input"] = params["input"][:-len(previous)].rstrip().rstrip(",").rstrip()
     if params.get("_skip_character_reference_late_binding"):
         return
     hashes = enabled_hashes(context)
-    if hashes:
-        params["_anima_reference"] = {"hashes": hashes, "settings": load_settings(context)}
+    if not hashes:
+        return
+    captured = {"hashes": hashes, "settings": load_settings(context)}
+    if load_prompt_option(context):
+        block = prompt_block(character_prompts(context, hashes))
+        if block:
+            before = str(params.get("input") or "")
+            params["input"] = with_block(before, block)
+            if params["input"] != before:
+                captured["prompt"] = block
+    params["_anima_reference"] = captured
 
 
 def _flatten(image):

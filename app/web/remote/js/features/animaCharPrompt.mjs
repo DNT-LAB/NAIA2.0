@@ -1,32 +1,26 @@
-/** ANIMA 참조 줄의 캐릭터 프롬프트 [불러오기](사용자 지시 2026-11-05).
+/** ANIMA 참조 줄 - 선행 고정에 남은 옛 캐릭터 덩어리 찾기 · 걷기(사용자 지시 2026-11-06).
  *
- *  그림마다 저장한 캐릭터 프롬프트를 선행 고정(prefix) 칸 끝에 한 덩어리로 붙인다:
+ *  11-05 판의 [불러오기] 는 칸의 캐릭터 프롬프트를 선행 고정(prefix) 끝에 붙였다:
  *    (character at center: girl, pink eyes, … :0.8)
- *  - 가중치는 ANIMA 에서 0.8 고정(사용자 지정). ComfyUI 는 괄호 안 마지막 ':' 뒤를 가중치로 읽는다(원격 실측 11-05).
- *  - 같은 그림의 덩어리를 다시 불러오면 **앞의 것을 바꿔 끼운다** - 겹쳐 쌓이지 않는다. 앞의 것 = 지난번에 넣은 글
- *    그대로(사용자가 그 덩어리를 손으로 고쳤으면 찾지 못하므로 새로 붙인다 - 고친 글을 지우지 않는다).
+ *  11-06 부터는 생성할 때 백엔드가 프롬프트 끝에 싣는다(core/anima_engine/reference.py · 여러 장이면 left/right 문장).
+ *  선행 고정에 옛 덩어리가 남아 있으면 같은 캐릭터가 두 번 들어가고, 여러 장일 때는 'center' 가 자리를 흐린다 -
+ *  창이 알려 주고 [지우기] 로 걷는다. 덩어리 안의 괄호 한 겹((artist) 등)까지 한 덩어리로 본다.
  */
 
-export const ANIMA_CHARACTER_WEIGHT = '0.8';
+const OLD_BLOCK = /\(character at center:(?:[^()]|\([^()]*\))*:0\.8\)/g;
 
-/** 저장된 캐릭터 프롬프트 -> 붙일 덩어리. 비었으면 ''. 줄바꿈 · 앞뒤 쉼표는 걷는다. */
-export function characterBlock(prompt) {
-  const body = String(prompt || '')
-    .replace(/\s*[\r\n]+\s*/g, ' ')
-    .replace(/^[\s,]+|[\s,]+$/g, '');
-  return body ? `(character at center: ${body}:${ANIMA_CHARACTER_WEIGHT})` : '';
+/** prefix 안의 옛 덩어리들(없으면 []). */
+export function findOldBlocks(prefix) {
+  return String(prefix || '').match(OLD_BLOCK) || [];
 }
 
-/** prefix 에 덩어리를 넣은 글. previous = 같은 그림으로 지난번에 넣은 덩어리(없으면 '').
- *  돌려줌 {text, action}: action = 'replaced' | 'appended' | 'same'(이미 그대로 들어 있다). */
-export function placeCharacterBlock(prefix, block, previous = '') {
+/** 옛 덩어리를 걷은 prefix - 덩어리 앞의 쉼표 하나와 사이 공백도 같이 걷는다. 끝 쉼표는 원래 있던 그대로. */
+export function stripOldBlocks(prefix) {
   const text = String(prefix || '');
-  if (!block) return {text, action: 'same'};
-  if (previous && previous !== block && text.includes(previous)) {
-    return {text: text.replace(previous, () => block), action: 'replaced'};
-  }
-  if (text.includes(block)) return {text, action: 'same'};
-  const head = text.replace(/[\s,]+$/, '');
   const tail = /,\s*$/.test(text) ? ',' : '';
-  return {text: head ? `${head}, ${block}${tail}` : `${block}${tail}`, action: 'appended'};
+  const out = text
+    .replace(new RegExp(`\\s*,?\\s*${OLD_BLOCK.source}`, 'g'), '')
+    .replace(/^[\s,]+/, '')
+    .replace(/[\s,]+$/, '');
+  return out ? out + tail : '';
 }

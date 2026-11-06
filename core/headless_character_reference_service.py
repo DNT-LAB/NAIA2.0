@@ -279,7 +279,8 @@ class HeadlessCharacterReferenceService:
             return None
         from core.anima_engine import ref_adapter, reference
         return {"settings": reference.load_settings(self.context), "defaults": dict(reference.REF_DEFAULTS),
-                "max_refs": reference.MAX_REFS, "addon": ref_adapter.status(self._anima_engine_root())}
+                "max_refs": reference.MAX_REFS, "addon": ref_adapter.status(self._anima_engine_root()),
+                "character_prompts": reference.load_prompt_option(self.context)}
 
     def _anima_param(self, key: str, value: Any) -> dict[str, Any] | list | None:
         # 추가 구성 요소 받기는 여기가 아니라 POST /api/anima-engine/ref-adapter/install(엔진 설치처럼 이 PC 에서만)
@@ -326,6 +327,23 @@ class HeadlessCharacterReferenceService:
             index = context._index_from_key(key, "remove_frame_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
                 context.character_reference_frames.pop(index)
+        elif key == "move_frame":
+            # 칸 순서 바꾸기(끌어 놓기 · 사용자 지시 2026-11-06) - ANIMA 는 이 차례가 붙이는 차례이자 left/right 이다.
+            # 칸은 해시로 지목한다: 다른 탭이 칸을 빼거나 옮긴 뒤의 낡은 번호가 엉뚱한 칸을 옮기지 않게.
+            try:
+                request = json.loads(str(value or ""))
+                file_hash = str(request.get("file_hash") or "")
+                target = int(request.get("to"))
+            except (ValueError, TypeError, AttributeError):
+                return context._toast("칸 순서 요청을 읽지 못했습니다.", level="error")
+            frames = context.character_reference_frames
+            index = next((i for i, f in enumerate(frames) if str(f.get("file_hash") or "") == file_hash), None)
+            if index is None or not file_hash:
+                return self.module_state()
+            target = max(0, min(len(frames) - 1, target))
+            if target == index:
+                return self.module_state()
+            frames.insert(target, frames.pop(index))
         elif key == "clear_frames":
             # 프레임만 비운다 - storage(save/character_reference/images)는 보존.
             context.character_reference_frames.clear()

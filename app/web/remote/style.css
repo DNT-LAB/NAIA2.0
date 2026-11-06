@@ -32997,6 +32997,14 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-hint { color: var(--text-dim); font-size: 10.5px; }
 /* ANIMA 참조(Ref Adapter v2) - 붙일 자리 표시 · 설정 칸 · 추가 구성 요소 안내 */
 .rvw-pos { flex: 0 0 auto; font-size: 10px; color: #cfc7ff; border: 1px solid rgba(124,106,239,.55); border-radius: 4px; padding: 0 5px; }
+/* ANIMA 활성 칸 끌어 순서 바꾸기(2026-11-06) - 손잡이 · 놓을 자리 줄 · 캐릭터 프롬프트 싣기 */
+.rvw-grip { flex: 0 0 auto; width: 10px; color: var(--text-dim); cursor: grab; user-select: none; font-size: 12px; line-height: 1; }
+.rvw-row[draggable=true] { cursor: grab; }
+.rvw-row.is-dragging { opacity: .45; }
+.rvw-row.is-drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.rvw-row.is-drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.rvw-opt { gap: 6px; cursor: pointer; font-size: 11px; color: var(--text); }
+.rvw-opt input { margin: 0; accent-color: rgb(124,106,239); }
 .rvw-anima { flex: 0 0 auto; display: flex; flex-direction: column; gap: 4px; padding: 6px 10px 8px; border-top: 1px solid rgba(255,255,255,.06); }
 .rvw-anima .rvw-k { width: 64px; }
 .rvw-addon { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; line-height: 1.5; }

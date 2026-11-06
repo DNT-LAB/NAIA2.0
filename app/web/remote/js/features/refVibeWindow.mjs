@@ -11,10 +11,9 @@
  *  ⚠️ `title` 속성은 앱이 자체 툴팁으로 바꿔 덮는다 - 설명은 `data-naia-title` 로 단다.
  */
 
-import {characterBlock, placeCharacterBlock} from './animaCharPrompt.mjs';
+import {findOldBlocks, stripOldBlocks} from './animaCharPrompt.mjs?v=20261106';
 
 const TAB_KEY = 'naia.refvibe.tab';
-const ACP_LAST_KEY = 'naia.refvibe.animaCharBlock';   // file_hash -> 지난번에 prefix 에 넣은 덩어리
 const PAGE = 60;
 const KINDS = {vibe: 'vibe_transfer', cr: 'character_reference'};
 const API_KIND = {vibe: 'vibe', cr: 'character_reference'};
@@ -36,8 +35,8 @@ export function createRefVibeWindow({
   isInteractive = () => false,
   isAnima = () => false,     // 내장 ANIMA - Char Ref 만 · Ref Adapter v2(사용자 지정 2026-11-05)
   installRefAdapter = async () => ({}),
-  readPrefix = () => null,   // () => 선행 고정(PE pre_prompt) 글 · 모르면 null
-  writePrefix = () => false, // (text) => 보냈는가
+  readPrefix = () => null,   // () => 선행 고정(PE pre_prompt) 글 · 모르면 null - 옛 [불러오기] 덩어리를 찾는다
+  writePrefix = () => false, // (text) => 보냈는가 - 그 덩어리를 걷는다
   showToast = () => {},
   confirmDialog = async () => false,
   promptDialog = async () => null,
@@ -429,14 +428,11 @@ export function createRefVibeWindow({
 
   // ── 칸마다 캐릭터 프롬프트(사용자 지시 2026-11-05 · 목업대로) ──
   //  [캐릭터 ▾ / +] 를 누르면 아래에 글칸 - 그림에 저장(NAI 보관함의 '캐릭터 프롬프트' 와 같은 값 · 같은 라우트).
-  //  [불러오기] = 선행 고정 칸 끝에 (character at center: …:0.8) - 가중치 고정. 다시 누르면 앞의 덩어리를 바꿔 끼운다.
+  //  생성할 때 백엔드가 프롬프트 끝에 싣는다(사용자 지시 2026-11-06 · core/anima_engine/reference.py) - 1장 =
+  //  (character at center: …:0.8) · 여러 장 = 칸 차례대로 'the girl on the left is a girl with …'. 칸은 끌어 순서를 바꾼다.
   const acpOpen = new Set();      // 펼친 그림(file_hash) - 칸 차례가 바뀌어도 따라간다
   const acpDrafts = new Map();    // file_hash -> 치는 중 · 저장 중인 글(상태가 같은 글을 돌려줄 때까지)
   const acpSaving = new Map();    // file_hash -> 보내는 중인 글
-  const acpLast = (() => {
-    try { const raw = JSON.parse(storage?.getItem(ACP_LAST_KEY) || '{}'); return raw && typeof raw === 'object' ? raw : {}; }
-    catch (_) { return {}; }
-  })();
 
   function acpText(frame) {
     const hash = String(frame.file_hash || '');
@@ -455,7 +451,7 @@ export function createRefVibeWindow({
     const cls = has ? (open ? ' on' : '') : ' is-new';
     const label = has ? `캐릭터 ${open ? '▴' : '▾'}` : '캐릭터 +';
     return `<button type="button" class="rvw-chip${cls}" data-rvw-acp="${escHtml(hash)}"`
-      + ` data-naia-title="이 그림의 캐릭터 프롬프트 - 불러오면 선행 고정 끝에 넣습니다">${label}</button>`;
+      + ` data-naia-title="이 그림의 캐릭터 프롬프트 - 생성할 때 프롬프트 끝에 싣습니다">${label}</button>`;
   }
 
   function acpDetail(frame) {
@@ -466,8 +462,7 @@ export function createRefVibeWindow({
       + `<span class="rvw-hint">캐릭터 프롬프트 (이 그림에 저장)</span>`
       + `<textarea class="rvw-cp-text" rows="3" spellcheck="false" data-rvw-acp-text="${h}"`
       + ` placeholder="girl, pink eyes, long hair, twintails …">${escHtml(acpText(frame))}</textarea>`
-      + `<div class="rvw-line"><button type="button" class="rvw-btn" data-rvw-acp-load="${h}">불러오기</button>`
-      + `<span class="rvw-hint">가중치 0.8 고정 (ANIMA) · 선행 고정 끝에 넣습니다</span></div></div>`;
+      + `<span class="rvw-hint">생성할 때 실음 - 1장 = (character at center: …:0.8) · 여러 장 = the girl on the left is a girl with …</span></div>`;
   }
 
   async function saveAnimaPrompt(hash) {
@@ -491,23 +486,14 @@ export function createRefVibeWindow({
     }
   }
 
-  function loadAnimaPrompt(hash) {
-    const frame = animaFrame(hash);
-    if (!frame) return;
-    const block = characterBlock(acpText(frame));
-    if (!block) { showToast('캐릭터 프롬프트를 먼저 적으세요', 'info'); return; }
-    saveAnimaPrompt(hash);   // 고친 글이 있으면 같이 저장(불러온 것과 저장된 것이 갈리지 않게)
+  // 11-05 판 [불러오기] 가 선행 고정에 넣은 덩어리 - 이제는 생성할 때 실으니 남아 있으면 두 번 들어간다
+  function stripOldPrefixBlocks() {
     const prefix = readPrefix();
     if (prefix == null) { showToast('선행 고정 칸을 읽지 못했습니다 - 잠시 뒤 다시 누르세요', 'error'); return; }
-    const {text, action} = placeCharacterBlock(prefix, block, String(acpLast[hash] || ''));
-    if (action !== 'same' && writePrefix(text) === false) {
-      showToast('연결이 끊겨 선행 고정 칸에 넣지 못했습니다', 'error');
-      return;
-    }
-    acpLast[hash] = block;
-    try { storage?.setItem(ACP_LAST_KEY, JSON.stringify(acpLast)); } catch (_) {}
-    showToast(action === 'replaced' ? '선행 고정의 캐릭터 프롬프트를 바꿨습니다'
-      : action === 'same' ? '선행 고정 끝에 이미 들어 있습니다' : '선행 고정 끝에 캐릭터 프롬프트를 넣었습니다', 'info');
+    if (!findOldBlocks(prefix).length) { renderActive(); return; }
+    if (writePrefix(stripOldBlocks(prefix)) === false) { showToast('연결이 끊겨 선행 고정 칸을 고치지 못했습니다', 'error'); return; }
+    showToast('선행 고정에서 옛 캐릭터 덩어리를 지웠습니다', 'info');
+    win.setTimeout(() => renderActive(), 400);
   }
 
   function renderAnimaActive(host, scrollTop) {
@@ -549,7 +535,10 @@ export function createRefVibeWindow({
     const rows = frames.map((frame, index) => {
       const live = frame.is_enabled ? ' is-live' : ' is-off';
       const where = place.get(index);
-      return `<div class="rvw-row${live}" data-rvw-row="${index}">`
+      const hash = escHtml(String(frame.file_hash || ''));
+      // 칸을 끌어 순서를 바꾼다 - 붙이는 차례 = left/middle/right(백엔드 move_frame · 해시로 지목)
+      return `<div class="rvw-row${live}" data-rvw-row="${index}" data-rvw-rowdrag="${hash}" draggable="true">`
+        + `<span class="rvw-grip" aria-hidden="true" data-naia-title="끌어서 순서 바꾸기 - 위 칸이 왼쪽">⠿</span>`
         + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
         + thumbHtml(frame)
         + `<span class="rvw-name">R${index + 1} · ${escHtml(frameName(frame))}</span>`
@@ -561,8 +550,21 @@ export function createRefVibeWindow({
     const settings = anima.settings || {};
     const tools = `<button type="button" class="rvw-btn" data-rvw-act="upload">+ 업로드</button>`
       + `<button type="button" class="rvw-btn" data-rvw-act="paste">붙여넣기</button>`;
+    const sendPrompts = anima.character_prompts !== false;
     const notice = on.length >= 2
-      ? `<div class="rvw-notice is-warn">${on.length}장을 왼쪽부터 나란히 붙여 보냅니다 - 프롬프트에 누가 어느 쪽인지 적으세요.</div>` : '';
+      ? `<div class="rvw-notice is-warn">${on.length}장을 위 칸부터 왼쪽에 나란히 붙여 보냅니다 - 끌어서 순서를 바꾸면 자리도 바뀝니다.`
+        + ` 장면 프롬프트에 인원수(${on.length}girls · 1girl, 1boy 등)를 적으세요${sendPrompts ? '' : ' · 캐릭터 프롬프트를 싣지 않으니 누가 어느 쪽인지 직접 적으세요'}.</div>`
+      : '';
+    // 옛 [불러오기] 덩어리가 선행 고정에 남아 있으면 알린다(켠 칸이 있을 때만 - 없으면 생성에 상관없다)
+    const prefix = on.length ? readPrefix() : null;
+    const oldBlocks = prefix == null ? 0 : findOldBlocks(prefix).length;
+    const oldNotice = oldBlocks && sendPrompts
+      ? `<div class="rvw-notice is-warn">선행 고정에 옛 (character at center: …) 덩어리가 ${oldBlocks}개 남아 있습니다 - 이제는 생성할 때 실으니 두 번 들어갑니다.`
+        + ` <button type="button" class="rvw-btn" data-rvw-act="stripold">지우기</button></div>`
+      : '';
+    const promptOpt = `<label class="rvw-line rvw-opt" data-naia-title="켠 칸의 캐릭터 프롬프트를 생성할 때 프롬프트 끝에 싣습니다 - 선행 고정은 고치지 않습니다">`
+      + `<input type="checkbox" data-rvw-anima-opt="character_prompts"${sendPrompts ? ' checked' : ''}>`
+      + `<span>캐릭터 프롬프트 싣기</span></label>`;
     const corrections = [['apg', 'APG'], ['rescale', 'Rescale'], ['none', '끔']]
       .map(([value, label]) => `<option value="${value}"${value === settings.correction ? ' selected' : ''}>${label}</option>`).join('');
     const more = animaMore
@@ -574,11 +576,11 @@ export function createRefVibeWindow({
       : '';
     host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${on.length} / ${max}</span>`
       + `<span class="rvw-sec-tools">${tools}</span></div>`
-      + notice
+      + notice + oldNotice
       + (frames.length
         ? `<div class="rvw-rows">${rows}</div>`
         : `<div class="rvw-empty">아래 STORAGE 에서 고르거나, 이미지를 올리거나 붙여 넣으세요.</div>`)
-      + `<div class="rvw-anima">`
+      + `<div class="rvw-anima">` + promptOpt
       + animaSlider('ref_guidance', settings.ref_guidance).replace('</div>',
         `<button type="button" class="rvw-btn" data-rvw-act="animamore">${animaMore ? '접기 ▴' : '더 보기 ▾'}</button></div>`)
       + more + `</div>`;
@@ -663,6 +665,7 @@ export function createRefVibeWindow({
   //    고르면 오른쪽이 클러스터 목록 → 누르면 멤버 편집. Vibe 전용.
   const DND_ITEM = 'application/x-naia-refvibe-item';
   const DND_CAT = 'application/x-naia-refvibe-category';
+const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순서(끌어 놓기 · 2026-11-06)
   const CLUSTER_NAME = /^[A-Za-z0-9가-힣ㄱ-ㅎㅏ-ㅣ]+$/;   // `vibe:이름` 트리거에 쓰인다(vibe_cluster_resolver 와 같은 규칙)
   const clusters = {list: [], loading: false, loaded: false, error: '', openId: '', seq: 0};
   let drag = null;                       // {type: 'item'|'cat', hash?, id?}
@@ -1316,7 +1319,28 @@ export function createRefVibeWindow({
   //    그 값을 통행증으로 쓰면 다른 데서 끌어온 파일이 엉뚱한 항목으로 옮겨진다(Scene 창에서 실측된 결함).
   function dndTypes(event) {
     const types = event.dataTransfer?.types || [];
-    return {item: Array.prototype.indexOf.call(types, DND_ITEM) >= 0, cat: Array.prototype.indexOf.call(types, DND_CAT) >= 0};
+    const has = type => Array.prototype.indexOf.call(types, type) >= 0;
+    return {item: has(DND_ITEM), cat: has(DND_CAT), row: has(DND_ROW) || drag?.type === 'row'};
+  }
+
+  // ANIMA 활성 칸 끌어 놓기 - 놓은 줄의 위/아래 반으로 앞/뒤를 정한다. 보낼 때는 해시 + 새 자리(백엔드 move_frame).
+  function rowDropTarget(event) {
+    const row = event.target.closest?.('[data-rvw-rowdrag]');
+    if (!row || !panel?.body.querySelector('[data-rvw-active]')?.contains(row)) return null;
+    const box = row.getBoundingClientRect();
+    return {row, after: event.clientY >= box.top + box.height / 2};
+  }
+
+  function dropRow(hash, target) {
+    const frames = getModuleState(KINDS.cr)?.frames || [];
+    const from = frames.findIndex(frame => String(frame.file_hash || '') === hash);
+    const over = frames.findIndex(frame => String(frame.file_hash || '') === target.row.dataset.rvwRowdrag);
+    if (from < 0 || over < 0) return;
+    let to = over + (target.after ? 1 : 0);
+    if (from < to) to -= 1;
+    if (to === from) return;
+    openRows.clear();       // 펼친 줄 표식은 번호라 순서가 바뀌면 엉뚱한 줄이 펼쳐진다
+    setModuleParam(KINDS.cr, 'move_frame', JSON.stringify({file_hash: hash, to}));
   }
 
   function clearDropMarks() {
@@ -1326,8 +1350,17 @@ export function createRefVibeWindow({
   function onDragStart(event) {
     const card = event.target.closest?.('[data-rvw-card]');
     const catRow = event.target.closest?.('[data-rvw-catdrag]');
+    const activeRow = event.target.closest?.('[data-rvw-rowdrag]');
+    // 글칸 · 슬라이더 · 고르개 안에서 시작한 끌기는 칸 끌기가 아니다(글 고르기 등)
+    if (activeRow && event.target.closest?.('input, textarea, select')) { event.preventDefault(); return; }
     try {
-      if (card) {
+      if (activeRow && activeRow.dataset.rvwRowdrag) {
+        drag = {type: 'row', hash: activeRow.dataset.rvwRowdrag};
+        event.dataTransfer.setData(DND_ROW, drag.hash);
+        event.dataTransfer.setData('text/plain', drag.hash);
+        event.dataTransfer.effectAllowed = 'move';
+        activeRow.classList.add('is-dragging');
+      } else if (card) {
         drag = {type: 'item', hash: card.dataset.rvwCard};
         event.dataTransfer.setData(DND_ITEM, JSON.stringify({kind: tab, hash: drag.hash}));
         event.dataTransfer.setData('text/plain', drag.hash);   // 표준 자료형이 없으면 끌기를 취소하는 브라우저가 있다
@@ -1354,7 +1387,14 @@ export function createRefVibeWindow({
 
   function onDragOver(event) {
     const types = dndTypes(event);
-    if (types.item) {
+    if (types.row) {
+      const target = rowDropTarget(event);
+      if (!target) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      clearDropMarks();
+      target.row.classList.add(target.after ? 'is-drop-after' : 'is-drop-before');
+    } else if (types.item) {
       const zone = event.target.closest?.('[data-rvw-drop]');
       if (!zone) return;
       event.preventDefault();
@@ -1373,16 +1413,25 @@ export function createRefVibeWindow({
   }
 
   function onDragLeave(event) {
-    const zone = event.target.closest?.('[data-rvw-drop], [data-rvw-catdrag]');
+    const zone = event.target.closest?.('[data-rvw-drop], [data-rvw-catdrag], [data-rvw-rowdrag]');
     if (zone && !zone.contains(event.relatedTarget)) zone.classList.remove('is-drop', 'is-drop-before', 'is-drop-after');
   }
 
   function onDrop(event) {
     const types = dndTypes(event);
-    if (!types.item && !types.cat) return;
+    if (!types.item && !types.cat && !types.row) return;
     event.preventDefault();
     const point = {x: event.clientX, y: event.clientY};
     clearDropMarks();
+    if (types.row) {
+      const target = rowDropTarget(event);
+      let hash = '';
+      try { hash = event.dataTransfer.getData(DND_ROW) || ''; } catch (_) { hash = ''; }
+      hash = hash || (drag?.type === 'row' ? drag.hash : '');
+      onDragEnd();
+      if (target && hash) dropRow(hash, target);
+      return;
+    }
     if (types.item) {
       const zone = event.target.closest?.('[data-rvw-drop]');
       let hash = '';
@@ -1430,10 +1479,6 @@ export function createRefVibeWindow({
       const hash = el.dataset.rvwAcp;
       if (acpOpen.has(hash)) { acpOpen.delete(hash); saveAnimaPrompt(hash); } else acpOpen.add(hash);
       renderActive();
-      return;
-    }
-    if ((el = t.closest('[data-rvw-acp-load]'))) {
-      loadAnimaPrompt(el.dataset.rvwAcpLoad);
       return;
     }
     if ((el = t.closest('[data-rvw-remove]'))) {
@@ -1523,6 +1568,7 @@ export function createRefVibeWindow({
       else if (act === 'clmore') openClusterMoreMenu(el, el.dataset.id);
       else if (act === 'animamore') { animaMore = !animaMore; renderActive(); }
       else if (act === 'animareset') setModuleParam(KINDS.cr, 'anima_reset', '1');
+      else if (act === 'stripold') stripOldPrefixBlocks();
       else if (act === 'addoninstall') {
         el.disabled = true;
         installRefAdapter()
@@ -2012,6 +2058,8 @@ export function createRefVibeWindow({
       setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnima}`, fmt(Number(t.value) / Number(t.dataset.scale), Number(t.dataset.digits)));
     } else if (t.matches('[data-rvw-anima-sel]')) {
       setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnimaSel}`, t.value);
+    } else if (t.matches('[data-rvw-anima-opt]')) {
+      setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnimaOpt}`, String(t.checked));
     } else if (t.matches('[data-rvw-acp-text]')) {
       acpDrafts.set(t.dataset.rvwAcpText, t.value);
       saveAnimaPrompt(t.dataset.rvwAcpText);

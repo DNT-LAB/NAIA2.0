@@ -3123,7 +3123,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261105-ref2')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261106-ref3')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3148,7 +3148,8 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261105-re
         if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
         return data;
       })),
-      // 캐릭터 프롬프트 [불러오기] - 선행 고정(PE pre_prompt) 끝에 넣는다(사용자 지시 2026-11-05).
+      // 선행 고정(PE pre_prompt) - 11-05 판 [불러오기] 가 남긴 (character at center: …) 덩어리를 찾고 걷는다
+      // (11-06 부터 캐릭터 프롬프트는 생성할 때 백엔드가 싣는다).
       // ⚠️ PE 상태를 아직 못 받았으면 null - 빈 글로 보고 쓰면 사용자의 선행 고정이 통째로 지워진다.
       readPrefix: () => {
         if (typeof slashPeState().pre_prompt !== 'string') {

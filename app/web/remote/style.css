@@ -33545,3 +33545,60 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
   .mobile-remote-icon { width: 22px; text-align: center; }
   .mobile-remote-note { margin-left: auto; font-size: 12px; color: var(--text-dim); }
 }
+
+/* 휴대폰 Artists 목록(사용자 지정 2026-11-06) - 모바일 리모트에서만 열린다. 화면 전체를 덮는 보기 전용 판. */
+html.mal-open, html.mal-open body { overflow: hidden; }
+.mal-panel:not([hidden]) {
+  position: fixed; inset: 0; z-index: 9100; display: flex; flex-direction: column;
+  background: var(--bg-deep, #0b0b12); color: var(--text-primary);
+  padding: env(safe-area-inset-top, 0px) 0 env(safe-area-inset-bottom, 0px);
+}
+.mal-head {
+  display: flex; align-items: center; justify-content: space-between; flex: none;
+  padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--border-dim);
+}
+.mal-title { font-size: 15px; font-weight: 600; }
+.mal-close {
+  width: 40px; height: 40px; border: 0; background: none; color: var(--text-dim); font-size: 18px; cursor: pointer;
+}
+.mal-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px 0; flex: none; }
+/* 콤보박스 = 나이아 표준(mod-select → customSelects) · 손가락 크기만 키운다 */
+.mal-controls .custom-mod-select .custom-select-button { height: 40px; }
+.mal-search {
+  width: 100%; min-width: 0; height: 40px; padding: 0 10px;
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  background: var(--bg-surface, #15151f); color: var(--text-primary);
+}
+.mal-search-row { padding: 8px 12px 0; flex: none; }
+.mal-search { font-size: 16px; } /* 16px 미만이면 iOS 가 확대한다 */
+.mal-status { padding: 8px 14px; font-size: 12px; color: var(--text-dim); flex: none; font-variant-numeric: tabular-nums; }
+.mal-scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 0 10px 16px; }
+.mal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
+.mal-card {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 0; border: 0;
+  background: none; color: inherit; text-align: left; cursor: pointer;
+}
+.mal-card.is-banned { opacity: 0.45; }
+.mal-thumb {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  aspect-ratio: 1 / 1; overflow: hidden; border-radius: 6px; background: var(--bg-card, #1b1b26);
+}
+.mal-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.mal-noimg { font-size: 11px; color: var(--text-dim); }
+.mal-mark {
+  position: absolute; top: 4px; right: 4px; min-width: 18px; height: 18px; padding: 0 3px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1;
+  background: rgba(0,0,0,0.65);
+}
+.mal-fav { color: #f5c542; }
+.mal-ban { color: #ff7a7a; top: auto; bottom: 4px; }
+.mal-name { font-size: 12px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mal-more { min-height: 40px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text-dim); }
+.mal-viewer:not([hidden]) {
+  position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; padding: 48px 12px 24px; background: rgba(0,0,0,0.92);
+}
+.mal-viewer-close { position: absolute; top: calc(4px + env(safe-area-inset-top, 0px)); right: 4px; color: #ddd; }
+.mal-viewer-img { max-width: 100%; max-height: calc(100% - 64px); object-fit: contain; border-radius: 6px; }
+.mal-viewer-info { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; font-size: 13px; color: #ccc; }
+.mal-viewer-info b { width: 100%; text-align: center; font-size: 15px; color: #fff; word-break: break-all; }

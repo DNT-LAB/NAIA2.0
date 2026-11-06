@@ -7320,6 +7320,22 @@ function closeMobileRemote() {
   $('mobileRemoteBackdrop').hidden = true;
   $('mobileRemoteBtn')?.setAttribute('aria-expanded', 'false');
 }
+let mobileArtistListReady = null;
+function ensureMobileArtistList() {
+  if (!mobileArtistListReady) {
+    mobileArtistListReady = import('./js/features/mobileArtistList.mjs?v=20261106-mal2')
+      .then(({createMobileArtistList}) => createMobileArtistList({
+        document, window, escHtml, showToast, storage: localStorage,
+      }))
+      .catch(error => {
+        mobileArtistListReady = null;
+        console.error('Failed to initialize mobile artist list', error);
+        showToast('Artists 화면을 못 열었습니다', 'error');
+        return null;
+      });
+  }
+  return mobileArtistListReady;
+}
 function toggleMobileRemote() {
   if ($('mobileRemoteSheet')?.hidden === false) closeMobileRemote();
   else openMobileRemote();
@@ -7331,6 +7347,8 @@ $('mobileRemoteSheet')?.addEventListener('click', event => {
   const target = item.dataset.mobileRemote;
   // Characters 는 기존 창이 휴대폰 폭에서도 맞는다 - 탭으로 가지 않고 창만 띄운다.
   if (target === 'characters') { void ensureCharacterWindow().then(win => win?.open()); return; }
+  // Artists = 휴대폰용 간소판(보기 전용 목록). PC 탭과 같은 라우트를 읽기만 한다.
+  if (target === 'artists') { void ensureMobileArtistList().then(list => list?.open()); return; }
   showToast(`${item.dataset.label || target} 휴대폰 화면은 준비 중입니다`, 'info');
 });
 

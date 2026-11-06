@@ -7347,6 +7347,50 @@ function toggleMobileRemote() {
   if ($('mobileRemoteSheet')?.hidden === false) closeMobileRemote();
   else openMobileRemote();
 }
+
+// 확대보기(사용자 지정 2026-11-06) - 리모트 단추 위 [⤢]. 켜면 결과 아래 줄들(Inpaint 줄 · Prompt/Params 띠 ·
+// Prompt Fixed 줄 · 해상도 줄)을 걷고 Random · Generate 만 남긴다. 걷는 것은 CSS(휴대폰 폭에서만) - 여기는 표식만.
+const MOBILE_ZOOM_KEY = 'naia.mobileZoom';
+function setMobileZoom(on) {
+  document.body.classList.toggle('mobile-zoom', Boolean(on));
+  $('mobileZoomBtn')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+  try { localStorage.setItem(MOBILE_ZOOM_KEY, on ? '1' : ''); } catch (_) { /* 기억 못 해도 지금 화면은 바뀐다 */ }
+}
+function toggleMobileZoom() {
+  setMobileZoom(!document.body.classList.contains('mobile-zoom'));
+}
+try {
+  if (localStorage.getItem(MOBILE_ZOOM_KEY) === '1') setMobileZoom(true);
+} catch (_) { /* 저장소를 못 읽으면 꺼진 채로 */ }
+
+// Generation Info 단추 줄 - 자리가 모자라 잘리면 I · D · U · E 한 글자씩(사용자 지정 2026-11-06).
+// ⚠️ 표식을 뗀 상태에서 재고 그 자리에서 다시 붙인다(그리기 전이라 깜빡이지 않는다). 지켜보는 쪽은 크기 ·
+//    글자 변화뿐이고 이 표식(속성)은 안 본다 - 서로 부르며 돌지 않는다.
+function fitResultEnhanceLabels() {
+  const box = document.querySelector('.result-enhance-controls');
+  if (!box || !box.getClientRects().length) return;
+  box.classList.remove('is-initials');
+  box.parentElement?.classList.remove('enhance-initials');
+  const cut = box.scrollWidth > box.clientWidth + 1
+    || [...box.querySelectorAll('.result-enhance-btn')]
+      .some(btn => btn.getClientRects().length && btn.scrollWidth > btn.clientWidth + 1);
+  if (!cut) return;
+  box.classList.add('is-initials');
+  box.parentElement?.classList.add('enhance-initials');     // 제목을 비킨다(CSS)
+}
+(() => {
+  const box = document.querySelector('.result-enhance-controls');
+  if (!box) return;
+  let timer = 0;
+  const later = () => {
+    if (timer) return;
+    timer = window.setTimeout(() => { timer = 0; fitResultEnhanceLabels(); }, 30);
+  };
+  window.addEventListener('resize', later);
+  if (typeof ResizeObserver === 'function' && box.parentElement) new ResizeObserver(later).observe(box.parentElement);
+  new MutationObserver(later).observe(box, {subtree: true, childList: true, characterData: true});
+  later();
+})();
 $('mobileRemoteSheet')?.addEventListener('click', event => {
   const item = event.target.closest('[data-mobile-remote]');
   if (!item) return;

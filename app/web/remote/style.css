@@ -33820,3 +33820,57 @@ body[data-pe-quick-state="empty"] .pe-quick-btn { color: var(--text-dim); border
 .tag-tooltip.phone-dock .tag-tooltip-extra { gap: 6px; font-size: 12px; }
 .tag-tooltip.phone-dock .tag-tooltip-extra-label { font-size: 10px; }
 .tag-tooltip.phone-dock .tag-tooltip-extra-tag { flex: none; padding: 5px 11px; border-radius: 14px; font-size: 12px; }
+
+/* ── Generation Info 줄이 결과 칸보다 넓을 때(768px 이상 · 2026-11-06) ─────────────────────────────
+   펼친 폴드(884) · 가로 휴대폰(915) 에서 단추 여섯 칸(438px)이 268px 칸 밖으로 나가 문서 폭이 1046 이 됐고,
+   휴대폰 브라우저는 그 폭을 다 담으려고 **페이지 전체를 줄여** 오른쪽 · 아래가 검게 비었다(사용자 제보).
+   넘칠 때만 제목부터 줄고, 묶음은 제 칸 밖으로 나가지 않는다(잘림). 잘리면 app.js fitResultEnhanceLabels 가
+   .is-initials 를 붙여 I · D · U · E 한 글자로 접는다(아래). 자리가 넉넉하면(PC 넓은 창) 아무것도 안 바뀐다. */
+@media (min-width: 768px) {
+  .result-info-header { min-width: 0; }
+  #resultInfoTitle {
+    flex: 0 100 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .result-enhance-controls { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+}
+/* 잘리면 한 글자씩(사용자 지정 2026-11-06: "잘리는 방식으로 하되 I D U E 한 글자씩만") - 모든 폭에 같다.
+   글자는 data-initial(index.html) · 단추 글(Enhance x1.5 | 0.2 같은 바뀌는 글)은 font-size 0 으로 숨긴다. */
+.result-enhance-controls.is-initials .result-enhance-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 2px;
+  font-size: 0;
+  text-overflow: clip;
+}
+.result-enhance-controls.is-initials .result-enhance-btn::before {
+  content: attr(data-initial);
+  font-size: 12px;
+}
+.result-enhance-controls.is-initials .result-enhance-settings-btn { flex: 0 0 22px; }
+/* 접히면 제목은 비키고 단추 묶음이 줄을 다 쓴다 - 안 그러면 줄어든 묶음 자리를 제목이 도로 먹어 단추가 13px 가 됐다. */
+.result-info-header.enhance-initials #resultInfoTitle { display: none; }
+.result-enhance-controls.is-initials { flex: 1 1 auto; }
+
+/* ── 휴대폰 확대보기(사용자 지정 2026-11-06) ─────────────────────────────────────────────────────
+   리모트 단추 위의 [⤢] - 켜면 결과 아래 줄들(Inpaint 줄 · Prompt/Params/Modules 띠 · Prompt Fixed 줄 ·
+   해상도 줄)을 걷고 Random · Generate 만 남긴다. 그만큼 결과 그림이 커진다. 상태는 localStorage(naia.mobileZoom). */
+.mobile-zoom-btn { display: none; }
+@media (max-width: 767px) {
+  .mobile-zoom-btn {
+    position: absolute; bottom: calc(48px + var(--inpaint-dock-lift, 0px)); right: 10px; z-index: 6;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px; padding: 0; cursor: pointer;
+    border: 1px solid var(--border-dim); border-radius: 6px;
+    background: rgba(12,12,20,0.82); color: var(--text-dim); font-size: 17px; line-height: 1;
+    touch-action: manipulation;
+  }
+  .mobile-zoom-btn[aria-pressed="true"] { border-color: var(--accent-blue); color: var(--text-primary); background: rgba(40,120,216,0.35); }
+  body.mobile-zoom #resultInfoPanel,
+  body.mobile-zoom .prompt-toggle-bar,
+  body.mobile-zoom .bottom-controls > .options-row,
+  body.mobile-zoom .bottom-controls > .quick-params { display: none; }
+}

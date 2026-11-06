@@ -4,6 +4,7 @@
   "scope": "Remote Web feature ownership, route coverage, and migration smoke contract",
   "route_source": "core/web_session_app.py",
   "route_sources": [
+    "app/backend/server/agent_discovery_routes.py",
     "core/web_session_app.py",
     "app/backend/server/anima_engine_routes.py",
     "app/backend/server/artist_thumbnail_routes.py",
@@ -62,6 +63,22 @@
     }
   ],
   "feature_groups": [
+    {
+      "id": "agent_discovery",
+      "name": "Agent capability discovery, usage schemas, coverage audit and correlated WebSocket calls",
+      "legacy_dependency": "none",
+      "source_files": [
+        "NAIA_cli.py", "core/agent_cli.py", "core/agent_catalog.py", "core/agent_client.py",
+        "core/agent_protocol.py", "core/agent_local_session.py", "core/agent_setup.py", "app/backend/server/agent_discovery_routes.py",
+        "app/backend/server/websocket_session.py"
+      ],
+      "routes": [
+        {"method": "GET", "path": "/api/agent/catalog", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/agent/audit", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/agent/assets", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/agent/models", "smoke": "non_destructive"}
+      ]
+    },
     {
       "id": "anima_managed_engine",
       "name": "ANIMA managed ComfyUI engine (install, runtime, fixed SPD profile, serial LoRA)",

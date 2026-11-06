@@ -516,6 +516,39 @@ async def send_startup_messages(
 async def handle_json_command(
     ws, context, clients, client_host, command, *, run_in_thread, broadcast_json, start_generation_runner,
 ) -> None:
+    # Agent requests stay on the same FIFO/live lanes and temporary-search gates
+    # as browser requests. Only direct replies gain correlation, never broadcasts.
+    from core.agent_protocol import AgentReplySocket, CALL_ID_KEY, clean_call_id
+    call_id = clean_call_id(command.get(CALL_ID_KEY))
+    if not call_id:
+        return await _handle_json_command_impl(ws, context, clients, client_host, command,
+            run_in_thread=run_in_thread, broadcast_json=broadcast_json,
+            start_generation_runner=start_generation_runner)
+    command = dict(command)
+    command.pop(CALL_ID_KEY, None)
+    reply = AgentReplySocket(ws, call_id, context, command)
+    try:
+        await _handle_json_command_impl(reply, context, clients, client_host, command,
+            run_in_thread=run_in_thread, broadcast_json=broadcast_json,
+            start_generation_runner=start_generation_runner)
+    except asyncio.CancelledError:
+        try:
+            await reply.acknowledge(error="Command was cancelled; background work may still be running")
+        except Exception:
+            pass
+        raise
+    except Exception as exc:
+        await reply.acknowledge(error=exc)
+        # The ordinary lane/live outer handlers would otherwise echo a second,
+        # uncorrelated and unsanitized error through the raw socket.
+        return
+    else:
+        await reply.acknowledge()
+
+
+async def _handle_json_command_impl(
+    ws, context, clients, client_host, command, *, run_in_thread, broadcast_json, start_generation_runner,
+) -> None:
     kind = str(command.get("type") or "").strip()
     if kind == "startup_ui_batch_end":
         # receive 루프의 일반 FIFO를 거친 표식이다. 검색 전환 중에도 응답 없이 기록만 한다.

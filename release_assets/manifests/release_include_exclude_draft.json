@@ -5,6 +5,7 @@
   "include": {
     "backend_runtime": [
       "NAIA_web_headless.py",
+      "NAIA_cli.py",
       "app/__init__.py",
       "app/backend/**",
       "app/web/__init__.py",

@@ -26,6 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover - used when executed as a script
 
 REQUIRED_SELECTED_FILES = {
     "NAIA_web_headless.py",
+    "NAIA_cli.py",
     "requirements-headless.txt",
     "app/web/remote/index.html",
     "app/web/remote/app.js",

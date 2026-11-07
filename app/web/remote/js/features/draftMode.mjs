@@ -578,6 +578,18 @@ export function initDraftMode({
       counting.hidden = true;
     }
   }
+  /** 쉼표로 나뉜 여러 조각을 하나씩 칩으로. 처음 실패에서 멈추고 그 조각과 남은 조각을 입력칸 앞에 되돌린다 -
+   *  입력칸에서 먼저 지운 뒤라 그냥 멈추면 사라졌다(Codex 4차 11-07). 붙여 넣기 · Enter · 쉼표 키가 같이 쓴다. */
+  async function commitParts(zone, parts) {
+    const { input } = inputs[zone];
+    for (let i = 0; i < parts.length; i++) {
+      if (await commit(zone, parts[i])) continue;
+      const rest = parts.slice(i).map(part => part.trim()).filter(Boolean).join(', ');
+      if (rest) input.value = input.value.trim() ? `${rest}, ${input.value.trim()}` : rest;
+      return false;
+    }
+    return true;
+  }
   async function chipOp(body) {
     try { receive(await edit('/draft/chips', body)); }
     catch (error) { showToast(error.message || 'Draft 요청 실패', error.code === 'zero_match' ? 'warning' : 'error'); }
@@ -604,7 +616,11 @@ export function initDraftMode({
       if (handleSuggestKey(event, zone)) return;
       if (event.key === 'Enter' || event.key === ',') {
         event.preventDefault();
-        void commit(zone, input.value);
+        // 되돌려 놓은 'a, b' 처럼 쉼표가 든 글은 붙여 넣기와 같이 조각마다 - 통째로 보내면 색인 밖 글로 Extra 에 들어가
+        // 제외하려던 태그가 프롬프트에 들어갔다(Codex 5차 11-07).
+        const text = input.value;
+        if (text.includes(',')) { input.value = ''; void commitParts(zone, text.split(',')); }
+        else void commit(zone, text);
         return;
       }
       if (event.key === 'Backspace' && !input.value) {
@@ -618,15 +634,7 @@ export function initDraftMode({
       if (input.value.includes(',')) {
         const parts = input.value.split(',');
         input.value = parts.pop();
-        void (async () => {
-          for (let i = 0; i < parts.length; i++) {
-            if (await commit(zone, parts[i])) continue;
-            // 못 넣은 조각과 남은 조각을 입력칸 앞에 되돌린다 - 입력칸에서 먼저 지운 뒤라 그냥 멈추면 사라졌다(Codex 4차 11-07)
-            const rest = parts.slice(i).map(part => part.trim()).filter(Boolean).join(', ');
-            if (rest) input.value = input.value.trim() ? `${rest}, ${input.value.trim()}` : rest;
-            break;
-          }
-        })();
+        void commitParts(zone, parts);
         return;
       }
       scheduleSuggest(zone);

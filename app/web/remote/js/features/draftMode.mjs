@@ -546,14 +546,15 @@ export function initDraftMode({
 
   // ---- 칩 입력 ----
   function markBad(zone, on) { inputs[zone].input.classList.toggle('is-bad', !!on); }
+  /** 칩 하나 넣기. 넣었으면(또는 넣을 것이 없으면) true - 붙여 넣기 루프는 false 에서 멈추고 남은 글을 되돌린다. */
   async function commit(zone, raw) {
     const text = String(raw || '').trim().replace(/,+$/, '').trim();
-    if (!text) return;
+    if (!text) return true;
     const { input, counting } = inputs[zone];
     hideSuggest();
     // 칩이 Extra 로 갈 수 있다(색인 밖 태그) - 저장 못 한 Extra 가 있으면 먼저 저장한다. 못 하면 멈춘다: 그대로 두면
     // 서버가 붙인 태그는 칸에 안 보이고 다음 저장이 그것을 지웠다(Codex 3차 11-07).
-    if (!(await flushExtra())) return;
+    if (!(await flushExtra())) return false;
     const timer = setTimeout(() => { counting.hidden = false; }, COUNTING_DELAY_MS);
     try {
       const data = await edit('/draft/chips', { op: 'add', zone, text });
@@ -566,10 +567,12 @@ export function initDraftMode({
         extraEl.classList.add('is-flash');
         showToast(`'${text}' 은(는) 이벤트 맵에 없어 Extra 로 보냈습니다`, 'info');
       }
+      return true;
     } catch (error) {
       markBad(zone, true);
       if (error.code !== 'zero_match') showToast(error.message || '칩을 넣지 못했습니다', 'warning');
       else showToast(error.message || '이 조건이면 남는 게시물이 없습니다', 'warning');
+      return false;
     } finally {
       clearTimeout(timer);
       counting.hidden = true;
@@ -615,7 +618,15 @@ export function initDraftMode({
       if (input.value.includes(',')) {
         const parts = input.value.split(',');
         input.value = parts.pop();
-        void (async () => { for (const part of parts) await commit(zone, part); })();
+        void (async () => {
+          for (let i = 0; i < parts.length; i++) {
+            if (await commit(zone, parts[i])) continue;
+            // 못 넣은 조각과 남은 조각을 입력칸 앞에 되돌린다 - 입력칸에서 먼저 지운 뒤라 그냥 멈추면 사라졌다(Codex 4차 11-07)
+            const rest = parts.slice(i).map(part => part.trim()).filter(Boolean).join(', ');
+            if (rest) input.value = input.value.trim() ? `${rest}, ${input.value.trim()}` : rest;
+            break;
+          }
+        })();
         return;
       }
       scheduleSuggest(zone);
@@ -825,8 +836,14 @@ export function initDraftMode({
     if (!active()) return true;
     const text = extraEl.value;
     if (text === String(snap?.state?.extra || '')) return true;
-    try { receive(await edit('/draft/extra', { text })); return true; }
+    try { receive(await edit('/draft/extra', { text })); }
     catch (error) { showToast(error.message || 'Extra 를 저장하지 못했습니다', 'error'); return false; }
+    // 저장 응답보다 새 스냅숏(다른 탭)이 먼저 와서 칸과 서버 글이 다르면 이어서 하지 않는다(Codex 4차 11-07)
+    if (extraEl.value !== String(snap?.state?.extra || '')) {
+      showToast('다른 창에서 Extra 가 바뀌었습니다 - Extra 를 확인한 뒤 다시 해 주세요', 'warning');
+      return false;
+    }
+    return true;
   }
   extraEl.addEventListener('blur', () => { void flushExtra(); });
   extraEl.addEventListener('animationend', () => extraEl.classList.remove('is-flash'));

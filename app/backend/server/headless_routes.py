@@ -19,6 +19,7 @@ from app.backend.server.event_preset_routes import register_event_preset_routes
 from app.backend.server.extension_install_routes import register_extension_install_routes
 from app.backend.server.fast_search_routes import register_fast_search_routes
 from app.backend.server.font_routes import register_font_routes
+from app.backend.server.guide_editor_routes import register_guide_editor_routes
 from app.backend.server.interactive_thumbnail_routes import register_interactive_thumbnail_routes
 from app.backend.server.interactive_advice_routes import register_interactive_advice_routes
 from app.backend.server.tag_combo_routes import register_tag_combo_routes
@@ -196,6 +197,8 @@ def register_headless_routes(
 ) -> None:
     app.state.remote_web_dir = str(root_web_dir)
     register_web_shell_routes(app, root_web_dir)
+    # 가이드 편집기(개발 전용) - 저장소 사본(.git 있음)에서만 등록된다. 포터블엔 라우트가 없다.
+    register_guide_editor_routes(app, root_web_dir)
     _register_extension_toast_bridge(context, clients)
     _register_search_loading_bridge(context, clients)
     _register_extension_queue_bridge(context, clients)

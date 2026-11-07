@@ -21,6 +21,7 @@
     "app/backend/server/event_preset_routes.py",
     "app/backend/server/fast_search_routes.py",
     "app/backend/server/font_routes.py",
+    "app/backend/server/guide_editor_routes.py",
     "app/backend/server/install_manager_routes.py",
     "app/backend/server/interactive_advice_routes.py",
     "app/backend/server/interactive_assets_routes.py",
@@ -1118,6 +1119,25 @@
         {"method": "POST", "path": "/api/fonts/upload", "smoke": "asset_runtime"},
         {"method": "DELETE", "path": "/api/fonts/{font_id}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/fonts/{filename}", "smoke": "static"}
+      ]
+    },
+    {
+      "id": "guide_editor",
+      "name": "Guide viewer editor (dev checkout only: registered when .git exists, loopback only)",
+      "source_files": [
+        "app/backend/server/guide_editor_routes.py",
+        "app/web/remote/guides/index.html",
+        "app/web/remote/guides/viewer.js",
+        "app/web/remote/guides/editor.js",
+        "app/web/remote/guides/catalog.json"
+      ],
+      "legacy_dependency": "none",
+      "routes": [
+        {"method": "GET", "path": "/api/guide-editor/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/guide-editor/assets", "smoke": "state_mutation"},
+        {"method": "PUT", "path": "/api/guide-editor/docs/{doc_id}", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/guide-editor/docs", "smoke": "state_mutation"},
+        {"method": "PUT", "path": "/api/guide-editor/catalog", "smoke": "state_mutation"}
       ]
     },
     {

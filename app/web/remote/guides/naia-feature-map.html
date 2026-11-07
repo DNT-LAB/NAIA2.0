@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NAIA 기능 지도</title>
+<link rel="stylesheet" href="document.css?v=4">
+<style>html { overflow: auto; } .page { max-width: 708px; margin: 0 auto; padding: 48px 24px 64px; }
+/* 표 너비 통일 - 본문 폭에 맞추고 첫 열(기능 · 그룹)을 같은 폭으로 */
+table { width: 100%; table-layout: fixed; } th:first-child, td:first-child { width: 34%; }
+/* 기능 카드 - 이름 · 여는 곳 · 그림(빨간 상자 = 누르는 곳) */
+table.cards { margin: 16px 0 8px; } table.cards td { width: 50%; border: none; padding: 0 8px 22px; vertical-align: top; }
+table.cards td:first-child { padding-left: 0; } table.cards td:last-child { padding-right: 0; }
+table.cards h4.card { margin: 0 0 2px; font-size: 17px; } table.cards p.entry { margin: 0; color: rgba(55,53,47,.65); font-size: 13px; line-height: 1.45; min-height: 2.9em; }
+table.cards .image-wrap { margin-top: 4px; }
+kbd { display: inline-block; padding: 1px 6px; border: 1px solid #d3d1cb; border-bottom-width: 2px; border-radius: 4px; background: #f7f6f3; font: 600 12px/1.5 ui-monospace, Consolas, monospace; color: #37352f; }</style>
+</head>
+<body>
+<main class="page">
+<p>이 페이지에서는 NAIA 2.0 Portable에 붙어있는 온갖 버튼들에 대해서 간단히 다룹니다.</p>
+<p>번호가 여러 개 붙은 메뉴(프롬프트 도구 · NAI 전용 도구)는 안에 여러 그룹의 기능이 섞여 있다는 뜻입니다. 각 항목은 해당 그룹의 표에 나눠 적었습니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-203839.webp" alt="NAIA 메인 화면 기능 지도 - 번호 1~10" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>그룹</th><th>역할</th></tr>
+</thead>
+<tbody>
+<tr><td><b>① 생성설정</b></td><td>Novel AI 및 WEBUI/COMFYUI 연동, 모델과 각종 파라미터를 설정합니다.</td></tr>
+<tr><td><b>② 검색필터</b></td><td>어떤 프롬프트를 뽑을지 정하고, 랜덤 프롬프트를 생성합니다.</td></tr>
+<tr><td><b>③ 프롬프트</b></td><td>태그 검색, 랜덤 프롬프트 정제, 네거티브 프롬프트 등을 다룹니다.</td></tr>
+<tr><td><b>④ 스타일</b></td><td>그림체(작가)를 정하거나 스타일을 탐색합니다.</td></tr>
+<tr><td><b>⑤ 캐릭터</b></td><td>생성 대상 캐릭터를 검색하거나 선택합니다.</td></tr>
+<tr><td><b>⑥ 장면연출</b></td><td>한 장면, 여러 컷을 구성합니다.</td></tr>
+<tr><td><b>⑦ 생성자동화</b></td><td>이미지를 생성하거나, 생성 관련 자동화 옵션을 조작합니다.</td></tr>
+<tr><td><b>⑧ 이미지편집</b></td><td>인페인트 기능 및 Vibe Transfer, Character Reference 관련 기능입니다.</td></tr>
+<tr><td><b>⑨ 결과 · 보관</b></td><td>이미지 생성 결과 히스토리 영역 및 자동 저장 관련 기능을 제공합니다.</td></tr>
+<tr><td><b>⑩ 환경설정</b></td><td>화면 · 입력 편의 · 확장 기능을 정합니다.</td></tr>
+</tbody>
+</table>
+<h3>① 생성설정</h3>
+<p>Novel AI 및 WEBUI/COMFYUI 연동, 모델과 각종 파라미터를 설정합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g1.webp" alt="① 생성설정 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>NAI ▾ · API</td><td>생성 백엔드(NAI · WEBUI · ComfyUI · ANIMA)를 고르고 연결합니다.</td></tr>
+<tr><td>Params</td><td>모델 · 스텝 · CFG · 샘플러 · 시드</td></tr>
+<tr><td>해상도 · Rnd Res · Auto Res</td><td>크기 지정 · 랜덤 해상도 · 원본 게시물의 비율을 먼저 씁니다.</td></tr>
+<tr><td>🌱 (결과 그림 왼쪽 아래)</td><td>직전 생성의 시드와 해상도를 고정합니다.</td></tr>
+<tr><td>NAI 전용 도구 › 해상도 프리셋</td><td>자주 쓰는 크기 목록</td></tr>
+</tbody>
+</table>
+<p><b>그 밖에</b> : WEBUI Hiresfix Assist, ComfyUI 워크플로우 등</p>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">백엔드 · API</h4><p class="entry">생성에 쓸 백엔드를 고르고, NovelAI 토큰이나 WebUI·ComfyUI 주소를 연결합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-1.webp" alt="백엔드 · API - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Params</h4><p class="entry">모델·샘플러·해상도·스텝·CFG·시드 같은 생성 설정을 정합니다. 프리셋 마다 따로 관리됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-2.webp" alt="Params - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Rnd Res</h4><p class="entry">생성할 때마다 해상도 목록에서 하나를 무작위로 골라 씁니다. Auto Res가 켜져있으면 Auto Res가 1회 먼저 적용됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-3.webp" alt="Rnd Res - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Auto Res</h4><p class="entry">뽑은 Danbooru 프롬프트의 원본 그림 비율에 맞춰 해상도를 고릅니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-4.webp" alt="Auto Res - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">새싹 버튼 - 시드 · 해상도 고정</h4><p class="entry">직전 생성의 시드·해상도를 그대로 다시 씁니다. 해제하면 이전 설정이 복원됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-5.webp" alt="새싹 - 시드 · 해상도 고정 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">해상도 프리셋</h4><p class="entry">해상도 목록을 Small~Wallpaper 크기 대역으로 바꿉니다(Large 이상은 Anlas 소모).</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-6.webp" alt="해상도 프리셋 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">USAGE - 계정 · 사용량</h4><p class="entry">계정별 V5 무료 사용량을 보고, 2계정 이상일 때는 여러 계정에 생성을 나눠 맡깁니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c1-7.webp" alt="USAGE - 계정 · 사용량 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td></td></tr>
+</tbody>
+</table>
+<h3>② 검색필터</h3>
+<p>어떤 프롬프트를 뽑을지 정하고, 랜덤 프롬프트를 생성합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g2.webp" alt="② 검색필터 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Prompt: Counts</td><td>아카이브 전체를 검색해 생성 풀을 새로 만듭니다. 숫자는 남은 풀입니다.</td></tr>
+<tr><td>Quick</td><td>만든 풀을 다시 검색하지 않고 태그로 바로 좁힙니다.</td></tr>
+<tr><td>E · S</td><td>이벤트 맵(Ctrl+E) · 조합(스테이징)</td></tr>
+<tr><td>Random</td><td>풀에서 한 줄을 뽑아 프롬프트 칸에 놓습니다.</td></tr>
+<tr><td>프롬프트 도구 › E621 연구모듈 · Danbooru</td><td>참고 자료 탐색</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Prompt: ... - 검색</h4><p class="entry">태그·키워드로 아카이브 전체를 검색해 랜덤 프롬프트를 뽑을 풀을 만듭니다. Prompt 뒤의 숫자가 남은 프롬프트 수 입니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-1.webp" alt="Prompt: 160,888 - 검색 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Quick - 태그 필터</h4><p class="entry">다시 검색하지 않고 지금 풀을 태그·등급으로 바로 좁힙니다. 필터 저장이 가능하고 Rating 등도 빠르게 관리 가능.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-2.webp" alt="Quick - 태그 필터 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">E - 이벤트 맵</h4><p class="entry">태그를 고르면 실제 그림에서 같이 쓰인 태그를 찾아 프롬프트에 넣습니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-3.webp" alt="E - 이벤트 맵 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">S - 조합(스테이징)</h4><p class="entry">이벤트 맵에서 담은 조합을 모아 두고, Random이 그중에서 뽑게 합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-4.webp" alt="S - 조합(스테이징) - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">E621 연구모듈</h4><p class="entry">E621 태그를 분류별로 찾아 뜻을 확인하고, 그 태그로 시험 생성합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-5.webp" alt="E621 연구모듈 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Draft (V70)</h4><p class="entry">넣을 태그·뺄 태그를 칩으로 정하면, 조건에 맞는 실제 게시물 하나를 뽑아 프롬프트로 씁니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-6.webp" alt="Draft - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Danbooru</h4><p class="entry">Danbooru 게시물의 태그를 읽어 프롬프트에 적용하거나 바로 생성합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c2-7.webp" alt="Danbooru - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td></td></tr>
+</tbody>
+</table>
+<h3>③ 프롬프트</h3>
+<p>태그 검색, 랜덤 프롬프트 정제, 네거티브 프롬프트 등을 다룹니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g3.webp" alt="③ 프롬프트 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>메인 프롬프트 칸</td><td>prefix + 본문 + postfix. 보이는 글이 그대로 나갑니다.</td></tr>
+<tr><td>프롬프트 엔지니어링</td><td>특징 제거 · 함의 압축 · Auto-Boost · AI Boost 같은 다듬기 규칙</td></tr>
+<tr><td>프롬프트 엔지니어링 옆 Quick 버튼</td><td>PE 프리셋 바로 바꾸기</td></tr>
+<tr><td>Snapshot</td><td>설정 전체를 그림과 함께 담아 두고, 골라서 되돌립니다(NAI V4.5 · V5).</td></tr>
+<tr><td>Negative</td><td>네거티브 프롬프트</td></tr>
+<tr><td>A (Assist)</td><td>한국어로 설명하면 태그를 찾아 줍니다.</td></tr>
+<tr><td>Tag · Chunk</td><td>태그 이름 일부로 찾기 · 자주 쓰는 태그 묶음($그룹:키)</td></tr>
+<tr><td>Memo</td><td>프롬프트를 만들다 떠오른 것을 적어 두는 메모장(폰에서도 같은 메모)</td></tr>
+<tr><td>Fn › Translate</td><td>한국어 → 영어 번역</td></tr>
+<tr><td>프롬프트 도구 › 와일드카드 관리 · 조건부 프롬프트</td><td>와일드카드 파일과 조건 규칙을 관리합니다.</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">메인 프롬프트 칸</h4><p class="entry">생성 요청에 그대로 실리는 프롬프트를 보면서 직접 고칩니다. 랜덤 프롬프트 사용시 이 프롬프트 영역은 매번 휘발됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-1.webp" alt="메인 프롬프트 칸 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Negative</h4><p class="entry">그림에 나오지 않았으면 하는 요소(저화질·손 뭉개짐 등)를 적어 둡니다. 특별한 이유가 없으면 항상 고정됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-2.webp" alt="Negative - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">프롬프트 엔지니어링</h4><p class="entry">랜덤 프롬프트 앞뒤에 붙일 태그와 지울 태그 그룹을 정해 프롬프트를 다듬습니다. <a href="index.html#naia-purpose">NAIA의 목적</a>을 참고하세요.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-3.webp" alt="프롬프트 엔지니어링 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">프롬프트 엔지니어링 옆 Quick 버튼</h4><p class="entry">즐겨찾기한 PE 프리셋으로 창을 열지 않고 바로 바꿉니다(NAI 모드 전용).</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-4.webp" alt="PE 옆 Quick - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Snapshot</h4><p class="entry">담아 둔 설정을 그림으로 골라, 원하는 항목만 되돌려 불러옵니다(NAI 전용). Char Ref, Vibe, 랜덤 프롬프트 등이 함께 적용됨.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-5.webp" alt="Snapshot - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Snapshot 저장 (우클릭 옵션)</h4><p class="entry">이 그림과 지금 설정(프롬프트·생성 설정·캐릭터 등)을 스냅샷으로 담아 둡니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-6.webp" alt="Snapshot 저장 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">A - Assist</h4><p class="entry">원하는 그림을 한국어로 적으면 알맞은 프롬프트 태그를 찾아 줍니다. 로컬 LLM을 호출하며, E2B CPU 모드를 지원합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-7.webp" alt="A - Assist - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Tag</h4><p class="entry">태그 이름 일부로 찾고, 한글 설명을 확인해 프롬프트에 넣습니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-8.webp" alt="Tag - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Memo</h4><p class="entry">프롬프트 요령·조합을 적어 두는 메모장으로, 폰에서 열어도 같은 메모가 보입니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-9.webp" alt="Memo - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Chunk</h4><p class="entry">자주 쓰는 태그 묶음을 $그룹:키로 저장해 두고 프롬프트에서 불러 씁니다. (개선 예정)</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-10.webp" alt="Chunk - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">와일드카드 관리</h4><p class="entry">__이름__으로 부르는 와일드카드 파일을 찾아보고 만들고 고칩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-11.webp" alt="와일드카드 관리 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">조건부 프롬프트</h4><p class="entry">"이 태그가 있으면 저 태그를 붙여라" 같은 규칙으로 프롬프트를 자동으로 고칩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-12.webp" alt="조건부 프롬프트 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Fast Search (Ctrl+F)</h4><p class="entry">태그·작가·캐릭터·와일드카드·프리셋·이벤트를 한 칸에서 찾아 복사합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c3-13.webp" alt="Fast Search - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td></td></tr>
+</tbody>
+</table>
+<h3>④ 스타일</h3>
+<p>그림체(작가)를 정하거나 스타일을 탐색합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g4.webp" alt="④ 스타일 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Thumb</td><td>(확인 필요) 화풍 썸네일 창</td></tr>
+<tr><td>Artists</td><td>작가 썸네일 격자 · 그룹 · 믹스 · 랜덤 작가</td></tr>
+</tbody>
+</table>
+<p><b>그 밖에</b> : ANIMA LoRA</p>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Thumb</h4><p class="entry">화풍·품질 태그를 넣으면 그림이 어떻게 바뀌는지 썸네일로 비교합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c4-1.webp" alt="Thumb - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Artists</h4><p class="entry">작가마다 샘플 그림을 훑어보고, 마음에 드는 화풍의 작가를 프롬프트에 넣습니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c4-2.webp" alt="Artists - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>⑤ 캐릭터</h3>
+<p>생성 대상 캐릭터를 검색하거나 선택합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g5.webp" alt="⑤ 캐릭터 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Characters</td><td>캐릭터를 찾아보고 고릅니다.</td></tr>
+<tr><td>Assets</td><td>캐릭터를 만들고 의상을 입힙니다(V4.5 · V5).</td></tr>
+<tr><td>Quick Character Prompt</td><td>다음 생성에 쓸 캐릭터를 바로 고칩니다.</td></tr>
+<tr><td>NAI 전용 도구 › Character</td><td>캐릭터 프롬프트 - 캐릭터마다 칸을 나눠 적습니다.</td></tr>
+</tbody>
+</table>
+<p><b>그 밖에</b> : 캐릭터 프롬프트(Ctrl+P)</p>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Characters</h4><p class="entry">캐릭터 1.7만 명을 작품·특징으로 찾아 슬롯에 담거나 바로 생성합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c5-1.webp" alt="Characters - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Assets</h4><p class="entry">머리·눈·의상 같은 부품을 골라 나만의 캐릭터를 만들어 보관해 둡니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c5-2.webp" alt="Assets - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Quick Character Prompt</h4><p class="entry">결과 그림을 보면서 캐릭터별 프롬프트와 위치(POS)를 바로 고칩니다. NAI 전용.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c5-3.webp" alt="CHARACTER - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">캐릭터 프롬프트 (Ctrl+P)</h4><p class="entry">캐릭터마다 프롬프트를 따로 쓰고, 썼던 것은 히스토리에서 다시 불러옵니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c5-4.webp" alt="캐릭터 프롬프트 (Ctrl+P) - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>⑥ 장면연출</h3>
+<p>한 장면, 여러 컷을 구성합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g6.webp" alt="⑥ 장면연출 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Interactive</td><td>캐릭터 · 의상 · 액션 · 표정 · 구도 · 배경 슬롯으로 조립합니다.</td></tr>
+<tr><td>Fn › Preset</td><td>이벤트 · 의상 · 표정 조합 프리셋</td></tr>
+<tr><td>Fn › Sequence</td><td>준비된 이야기 조합을 검색해 연속 생성합니다.</td></tr>
+<tr><td>Fn › V5 Scene</td><td>이벤트별로 컷을 담고 다시 불러옵니다.</td></tr>
+<tr><td>Studio</td><td>프레임마다 직접 쓰고 순서대로 생성합니다.</td></tr>
+<tr><td>프롬프트 도구 › 구도 / 시점 제어</td><td>시점을 골라 구도 태그를 넣습니다.</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Interactive</h4><p class="entry">머리·표정·의상처럼 칸마다 썸네일을 보며 태그를 골라 프롬프트를 짭니다. 개발 중단 기능으로 추후 개선 예정</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-1.webp" alt="Interactive - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Preset</h4><p class="entry">행동·옷·표정을 목록에서 골라, 실제로 많이 쓰인 조합으로 프롬프트를 짭니다. 개발 중단 기능으로 추후 개선 예정. (무거움)</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-2.webp" alt="Preset - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Sequence</h4><p class="entry">실제 그림에서 모은 2~4컷짜리 이야기를 태그로 찾아 만화 한 장으로 생성합니다. (V5 high, 28 step, CFG 7 권장, nsfw 위주)</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-3.webp" alt="Sequence - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">V5 Scene</h4><p class="entry">프롬프트·캐릭터·해상도를 컷으로 저장해 두고, 만화처럼 차례로 불러와 생성합니다. 사용의 난해함으로 인해 추후 개선 예정</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-4.webp" alt="V5 Scene - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Studio</h4><p class="entry">프레임마다 다른 프롬프트를 담아 두고, 한 번에 차례로 생성합니다. 만들다 만거라 언젠간 개선 예정 (제가 안씀)</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-5.webp" alt="Studio - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">구도 / 시점 제어</h4><p class="entry">인물을 돌려 보며 카메라 각도·거리를 고르면 구도 태그를 만들어 줍니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c6-6.webp" alt="구도 / 시점 제어 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>⑦ 생성자동화</h3>
+<p>이미지를 생성하거나, 생성 관련 자동화 옵션을 조작합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g7.webp" alt="⑦ 생성자동화 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Generate</td><td>한 장 생성</td></tr>
+<tr><td>Prompt Fixed</td><td>랜덤을 잠그고 지금 프롬프트로 계속 생성합니다.</td></tr>
+<tr><td>Auto Gen</td><td>한 장이 끝나면 다음 장을 이어서 생성합니다.</td></tr>
+<tr><td>WC Solo (와일드카드 단독 모드)</td><td>랜덤 프롬프트 없이 prefix/postfix와 와일드카드만으로 생성합니다.</td></tr>
+<tr><td>⚙ (옵션 줄 오른쪽)</td><td>자주 쓰지 않는 생성 옵션 - 랜덤을 누를 때 생성 등</td></tr>
+<tr><td>자동화 / 고급 기능 › Automation</td><td>횟수 · 지연</td></tr>
+<tr><td>프롬프트 도구 › 이벤트 스트림 설정</td><td>이벤트 단위 자동 진행</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Prompt Fixed</h4><p class="entry">랜덤 뽑기를 잠가 지금 프롬프트 그대로 계속 생성합니다. (Auto Gen 사용시 중요합니다.)</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-1.webp" alt="Prompt Fixed - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Auto Gen</h4><p class="entry">한 장이 끝나면 멈추지 않고 다음 장을 이어서 생성합니다. Automation을 이용해 횟수 / 시간 조절이 가능합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-2.webp" alt="Auto Gen - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">WC Solo (와일드카드 단독 모드)</h4><p class="entry">랜덤 프롬프트 없이 Prefix·Postfix와 와일드카드만으로 프롬프트를 짭니다. 이걸 켜야 NAIA 랜덤 프롬프트를 안씁니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-3.webp" alt="WC Solo - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">확장 기능 (톱니)</h4><p class="entry">Random 한 번에 프롬프트 뽑기와 한 장 생성을 함께 합니다. 언젠간 더 많은 기능이 들어갈거에요.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-4.webp" alt="확장 기능 (톱니) - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Automation</h4><p class="entry">딜레이와 종료 조건(횟수·타이머)을 정해 두면 자동 생성이 알아서 돌다 멈춥니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-5.webp" alt="Automation - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">이벤트 스트림 설정</h4><p class="entry">캐릭터·화풍은 고정하고 장면만 스텝마다 바꿔 순서대로 한 장씩 뽑습니다. 현재는 방치된 기능입니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c7-6.webp" alt="이벤트 스트림 설정 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>⑧ 이미지편집</h3>
+<p>인페인트 기능 및 Vibe Transfer, Character Reference 관련 기능입니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g8.webp" alt="⑧ 이미지편집 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Inpaint · Director · Upscale · Enhance</td><td>만든 그림을 고치거나 키우거나 다시 그립니다.</td></tr>
+<tr><td>NAI 전용 도구 › Char Ref</td><td>캐릭터 참조 이미지(V5 미지원)</td></tr>
+<tr><td>NAI 전용 도구 › Vibe Transfer</td><td>분위기 참조 이미지(V5 미지원)</td></tr>
+<tr><td>Fn › 레퍼런스 인셋</td><td>참조 그림을 캔버스에 놓고 구성합니다.</td></tr>
+</tbody>
+</table>
+<p><b>그 밖에</b> : 결과 우클릭 › Img2Img · Outpaint (NAI), ANIMA Char Ref</p>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Inpaint</h4><p class="entry">결과 그림에서 마스크로 칠한 부분만 다시 그립니다. 1MP를 넘는 캔버스는 Anlas가 듭니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-1.webp" alt="Inpaint - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Director</h4><p class="entry">결과 그림을 선화·스케치·채색·표정 바꾸기·배경 지우기로 변형합니다. 배경 지우기는 Anlas가 많이 듭니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-2.webp" alt="Director - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Upscale · Enhance</h4><p class="entry">결과 그림을 2배로 키우거나(Upscale) 살짝 다시 그려 다듬습니다(Enhance). Anlas가 듭니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-3.webp" alt="Upscale · Enhance - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Char Ref</h4><p class="entry">참조 그림의 캐릭터나 화풍을 닮게 그립니다. 장당 5 Anlas가 듭니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-4.webp" alt="Char Ref - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">Vibe Transfer</h4><p class="entry">참조 그림의 색감·화풍·분위기를 생성에 입힙니다. 새 그림 인코딩은 2 Anlas가 듭니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-5.webp" alt="Vibe - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">레퍼런스 인셋</h4><p class="entry">참조 그림을 캔버스 한쪽에 두고 남은 칸에 닮은 캐릭터를 그립니다(큰 캔버스는 Anlas).</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-6.webp" alt="레퍼런스 인셋 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">결과 우클릭 › NAI 도구</h4><p class="entry">결과 그림을 업스케일·img2img·인페인트·Char Ref·Vibe로 바로 넘깁니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-7.webp" alt="결과 우클릭 › NAI 도구 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Inpaint 설정</h4><p class="entry">인페인트 그림을 1MP로 줄여 Anlas를 아낄지, 원본 크기를 지킬지 정합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c8-8.webp" alt="Inpaint 설정 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>⑨ 결과 · 보관</h3>
+<p>이미지 생성 결과 히스토리 영역 및 자동 저장 관련 기능을 제공합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g9.webp" alt="⑨ 결과·보관 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Result · Metadata</td><td>결과 그림과 그 생성 정보</td></tr>
+<tr><td>Generation Info</td><td>실제로 나간 프롬프트</td></tr>
+<tr><td>History · Open Folder</td><td>지난 결과 · 저장 폴더 열기</td></tr>
+<tr><td>Auto Save</td><td>자동 저장</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Metadata</h4><p class="entry">그림에 담긴 프롬프트와 설정을 읽어서 내 화면에 그대로 다시 적용합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-1.webp" alt="Metadata - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Generation Info</h4><p class="entry">고른 결과에 실제로 들어간 프롬프트를 보고, 태그를 눌러 뜻을 확인합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-2.webp" alt="Generation Info - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">History · Open Folder</h4><p class="entry">지난 결과를 다시 열어 보고, 저장 폴더를 탐색기로 엽니다. 히스토리의 아이템을 우클릭 하면 다양한 기능이 제공됩니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-3.webp" alt="History · Open Folder - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Auto Save</h4><p class="entry">생성한 그림을 폴더에 자동으로 저장할지 정하고, 저장 안 된 그림은 한 번에 저장합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-4.webp" alt="Auto Save - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">결과 우클릭 메뉴</h4><p class="entry">결과 그림의 프롬프트·설정을 불러오거나 큐 추가·복사·삭제를 바로 합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-5.webp" alt="결과 우클릭 메뉴 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">히스토리 브라우저</h4><p class="entry">지난 결과를 큰 화면에서 넘겨 보고 확대·삭제·일괄 정리합니다. 개편 예정입니다. 불편함.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-6.webp" alt="히스토리 브라우저 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">히스토리 줄 설정</h4><p class="entry">삭제할 때 저장 파일까지 지울지, 확인을 물을지 정하고 저장 경로를 봅니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c9-7.webp" alt="히스토리 줄 설정 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td></td></tr>
+</tbody>
+</table>
+<h3>⑩ 환경설정</h3>
+<p>화면 · 입력 편의 · 확장 기능을 정합니다.</p>
+<figure class="image-wrap"><img src="assets/naia-feature-map-20261107-204853-g10.webp" alt="⑩ 환경설정 위치" width="1280" height="876"></figure>
+<table>
+<thead>
+<tr><th>기능</th><th>설명</th></tr>
+</thead>
+<tbody>
+<tr><td>Settings</td><td>자동완성 · 화면 표시 · Extension</td></tr>
+<tr><td>가이드</td><td>이 문서</td></tr>
+</tbody>
+</table>
+<table class="cards">
+<tbody>
+<tr><td><h4 class="card">Settings</h4><p class="entry">생성 미리보기, 자동완성, 폰트, 화면 배율, 저장 경로 같은 앱 전체 설정을 바꿉니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c10-1.webp" alt="Settings - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">Settings › Extension</h4><p class="entry">필요한 경우 GitHub의 확장을 설치하고 켜고 끄면서 NAIA에 기능을 더합니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c10-2.webp" alt="Settings › Extension - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+<tr><td><h4 class="card">가이드</h4><p class="entry">NAIA 기능과 사용법을 정리한 설명서를 찾아 읽습니다. 그렇죠. 보고 계신 이 화면이에요.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c10-3.webp" alt="가이드 - 여는 곳과 열린 화면" width="1000" height="625"></figure></td><td><h4 class="card">브라우저 (포터블 전용)</h4><p class="entry">지금 화면을 기본 웹 브라우저에서 엽니다. 가끔 잘못 누르면 짜증을 유발할 수 있습니다.</p><figure class="image-wrap"><img src="assets/naia-feature-map-20261107-230000-c10-4.webp" alt="브라우저 (포터블 전용) - 여는 곳과 열린 화면" width="1000" height="625"></figure></td></tr>
+</tbody>
+</table>
+<h3>단축키</h3>
+<p>결과 칸이 비어 있을 때 보이는 단축키 안내와 같은 목록입니다. 글을 치는 중에도 됩니다.</p>
+<table>
+<thead>
+<tr><th>키</th><th>하는 일</th></tr>
+</thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd> <kbd>Enter</kbd></td><td>Generate - 지금 프롬프트로 생성합니다.</td></tr>
+<tr><td><kbd>Alt</kbd> <kbd>Enter</kbd></td><td>Random - 랜덤 프롬프트를 뽑습니다.</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>Q</kbd></td><td>Quick - 태그 필터를 열고 닫습니다(②).</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>W</kbd></td><td>와일드카드 관리(③) - 앱 창에서만 됩니다. 브라우저에서는 탭이 닫힙니다.</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>P</kbd></td><td>캐릭터 프롬프트(⑤)</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>E</kbd></td><td>이벤트 맵(②)</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>O</kbd></td><td>Assist(③)</td></tr>
+<tr><td><kbd>Ctrl</kbd> <kbd>F</kbd></td><td>Fast Search(③)</td></tr>
+</tbody>
+</table>
+<p><b>결과 화면</b> : 안내에는 없지만 결과 그림 · 히스토리에서 쓰는 키입니다. 글을 치는 중에는 듣지 않습니다.</p>
+<table>
+<thead>
+<tr><th>키</th><th>하는 일</th></tr>
+</thead>
+<tbody>
+<tr><td><kbd>Ctrl</kbd> <kbd>S</kbd></td><td>보고 있는 결과 그림을 빠르게 저장합니다. 여러 장 골라 두었으면 그 장들을 저장합니다.</td></tr>
+<tr><td><kbd>Ctrl</kbd>+클릭 · <kbd>Shift</kbd>+클릭</td><td>히스토리에서 여러 장 · 범위로 고릅니다. <kbd>Ctrl</kbd> <kbd>A</kbd> 는 불러온 것 전부, <kbd>Esc</kbd> 는 선택 해제입니다.</td></tr>
+<tr><td><kbd>Delete</kbd></td><td>고른 결과를 지웁니다. 히스토리 줄 설정에서 켜면 <kbd>Ctrl</kbd> <kbd>D</kbd> 도 같습니다.</td></tr>
+</tbody>
+</table>
+</main>
+</body>
+</html>

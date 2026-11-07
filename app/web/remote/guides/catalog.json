@@ -19,6 +19,14 @@
       "file": "naia-purpose.html"
     },
     {
+      "id": "naia-feature-map",
+      "category": "1. NAIA 소개",
+      "title": "NAIA 기능 지도",
+      "summary": "",
+      "keywords": "기능 지도 화면 구성 메뉴",
+      "file": "naia-feature-map.html"
+    },
+    {
       "id": "conditional-prompt",
       "category": "2. 프롬프트",
       "title": "조건부 프롬프트",

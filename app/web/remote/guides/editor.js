@@ -31,6 +31,8 @@
     #guideEditBar .badge { padding: 2px 8px; border-radius: 4px; background: rgba(255,193,7,.18); color: #0e1117; font-weight: 600; }
     #guideEditBar button, #guideEditBar select { height: 26px; padding: 0 8px; border: 0; border-radius: 4px; background: none; color: #37352f; font-size: 13px; }
     #guideEditBar button:hover, #guideEditBar select:hover { background: rgba(55,53,47,.08); }
+    #guideEditBar .table-tools { display: inline-flex; align-items: center; gap: 4px; padding-left: 4px; border-left: 2px solid rgba(35,131,226,.35); }
+    #guideEditBar .table-tools[hidden] { display: none; }
     #guideEditBar .sep { width: 1px; height: 16px; background: #e9e9e7; margin: 0 2px; }
     #guideEditBar .group { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
     #guideEditBar .primary { background: #37352f; color: #fff; }
@@ -83,6 +85,14 @@
     <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">목록</button>
     <button type="button" data-cmd="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
     <button type="button" data-link title="링크 (Ctrl+K) - 새 브라우저 탭에서 열립니다">링크</button>
+    <button type="button" data-table title="표 넣기 - 엑셀 · 시트에서 복사한 칸이나 | 마크다운 표 | 를 붙여넣어도 표가 됩니다">표</button>
+    <span class="table-tools" hidden>
+      <button type="button" data-table-op="row+" title="아래에 행 추가 (마지막 칸에서 Tab)">행+</button>
+      <button type="button" data-table-op="row-" title="이 행 지우기">행−</button>
+      <button type="button" data-table-op="col+" title="오른쪽에 열 추가">열+</button>
+      <button type="button" data-table-op="col-" title="이 열 지우기">열−</button>
+      <button type="button" data-table-op="drop" title="표 통째로 지우기">표 지우기</button>
+    </span>
     <span class="sep"></span>
     <button type="button" data-box="callout good" title="문단을 녹색 상자로">녹색 상자</button>
     <button type="button" data-box="callout warn" title="문단을 노란 상자로">노란 상자</button>
@@ -119,6 +129,8 @@
     else if (button.dataset.box) wrapInBox(button.dataset.box);
     else if ('unbox' in button.dataset) unwrapBox();
     else if ('link' in button.dataset) editLink();
+    else if ('table' in button.dataset) insertTable();
+    else if (button.dataset.tableOp) tableOp(button.dataset.tableOp);
     else if (button.dataset.move) moveInCatalog(Number(button.dataset.move));
     else if ('cancel' in button.dataset) cancelEdits();
     else if ('save' in button.dataset) save();
@@ -215,6 +227,9 @@
     const text = event.clipboardData?.getData('text/plain');
     if (!text) return;
     event.preventDefault();
+    // 칸으로 나뉜 글(엑셀 · 시트 · | 마크다운 표 |)은 표로.
+    const grid = parseGrid(text, !!cellAtCaret(frameDoc));
+    if (grid) { pasteGrid(grid); return; }
     // 주소 하나를 붙여넣으면 링크 - 글자를 골라 두었으면 그 글자에, 아니면 주소 그대로.
     const url = text.trim();
     const selection = frameDoc.getSelection();
@@ -230,6 +245,7 @@
 
   function onKeydown(event) {
     if (autoList(event)) return;
+    if (tableKey(event)) return;
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); save(); return; }
     if (mod && event.key.toLowerCase() === 'k' && frameDoc) { event.preventDefault(); editLink(); return; }
@@ -311,6 +327,195 @@
     return true;
   }
 
+  // ── 표 - [표] 단추 · 칸으로 나뉜 글 붙여넣기 · Tab 으로 칸 이동 ──────────────────
+  // 첫 줄은 머리줄(th). 행 · 열 단추는 커서가 표 안에 있을 때만 보인다.
+  // 행 · 열 넣고 빼기는 DOM 을 직접 고친다 - Ctrl+Z 로 되돌아가지 않는다(취소는 [취소]).
+  function cellAtCaret(doc) {
+    const node = doc?.getSelection()?.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    const cell = el?.closest('td, th');
+    return cell && mainOf(doc)?.contains(cell) ? cell : null;
+  }
+
+  function syncTableTools() {
+    bar.querySelector('.table-tools').hidden = !cellAtCaret(frameDoc);
+  }
+
+  // 칸 글자: **굵게** 는 <b>, `코드` 는 글자만 - 그 밖에는 글자 그대로.
+  function fillCell(cell, text) {
+    const doc = cell.ownerDocument;
+    cell.replaceChildren();
+    const value = String(text || '').trim();
+    if (!value) { cell.append(doc.createElement('br')); return cell; }
+    value.split(/(\*\*[^*]+\*\*)/).forEach(part => {
+      if (!part) return;
+      const bold = /^\*\*([^*]+)\*\*$/.exec(part);
+      if (bold) { const b = doc.createElement('b'); b.textContent = bold[1]; cell.append(b); }
+      else cell.append(part.replace(/`([^`]*)`/g, '$1'));
+    });
+    return cell;
+  }
+
+  const makeCell = (doc, tag, text = '') => fillCell(doc.createElement(tag), text);
+
+  function buildTable(doc, rows) {
+    const width = Math.max(1, ...rows.map(row => row.length));
+    const table = doc.createElement('table');
+    const thead = doc.createElement('thead');
+    const tbody = doc.createElement('tbody');
+    rows.forEach((row, index) => {
+      const tr = doc.createElement('tr');
+      for (let col = 0; col < width; col++) tr.append(makeCell(doc, index ? 'td' : 'th', row[col]));
+      (index ? tbody : thead).append(tr);
+    });
+    if (!tbody.rows.length) {
+      const tr = doc.createElement('tr');
+      for (let col = 0; col < width; col++) tr.append(makeCell(doc, 'td'));
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    return table;
+  }
+
+  // 커서가 있는 문단 뒤에 놓는다 - 빈 문단이면 그 자리를 표가 차지한다. 표 뒤에는 늘 문단 하나.
+  function placeTable(table, caret) {
+    const doc = frameDoc;
+    const block = blockAtCaret(doc);
+    if (block && block.tagName === 'P' && !block.textContent.trim() && !block.querySelector('img')) block.replaceWith(table);
+    else if (block) block.after(table);
+    else mainOf(doc).append(table);
+    let next = table.nextElementSibling;
+    if (!next || next.tagName !== 'P') {
+      next = doc.createElement('p');
+      next.append(doc.createElement('br'));
+      table.after(next);
+    }
+    placeCaretIn(doc, caret === 'after' ? next : table.querySelector('th, td'));
+    markDirty();
+    syncTableTools();
+  }
+
+  function insertTable() {
+    if (!frameDoc) return;
+    placeTable(buildTable(frameDoc, [['', ''], ['', ''], ['', '']]));
+    setStatus('표를 넣었습니다 · Tab 으로 다음 칸 · 마지막 칸에서 Tab 은 새 행.');
+  }
+
+  // 붙여넣은 글이 표인가 - | 마크다운 표 | (구분줄 |---| 은 버림) 또는 탭으로 나뉜 줄들.
+  // 표 밖에서는 두 줄 이상만 표로 만든다(탭 하나 섞인 한 줄은 그냥 글자).
+  function parseGrid(text, inCell) {
+    const lines = text.replace(/\r\n?/g, '\n').split('\n').filter(line => line.trim());
+    if (!lines.length) return null;
+    if (lines.every(line => line.trim().startsWith('|')) && (lines.length >= 2 || inCell)) {
+      const rows = lines
+        .filter(line => !(/^[\s|:-]+$/.test(line) && line.includes('-')))
+        .map(line => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim()));
+      return rows.length ? rows : null;
+    }
+    if (lines.every(line => line.includes('\t')) && (lines.length >= 2 || inCell)) return lines.map(line => line.split('\t'));
+    return null;
+  }
+
+  function pasteGrid(rows) {
+    const doc = frameDoc;
+    const cell = cellAtCaret(doc);
+    if (!cell) {
+      placeTable(buildTable(doc, rows), 'after');
+      setStatus(`붙여넣은 글을 표로 만들었습니다 · ${rows.length}줄 (첫 줄 = 머리줄).`);
+      return;
+    }
+    // 표 안 - 커서 칸부터 채운다. 모자란 행은 늘리고, 넘치는 열은 버린다.
+    const table = cell.closest('table');
+    const tr = cell.parentElement;
+    const startCol = cell.cellIndex;
+    let row = tr;
+    let dropped = 0;
+    rows.forEach((values, index) => {
+      if (index) {
+        let next = row.nextElementSibling || (row.parentElement.tagName === 'THEAD' ? table.tBodies[0]?.rows[0] : null);
+        if (!next) {
+          next = doc.createElement('tr');
+          for (let col = 0; col < tr.cells.length; col++) next.append(makeCell(doc, 'td'));
+          (table.tBodies[0] || table.appendChild(doc.createElement('tbody'))).append(next);
+        }
+        row = next;
+      }
+      values.forEach((value, offset) => {
+        const target = row.cells[startCol + offset];
+        if (target) fillCell(target, value); else dropped++;
+      });
+    });
+    placeCaretIn(doc, row.cells[Math.min(startCol + rows.at(-1).length - 1, row.cells.length - 1)]);
+    markDirty();
+    setStatus(dropped ? `표에 채웠습니다 · 열이 모자라 ${dropped}칸은 버렸습니다([열+] 뒤 다시 붙여넣기).` : '표에 채웠습니다.');
+  }
+
+  function addRowAfter(tr) {
+    const doc = tr.ownerDocument;
+    const table = tr.closest('table');
+    const row = doc.createElement('tr');
+    for (let col = 0; col < tr.cells.length; col++) row.append(makeCell(doc, 'td'));
+    if (tr.parentElement.tagName === 'THEAD') (table.tBodies[0] || table.appendChild(doc.createElement('tbody'))).prepend(row);
+    else tr.after(row);
+    return row;
+  }
+
+  function tableOp(op) {
+    const doc = frameDoc;
+    const cell = cellAtCaret(doc);
+    if (!cell) { setStatus('표 안에 커서를 두세요.', true); return; }
+    const tr = cell.parentElement;
+    const table = cell.closest('table');
+    const col = cell.cellIndex;
+    if (op === 'row+') {
+      placeCaretIn(doc, addRowAfter(tr).cells[col]);
+    } else if (op === 'row-') {
+      if (tr.parentElement.tagName === 'THEAD') { setStatus('머리줄은 지울 수 없습니다 - 표를 없애려면 [표 지우기].', true); return; }
+      const next = tr.nextElementSibling || tr.previousElementSibling;
+      if (!next) { setStatus('남은 행이 하나입니다 - 표를 없애려면 [표 지우기].', true); return; }
+      tr.remove();
+      placeCaretIn(doc, next.cells[Math.min(col, next.cells.length - 1)]);
+    } else if (op === 'col+') {
+      for (const row of table.rows) {
+        const added = makeCell(doc, row.parentElement.tagName === 'THEAD' ? 'th' : 'td');
+        if (row.cells[col]) row.cells[col].after(added); else row.append(added);
+      }
+      placeCaretIn(doc, tr.cells[col + 1]);
+    } else if (op === 'col-') {
+      if (tr.cells.length <= 1) { setStatus('남은 열이 하나입니다 - 표를 없애려면 [표 지우기].', true); return; }
+      for (const row of [...table.rows]) row.cells[col]?.remove();
+      placeCaretIn(doc, tr.cells[Math.min(col, tr.cells.length - 1)]);
+    } else if (op === 'drop') {
+      if (!confirm('이 표를 지울까요? (저장 전이면 [취소]로 되돌릴 수 있습니다)')) return;
+      const para = doc.createElement('p');
+      para.append(doc.createElement('br'));
+      table.replaceWith(para);
+      placeCaretIn(doc, para);
+    }
+    markDirty();
+    syncTableTools();
+  }
+
+  // Tab / Shift+Tab = 칸 이동(마지막 칸의 Tab 은 새 행) · Enter = 칸 안 줄바꿈(문단을 만들지 않는다).
+  function tableKey(event) {
+    if (!frameDoc || event.target?.ownerDocument !== frameDoc) return false;
+    if (event.ctrlKey || event.metaKey || event.altKey || !['Tab', 'Enter'].includes(event.key)) return false;
+    const cell = cellAtCaret(frameDoc);
+    if (!cell) return false;
+    event.preventDefault();
+    if (event.key === 'Enter') { frameDoc.execCommand('insertLineBreak'); markDirty(); return true; }
+    const cells = [...cell.closest('table').querySelectorAll('th, td')];
+    let target = cells[cells.indexOf(cell) + (event.shiftKey ? -1 : 1)];
+    if (!target && !event.shiftKey) { target = addRowAfter(cell.parentElement).cells[0]; markDirty(); }
+    if (!target) return true;
+    const range = frameDoc.createRange();
+    range.selectNodeContents(target);
+    const selection = frameDoc.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
   // ── 링크 (Ctrl+K) - 늘 새 브라우저 탭에서 열린다 ──────────────────────────────
   const LINK_RE = /^https?:\/\/\S+$/i;
   const decorateLink = a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; };
@@ -375,13 +580,15 @@
     frameStyle.textContent = `main.page[contenteditable] { outline: none; caret-color: #37352f; }
       main.page[contenteditable] img { cursor: pointer; }
       .guide-uploading { padding: 32px 16px; text-align: center; color: rgba(55,53,47,.65); font-size: 14px; background: #f7f7f5; }
-      div.callout > p:last-child, .final > p:last-child, .notice > p:last-child { margin-bottom: 0; }`;
+      div.callout > p:last-child, .final > p:last-child, .notice > p:last-child { margin-bottom: 0; }
+      main.page[contenteditable] th, main.page[contenteditable] td { min-width: 3em; }`;
     frameStyle.dataset.guideEditor = '1';
     doc.head.append(frameStyle);
     main.addEventListener('input', markDirty);
     main.addEventListener('paste', onPaste);
     main.addEventListener('dblclick', onDoubleClick);
     doc.addEventListener('keydown', onKeydown);
+    doc.addEventListener('selectionchange', syncTableTools);
   }
 
   // ── 제목 · 요약 (catalog.json) ───────────────────────────────────────────────
@@ -459,10 +666,12 @@
     liftLists(clone);
     clone.querySelectorAll('a[href]').forEach(a => { if (!a.getAttribute('href').startsWith('#')) decorateLink(a); });
     // 문단마다 줄을 바꿔 둔다 - 한 줄로 이어 쓰면 git diff 를 읽을 수 없다.
-    for (const parent of [clone, ...clone.querySelectorAll('section, article, .steps, .step-copy, div.callout, .notice, .final, ul, ol')]) {
+    // 표는 행(tr) 하나가 한 줄.
+    for (const parent of [clone, ...clone.querySelectorAll('section, article, .steps, .step-copy, div.callout, .notice, .final, ul, ol, table, thead, tbody')]) {
       for (const child of [...parent.children]) {
         if (child.previousSibling?.nodeType === 1 || (child === parent.firstChild)) child.before('\n');
       }
+      if (parent.matches?.('table, thead, tbody') && parent.lastChild?.nodeType === 1) parent.append('\n');
     }
     setStatus('저장 중…');
     try {
@@ -557,6 +766,7 @@
   guide.onShown = shown => {
     page = shown;
     frameDoc = null;
+    syncTableTools();
     if (guide.showHidden !== editing) { guide.showHidden = editing; guide.refreshNavigation(); }
     const editable = editing && !!shown.file;
     toggle.setAttribute('aria-pressed', String(editing));

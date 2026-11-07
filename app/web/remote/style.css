@@ -34205,5 +34205,7 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   background: rgba(22,22,34,0.94);
   border-top: 1px solid rgba(232,232,240,0.08);
 }
-.drw-keep { border-color: var(--accent); color: var(--text-primary); background: rgba(124,106,239,0.18); }
-.drw-keep:hover { background: rgba(124,106,239,0.3); }
+/* 창 좌우로 꽉 찬 큰 단추 - Random · Generate 와 같은 꼴(ctrl-btn) · Generate 색(사용자 지시 11-07) */
+.drw-foot .drw-keep { flex: 1 1 auto; width: 100%; background: linear-gradient(135deg, #5b52d6, #7c6aef); color: #fff;
+  box-shadow: 0 4px 16px rgba(124,106,239,0.25); }
+.drw-foot .drw-keep:hover { filter: brightness(1.08); }

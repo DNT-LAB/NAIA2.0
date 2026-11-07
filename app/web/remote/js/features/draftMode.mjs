@@ -319,7 +319,7 @@ export function initDraftMode({
     // [이 결과를 메인 프롬프트로](사용자 지시 11-07) - Draft 를 끄고 이 결과로 조립된 글을 메인 칸에 남겨 바로 고치게 한다.
     const foot = document.createElement('div');
     foot.className = 'drw-foot';
-    foot.innerHTML = '<button type="button" class="dr-btn drw-keep" data-drw-keep'
+    foot.innerHTML = '<button type="button" class="ctrl-btn drw-keep" data-drw-keep'
       + ' title="Draft 를 끄고 이 결과(뽑힌 태그 + 내 칩 + Extra)로 조립된 글을 메인 프롬프트에 남깁니다">이 결과를 메인 프롬프트로</button>';
     foot.addEventListener('click', event => { if (event.target.closest('[data-drw-keep]')) void keepToMain(); });
     drawnPanel.body.appendChild(foot);

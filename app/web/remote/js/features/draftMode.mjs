@@ -168,6 +168,7 @@ export function initDraftMode({
   const footer = host.querySelector('.prompt-token-footer');
   host.insertBefore(board, footer || null);
   const extraEl = board.querySelector('[data-dr-extra]');
+  let extraShown = null;   // 칸에 마지막으로 반영한 서버 Extra - 칸의 글이 이것과 다르면 아직 저장 못 한 사용자 글
   const sumEl = board.querySelector('[data-dr-sum]');
   const suggestEl = board.querySelector('[data-dr-suggest]');
   const bands = [...board.querySelectorAll('[data-dr-pe]')];
@@ -535,10 +536,12 @@ export function initDraftMode({
     paintDrawn();
     paintSum();
     paintBands();
-    if (extraEl !== document.activeElement) {
-      const text = String(snap?.state?.extra || '');
-      if (extraEl.value !== text) extraEl.value = text;
-    }
+    // 저장 못 한 Extra(칸의 글 != 마지막으로 받은 서버 글)는 덮지 않는다 - 저장이 409 로 실패하면 request() 가 오류 응답의
+    // 스냅숏을 먼저 그려 친 글이 옛 값으로 사라졌다(Codex 재리뷰 11-07). 저장되면(서버 글 = 칸의 글) 다시 서버를 따른다.
+    const extraText = String(snap?.state?.extra || '');
+    const extraUnsaved = extraShown !== null && extraEl.value !== extraShown;
+    if (extraEl !== document.activeElement && !extraUnsaved && extraEl.value !== extraText) extraEl.value = extraText;
+    if (!extraUnsaved || extraEl.value === extraText) extraShown = extraText;
   }
 
   // ---- 칩 입력 ----

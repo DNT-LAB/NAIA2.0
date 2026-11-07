@@ -149,6 +149,9 @@ export function initDraftMode({
     <div class="dr-zone" data-dr-zone="include">
       <div class="dr-zh"><span class="dr-zt">포함</span></div>
       <div class="dr-chips" data-dr-chips="include"></div>
+      <div class="dr-zone-foot" data-dr-drawn-foot hidden>
+        <button type="button" class="dr-drawn-btn" data-dr-drawn-open aria-pressed="false"></button>
+      </div>
     </div>
     <div class="dr-zone" data-dr-zone="exclude">
       <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span></div>
@@ -168,6 +171,12 @@ export function initDraftMode({
   const sumEl = board.querySelector('[data-dr-sum]');
   const suggestEl = board.querySelector('[data-dr-suggest]');
   const bands = [...board.querySelectorAll('[data-dr-pe]')];
+  // [이번에 뽑힌 프롬프트 : N] - 포함 칸 오른쪽 아래(사용자 지시 11-07). 새로 뽑힐 때마다 배경이 깜빡인다(Usage 알약처럼).
+  const drawnFootEl = board.querySelector('[data-dr-drawn-foot]');
+  const drawnBtnEl = board.querySelector('.dr-drawn-btn');
+  let lastDrawnRid;          // undefined = 아직 안 그렸다 - 새로고침 · 처음 그릴 때는 깜빡이지 않는다
+  let drawnFlashPending = false;
+  drawnBtnEl.addEventListener('animationend', () => drawnBtnEl.classList.remove('is-flash'));
 
   // ---- 칸 높이 손잡이(사용자 지시 11-07) ----
   // 칸 위 색 줄이 곧 손잡이다: 제외 위 줄 = 포함 높이 · Extra 위 줄 = 제외 높이 · postfix 위 줄 = Extra 높이.
@@ -209,7 +218,9 @@ export function initDraftMode({
     const chip = chips.querySelector('.dr-chip');
     const row = Math.max(chip ? chip.offsetHeight : 0, 22);
     const gap = parseFloat(getComputedStyle(chips).rowGap) || 5;
-    return Math.ceil(box + headH + row * 2 + gap);
+    const foot = el.querySelector('.dr-zone-foot');
+    const footH = foot && !foot.hidden ? foot.offsetHeight : 0;
+    return Math.ceil(box + headH + row * 2 + gap + footH);
   }
   Object.entries(handleBefore).forEach(([name, next]) => {
     if (!next) return;
@@ -305,6 +316,13 @@ export function initDraftMode({
       },
     });
     drawnPanel.body.appendChild(drawnEl);
+    // [이 결과를 메인 프롬프트로](사용자 지시 11-07) - Draft 를 끄고 이 결과로 조립된 글을 메인 칸에 남겨 바로 고치게 한다.
+    const foot = document.createElement('div');
+    foot.className = 'drw-foot';
+    foot.innerHTML = '<button type="button" class="dr-btn drw-keep" data-drw-keep'
+      + ' title="Draft 를 끄고 이 결과(뽑힌 태그 + 내 칩 + Extra)로 조립된 글을 메인 프롬프트에 남깁니다">이 결과를 메인 프롬프트로</button>';
+    foot.addEventListener('click', event => { if (event.target.closest('[data-drw-keep]')) void keepToMain(); });
+    drawnPanel.body.appendChild(foot);
     drawnEl.addEventListener('click', event => {
       const gray = event.target.closest('[data-dr-gray]');
       if (gray) grayMenu(gray);
@@ -328,6 +346,25 @@ export function initDraftMode({
     if (!panel.isOpen()) panel.open();
     if (panel.isCollapsed()) panel.expand();
     panel.raise();
+  }
+  async function keepToMain() {
+    if (!active() || busy) return;
+    const rid = snap?.state?.drawn?.rid;
+    // 창이 보여 주는 게시물로만 - 서버도 rid 가 지금 것이 아니면 거절한다(stale)
+    if (rid == null || rid !== shownRid) return;
+    closeMenu();
+    hideSuggest();
+    await flushExtra();
+    try {
+      receive(await run(() => request('/draft/exit', { keep: true, rid })));
+    } catch (_) { return; /* run 이 알렸다 */ }
+    showToast('이 결과를 메인 프롬프트로 옮겼습니다 - Draft 를 껐습니다', 'info');
+    requestAnimationFrame(() => {
+      const editor = document.getElementById('promptEdit');
+      if (!editor || editor.offsetParent === null) return;
+      editor.focus();
+      try { const end = editor.value.length; editor.setSelectionRange(end, end); } catch (_) {}
+    });
   }
   function toggleDrawnPanel() {
     if (drawnPanel?.isOpen()) { drawnPanel.close(); return; }
@@ -386,9 +423,12 @@ export function initDraftMode({
     if (!drawn) {
       drawnEl.innerHTML = '';
       shownRid = null;
+      lastDrawnRid = null;
       closeDrawnPanel();
       return;
     }
+    if (lastDrawnRid !== undefined && drawn.rid !== lastDrawnRid) drawnFlashPending = true;
+    lastDrawnRid = drawn.rid;
     const gray = der.gray || [];
     const hidden = gray.filter(g => g.pe_hidden).length;
     const head = `${gray.filter(g => !g.dropped).length}개${hidden ? ` · PE 가 ${hidden}개 지움` : ''}`;
@@ -405,17 +445,30 @@ export function initDraftMode({
   function paintSum() {
     const der = snap?.derived || {};
     const remaining = der.remaining;
-    const drawn = snap?.state?.drawn;
-    const drawnOpen = !!drawnPanel?.isOpen();
-    const drawnBtn = drawn ? `<button type="button" class="dr-btn${drawnOpen ? ' is-on' : ''}" data-dr-drawn-open aria-pressed="${drawnOpen}"
-        title="뽑힌 게시물 #${esc(drawn.rid)} 의 태그 창 열기 · 닫기">뽑힌 결과 ${fmt((der.gray || []).filter(g => !g.dropped).length)}</button>` : '';
     const rating = der.rating_out ? `<span class="dr-rating" title="이 등급 태그가 프롬프트에 들어갑니다">${esc(der.rating_out)}</span>` : '';
     sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}
       <span class="dr-gap"></span>
-      ${drawnBtn}
       <button type="button" class="dr-btn dr-btn--icon" data-dr-stage title="스테이징으로 보내기 - 지금 칩 조건을 스테이징 줄 하나로"
         aria-label="스테이징으로 보내기">&rarr;</button>
       <button type="button" class="dr-btn" data-dr-from title="S 창을 엽니다 - 줄의 [드래프트로 불러오기]">불러오기</button>`;
+    paintDrawnBtn();
+  }
+  function paintDrawnBtn() {
+    const drawn = snap?.state?.drawn;
+    drawnFootEl.hidden = !drawn;
+    if (!drawn) { drawnFlashPending = false; return; }
+    const open = !!drawnPanel?.isOpen();
+    const n = (snap?.derived?.gray || []).filter(g => !g.dropped).length;
+    drawnBtnEl.textContent = `이번에 뽑힌 프롬프트 : ${fmt(n)}`;
+    drawnBtnEl.classList.toggle('is-on', open);
+    drawnBtnEl.setAttribute('aria-pressed', String(open));
+    drawnBtnEl.title = `뽑힌 게시물 #${drawn.rid} 의 태그 창 열기 · 닫기`;
+    if (drawnFlashPending) {
+      drawnFlashPending = false;
+      drawnBtnEl.classList.remove('is-flash');
+      void drawnBtnEl.offsetWidth;   // 같은 애니메이션을 다시 처음부터
+      drawnBtnEl.classList.add('is-flash');
+    }
   }
   function paintBands() {
     bands.forEach(el => {

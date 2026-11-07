@@ -894,6 +894,14 @@ class DraftSession:
                             messages.extend(stopped.get("_headless_extra_messages", []))
                             messages.append({"type": "toast", "level": "info", "message": "Draft를 위해 Story를 종료했습니다."})
                     ctx.event_map_random_link = {"enabled": True, "mode": "draft", "revision": old_link["revision"] + 1}
+                elif body.get("keep") is True:
+                    # [이 결과를 메인 프롬프트로](사용자 지시 11-07) - 원문으로 되돌리지 않고 지금 조립된 글을 메인에 남긴다.
+                    # 화면이 보던 게시물(rid)이 지금 것이 아니면 거절한다 - 다른 뽑기의 글을 남기지 않게.
+                    drawn = state["drawn"]
+                    if drawn is None or type(body.get("rid")) is not int or body["rid"] != drawn["rid"]:
+                        raise DraftError("stale")
+                    if old_link.get("mode") == "draft":
+                        ctx.event_map_random_link = {"enabled": False, "revision": old_link["revision"] + 1}
                 else:
                     ctx.prompt_text = state["saved_prompt"]
                     if old_link.get("mode") == "draft":

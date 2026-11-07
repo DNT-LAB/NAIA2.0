@@ -20,7 +20,7 @@
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
-const SUGGEST_DEBOUNCE_MS = 150;
+const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
 const COUNTING_DELAY_MS = 250;
 
 export function initDraftMode({
@@ -523,42 +523,79 @@ export function initDraftMode({
   });
 
   // ---- 자동완성(포함 · 제외 = 맵 색인 안) ----
-  let suggestTimer = null, suggestSeq = 0, suggestZone = '', suggestItems = [], suggestIndex = -1;
+  // 두 번에 나눠 받는다(사용자 지시 11-07: 자동완성은 미리, 수만 잠시 후에): 이름 20개(counts=0 · 수 ms) 를 바로 띄우고,
+  // 입력이 멈추면 같은 20개의 수(counts=1)를 받아 **제자리에** 채운다 - 줄 차례는 안 바뀐다(고르던 줄이 도망가지 않게).
+  const SUGGEST_COUNT_DELAY_MS = 180;
+  let suggestTimer = null, countTimer = null, suggestSeq = 0, suggestZone = '', suggestItems = [], suggestIndex = -1;
+  let suggestQ = '';   // 지금 떠 있는 목록이 어느 입력의 것인가 - 다른 글이면 키보드로 고르지 못한다(옛 목록에서 Enter = 엉뚱한 칩)
   function hideSuggest() {
+    clearTimeout(countTimer);
     suggestEl.hidden = true;
     suggestEl.innerHTML = '';
     suggestItems = [];
     suggestIndex = -1;
     suggestZone = '';
+    suggestQ = '';
   }
   function scheduleSuggest(zone) {
     clearTimeout(suggestTimer);
+    clearTimeout(countTimer);
     let enabled = true;
     try { enabled = isAutocompleteEnabled() !== false; } catch (_) {}
     const q = inputs[zone].input.value.trim();
     if (!enabled || q.replace(/^\*/, '').length < 1) { hideSuggest(); return; }
     suggestTimer = setTimeout(() => void loadSuggest(zone, q), SUGGEST_DEBOUNCE_MS);
   }
+  function suggestCountHtml(it, zone) {
+    // 서버는 0건 후보도 blocked 로 준다 - '영구 제외' 는 수가 0 이 아닌데 막힌 것뿐이다.
+    if (it.blocked && it.count_after !== 0 && (it.count_after != null || it.kind === 'tag')) return '<span class="dr-sg-n">영구 제외</span>';
+    if (it.slow) return '<span class="dr-sg-n" title="걸리는 태그가 많아 세지 않았습니다">…</span>';
+    // 후보 수는 그 태그 하나로 센 값이다 - 텍스트 칩이면 포함 칸은 하한(≥) · 제외 칸은 남는 수의 상한(≤).
+    if (Number.isFinite(it.count_after)) {
+      return `<span class="dr-sg-n">${zone === 'exclude' ? '남음 ' : ''}${it.bound === 'min' ? '≥' : (it.bound === 'max' ? '≤' : '')}${fmt(it.count_after)}</span>`;
+    }
+    return '<span class="dr-sg-n is-pending" aria-hidden="true"></span>';
+  }
+  function suggestRowClass(it) {
+    return `dr-sg${it.blocked ? ' is-blocked' : ''}${it.count_after === 0 ? ' is-zero' : ''}`;
+  }
+  async function loadSuggestCounts(zone, q, seq) {
+    let data;
+    try { data = await request(`/draft/suggest?q=${encodeURIComponent(q)}&zone=${zone}&counts=1`); } catch (_) { return; }
+    if (seq !== suggestSeq || suggestZone !== zone || inputs[zone].input.value.trim() !== q || suggestEl.hidden) return;
+    const byTag = new Map((data.items || []).map(it => [`${it.kind}:${it.tag}`, it]));
+    suggestItems.forEach((it, i) => {
+      const got = byTag.get(`${it.kind}:${it.tag}`);
+      const row = suggestEl.querySelector(`[data-dr-sg="${i}"]`);
+      if (!row) return;
+      if (got) Object.assign(it, { count_after: got.count_after, blocked: got.blocked, bound: got.bound, slow: got.slow });
+      else it.count_after = it.count_after ?? null;
+      row.className = `${suggestRowClass(it)}${i === suggestIndex ? ' is-on' : ''}`;
+      const old = row.querySelector('.dr-sg-n');
+      const html = got ? suggestCountHtml(it, zone) : '';
+      if (old) old.outerHTML = html || '<span class="dr-sg-n"></span>';
+    });
+  }
   async function loadSuggest(zone, q) {
     const seq = ++suggestSeq;
     let data;
     // `*` 를 그대로 보낸다 - 서버가 퍼펙트 매칭으로 센다.
-    try { data = await request(`/draft/suggest?q=${encodeURIComponent(q)}&zone=${zone}`); } catch (_) { return; }
+    try { data = await request(`/draft/suggest?q=${encodeURIComponent(q)}&zone=${zone}&counts=0`); } catch (_) { return; }
     if (seq !== suggestSeq || inputs[zone].input.value.trim() !== q || document.activeElement !== inputs[zone].input) return;
     suggestItems = (data.items || []).filter(it => !it.blocked || it.kind === 'tag');
     suggestZone = zone;
+    suggestQ = q;
     suggestIndex = -1;
     if (!suggestItems.length) { hideSuggest(); return; }
     suggestEl.innerHTML = suggestItems.map((it, i) => {
       const name = it.kind === 'rating' ? (it.label || RATING_LABEL[it.rating] || it.tag) : it.tag;
       const kr = it.kr ? `<span class="dr-sg-kr">${esc(it.kr)}</span>` : '';
-      // 서버는 0건 후보도 blocked 로 준다 - '영구 제외' 는 수가 0 이 아닌데 막힌 것뿐이다.
-      const count = (it.blocked && it.count_after !== 0) ? '<span class="dr-sg-n">영구 제외</span>'
-        : (it.slow ? '<span class="dr-sg-n" title="걸리는 태그가 많아 세지 않았습니다">…</span>'
-          // 후보 수는 그 태그 하나로 센 값이다 - 텍스트 칩이면 포함 칸은 하한(≥) · 제외 칸은 남는 수의 상한(≤).
-          : (Number.isFinite(it.count_after) ? `<span class="dr-sg-n">${zone === 'exclude' ? '남음 ' : ''}${it.bound === 'min' ? '≥' : (it.bound === 'max' ? '≤' : '')}${fmt(it.count_after)}</span>` : ''));
-      return `<div class="dr-sg${it.blocked ? ' is-blocked' : ''}${it.count_after === 0 ? ' is-zero' : ''}" role="option" data-dr-sg="${i}"><span class="dr-sg-t">${esc(name)}</span>${kr}${count}</div>`;
+      return `<div class="${suggestRowClass(it)}" role="option" data-dr-sg="${i}"><span class="dr-sg-t">${esc(name)}</span>${kr}${suggestCountHtml(it, zone)}</div>`;
     }).join('');
+    if (data.counted === false) {
+      clearTimeout(countTimer);
+      countTimer = setTimeout(() => void loadSuggestCounts(zone, q, seq), SUGGEST_COUNT_DELAY_MS);
+    }
     const { input } = inputs[zone];
     const boardBox = board.getBoundingClientRect();
     const box = input.getBoundingClientRect();
@@ -578,6 +615,8 @@ export function initDraftMode({
   }
   function handleSuggestKey(event, zone) {
     if (suggestEl.hidden || suggestZone !== zone || !suggestItems.length) return false;
+    // 친 글이 목록보다 앞섰다(새 목록이 오는 중) - 옛 목록에서 고르지 않는다. Enter 는 친 글 그대로 칩이 된다.
+    if (suggestQ !== inputs[zone].input.value.trim() && event.key !== 'Escape') return false;
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const n = suggestItems.length;

@@ -34168,3 +34168,6 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .dr-zone.is-sized { flex: 0 0 auto; min-height: 0; overflow-y: auto; }
 .dr-zone--extra.is-sized { display: flex; flex-direction: column; overflow: hidden; }
 .dr-zone--extra.is-sized .dr-extra-text { flex: 1 1 auto; max-height: none; }
+
+/* 자동완성 수 = 나중에 채운다(11-07). 기다리는 동안 자리만 잡아 둔 흐린 점 셋 */
+.dr-sg-n.is-pending::after { content: "···"; opacity: 0.35; letter-spacing: 1px; }

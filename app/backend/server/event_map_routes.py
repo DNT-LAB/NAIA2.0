@@ -212,8 +212,9 @@ def register_event_map_routes(
         return await _draft_request("get")
 
     @app.get("/api/event-map/draft/suggest")
-    async def api_event_map_draft_suggest(q: str = "", zone: str = "include"):
-        return await _draft_request("suggest", {"q": q, "zone": zone})
+    async def api_event_map_draft_suggest(q: str = "", zone: str = "include", counts: int = 1):
+        # counts=0 = 이름만(바로) · 화면은 그 뒤 counts=1 로 같은 20개의 수를 받아 채운다(11-07)
+        return await _draft_request("suggest", {"q": q, "zone": zone, "counts": bool(counts)})
 
     @app.post("/api/event-map/draft/enter")
     async def api_event_map_draft_enter(req: Request):

@@ -337,6 +337,10 @@ class EventMapDraft:
         # 다시 센다. 열쇠 = 색인 · 영구 제외 객체 · 조건 글. 색인이 바뀌면(invalidate) 객체가 달라져 저절로 빗나간다.
         self._memo_key = None
         self._memo_rids = None
+        # 그 게시물 목록의 비트 표(rid -> 있나) - 자동완성 후보 수를 교집합 대신 모아 읽기로 센다(실측 11-07:
+        # 'w' 후보 1,677개 교집합 3.9초 -> 75ms). 열쇠 = 위 목록 객체 그대로(is).
+        self._mask_for = None
+        self._mask = None
         self._memo_lock = threading.Lock()
 
     def _index(self):
@@ -365,6 +369,16 @@ class EventMapDraft:
         with self._memo_lock:
             self._memo_key, self._memo_rids = key, rids
         return rids
+
+    def _posts_mask(self, rids, idx):
+        with self._memo_lock:
+            if self._mask_for is rids:
+                return self._mask
+        mask = np.zeros(max(int(idx.offsets.size), int(rids[-1]) + 1 if rids.size else 0), dtype=bool)
+        mask[rids] = True
+        with self._memo_lock:
+            self._mask_for, self._mask = rids, mask
+        return mask
 
     def _posts(self, state, idx, block):
         parts = idx._partition_filter(state["ratings"], state["tags"]["persons"])
@@ -559,7 +573,11 @@ class EventMapDraft:
 
     build_row = staticmethod(build_row)
 
-    def suggest(self, q, zone, *, state=None):
+    def suggest(self, q, zone, *, state=None, counts=True):
+        """후보 20개. `counts=False` 면 이름만(1ms 안쪽) - 화면이 먼저 띄우고 수는 `counts=True` 로 따로 받는다
+        (사용자 지시 11-07: '자동완성은 미리 보여주고 수만 잠시 후에'). 차례는 두 번 모두 같다 = 무리(rating · 앞 · 가운데 ·
+        한글) 안에서 **전체 출현 수** 순. 옛 차례(지금 조건 안의 수)는 후보 전부(앞부분 일치만 'w' 1,677개)를 세야 정해져
+        키 하나에 4~9초였다. 이제 세는 것은 보여 줄 20개뿐이다."""
         state = state if state is not None else new_state()
         raw = str(q or "").strip().lower()
         exact = raw.startswith("*")
@@ -569,38 +587,55 @@ class EventMapDraft:
         if len(raw) > 160 or zone not in ("include", "exclude"):
             raise DraftError("too_many")
         idx = self._index()
-        buckets = {g: [] for g in ("rating", "prefix", "infix", "korean")}
+        items = []
         for rating, name in RATINGS.items():
             if rating in state["ratings"] or not any(a.startswith(raw) for a, r in RATING_ALIASES.items() if r == rating):
                 continue
-            check = self.check(zone, name, state=state)
-            buckets["rating"].append({"tag": "rating:" + name, "kind": "rating", "rating": rating,
-                                      "label": "rating:" + name, "kr": None, "group": "rating",
-                                      "count_after": check["count_after"], "slow": False,
-                                      "blocked": check["kind"] == "blocked"})
+            items.append({"tag": "rating:" + name, "kind": "rating", "rating": rating,
+                          "label": "rating:" + name, "kr": None, "group": "rating",
+                          "count_after": None, "slow": False, "blocked": zone == "exclude"})
         picked, _, groups = self.service.suggest_candidates(raw, 20, kr_lookup=self.kr_lookup)
         existing = {c["text"] for z in ("include", "exclude") for c in state[z]}
         block = self.service.permanent_block(idx)
-        current = self.posts(state, idx=idx)
-        for _, name, tid in picked:
+        # 후보 수는 **그 태그 하나의 게시물 목록**으로 센다(실측 2026-11-07: 후보마다 텍스트 합집합을 만들면
+        # 키 하나에 1~4초 · 64MB 캐시를 후보가 밀어낸다). 텍스트 칩의 실제 수는 합집합이라 이보다 작아질 수 없다 -
+        # 포함 칸은 하한, 제외 칸은 남는 수의 상한이다. `bound` 로 알린다(화면 ≥ · ≤). 칩 추가는 늘 정확히 센다(check).
+        bound = None if exact else ("min" if zone == "include" else "max")
+        by_group = {g: [] for g in ("prefix", "infix", "korean")}
+        for observed, name, tid in picked:
             if name in existing or name in RATING_ALIASES:
                 continue
-            slow = False   # 늘 센다(아래) - 옛 '걸린 태그 > 200 은 수 생략' 은 합집합을 만들 때의 규칙이었다
-            blocked = block is not None and bool(block.tags[tid])
-            # 후보 수는 **그 태그 하나의 게시물 목록**으로 센다(실측 2026-11-07: 후보마다 텍스트 합집합을 만들면
-            # 키 하나에 1~4초 · 64MB 캐시를 후보가 밀어낸다). 텍스트 칩의 실제 수는 합집합이라 이보다 작아질 수 없다 -
-            # 포함 칸은 하한, 제외 칸은 남는 수의 상한이다. `bound` 로 알린다(화면 ≥ · ≤). 칩 추가는 늘 정확히 센다(check).
-            hits_in_current = _intersect_sorted(current, idx.posting(tid)).size
-            count = int(hits_in_current if zone == "include" else current.size - hits_in_current)
-            bound = None if exact else ("min" if zone == "include" else "max")
-            buckets[groups[name]].append({"tag": name, "kind": "tag", "kr": None,
-                                         "group": groups[name], "count_after": count, "bound": bound,
-                                         "slow": slow, "blocked": blocked or (count == 0 and bound != "min")})
-        items = []
-        for rows in buckets.values():
-            rows.sort(key=lambda r: -(r["count_after"] if r["count_after"] is not None else -1))
-            items.extend(rows)
-        return {"ok": True, "items": items[:20]}
+            by_group[groups[name]].append((observed, name, tid))
+        tids = {}
+        for group, rows in by_group.items():
+            rows.sort(key=lambda r: -r[0])
+            for _, name, tid in rows:
+                tids[name] = tid
+                items.append({"tag": name, "kind": "tag", "kr": None, "group": group,
+                              "count_after": None, "bound": bound, "slow": False,
+                              "blocked": block is not None and bool(block.tags[tid])})
+        items = items[:20]
+        if counts and items:
+            current = self.posts(state, idx=idx)
+            mask = self._posts_mask(current, idx)
+            for item in items:
+                if item["kind"] == "rating":
+                    if item["blocked"]:
+                        continue   # 제외 칸의 rating 은 칩이 될 수 없다 - 셀 것도 없다
+                    # check() 는 posts() 한 칸 메모를 이 후보 조건으로 덮는다 - 다음 키에서 지금 조건을 다시 센다.
+                    candidate = deepcopy(state)
+                    candidate["ratings"].append(item["rating"])
+                    item["count_after"] = int(self._posts(candidate, idx, block).size)
+                    item["blocked"] = item["count_after"] == 0
+                    continue
+                posting = idx.posting(tids[item["tag"]])
+                if posting.size and posting[-1] >= mask.size:
+                    posting = posting[posting < mask.size]
+                hits = int(np.count_nonzero(mask[posting])) if posting.size else 0
+                count = hits if zone == "include" else int(current.size) - hits
+                item["count_after"] = count
+                item["blocked"] = item["blocked"] or (count == 0 and bound != "min")
+        return {"ok": True, "items": items, "counted": bool(counts)}
 
     def to_staging(self, state):
         _limits(state)
@@ -685,6 +720,9 @@ def exit_for_owner(context, owner):
 
 def session(context):
     from core.headless_random_prompt_service import pipeline_swap_lock
+    holder = getattr(context, "event_map_draft", None)
+    if holder is not None:
+        return holder   # 이미 있으면 잠금 없이 - 자동완성이 생성 조립을 기다리지 않게(11-07)
     with pipeline_swap_lock(context):
         holder = getattr(context, "event_map_draft", None)
         if holder is None:
@@ -797,6 +835,23 @@ class DraftSession:
         from core.headless_random_prompt_service import pipeline_swap_lock
         from core.event_map.random_link import link_state, staging_store
         ctx = self.context
+        if action in ("suggest", "check"):
+            # 읽기만 한다 - 생성 조립 · 랜덤 파이프라인(pipeline_swap_lock) · 칩 편집의 재조립(self.lock)을 기다리지 않는다
+            # (사용자 지적 11-07: 자동완성이 느리다). 상태는 통째로 갈아 끼우기만 하므로(제자리 수정 없음) 참조 하나를 읽는다.
+            state = self.state
+            self.engine._index()
+            for key in ("zone", "text"):
+                if key in body and not isinstance(body[key], str):
+                    raise DraftError("too_many", "요청 형식을 확인해주세요.")
+            if action == "check":
+                if not isinstance(body.get("zone"), str) or not isinstance(body.get("text"), str):
+                    raise DraftError("too_many", "요청 형식을 확인해주세요.")
+                return self.engine.check(body.get("zone"), body.get("text"), state=state), []
+            suggestions = self.engine.suggest(body.get("q"), body.get("zone", "include"), state=state,
+                                              counts=body.get("counts", True) is not False)
+            for item in suggestions["items"]:
+                item.setdefault("bound", None)
+            return suggestions, []
         with pipeline_swap_lock(ctx), self.lock:
             if action != "exit":
                 self.engine._index()
@@ -811,13 +866,6 @@ class DraftSession:
             result = None
             extras = {}
             messages = []
-            if action == "check":
-                return self.engine.check(body.get("zone"), body.get("text"), state=state), messages
-            if action == "suggest":
-                suggestions = self.engine.suggest(body.get("q"), body.get("zone", "include"), state=state)
-                for item in suggestions["items"]:
-                    item.setdefault("bound", None)
-                return suggestions, messages
             if action in ("enter", "exit"):
                 entering = action == "enter"
                 if state["active"] == entering:

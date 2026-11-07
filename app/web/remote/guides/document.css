@@ -1,35 +1,106 @@
 @import url("fonts.css?v=1");
-/* Reading style for existing guides inside the viewer; standalone pages retain their style. */
+/* 뷰어(iframe) 안에서 기존 가이드를 Notion 같은 읽기 스타일로 다시 입힌다. 단독 페이지는 원래 스타일을 유지한다.
+   기준: 본문 16px · 줄간격 1.5 · 글색 #37352f · 소제목 24/20px · 상자는 회색 바탕만(테두리 강조 없음). */
 :root {
-  --bg: #fff; --panel: #fff; --panel-2: #f5f5f5;
-  --line: #e3e3e3; --line-strong: #ccc;
-  --text: #242424; --muted: #444; --dim: #666;
-  --accent: #333; --accent-2: #444; --good: #285738;
-  --warn: #775615; --bad: #8b3434; --shadow: transparent;
-  font-family: "NAIA Guide Pretendard", sans-serif;
+  --bg: #fff; --panel: #fff; --panel-2: #f7f7f5;
+  --line: #e9e9e7; --line-strong: #e9e9e7;
+  --text: #37352f; --muted: #37352f; --dim: rgba(55, 53, 47, 0.65);
+  --accent: #37352f; --accent-2: #37352f; --good: #448361;
+  --warn: #cb912f; --bad: #d44c47; --shadow: transparent;
+  font-family: "NAIA Guide Pretendard", -apple-system, "Segoe UI", sans-serif;
+  color: #37352f;
 }
 html { overflow: hidden; }
-body { background: #fff; min-height: 0; display: flow-root; }
-.page { max-width: none; margin: 0; padding: 0; }
-.hero { background: none; border: 0; border-radius: 0; padding: 0 0 20px; box-shadow: none; }
+body { background: #fff; color: #37352f; min-height: 0; display: flow-root; -webkit-font-smoothing: antialiased; }
+.page { width: auto; max-width: none; margin: 0; padding: 0 0 8px; }
+
+/* 머리말: 제목 · 꼬리표는 뷰어가 이미 그린다. 소개 글과 바깥 링크만 남긴다. */
+.hero { display: block; background: none; border: 0; border-radius: 0; padding: 0; box-shadow: none; }
 .hero h1, .hero .eyebrow { display: none; }
-.lead, p, ul, .step p { color: #333; font-size: 16px; line-height: 1.85; }
-.btn, .btn.primary { background: transparent; color: #333; border: 0; border-radius: 0; padding: 0; text-decoration: underline; text-underline-offset: 4px; box-shadow: none; }
-.actions { gap: 20px; }
-section.block, .step, .final { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 24px 0; margin: 0; border-top: 1px solid #e5e5e5; }
-.steps { gap: 0; }
+.lead { max-width: none; margin: 0 0 12px; color: #37352f; font-size: 16px; line-height: 1.5; }
+/* iframe 안에서 "/" 로 가면 앱이 iframe 속에 열린다 - 뷰어에서는 숨긴다. */
+.actions a[href="/"] { display: none; }
+.actions { display: flex; flex-wrap: wrap; gap: 16px; margin: 0 0 4px; }
+.btn, .btn.primary {
+  display: inline; min-height: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+  color: #37352f; font-size: 16px; font-weight: 500; text-decoration: underline;
+  text-decoration-color: rgba(55, 53, 47, 0.4); text-underline-offset: 3px;
+}
+.btn:hover { text-decoration-color: #37352f; }
+
+p, ul, .step p { color: #37352f; font-size: 16px; line-height: 1.5; }
+p { margin: 0 0 12px; }
+ul { margin: 4px 0 12px; padding-left: 24px; }
+li { margin: 0 0 4px; }
+strong { font-weight: 600; }
+a { color: inherit; }
+
+h2 { margin: 0 0 8px; font-size: 24px; font-weight: 600; line-height: 1.3; color: #37352f; }
+h3 { margin: 24px 0 6px; font-size: 20px; font-weight: 600; line-height: 1.3; color: #37352f; }
+h4 { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: #37352f; }
+
+/* 구획: 테두리 상자를 걷고 여백으로만 나눈다. */
+section.block, .step { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 0; margin: 40px 0 0; }
+.steps { display: block; margin: 0; }
 .step { display: block; }
-.step-copy { padding: 0; }
-.step-num { background: none; color: #666; border: 0; width: auto; height: auto; display: block; margin-bottom: 8px; }
-h2 { font-size: 21px; color: #242424; }
-.notice, .callout, .callout.warn, .callout.good { background: #f5f5f5; border: 0; border-left: 2px solid #bbb; border-radius: 0; color: #333; padding: 16px 20px; }
-.notice strong, .callout.warn strong, .callout.good strong { color: #333; }
-.image-wrap { margin: 20px 0 0; padding: 0; background: none; border: 0; border-radius: 0; }
-.image-wrap img { max-width: 100%; height: auto; }
-.toc { background: none; border: 0; padding: 0 0 20px; }
-.toc a { background: none; border: 0; border-radius: 0; text-decoration: underline; color: #444; }
-.shape, .pair > div, .pair .bad, .pair .ok, .tags { background: #f5f5f5; border: 0; border-radius: 0; color: #333; }
-code { color: #333; background: #f2f2f2; border-color: #ddd; }
-th { background: #f5f5f5; color: #333; }
-th, td { border-color: #ddd; }
-.footer { color: #777; }
+.step-copy { display: block; padding: 0; }
+.step-num {
+  display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: 0 0 8px;
+  padding: 0; border: 0; border-radius: 50%; background: #f1f1ef; color: rgba(55, 53, 47, 0.75);
+  font-size: 12px; font-weight: 600;
+}
+.step-copy h2 { margin-bottom: 6px; }
+
+/* 안내 상자: Streamlit 알림(st.success · st.warning · st.error) - 옅은 색 바탕 · 검은 글자 · 테두리 없음. */
+.notice, .final, div.callout, .callout.warn, .callout.good {
+  display: block; margin: 24px 0 0; padding: 16px; border: 0; border-radius: 8px;
+  background: rgba(28, 131, 225, 0.1); color: #0e1117; font-size: 15px; line-height: 1.5;
+}
+/* 상자 제목은 바로 아래 strong 하나뿐 - 문장 속 strong 까지 블록으로 만들면 줄이 끊긴다. */
+.notice > strong, div.callout > strong {
+  display: block; margin: 0 0 4px; color: #0e1117; font-size: 15px; letter-spacing: 0;
+}
+/* 원본의 `.callout.warn strong` 연한 글자색(0,2,1)을 같은 세기로 덮는다 - 상자 안 굵은 글자 전부. */
+.notice strong, .final strong, .callout.warn strong, .callout.good strong { color: #0e1117; font-size: inherit; }
+.final, .callout.good { background: rgba(33, 195, 84, 0.1); }
+.notice, .callout.warn { background: rgba(255, 193, 7, 0.12); }
+/* 문장 속 강조(span.callout)는 상자가 아니라 굵은 글자다. */
+span.callout { display: inline; margin: 0; padding: 0; border: 0; background: none; color: #37352f; font-weight: 600; }
+
+.image-wrap { margin: 12px 0 0; padding: 0; overflow: hidden; background: none; border: 1px solid #e9e9e7; border-radius: 6px; }
+.image-wrap img { display: block; width: 100%; height: auto; }
+
+.toc { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 0; padding: 0; background: none; border: 0; }
+.toc a {
+  padding: 0; background: none; border: 0; border-radius: 0; color: rgba(55, 53, 47, 0.75);
+  font-size: 14px; font-weight: 400; text-decoration: underline; text-decoration-color: rgba(55, 53, 47, 0.3);
+  text-underline-offset: 3px;
+}
+.toc a:hover { color: #37352f; }
+
+.shape { margin: 12px 0 12px; padding: 16px; border: 0; border-radius: 6px; background: #f7f7f5; color: #37352f; }
+.shape .line { font-size: 20px; font-weight: 600; }
+.shape .cond { color: #9065b0; }
+.shape .act { color: #448361; }
+.shape .hint { color: rgba(55, 53, 47, 0.65); font-size: 13px; }
+/* 원본은 820px 아래에서 한 줄로 쌓는다 - 본문 폭 708px 에서도 둘이 나란히 들어간다. */
+.pair { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin: 12px 0 0; }
+.pair > div, .pair .bad, .pair .ok { padding: 12px 14px; border: 0; border-radius: 8px; background: #f7f7f5; color: #0e1117; font-size: 14px; line-height: 1.5; }
+.pair .bad { background: rgba(255, 43, 43, 0.09); }
+.pair .ok { background: rgba(33, 195, 84, 0.1); }
+.pair h4 { color: #0e1117; }
+.pair h4 { font-size: 13px; letter-spacing: 0; }
+
+code {
+  padding: 0.2em 0.4em; border: 0; border-radius: 4px; background: rgba(135, 131, 120, 0.15); color: #eb5757;
+  font-size: 85%; white-space: nowrap;
+}
+.tags { padding: 1px 6px; border: 0; border-radius: 4px; background: rgba(135, 131, 120, 0.15); color: #37352f; font-size: 13px; }
+
+table { margin: 12px 0 4px; font-size: 14px; border-collapse: collapse; }
+th, td { padding: 7px 9px; border: 1px solid #e9e9e7; line-height: 1.5; }
+th { background: #f7f7f5; color: rgba(55, 53, 47, 0.75); font-size: 13px; font-weight: 600; letter-spacing: 0; }
+.yes { color: #448361; font-weight: 600; }
+.no { color: #d44c47; font-weight: 600; }
+
+.footer { margin: 32px 0 0; color: rgba(55, 53, 47, 0.5); font-size: 13px; line-height: 1.5; }

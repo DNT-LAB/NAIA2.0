@@ -75,7 +75,7 @@ async function showPage() {
         if (!doc?.querySelector('.page')) return;
         const style = doc.createElement('link');
         style.rel = 'stylesheet';
-        style.href = 'document.css?v=3';
+        style.href = 'document.css?v=4';
         style.onload = () => {
           if (generation !== loadGeneration) return;
           const resize = () => { frame.style.height = `${Math.ceil(Math.max(doc.body.scrollHeight, doc.body.getBoundingClientRect().height)) + 2}px`; };

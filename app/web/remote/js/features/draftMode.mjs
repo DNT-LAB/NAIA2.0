@@ -191,8 +191,21 @@ export function initDraftMode({
     const r = drawnBtnEl.getBoundingClientRect();
     const w = Math.min(420, window.innerWidth - 16);
     peekEl.style.width = `${w}px`;
-    peekEl.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
     const h = peekEl.offsetHeight;
+    // 왼쪽 판 바깥 오른쪽(결과 화면 위)에 - 판 안에 띄우면 칩을 가린다(사용자 지시 11-07). 판 옆 E · S · A 탭도 비켜 간다.
+    // 아래 끝을 단추 아래 끝에 맞춘다. 오른쪽에 자리가 없으면(좁은 화면) 단추 위로.
+    const panel = board.closest('.control-panel')?.getBoundingClientRect();
+    let edge = panel ? panel.right : 0;
+    document.querySelectorAll('.em-tab').forEach(tab => {
+      const t = tab.getBoundingClientRect();
+      if (t.width && t.left < edge + 8 && t.right > edge - 8) edge = Math.max(edge, t.right);
+    });
+    if (panel && edge + 12 + w <= window.innerWidth - 8) {
+      peekEl.style.left = `${edge + 12}px`;
+      peekEl.style.top = `${Math.max(8, Math.min(r.bottom - h, window.innerHeight - h - 8))}px`;
+      return;
+    }
+    peekEl.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
     const top = r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(r.bottom + 8, window.innerHeight - h - 8);
     peekEl.style.top = `${Math.max(8, top)}px`;
   }

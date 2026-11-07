@@ -34088,8 +34088,10 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-btn:hover { border-color: var(--accent); color: var(--text-primary); }
 /* 칸 나누기(사용자 11-07): 포함 · 제외가 남는 높이를 2:1 로 나눠 갖고(둘 다 최소 칩 두 줄), Extra 는 두 줄 남짓으로 줄인다. */
-.dr-zone[data-dr-zone="include"] { flex: 2 1 auto; min-height: 84px; }
-.dr-zone[data-dr-zone="exclude"] { flex: 1 1 auto; min-height: 84px; }
+/* 줄지 않는다(flex-shrink 0) - 판이 짧으면 칸이 아니라 판이 스크롤된다. 줄게 두면 칩이 3줄일 때 칸이 84px 로 눌려
+   칩이 아래 제외 칸을 덮었다(다른 세션 캡처 중 제보 11-07: 높이 84 · 내용 143). */
+.dr-zone[data-dr-zone="include"] { flex: 2 0 auto; min-height: 84px; }
+.dr-zone[data-dr-zone="exclude"] { flex: 1 0 auto; min-height: 84px; }
 .dr-zone--extra { flex: none; }
 .dr-extra-text { min-height: 34px; max-height: 52px; }
 /* 칸 색(사용자 11-07 - 눈으로 바로 가르게): 칸 위 곧은 색 줄 + 제목 같은 색. 포함 초록 · 제외 빨강 · Extra 파랑. */

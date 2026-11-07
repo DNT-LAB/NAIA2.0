@@ -541,7 +541,7 @@ export function initDraftMode({
     const extraText = String(snap?.state?.extra || '');
     const extraUnsaved = extraShown !== null && extraEl.value !== extraShown;
     if (extraEl !== document.activeElement && !extraUnsaved && extraEl.value !== extraText) extraEl.value = extraText;
-    if (!extraUnsaved || extraEl.value === extraText) extraShown = extraText;
+    if (extraEl.value === extraText) extraShown = extraText;   // 칸이 실제로 서버 글을 보일 때만(포커스 중엔 안 썼다 - Codex 3차)
   }
 
   // ---- 칩 입력 ----
@@ -551,6 +551,9 @@ export function initDraftMode({
     if (!text) return;
     const { input, counting } = inputs[zone];
     hideSuggest();
+    // 칩이 Extra 로 갈 수 있다(색인 밖 태그) - 저장 못 한 Extra 가 있으면 먼저 저장한다. 못 하면 멈춘다: 그대로 두면
+    // 서버가 붙인 태그는 칸에 안 보이고 다음 저장이 그것을 지웠다(Codex 3차 11-07).
+    if (!(await flushExtra())) return;
     const timer = setTimeout(() => { counting.hidden = false; }, COUNTING_DELAY_MS);
     try {
       const data = await edit('/draft/chips', { op: 'add', zone, text });
@@ -866,6 +869,8 @@ export function initDraftMode({
     }
   }
   async function loadFromStaging(itemId) {
+    // 불러오기는 서버의 Extra 를 바꾼다 - 저장 못 한 Extra 를 먼저 저장하고, 못 하면 멈춘다(칩 넣기와 같은 이유 · Codex 3차)
+    if (!(await flushExtra())) return false;
     try {
       const data = await request('/draft/from-staging', { item_id: itemId });
       receive(data);

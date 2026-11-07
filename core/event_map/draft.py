@@ -740,12 +740,15 @@ class DraftSession:
         self.engine = EventMapDraft(ensure_event_map_service(context))
         self.lock = threading.RLock()
         self.broadcast = None
-        # 재시작 뒤 켜진 채 읽혔다 = 메인 글은 saved_prompt(원문)뿐이다. 첫 GET 이 한 번 조립한다.
-        self.needs_rebuild = bool(self.state["active"])
+        # 실행할 때는 늘 꺼진 채로(사용자 지시 11-07). 켜진 채 저장돼 있었으면 끈 것으로 적는다 - 칩 · Extra 는 남겨
+        # 다시 켜면 그대로 쓴다. 메인 글은 건드리지 않는다: Draft 중에도 저장되는 글은 saved_prompt(원문)이다.
         if self.state["active"]:
-            from core.event_map.random_link import link_state
-            context.event_map_random_link = {"enabled": True, "mode": "draft",
-                                             "revision": link_state(context)["revision"] + 1}
+            candidate = deepcopy(self.state)
+            candidate["active"] = False
+            try:
+                self.state = self.store.save(candidate)
+            except DraftError:
+                self.state = candidate   # 못 적어도 이번 실행은 꺼진 채 - 다음 저장이 덮는다
 
     def snapshot(self):
         from core.headless_random_prompt_service import pipeline_swap_lock

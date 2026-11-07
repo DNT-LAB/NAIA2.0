@@ -183,12 +183,6 @@ def register_event_map_routes(
             # Non-HTTP preset/mode changes use the same non-blocking broadcast path.
             holder.broadcast = lambda message: asyncio.run_coroutine_threadsafe(_broadcast(message), loop)
             if action == "get":
-                if getattr(holder, "needs_rebuild", False) and holder.state["active"]:
-                    holder.needs_rebuild = False
-                    try:
-                        await run_in_thread(holder.rebuild)
-                    except (DraftError, MapQueryError):
-                        pass  # 색인이 없거나 조립 실패 - 원문 그대로 두고 상태만 돌려준다
                 payload = await run_in_thread(holder.snapshot)
                 messages = []
             else:

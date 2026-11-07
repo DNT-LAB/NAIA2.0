@@ -88,7 +88,7 @@ export function initDraftMode({
     gen = data.gen;
     rev = Number(data.rev) || 0;
     const now = active();
-    if (now && !was) { drawnDismissed = false; shownRid = null; }
+    if (now && !was) shownRid = null;
     if (now && !was && data.__fromSocket) dropForeignOwners();
     if (typeof data.prompt === 'string' && (now || was)) applyServerPrompt(data.prompt, 'event_map_draft');
     paint();
@@ -300,17 +300,15 @@ export function initDraftMode({
   // ---- 뽑힌 결과 창 ----
   const drawnEl = document.createElement('div');
   drawnEl.className = 'drw-body';
+  // 뽑힌 결과 창은 저절로 열지 않는다 - [이번에 뽑힌 프롬프트 : N] 을 눌렀을 때만(사용자 지시 11-07).
   let drawnPanel = null;
-  let drawnDismissed = false;   // 이번 Draft 에서 사용자가 x 로 닫았다 - 새로 뽑혀도 저절로 열지 않는다
-  let drawnSystemClose = false; // 화면이 닫는 중(Draft 끔 등) - 사용자가 닫은 것으로 치지 않는다
-  let shownRid = null;          // 창을 마지막으로 연 게시물 - 같은 게시물로는 다시 열지 않는다
+  let shownRid = null;          // 창 글이 보여 주는 게시물 - [이 결과를 메인 프롬프트로] 는 이 게시물로만
   function ensureDrawnPanel() {
     if (drawnPanel) return drawnPanel;
     drawnPanel = createDraggablePanel({
       document, window, title: '뽑힌 결과', variant: 'drw', storageKey: 'draft-drawn',
       width: 340, minWidth: 240, maxWidth: 720, height: 320, minHeight: 120, resizable: true, escHtml: esc,
       onClose: () => {
-        if (!drawnSystemClose) drawnDismissed = true;
         closeMenu();
         paintSum();
       },
@@ -337,12 +335,12 @@ export function initDraftMode({
     return drawnPanel;
   }
   function closeDrawnPanel() {
-    if (!drawnPanel?.isOpen()) return;
-    drawnSystemClose = true;
-    try { drawnPanel.close(); } finally { drawnSystemClose = false; }
+    if (drawnPanel?.isOpen()) drawnPanel.close();
   }
   function openDrawnPanel() {
     const panel = ensureDrawnPanel();
+    const rid = snap?.state?.drawn?.rid;
+    if (rid != null) panel.setTitle(`뽑힌 결과 · #${rid}`);
     if (!panel.isOpen()) panel.open();
     if (panel.isCollapsed()) panel.expand();
     panel.raise();
@@ -368,7 +366,6 @@ export function initDraftMode({
   }
   function toggleDrawnPanel() {
     if (drawnPanel?.isOpen()) { drawnPanel.close(); return; }
-    drawnDismissed = false;
     openDrawnPanel();
     paintSum();
   }
@@ -432,11 +429,8 @@ export function initDraftMode({
     const gray = der.gray || [];
     const hidden = gray.filter(g => g.pe_hidden).length;
     const head = `${gray.filter(g => !g.dropped).length}개${hidden ? ` · PE 가 ${hidden}개 지움` : ''}`;
-    if (drawnPanel || drawn.rid !== shownRid) ensureDrawnPanel().setTitle(`뽑힌 결과 · #${drawn.rid}`);
-    if (drawn.rid !== shownRid) {
-      shownRid = drawn.rid;
-      if (!drawnDismissed) openDrawnPanel();
-    }
+    if (drawnPanel) drawnPanel.setTitle(`뽑힌 결과 · #${drawn.rid}`);
+    shownRid = drawn.rid;
     // 칩이 아니라 **글**로 - 쉼표로 이은 태그 줄(사용자 지시 11-07). 낱말을 누르면 같은 메뉴(고정 · 제외 · 이번만 빼기).
     drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="drw-text">${gray.map(g =>
       `<span class="drw-tag${g.pe_hidden ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"

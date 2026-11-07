@@ -10,9 +10,14 @@
  *    고치면 PE 에 쓰고, PE 상태가 돌아오면 서버에 다시 조립을 청한다(`/draft/rebuild`).
  *  · 칩 입력: 쉼표 · Enter = 칩으로. 서버가 0건이면 막는다 - 글은 남기고 붉게(D9). 색인 밖 글은 Extra 로 간다(D6).
  *    `*tag` = 퍼펙트(D4). 빈 칸 Backspace = 그 칸 마지막 칩 지우기.
+ *  · [Random] 으로 뽑힌 게시물의 태그는 포함 칸이 아니라 **'뽑힌 결과' 떠 있는 창**에 보인다(사용자 지시 11-07 -
+ *    포함 칸은 조건만 · 뽑힌 것은 미리보기). 창은 디버그 창들이 처음 뜨는 자리(왼쪽 패널 | 결과 탭 경계)에서 열리고
+ *    반투명 · 접기/펼치기. 새로 뽑힐 때마다 열린다 - 이번 Draft 에서 사용자가 닫았으면 [뽑힌 결과] 단추로만 다시 연다.
  *  · ⚠️ 판은 **뼈대를 한 번만** 만든다. 다시 그릴 때는 칩 줄 · 요약만 갈아 끼운다 - 입력 · Extra · 띠 칸을 갈아 끼우면
  *    초점 · 커서 · 자동완성이 날아간다(eventMapStaging 의 같은 교훈).
  */
+
+import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 150;
@@ -83,6 +88,7 @@ export function initDraftMode({
     gen = data.gen;
     rev = Number(data.rev) || 0;
     const now = active();
+    if (now && !was) { drawnDismissed = false; shownRid = null; }
     if (now && !was && data.__fromSocket) dropForeignOwners();
     if (typeof data.prompt === 'string' && (now || was)) applyServerPrompt(data.prompt, 'event_map_draft');
     paint();
@@ -140,17 +146,16 @@ export function initDraftMode({
     <div class="dr-band dr-band--pre"><span class="dr-band-name">prefix</span>
       <textarea class="dr-band-text" data-dr-pe="pre_prompt" rows="1" spellcheck="false" aria-label="Prefix Prompt"></textarea></div>
     <div class="dr-zone" data-dr-zone="include">
-      <div class="dr-zh"><span class="dr-zt">포함</span><span class="dr-zn">내 칩 = 조건 · 회색 = 뽑힌 태그</span></div>
+      <div class="dr-zh"><span class="dr-zt">포함</span></div>
       <div class="dr-chips" data-dr-chips="include"></div>
-      <div class="dr-drawn" data-dr-drawn></div>
     </div>
     <div class="dr-zone" data-dr-zone="exclude">
-      <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span><span class="dr-zn">세기 · 뽑기 둘 다에서 뺀다</span></div>
+      <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span></div>
       <div class="dr-chips" data-dr-chips="exclude"></div>
     </div>
     <div class="dr-sum" data-dr-sum></div>
     <div class="dr-zone dr-zone--extra">
-      <div class="dr-zh"><span class="dr-zt">Extra</span><span class="dr-zn">맵 무관 · 뽑기와 상관없이 늘 붙음</span></div>
+      <div class="dr-zh"><span class="dr-zt">Extra</span></div>
       <textarea class="dr-extra-text" data-dr-extra rows="2" maxlength="2000" spellcheck="false" aria-label="Extra Prompt"
         placeholder="이벤트 맵과 상관없는 태그 · 와일드카드 - 예: 1.2::artist:kim eb ::, __season__"></textarea>
     </div>
@@ -161,7 +166,6 @@ export function initDraftMode({
   host.insertBefore(board, footer || null);
   const extraEl = board.querySelector('[data-dr-extra]');
   const sumEl = board.querySelector('[data-dr-sum]');
-  const drawnEl = board.querySelector('[data-dr-drawn]');
   const suggestEl = board.querySelector('[data-dr-suggest]');
   const bands = [...board.querySelectorAll('[data-dr-pe]')];
   const inputs = {};
@@ -180,6 +184,56 @@ export function initDraftMode({
     inputs[zone] = { input, counting };
   });
   if (bindTagAssist) { try { bindTagAssist(extraEl, {}); } catch (_) {} }
+
+  // ---- 뽑힌 결과 창 ----
+  const drawnEl = document.createElement('div');
+  drawnEl.className = 'drw-body';
+  let drawnPanel = null;
+  let drawnDismissed = false;   // 이번 Draft 에서 사용자가 x 로 닫았다 - 새로 뽑혀도 저절로 열지 않는다
+  let drawnSystemClose = false; // 화면이 닫는 중(Draft 끔 등) - 사용자가 닫은 것으로 치지 않는다
+  let shownRid = null;          // 창을 마지막으로 연 게시물 - 같은 게시물로는 다시 열지 않는다
+  function ensureDrawnPanel() {
+    if (drawnPanel) return drawnPanel;
+    drawnPanel = createDraggablePanel({
+      document, window, title: '뽑힌 결과', variant: 'drw', storageKey: 'draft-drawn',
+      width: 340, minWidth: 240, maxWidth: 720, height: 320, minHeight: 120, resizable: true, escHtml: esc,
+      onClose: () => {
+        if (!drawnSystemClose) drawnDismissed = true;
+        closeMenu();
+        paintSum();
+      },
+    });
+    drawnPanel.body.appendChild(drawnEl);
+    drawnEl.addEventListener('click', event => {
+      const gray = event.target.closest('[data-dr-gray]');
+      if (gray) grayMenu(gray);
+    });
+    drawnEl.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      const el = event.target.closest?.('[data-dr-gray]');
+      if (!el || event.target !== el) return;
+      event.preventDefault();
+      grayMenu(el);
+    });
+    return drawnPanel;
+  }
+  function closeDrawnPanel() {
+    if (!drawnPanel?.isOpen()) return;
+    drawnSystemClose = true;
+    try { drawnPanel.close(); } finally { drawnSystemClose = false; }
+  }
+  function openDrawnPanel() {
+    const panel = ensureDrawnPanel();
+    if (!panel.isOpen()) panel.open();
+    if (panel.isCollapsed()) panel.expand();
+    panel.raise();
+  }
+  function toggleDrawnPanel() {
+    if (drawnPanel?.isOpen()) { drawnPanel.close(); return; }
+    drawnDismissed = false;
+    openDrawnPanel();
+    paintSum();
+  }
 
   // ---- 그리기 ----
   function paintPill() {
@@ -229,22 +283,34 @@ export function initDraftMode({
     const der = snap?.derived || {};
     const drawn = st.drawn;
     if (!drawn) {
-      drawnEl.innerHTML = '<div class="dr-sep">Random 을 누르면 이 조건의 실제 게시물 하나로 채웁니다</div>';
+      drawnEl.innerHTML = '';
+      shownRid = null;
+      closeDrawnPanel();
       return;
     }
     const gray = der.gray || [];
     const hidden = gray.filter(g => g.pe_hidden).length;
-    const head = `게시물 #${esc(drawn.rid)} 에서 · ${gray.filter(g => !g.dropped).length}개${hidden ? ` · PE 가 ${hidden}개 지움` : ''}`;
-    drawnEl.innerHTML = `<div class="dr-sep">${head}</div><div class="dr-chips dr-chips--drawn">${gray.map(g =>
+    const head = `${gray.filter(g => !g.dropped).length}개${hidden ? ` · PE 가 ${hidden}개 지움` : ''}`;
+    if (drawnPanel || drawn.rid !== shownRid) ensureDrawnPanel().setTitle(`뽑힌 결과 · #${drawn.rid}`);
+    if (drawn.rid !== shownRid) {
+      shownRid = drawn.rid;
+      if (!drawnDismissed) openDrawnPanel();
+    }
+    drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="dr-chips dr-chips--drawn">${gray.map(g =>
       `<span class="dr-chip is-drawn${g.pe_hidden ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"
         title="${g.dropped ? '이번만 뺀 태그 - 눌러서 다시 넣기' : (g.pe_hidden ? 'PE 필터가 지운 태그' : '뽑힌 태그 · 다음 Random 에 바뀜')}"><span class="dr-t">${esc(g.tag)}</span></span>`).join('')}</div>`;
   }
   function paintSum() {
     const der = snap?.derived || {};
     const remaining = der.remaining;
+    const drawn = snap?.state?.drawn;
+    const drawnOpen = !!drawnPanel?.isOpen();
+    const drawnBtn = drawn ? `<button type="button" class="dr-btn${drawnOpen ? ' is-on' : ''}" data-dr-drawn-open aria-pressed="${drawnOpen}"
+        title="뽑힌 게시물 #${esc(drawn.rid)} 의 태그 창 열기 · 닫기">뽑힌 결과 ${fmt((der.gray || []).filter(g => !g.dropped).length)}</button>` : '';
     const rating = der.rating_out ? `<span class="dr-rating" title="이 등급 태그가 프롬프트에 들어갑니다">${esc(der.rating_out)}</span>` : '';
     sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}
       <span class="dr-gap"></span>
+      ${drawnBtn}
       <button type="button" class="dr-btn" data-dr-stage title="지금 칩 조건을 스테이징 줄 하나로 보냅니다">스테이징으로 보내기</button>
       <button type="button" class="dr-btn" data-dr-from title="S 창을 엽니다 - 줄의 [드래프트로 불러오기]">불러오기</button>`;
   }
@@ -265,7 +331,7 @@ export function initDraftMode({
     const on = active();
     board.hidden = !on;
     document.body.classList.toggle('draft-mode', on);
-    if (!on) { closeMenu(); hideSuggest(); return; }
+    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); return; }
     paintZone('include');
     paintZone('exclude');
     paintDrawn();
@@ -440,11 +506,13 @@ export function initDraftMode({
     menuEl.setAttribute('role', 'menu');
     menuEl.innerHTML = `<div class="dr-menu-label">${esc(label)}</div>${items.map((it, i) =>
       `<button type="button" role="menuitem" data-dr-mi="${i}"${it.danger ? ' class="is-danger"' : ''}>${esc(it.label)}</button>`).join('')}`;
-    board.append(menuEl);
-    const boardBox = board.getBoundingClientRect();
+    // 화면 위에 고정으로 띄운다 - 판 · 뽑힌 결과 창 어느 쪽에서 열어도 그 창의 넘침에 잘리지 않게.
+    document.body.append(menuEl);
     const box = anchor.getBoundingClientRect();
-    menuEl.style.left = `${Math.max(4, Math.min(box.left - boardBox.left, boardBox.width - 180))}px`;
-    menuEl.style.top = `${box.bottom - boardBox.top + board.scrollTop + 3}px`;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const mh = menuEl.offsetHeight || 120, mw = menuEl.offsetWidth || 180;
+    menuEl.style.left = `${Math.max(4, Math.min(box.left, vw - mw - 4))}px`;
+    menuEl.style.top = `${box.bottom + 3 + mh > vh ? Math.max(4, box.top - mh - 3) : box.bottom + 3}px`;
     menuEl.addEventListener('click', event => {
       const btn = event.target.closest('[data-dr-mi]');
       if (!btn) return;
@@ -488,6 +556,7 @@ export function initDraftMode({
     if (user) { userChipMenu(user); return; }
     const gray = t.closest('[data-dr-gray]');
     if (gray) { grayMenu(gray); return; }
+    if (t.closest('[data-dr-drawn-open]')) { toggleDrawnPanel(); return; }
     if (t.closest('[data-dr-stage]')) { void sendToStaging(); return; }
     if (t.closest('[data-dr-from]')) { openStaging(); return; }
     const zone = t.closest('[data-dr-zone]');

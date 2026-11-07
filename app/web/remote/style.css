@@ -34123,3 +34123,16 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-menu button:hover { background: rgba(124,106,239,0.22); }
 .dr-menu button.is-danger { color: #ff9aa3; }
+
+/* 뽑힌 결과 창(draftMode.mjs - 사용자 지시 11-07: 포함 칸이 아니라 따로 · 디버그 창 자리 · 반투명 · 접기/펼치기) */
+.dragpanel.drw {
+  background: rgba(22,22,34,0.80);
+  backdrop-filter: blur(6px);
+}
+.dragpanel.drw .dragpanel-head { background: rgba(255,255,255,0.04); }
+.drw-body { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--text-primary); }
+.drw-meta { font-size: 10.5px; color: var(--text-dim); }
+.drw-body .dr-chips--drawn { gap: 4px; }
+/* 칩 메뉴는 화면 위 고정 - 판 · 창 넘침에 잘리지 않는다. 떠 있는 창들(--z-drag-panel + 순서)보다 위 */
+.dr-menu { position: fixed; z-index: calc(var(--z-drag-panel, 10150) + 500); }
+.dr-btn.is-on { border-color: var(--accent); color: var(--text-primary); }

@@ -1697,7 +1697,7 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261107-draft13')
+import('./js/features/draftMode.mjs?v=20261107-draft14')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1711,7 +1711,7 @@ import('./js/features/draftMode.mjs?v=20261107-draft13')
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
       isAutocompleteEnabled: () => tagAutocompleteEnabled(),
       // 인페인트 세션이 입력창을 쥐고 있으면 쓰지 않는다 - 세션을 닫을 때 원본(promptBeforeInpaint)이 돌아온다.
-      applyServerPrompt: (prompt, source) => { if (!inpaintOwnsPromptBox()) updatePromptOnly({prompt, source}); },
+      applyServerPrompt: (prompt, source) => { if (!inpaintOwnsPromptBox()) updatePromptOnly({prompt, source, draftSnapshot: true}); },
       // 안 보낸 편집이 있으면 지금 보내고 그 글을 enter 에 싣는다 - WS 와 HTTP 는 순서가 보장되지 않는다(DRAFT_MODE_API.md).
       takePendingPrompt: () => {
         if (!promptSendTimer && !_localPromptDirty) return null;
@@ -6454,6 +6454,10 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   // (isExpectedRandomPrompt)가 게이트라, 브로드캐스트/재연결로 도착한 '적용된' random 프롬프트가
   // 좌측 패널에 안 떴다(RC-1). 버튼 unlock 만 아래에서 request-id 로 게이트한다(isMyRandom).
   const isMyRandom = source === 'random' && isExpectedRandomPrompt(message);
+  // Draft 가 확정한 글의 WS 메아리(prompt_generated · source event_map_draft)는 칸에 글을 쓰지 않는다. 글은 draftMode 가
+  // fresh()(gen · rev)로 거른 스냅숏(applyServerPrompt -> draftSnapshot)으로만 쓴다 - 늦게 도착한 칩 편집 메아리가
+  // Draft 를 끈 뒤의 원문을 조립 글로 덮었다(Codex 리뷰 11-07 HIGH). 해상도 · 토큰 · PE 디버그는 그대로 받는다.
+  const draftEcho = source === 'event_map_draft' && !message.draftSnapshot;
   // 빈 프롬프트로는 패널을 비우지 않는다(Codex LOW): 내 random 응답(isMyRandom)이 아닌 한 prompt 가
   // 있을 때만 수용 — 남/stale random 의 빈 prompt 가 좌측 패널을 지우는 일 방지. (성공 random 은 항상
   // prompt 보유, 실패는 random_failed 로 분기되므로 실질 빈-수용은 발생하지 않음.)
@@ -6506,7 +6510,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     // Interactive 가 켜져 있으면 입력창의 주인은 블록이다. 서버 에코를 그대로 쓰면
     // 우리가 저장용으로 보낸 **원본**이 표시값을 덮어써 조립 결과가 사라진다.
     // 저장은 원본으로, 표시는 블록 조립값으로 — 둘을 갈라 둔다.
-    if (!(interactivePanel?.isActive?.() && promptBeforeInteractive !== null)) {
+    if (!draftEcho && !(interactivePanel?.isActive?.() && promptBeforeInteractive !== null)) {
       promptEdit.value = prompt;
     }
     syncingPrompt = false;

@@ -388,7 +388,8 @@ export function initDraftMode({
     if (rid == null || rid !== shownRid) return;
     closeMenu();
     hideSuggest();
-    await flushExtra();
+    if (!(await flushExtra())) return;
+    if (!active() || snap?.state?.drawn?.rid !== rid) return;   // 저장하는 사이 다른 탭이 끄거나 다시 뽑았다
     try {
       receive(await run(() => request('/draft/exit', { keep: true, rid })));
     } catch (_) { return; /* run 이 알렸다 */ }
@@ -446,8 +447,12 @@ export function initDraftMode({
     }
     // 입력칸 노드는 살린다 - 칩만 갈아 끼우고 입력칸을 끝에 다시 붙인다.
     const { input, counting } = inputs[zone];
-    box.innerHTML = html;
-    box.append(input, counting);
+    // 입력칸 · '세는 중' 노드는 떼지 않고 칩만 갈아 끼운다 - 떼었다 붙이면 포커스가 빠져 칩 하나를 넣을 때마다
+    // 입력칸을 다시 눌러야 했다(Codex 리뷰 11-07).
+    [...box.childNodes].forEach(node => { if (node !== input && node !== counting) node.remove(); });
+    if (input.parentNode !== box) box.append(input);
+    if (counting.parentNode !== box) box.append(counting);
+    input.insertAdjacentHTML('beforebegin', html);
   }
   function paintDrawn() {
     const st = snap?.state || {};
@@ -619,7 +624,10 @@ export function initDraftMode({
   let suggestTimer = null, countTimer = null, suggestSeq = 0, suggestZone = '', suggestItems = [], suggestIndex = -1;
   let suggestQ = '';   // 지금 떠 있는 목록이 어느 입력의 것인가 - 다른 글이면 키보드로 고르지 못한다(옛 목록에서 Enter = 엉뚱한 칩)
   function hideSuggest() {
+    // 기다리는 조회도 끊는다 - Escape 로 닫은 뒤 늦게 온 이름 응답이 목록을 다시 열었다(Codex 리뷰 11-07)
+    clearTimeout(suggestTimer);
     clearTimeout(countTimer);
+    suggestSeq++;
     suggestEl.hidden = true;
     suggestEl.innerHTML = '';
     suggestItems = [];
@@ -805,12 +813,14 @@ export function initDraftMode({
   document.addEventListener('mousedown', event => { if (menuEl && !menuEl.contains(event.target)) closeMenu(); }, true);
 
   // ---- Extra ----
+  // 저장했거나 저장할 것이 없으면 true. 실패면 false - [이 결과를 메인 프롬프트로] 는 멈춘다(Codex 리뷰 11-07:
+  // 실패를 삼키면 고친 Extra 가 빠진 글을 남기고 '옮겼습니다' 까지 띄웠다).
   async function flushExtra() {
-    if (!active()) return;
+    if (!active()) return true;
     const text = extraEl.value;
-    if (text === String(snap?.state?.extra || '')) return;
-    try { receive(await edit('/draft/extra', { text })); }
-    catch (error) { showToast(error.message || 'Extra 를 저장하지 못했습니다', 'error'); }
+    if (text === String(snap?.state?.extra || '')) return true;
+    try { receive(await edit('/draft/extra', { text })); return true; }
+    catch (error) { showToast(error.message || 'Extra 를 저장하지 못했습니다', 'error'); return false; }
   }
   extraEl.addEventListener('blur', () => { void flushExtra(); });
   extraEl.addEventListener('animationend', () => extraEl.classList.remove('is-flash'));

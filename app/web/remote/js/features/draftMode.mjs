@@ -145,6 +145,7 @@ export function initDraftMode({
   board.innerHTML = `
     <div class="dr-band dr-band--pre"><span class="dr-band-name">prefix</span>
       <textarea class="dr-band-text" data-dr-pe="pre_prompt" rows="1" spellcheck="false" aria-label="Prefix Prompt"></textarea></div>
+    <div class="dr-sum" data-dr-sum></div>
     <div class="dr-zone" data-dr-zone="include">
       <div class="dr-zh"><span class="dr-zt">포함</span></div>
       <div class="dr-chips" data-dr-chips="include"></div>
@@ -153,7 +154,6 @@ export function initDraftMode({
       <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span></div>
       <div class="dr-chips" data-dr-chips="exclude"></div>
     </div>
-    <div class="dr-sum" data-dr-sum></div>
     <div class="dr-zone dr-zone--extra">
       <div class="dr-zh"><span class="dr-zt">Extra</span></div>
       <textarea class="dr-extra-text" data-dr-extra rows="2" maxlength="2000" spellcheck="false" aria-label="Extra Prompt"
@@ -312,7 +312,8 @@ export function initDraftMode({
     sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}
       <span class="dr-gap"></span>
       ${drawnBtn}
-      <button type="button" class="dr-btn" data-dr-stage title="지금 칩 조건을 스테이징 줄 하나로 보냅니다">스테이징으로 보내기</button>
+      <button type="button" class="dr-btn dr-btn--icon" data-dr-stage title="스테이징으로 보내기 - 지금 칩 조건을 스테이징 줄 하나로"
+        aria-label="스테이징으로 보내기">&rarr;</button>
       <button type="button" class="dr-btn" data-dr-from title="S 창을 엽니다 - 줄의 [드래프트로 불러오기]">불러오기</button>`;
   }
   function paintBands() {

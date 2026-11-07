@@ -34064,11 +34064,16 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 7px 12px;
+  /* 한 줄(사용자 11-07) - 좁으면 등급 글자가 줄임표로 줄어든다 */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  padding: 6px 12px;
   border-top: 1px solid rgba(232,232,240,0.08);
   font-size: 11.5px;
 }
+.dr-sum .dr-rating { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dr-sum .dr-btn { flex: none; }
+.dr-btn--icon { padding: 3px 8px; font-size: 12px; line-height: 1; }
 .dr-big { font-size: 13px; font-weight: 600; color: #9d8bff; font-family: var(--font-mono); }
 .dr-rating { font-family: var(--font-mono); font-size: 10.5px; color: #c9a227; }
 .dr-gap { flex: 1; }
@@ -34082,8 +34087,18 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   cursor: pointer;
 }
 .dr-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-.dr-zone--extra { flex: 1 0 auto; }
-.dr-extra-text { min-height: 34px; }
+/* 칸 나누기(사용자 11-07): 포함 · 제외가 남는 높이를 2:1 로 나눠 갖고, Extra 는 두 줄 남짓으로 줄인다. */
+.dr-zone[data-dr-zone="include"] { flex: 2 1 auto; min-height: 84px; }
+.dr-zone[data-dr-zone="exclude"] { flex: 1 1 auto; min-height: 56px; }
+.dr-zone--extra { flex: none; }
+.dr-extra-text { min-height: 34px; max-height: 52px; }
+/* 칸 색(사용자 11-07 - 눈으로 바로 가르게): 칸 위 곧은 색 줄 + 제목 같은 색. 포함 초록 · 제외 빨강 · Extra 파랑. */
+.dr-zone[data-dr-zone="include"] { border-top: 2px solid rgba(63,182,139,0.75); }
+.dr-zone[data-dr-zone="exclude"] { border-top: 2px solid rgba(224,85,97,0.75); }
+.dr-zone--extra { border-top: 2px solid rgba(90,169,230,0.75); }
+.dr-zone[data-dr-zone="include"] .dr-zt { color: #6fd3ad; }
+.dr-zone[data-dr-zone="exclude"] .dr-zt { color: #f08a94; }
+.dr-zone--extra .dr-zt { color: #8cc4ef; }
 .dr-extra-text.is-flash { animation: dr-flash 0.9s ease; }
 @keyframes dr-flash {
   0% { background: rgba(124,106,239,0.30); }

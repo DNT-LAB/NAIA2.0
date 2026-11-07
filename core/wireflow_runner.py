@@ -23,10 +23,6 @@
   옛 저장본의 target · scope 값은 남아 있어도 읽지 않는다.
 - 인스턴트 와일드카드 = 노드 안 글칸(워크플로우와 함께 저장 · 와일드카드 폴더엔 파일 없음)에서 한 줄.
   줄 문법은 와일드카드 파일과 같다(`#` 주석 · `30:줄` 가중치 · 줄 안의 `__x__` `<a|b>` 도 전개).
-- 이벤트 맵 쿼리 = 이벤트 맵 색인에서 **게시물 하나**(기본 1인)를 골라 그 게시물의 한 갈래 태그만(사용자 2026-11-01 -
-  1차 목표 = 개인용 의상 · "행동만 받는다던지" -> 의상 · 행동 · 자세 · 표정 · 장소 · 구도·조명 · 성행위).
-  조건 태그(`1girl, maid` · `-apron` = 빼기 · `@이름` = 뽑기/변수)가 달린 게시물만 본다. 등급은 고른 값 또는 변수
-  (`rating` = sensitive -> S). 결과는 변수(+ 같은 이름 뽑기 · 비우면 갈래 이름)에 담고, 고르면 줄기 앞/뒤에도 넣는다. 색인이 없으면 그대로 지나간다.
 - Final Prompt = 끝 노드. 지금 PE 의 선행/후행 고정을 붙여 **메인 프롬프트를 대치**한다(사용자 결정 2026-10-31).
   ⚠️ 생성 연결 때 계약: Final 이 닿은 실행이면 PE 훅은 선행/후행을 **붙이지 않는다**(두 번 붙음) -
      결과의 `final.replaces_main` 이 그 표식이다. Final 이 없으면 지금처럼 PE 가 붙인다.
@@ -438,8 +434,6 @@ class WireFlowTestRun:
             self.captures[name] = list(tags)
             self.last_roll = tags
             return "out", f"{name} = {self.vars[name] or '(빈 값)'} · {len(lines)}줄 중{lack}", tags
-        if kind == "event_map_query":
-            return self._event_map_query(p)
         if kind == "instant_wildcard":
             lines = instant_lines(p.get("lines"))
             if not lines:
@@ -469,80 +463,6 @@ class WireFlowTestRun:
             self.final = {"node": node["id"], "pre": pre, "post": post}
             return None, f"PE 선행 {len(pre)} · 후행 {len(post)} 붙임 → 메인 프롬프트 대치", None
         return None, "모르는 노드", None
-
-    def _query_terms(self, text: Any) -> tuple[list[str], list[str], list[str]]:
-        """조건 칸 -> (조건 태그, 빼기 태그, 못 찾은 것). `-x` = 빼기 · `@이름` = 앞의 뽑기(변수 뽑기 · 쿼리 결과 포함)."""
-        pins: list[str] = []
-        exclude: list[str] = []
-        missing: list[str] = []
-        for tag in split_tags(text):
-            neg = tag.startswith("-")
-            body = tag[1:].strip() if neg else tag
-            if body.startswith("@"):
-                name = body[1:].strip()
-                if name in self.captures:
-                    got = list(self.captures[name])
-                else:
-                    missing.append(tag)
-                    continue
-            else:
-                got = [body] if body else []
-            (exclude if neg else pins).extend(got)
-        return pins, exclude, missing
-
-    def _query_ratings(self, p: dict[str, Any]) -> tuple[list[str], str]:
-        """등급 글자 목록(빈 것 = 전체) + Probe 에 적을 출처. 변수가 있으면 변수를 따른다."""
-        name = str(p.get("rating_var") or "").strip()
-        if name:
-            if name not in self.vars:
-                return _rating_letters(p.get("ratings")), f"{name} 없음 → 고른 등급"
-            letters = _rating_letters(_fmt(self.vars[name]), words=True)
-            if letters:
-                return letters, f"{name}({_fmt(self.vars[name])})"
-            return _rating_letters(p.get("ratings")), f"{name}({_fmt(self.vars[name])}) 모르는 값 → 고른 등급"
-        return _rating_letters(p.get("ratings")), ""
-
-    def _event_map_query(self, p: dict[str, Any]) -> tuple[str | None, str, list[str] | None]:
-        from core.event_map.random_link import ensure_event_map_service
-        from core.event_map.service import MapQueryError
-
-        pins, exclude, missing = self._query_terms(p.get("pins"))
-        ratings, rating_from = self._query_ratings(p)
-        from core.event_map.post_pick import CATEGORIES
-
-        kind = str(p.get("what") or "attire")
-        if kind not in CATEGORIES:
-            return "out", f"모르는 갈래: {kind}", None
-        try:
-            result = ensure_event_map_service(self.app_context).pick_from_post(
-                kind=kind, solo=str(p.get("who") or "solo") != "any", pins=pins, exclude=exclude, ratings=ratings,
-                keep_series=str(p.get("series") or "drop") == "keep")
-        except MapQueryError as exc:
-            if exc.code == "unavailable":
-                return "out", "이벤트 맵 색인이 없습니다 - 그대로 지나감", None
-            return "out", f"이벤트 맵: {exc.message}", None
-        head = " · ".join(filter(None, [
-            ", ".join(pins) or "조건 없음", f"빼기 {', '.join(exclude)}" if exclude else "",
-            f"등급 {'·'.join(r.upper() for r in ratings) or '전체'}" + (f" ← {rating_from}" if rating_from else "")]))
-        lack = f" · 못 찾음: {', '.join(missing)}" if missing else ""
-        if result.get("status") == "unknown_tag":
-            return "out", f"{head} → 맵에 없는 태그: {', '.join(result.get('unknown') or [])}{lack}", None
-        tags = list(result.get("tags") or [])
-        if not tags:
-            return "out", f"{head} → 맞는 게시물 없음{lack}", None
-        name = str(p.get("name") or "").strip() or CATEGORIES[kind][0]
-        if name:
-            self.vars[name] = ", ".join(tags)
-            self.captures[name] = list(tags)
-        self.last_roll = tags
-        pos = str(p.get("pos") or "back")
-        if pos in ("front", "back"):
-            (self._add_front if pos == "front" else self._add)(self.stream, tags)
-        where = {"front": f" · {_area_name(self.stream)} 앞에", "back": f" · {_area_name(self.stream)} 뒤에"}.get(pos, "")
-        thin = " · 태그가 적은 게시물뿐" if result.get("status") == "thin" else ""
-        found = f"게시물 {int(result.get('observed_posts') or 0):,}장 중 1장"
-        return "out", (f"{head} → {name} = {', '.join(tags)} · {found}"
-                       f"{where}{thin}{lack}"), tags
 
     def _starts(self) -> list[dict[str, Any]]:
         starts = [n for n in self.graph["nodes"] if not NODE_PORTS[n["type"]][0]]
@@ -618,22 +538,6 @@ def _exactify(expr: str) -> str:
     if not expr or expr[0] in "*~!%(":
         return expr
     return f"*{expr}"
-
-
-_RATING_WORDS = {"general": "g", "sensitive": "s", "questionable": "q", "explicit": "e"}
-
-
-def _rating_letters(value: Any, words: bool = False) -> list[str]:
-    """'gs' -> [g, s] · words=True 면 변수 값(`sensitive` · `g, q`)도 읽는다. 빈 것 = 전체."""
-    text = str(value or "").strip().lower()
-    if words:
-        out = []
-        for part in split_tags(text):
-            letter = _RATING_WORDS.get(part, part if part in ("g", "s", "q", "e") else "")
-            if letter and letter not in out:
-                out.append(letter)
-        return out
-    return [c for c in "gsqe" if c in text]
 
 
 def _area_name(area: str) -> str:

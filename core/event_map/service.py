@@ -1047,35 +1047,6 @@ class EventMapService:
         result["ok"] = True
         return result
 
-    def pick_from_post(self, *, kind: str = "attire", solo: bool = True, pins: Any = None, exclude: Any = None,
-                       ratings: Any = None, seed: Any = None, keep_series: bool = False) -> dict[str, Any]:
-        """게시물 하나에서 한 갈래(의상 · 행동 …)의 태그(`core.event_map.post_pick`). Wire-Flow 이벤트 맵 쿼리가 쓴다.
-
-        solo = 1인 게시물만(1인 분면이 색인에 없으면 빈 결과). 영구 제외(Search 의 붉은 줄)를 건다 - 이벤트 맵 랜덤과 같다.
-        같은 설정이면 후보 풀은 색인 캐시에서 온다(`EventMapIndex._candidate_pool`) - 뽑기는 매번 새로.
-        """
-        from core.event_map.post_pick import CATEGORIES, SOLO_PERSONS, pick_from_post
-        if kind not in CATEGORIES:
-            raise MapQueryError("bad_request", "모르는 갈래다: %s" % kind)
-        idx = self.index()
-        wanted = self._tags(pins, cap=MAX_PINS, what="조건 태그", code="too_many_pins")
-        excluded = self._tags(exclude, cap=MAX_EXCLUDE, what="빼기 태그", code="too_many_exclude")
-        want_r, _ = self._filters(idx, ratings, None)
-        persons = None
-        if solo:
-            known = {name[2:] for name in idx.partitions}
-            persons = [p for p in SOLO_PERSONS if p in known]
-            if not persons:
-                return {"ok": True, "kind": kind, "status": "no_match", "tags": [], "observed_posts": 0, "unknown": []}
-        try:
-            seed_value = int(seed) if seed not in (None, "") else None
-        except (TypeError, ValueError):
-            seed_value = None
-        result = pick_from_post(idx, kind=kind, persons=persons, pins=wanted, exclude=excluded, ratings=want_r,
-                                seed=seed_value, keep_series=bool(keep_series), block=self.permanent_block(idx))
-        result["ok"] = True
-        return result
-
     def drill(self, *, candidates: Any, exclude: Any = None, ratings: Any = None,
               persons: Any = None, min_posts: Any = 20) -> dict[str, Any]:
         """후보를 순서대로 꽂아 풀을 좁힌다(풀이 ``min_posts`` 밑이면 그 후보는 건너뜀). Assist v2 용."""

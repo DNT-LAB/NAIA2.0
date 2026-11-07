@@ -3300,7 +3300,7 @@ const conditionalPromptPanelReady = import('./js/features/conditionalPromptPanel
   .catch(error => {
     console.error('Failed to initialize conditional prompt panel module', error);
   });
-const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20260607-stvibe-halve1')
+const eventStreamPanelReady = import('./js/features/eventStreamPanel.mjs?v=20261107-acsearch1')
   .then(({createEventStreamPanel}) => {
     eventStreamPanel = createEventStreamPanel({
       document,
@@ -16004,7 +16004,7 @@ $('acTouchPlacement')?.addEventListener('click', event => {
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-acset2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-acset3')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

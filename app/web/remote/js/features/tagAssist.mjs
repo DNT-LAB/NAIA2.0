@@ -4049,6 +4049,9 @@ export function createTagAssistController({
       }
     });
     textarea.addEventListener('focus', () => {
+      // 앞 칸의 후보 목록이 떠 있으면 바로 닫는다 - 그 후보는 앞 칸 것이다. blur 의 200ms 정리를 기다리면 그 사이 Enter 가
+      // 검색칸의 후보를 (자동완성을 끈) 프롬프트 칸에 넣었다(Codex 재리뷰 F3). 슬래시 목록은 제 입력칸이 따로 있어 제외.
+      if (acMode && acTarget && acTarget !== textarea && !slashEntry) hideAutocomplete();
       acTarget = textarea;
       if (!acMode && !openPresetAutocompleteAtCursor(textarea)) checkTagHint();
     });
@@ -4088,6 +4091,8 @@ export function createTagAssistController({
       if (imeState.composing || e.isComposing || e.keyCode === 229) return;
       if (textarea === promptEdit && maybeOpenSlashEntryOnKey(textarea, e)) return;
       if (!acMode || !acResults.length) return;
+      // 이 칸이 자동완성을 끈 칸이면 남은 목록을 고르지 않는다(위 focus 정리의 안전망).
+      if (!slashEntry && !autocompleteOn(textarea)) { hideAutocomplete(); return; }
       // ⚠️ **Ctrl/⌘ + Enter 는 자동완성보다 세다**(사용자 지정 2026-09-01).
       //    아래 Enter 가지가 `preventDefault + stopPropagation` 을 걸어 전역
       //    Ctrl+Enter(=생성)를 삼키고 있었다 - 태그를 치다 생성하려고 누르면
@@ -4188,9 +4193,10 @@ export function createTagAssistController({
     window.clearTimeout(tagLookupTimer);
     stopAutocompletePendingRetry();
     clearAutocompleteTranslationTimer();
-    const readOnlyCard = tagLookupReadOnly && !acMode && tagTooltip.classList.contains('open');
-    if (!slashEntry && !readOnlyCard) hideAutocomplete();
-    if (!readOnlyCard) lastLookupTag = '';
+    if (!slashEntry) hideAutocomplete();
+    // 생성 정보에서 연 명시적 조회(읽기 전용 · promptInfoTooltip)는 끄기와 상관없다 - 응답을 기다리는 중이어도
+    // 조회 표식을 지우지 않는다. 지우면 답이 태그 대조에서 떨어져 'loading...' 만 남았다(Codex 재리뷰 F1).
+    if (!tagLookupReadOnly) lastLookupTag = '';
   }
 
   return {

@@ -430,7 +430,8 @@ export function createEventStreamPanel({
 
   function afterRender() {
     moduleBody?.querySelectorAll('.story-step-include, .story-step-exclude').forEach(el => {
-      try { bindAssist(el); } catch { /* autocomplete is optional */ }
+      // 포함 · 제외 = 검색 결과 행을 거르는 조건 - 설정의 [태그 자동완성 끄기] 에서 뺀다(searchField).
+      try { bindAssist(el, {searchField: true}); } catch { /* autocomplete is optional */ }
     });
   }
 

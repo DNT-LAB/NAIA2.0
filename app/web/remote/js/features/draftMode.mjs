@@ -160,7 +160,7 @@ export function initDraftMode({
     <div class="dr-zone dr-zone--extra">
       <div class="dr-zh"><span class="dr-zt">Extra</span></div>
       <textarea class="dr-extra-text" data-dr-extra rows="2" maxlength="2000" spellcheck="false" aria-label="Extra Prompt"
-        placeholder="이벤트 맵과 상관없는 태그 · 와일드카드 - 예: 1.2::artist:kim eb ::, __season__"></textarea>
+        placeholder="고정적으로 추가하고 싶은 태그를 자유롭게 작성합니다."></textarea>
     </div>
     <div class="dr-band dr-band--post"><span class="dr-band-name">postfix</span>
       <textarea class="dr-band-text" data-dr-pe="post_prompt" rows="1" spellcheck="false" aria-label="Postfix Prompt"></textarea></div>

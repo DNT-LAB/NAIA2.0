@@ -6,7 +6,7 @@
 <title>NAIA Remote</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=20261107-acset1">
+<link rel="stylesheet" href="style.css?v=20261107-guide-buttons1">
 <script>
 // 텍스트 입력창 폰트(--font-editor) 를 첫 페인트 전에 복원한다. 이 스크립트가 없으면
 // 저장된 폰트가 모듈 로드 후에야 적용돼 화면이 한 번 튄다.
@@ -940,7 +940,8 @@
       <span class="boot-indicator-text" id="bootIndicatorText">Connecting…</span>
       <div class="boot-indicator-bar"><div class="boot-indicator-bar-fill" id="bootIndicatorBarFill"></div></div>
     </div>
-    <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저에서 열기...</button>
+    <a class="open-browser-btn guide-viewer-btn" href="/guides/" data-open-external="1" target="_blank" rel="noopener noreferrer" title="NAIA 가이드 열기">가이드</a>
+    <button class="open-browser-btn" type="button" onclick="openInSystemBrowser()" title="기본 브라우저에서 열기">브라우저</button>
   </div>
 
   <div class="right-tab-pane active" id="rightTabResult" data-right-pane="result" role="tabpanel">

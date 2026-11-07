@@ -1,0 +1,35 @@
+@import url("fonts.css?v=1");
+/* Reading style for existing guides inside the viewer; standalone pages retain their style. */
+:root {
+  --bg: #fff; --panel: #fff; --panel-2: #f5f5f5;
+  --line: #e3e3e3; --line-strong: #ccc;
+  --text: #242424; --muted: #444; --dim: #666;
+  --accent: #333; --accent-2: #444; --good: #285738;
+  --warn: #775615; --bad: #8b3434; --shadow: transparent;
+  font-family: "NAIA Guide Pretendard", sans-serif;
+}
+html { overflow: hidden; }
+body { background: #fff; min-height: 0; display: flow-root; }
+.page { max-width: none; margin: 0; padding: 0; }
+.hero { background: none; border: 0; border-radius: 0; padding: 0 0 20px; box-shadow: none; }
+.hero h1, .hero .eyebrow { display: none; }
+.lead, p, ul, .step p { color: #333; font-size: 16px; line-height: 1.85; }
+.btn, .btn.primary { background: transparent; color: #333; border: 0; border-radius: 0; padding: 0; text-decoration: underline; text-underline-offset: 4px; box-shadow: none; }
+.actions { gap: 20px; }
+section.block, .step, .final { background: none; border: 0; border-radius: 0; box-shadow: none; padding: 24px 0; margin: 0; border-top: 1px solid #e5e5e5; }
+.steps { gap: 0; }
+.step { display: block; }
+.step-copy { padding: 0; }
+.step-num { background: none; color: #666; border: 0; width: auto; height: auto; display: block; margin-bottom: 8px; }
+h2 { font-size: 21px; color: #242424; }
+.notice, .callout, .callout.warn, .callout.good { background: #f5f5f5; border: 0; border-left: 2px solid #bbb; border-radius: 0; color: #333; padding: 16px 20px; }
+.notice strong, .callout.warn strong, .callout.good strong { color: #333; }
+.image-wrap { margin: 20px 0 0; padding: 0; background: none; border: 0; border-radius: 0; }
+.image-wrap img { max-width: 100%; height: auto; }
+.toc { background: none; border: 0; padding: 0 0 20px; }
+.toc a { background: none; border: 0; border-radius: 0; text-decoration: underline; color: #444; }
+.shape, .pair > div, .pair .bad, .pair .ok, .tags { background: #f5f5f5; border: 0; border-radius: 0; color: #333; }
+code { color: #333; background: #f2f2f2; border-color: #ddd; }
+th { background: #f5f5f5; color: #333; }
+th, td { border-color: #ddd; }
+.footer { color: #777; }

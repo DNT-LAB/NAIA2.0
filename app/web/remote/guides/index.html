@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NAIA Guide</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="viewer.css?v=3">
+  <script src="viewer.js?v=3" defer></script>
+</head>
+<body>
+  <a class="skip" href="#reader">본문으로 이동</a>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="#welcome">NAIA 가이드</a>
+    <div class="search-box"><label for="search">문서 찾기</label><input id="search" type="search" placeholder="제목 또는 키워드 검색" autocomplete="off"></div>
+    <nav id="navigation" aria-label="가이드 목차"></nav>
+    <p id="empty" role="status" hidden>일치하는 문서가 없습니다.</p>
+  </aside>
+  <main id="reader" tabindex="-1">
+    <header class="reader-bar"><button id="menu" aria-controls="sidebar" aria-expanded="false" aria-label="목차 열기">☰</button><span id="breadcrumb">가이드 / 시작하기</span><a id="original" hidden target="_blank" rel="noopener">별도 페이지 ↗</a></header>
+    <div class="document-heading"><h1 id="title">가이드 소개</h1><p id="summary" hidden></p></div>
+    <article id="article" aria-label="가이드 본문">
+      <p>NAIA의 설정과 사용 방법을 정리한 문서입니다. 왼쪽 목차에서 읽을 문서를 선택할 수 있습니다.</p>
+      <h2>시작하기</h2>
+      <ul><li><a href="#novelai-token">NovelAI 토큰 발급</a> — 토큰을 발급하고 NAIA에 연결하는 방법</li></ul>
+      <h2>프롬프트</h2>
+      <ul><li><a href="#conditional-prompt">조건부 프롬프트</a> — 조건에 따라 프롬프트를 구성하는 방법</li></ul>
+    </article>
+    <div id="embedded" hidden><p id="loadStatus" role="status"></p><iframe id="documentFrame" title="가이드 문서" hidden></iframe></div>
+    <nav class="page-navigation" aria-label="문서 순서"><a id="previous" hidden></a><a id="next" hidden></a></nav>
+  </main>
+</body>
+</html>

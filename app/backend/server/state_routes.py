@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -40,14 +41,21 @@ def register_state_routes(
     @app.post("/api/session/prepare-shutdown")
     async def api_session_prepare_shutdown():
         """종료 전 저장(사용자 2026-10-18): Electron 이 백엔드를 강제로 끄기(taskkill /F) **전에** 부르고 답을 기다린다.
-        지금은 Tag Filter 이어 하기 색인(core/tag_filter_remaining)만 쓴다. 실패해도 종료는 막지 않는다."""
+        Tag Filter 이어 하기 색인(core/tag_filter_remaining)을 쓰고, 같은 때에 AI 모델 엔진(llama-server)을 정리한다 —
+        새로 올리기를 막고 도는 요청을 최대 5초 기다린 뒤 내린다(Electron 은 8초 기다린다). 실패해도 종료는 막지 않는다."""
+        from app.backend.server.boost_v2_service import shutdown_boost_runtime
         from core.tag_filter_remaining import save_remaining
 
-        try:
-            remaining = await run_in_thread(save_remaining, session_context)
-        except Exception as exc:
-            return {"ok": False, "error": ascii(str(exc))}
-        return {"ok": True, "tag_filter_remaining": remaining}
+        remaining, llm = await asyncio.gather(
+            run_in_thread(save_remaining, session_context),
+            run_in_thread(shutdown_boost_runtime, session_context, 5.0),
+            return_exceptions=True,
+        )
+        if isinstance(llm, BaseException):
+            llm = {"error": ascii(str(llm))}
+        if isinstance(remaining, BaseException):
+            return {"ok": False, "error": ascii(str(remaining)), "llm": llm}
+        return {"ok": True, "tag_filter_remaining": remaining, "llm": llm}
 
     @app.get("/api/queue/state")
     async def api_queue_state():

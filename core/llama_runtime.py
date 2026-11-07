@@ -19,6 +19,9 @@ GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외�
   확실한 중단이다. 다음 요청이 다시 올린다.
 - 유휴 ``idle_seconds`` 가 지나면 내려서 RAM(약 1.3~2.5 GiB)을 돌려준다.
 - Windows 에선 Job Object(KILL_ON_JOB_CLOSE)에 넣어 백엔드가 강제 종료돼도 고아가 남지 않게 한다.
+- 앱 종료 직전(``shutdown``)에는 새로 올리기를 막고 도는 요청을 잠시 기다린 뒤 내린다. 엔진을 내릴 때마다 이유 ·
+  장치 · 결과를 엔진 로그에 한 줄 남긴다(11-07 '부스트를 끄거나 앱을 닫으면 블루스크린' 제보 — 원인 미확정, 다음 제보의
+  판단 근거). 프롬프트 내용은 적지 않는다.
 """
 
 from __future__ import annotations
@@ -181,6 +184,7 @@ class LlamaServerRuntime:
         self._unload_gen = 0                   # 내림 타이머 세대 — 이미 불리기 시작한 낡은 타이머가 새 유예를 무시하지 않게
         # 요청 하나가 모델을 여러 번 부른다(Assist 4~8번 — 사이에 한국어 층 · 이벤트 맵) — 마지막 부름 뒤 이만큼 조용하면 내린다
         self.unload_grace_seconds = 3.0
+        self._shutting_down = False            # 앱 종료 중 — 엔진을 다시 올리지 않는다(shutdown)
 
     # ── 구성·상태 ──────────────────────────────────────────────────────────
 
@@ -226,7 +230,7 @@ class LlamaServerRuntime:
             return False  # 요청이 도는 중 — 끝나고 바꾼다
         try:
             if self.is_stale():
-                self.stop()
+                self.stop(reason="stale")
                 return True
             return False
         finally:
@@ -287,20 +291,28 @@ class LlamaServerRuntime:
 
     # ── 수명 ─────────────────────────────────────────────────────────────
 
-    def stop(self) -> None:
+    def stop(self, reason: str = "") -> None:
+        """엔진을 내린다. 떠 있던 프로세스가 있으면 이유 · 장치 · 결과를 엔진 로그에 한 줄 남긴다."""
         with self._proc_lock:
             self._cancel_idle_timer()
             proc, self._proc = self._proc, None
+            note: dict[str, Any] | None = None
             if proc is not None and proc.poll() is None:
+                started = time.monotonic()
+                note = {"pid": proc.pid, "gpu": self.effective_gpu, "device": self.device or "auto",
+                        "method": "terminate"}
                 proc.terminate()
                 try:
                     proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
+                    note["method"] = "terminate+kill"
                     proc.kill()
                     try:
                         proc.wait(timeout=3)
                     except subprocess.TimeoutExpired:
-                        pass
+                        note["method"] = "terminate+kill(not-exited)"
+                note["exit"] = proc.poll()
+                note["seconds"] = round(time.monotonic() - started, 2)
             _close_job(self._job)
             self._job = None
             self._port = None
@@ -311,6 +323,58 @@ class LlamaServerRuntime:
                 except Exception:
                     pass
                 self._log_file = None
+            if note is not None:
+                self._log_event(
+                    f"engine stop reason={reason or 'unknown'} pid={note['pid']} gpu={note['gpu']} "
+                    f"device={note['device']} engine={self._engine_label()} method={note['method']} "
+                    f"exit={note['exit']} seconds={note['seconds']}")
+
+    def _engine_label(self) -> str:
+        if not self.managed_engine:
+            return "custom"
+        try:
+            from core.llama_engine_install import ENGINE_VERSION
+
+            return ENGINE_VERSION
+        except Exception:
+            return "managed"
+
+    def _log_event(self, line: str) -> None:
+        """엔진 로그(boost_llama_server.log)에 NAIA 쪽 한 줄을 덧붙인다. 엔진 핸들을 닫은 뒤에 부른다. 실패는 조용히."""
+        if self.log_path is None:
+            return
+        try:
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.log_path.open("a", encoding="utf-8") as fh:
+                fh.write(f"[naia {time.strftime('%Y-%m-%d %H:%M:%S')}] {line}\n")
+        except Exception:
+            pass
+
+    def shutdown(self, timeout: float = 5.0) -> dict[str, Any]:
+        """앱 종료 직전(Electron prepare-shutdown) — 다시 올리기(요청 · 예열 · CPU 재시도)를 막고, 도는 요청을
+        ``timeout`` 까지 기다린 뒤 내린다. 기다림이 끝나지 않으면 그대로 내린다 — 곧 백엔드가 강제로 꺼지므로 더 미룰 수
+        없다(그때는 요청 도중일 수 있다). 결과는 엔진 로그에도 남긴다."""
+        started = time.monotonic()
+        with self._proc_lock:
+            self._shutting_down = True
+            self._cancel_idle_timer()
+            for timer in (self._lease_timer, self._unload_timer):
+                if timer is not None:
+                    timer.cancel()
+            self._lease_timer = self._unload_timer = None
+            running = self._proc is not None and self._proc.poll() is None
+            busy = self._slot.locked()
+        got = self._slot.acquire(timeout=max(0.0, float(timeout)))
+        waited = round(time.monotonic() - started, 2)
+        try:
+            self.stop(reason="app_exit" if got else "app_exit_after_wait_timeout")
+        finally:
+            if got:
+                self._slot.release()
+        result = {"was_running": running, "busy": busy, "waited": waited, "wait_timed_out": not got}
+        if running or busy:
+            self._log_event(f"app shutdown was_running={running} busy={busy} waited={waited} wait_timed_out={not got}")
+        return result
 
     def _cancel_idle_timer(self) -> None:
         timer, self._idle_timer = self._idle_timer, None
@@ -335,7 +399,7 @@ class LlamaServerRuntime:
         try:
             with self._proc_lock:
                 if generation == self._generation:
-                    self.stop()
+                    self.stop(reason="idle")
         finally:
             self._slot.release()
 
@@ -366,7 +430,9 @@ class LlamaServerRuntime:
             if (self._proc is not None and self._proc.poll() is None and self._port
                     and self._running_key == self._desired_key()):
                 return self._port
-            self.stop()
+            if self._shutting_down:
+                raise LlamaRuntimeError("앱 종료 중 — 엔진을 올리지 않습니다.")
+            self.stop(reason="relaunch")
             if not self.engine_path or not self.engine_path.is_file():
                 raise LlamaRuntimeError(f"llama-server 엔진이 없습니다: {self.engine_path or '(경로 미지정)'}")
             if not self.model_path or not self.model_path.is_file():
@@ -403,10 +469,10 @@ class LlamaServerRuntime:
         # 준비 대기는 락 밖에서(stop 이 끼어들 수 있게). /health 200 전엔 요청을 보내지 않는다.
         while True:
             if proc.poll() is not None:
-                self.stop()
+                self.stop(reason="start_exited")
                 raise LlamaStartError("엔진이 시작 중 종료됨(엔진 로그 확인)")
             if time.monotonic() >= deadline:
-                self.stop()
+                self.stop(reason="start_timeout")
                 raise LlamaStartError("엔진 준비 시간 초과")
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
@@ -430,14 +496,14 @@ class LlamaServerRuntime:
         Auto Boost 를 꺼도 Assist 가 방금 썼다면 엔진은 남는다 — 그 임대가 끝나면 타이머가 내린다."""
         with self._proc_lock:
             self._leases.pop(owner, None)
-        return self._stop_if_unleased()
+        return self._stop_if_unleased(reason=f"release:{owner}")
 
     def leased(self) -> bool:
         now = time.monotonic()
         with self._proc_lock:
             return any(expiry > now for expiry in self._leases.values())
 
-    def _stop_if_unleased(self) -> bool:
+    def _stop_if_unleased(self, reason: str = "lease_expired") -> bool:
         if self.leased():
             self._arm_lease_timer()
             return False
@@ -447,7 +513,7 @@ class LlamaServerRuntime:
         try:
             if self.leased() or not self.is_running():
                 return False
-            self.stop()
+            self.stop(reason=reason)
             return True
         finally:
             self._slot.release()
@@ -466,7 +532,7 @@ class LlamaServerRuntime:
         try:
             self._unload_pending = False
             was = self.is_running()
-            self.stop()
+            self.stop(reason="unload")
             return was
         finally:
             self._slot.release()
@@ -510,7 +576,7 @@ class LlamaServerRuntime:
                 for owner in [o for o, expiry in self._leases.items() if expiry != math.inf]:
                     self._leases.pop(owner, None)
                 self._unload_pending = False
-            self.stop()
+            self.stop(reason="unload")
         finally:
             self._slot.release()
 
@@ -601,7 +667,7 @@ class LlamaServerRuntime:
                     if isinstance(getattr(exc, "reason", None), (TimeoutError, socket.timeout)):
                         raise TimeoutError from exc
                     crashed_on_gpu = self.effective_gpu
-                    self.stop()
+                    self.stop(reason="connection_lost")
                     if crashed_on_gpu and attempt == 0:
                         self.gpu_failed = f"{self.device or 'GPU'} 에서 엔진이 멈춤 — {exc}"
                         deadline = max(deadline, time.monotonic() + 30.0)
@@ -628,7 +694,7 @@ class LlamaServerRuntime:
                 }
             return {"ok": False, "error": "llama-server 통신 실패", "elapsed": round(time.monotonic() - started, 2)}
         except (TimeoutError, socket.timeout):
-            self.stop()  # 요청 단위 취소가 없다 — 내려야 다음 요청이 막히지 않는다.
+            self.stop(reason="request_timeout")  # 요청 단위 취소가 없다 — 내려야 다음 요청이 막히지 않는다.
             return {"ok": False, "error": f"{timeout:.0f}초 제한시간 초과", "elapsed": round(time.monotonic() - started, 2)}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "elapsed": round(time.monotonic() - started, 2)}

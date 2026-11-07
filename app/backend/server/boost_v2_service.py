@@ -314,6 +314,18 @@ def release_boost_runtime(context: Any) -> None:
             pass
 
 
+def shutdown_boost_runtime(context: Any, timeout: float = 5.0) -> dict[str, Any] | None:
+    """앱 종료 직전 — 엔진을 다시 못 올리게 하고, 도는 요청을 잠시 기다린 뒤 내린다(core/llama_runtime.shutdown).
+    엔진을 한 번도 안 만들었으면 None."""
+    runtime = getattr(context, "boost_llama_runtime", None)
+    if runtime is None:
+        return None
+    try:
+        return runtime.shutdown(timeout)
+    except Exception as exc:
+        return {"error": ascii(str(exc))}
+
+
 def stop_boost_runtime(context: Any) -> dict[str, Any]:
     """[엔진 내리기] · [VRAM 회수] — 누가 쥐고 있든 내린다(다음 요청이 다시 올린다). 도는 요청은 끊지 않고 끝난 뒤
     (core/llama_runtime.unload — 곧바로 stop() 하던 때는 도는 요청이 CPU 로 다시 떴다)."""

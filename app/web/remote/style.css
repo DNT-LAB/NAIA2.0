@@ -34198,8 +34198,9 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .drw-foot {
   position: sticky;
   bottom: -10px;
-  margin: 0 -10px -10px;
-  padding: 8px 10px 10px;
+  /* 늘 창 맨 아래(사용자 지시 11-07) - 글이 짧아도 위로 붙지 않는다. 아래 여백 18px = 크기 손잡이(16px)와 안 겹치게 */
+  margin: auto -10px -10px;
+  padding: 8px 10px 18px;
   display: flex;
   justify-content: flex-end;
   background: rgba(22,22,34,0.94);

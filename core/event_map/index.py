@@ -14,12 +14,14 @@ returns `1girl`, `solo` and `looking at viewer` for every pin in the corpus
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 from functools import lru_cache
 import json
 from pathlib import Path
 import mmap
 import random
 import sqlite3
+import threading
 import time
 import zlib
 
@@ -82,6 +84,11 @@ def effective_min_posts(matched: int, min_posts: int) -> int:
 BODY_MAGIC = b"NAIAMAPR"
 BODY_HEADER = 24         # magic 8 + 게시물 수 8 + 오프셋 표 위치 8
 GATHER_BATCH = 250_000   # 한 번에 긁는 게시물 수. 색인 배열이 메모리를 먹지 않게 끊는다.
+# sample() 의 후보 풀(핀 ∩ 분면 − 제외 − 영구 제외 → 찾기 조건) 캐시 - 색인 하나에 하나(2026-11-01 · Codex 설계 논의).
+# Wire-Flow 이벤트 맵 쿼리는 생성마다 같은 설정으로 부른다: 풀 짓기 150~250ms 가 매번 반복됐다. 뽑기(난수)는 매번 한다.
+# 1인 G·S 풀이 33.6MiB · 전체 풀이 69.6MiB(int64) - 예산을 넘는 풀 하나는 담지 않는다.
+POOL_CACHE_BYTES = 128 << 20
+POOL_CACHE_ITEMS = 64
 
 
 def _intersect_sorted(acc: np.ndarray, arr: np.ndarray) -> np.ndarray:
@@ -172,6 +179,11 @@ class EventMapIndex:
             raise FileNotFoundError(path)
         self.path = path
         self.body_path = path
+        # 후보 풀 캐시 - 여는 중 실패해도 close() 가 비울 수 있게 로더보다 먼저(리뷰 2026-11-01).
+        self._pool_cache: OrderedDict[tuple, np.ndarray] = OrderedDict()
+        self._pool_bytes = 0
+        self._pool_lock = threading.Lock()
+        self.pool_stats = {"hits": 0, "misses": 0}
         self.db = None
         self._pack = None
         self._body_file = self._body_map = None
@@ -310,8 +322,14 @@ class EventMapIndex:
         row = self.db.execute("SELECT data FROM postings WHERE tag=?", (tid,)).fetchone()
         return row[0] if row else b""
 
+    def clear_pool_cache(self) -> None:
+        with self._pool_lock:
+            self._pool_cache.clear()
+            self._pool_bytes = 0
+
     def close(self) -> None:
         self.posting.cache_clear()
+        self.clear_pool_cache()
         # numpy 뷰가 mmap 을 붙들고 있으면 닫히지 않는다 - 먼저 놓는다.
         self.offsets = self.body = self.part_arr = self._post_index = None
         if self._pack is not None:
@@ -390,8 +408,15 @@ class EventMapIndex:
                 return acc
         if parts is not None:
             acc, owner = self._partition_of(acc)
-            acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
+            acc = acc[self._part_lut(parts)[owner]]
         return acc
+
+    @staticmethod
+    def _part_lut(parts: set[int]) -> np.ndarray:
+        """분면 번호(uint8) -> 고른 분면인가. `np.isin` 보다 빠르고 순서 · 뜻이 같다."""
+        lut = np.zeros(256, dtype=bool)
+        lut[[int(p) for p in parts]] = True
+        return lut
 
     def filter_posts(self, rids, groups) -> np.ndarray:
         """AND chip groups over gathered post bodies; never union tag postings."""
@@ -461,7 +486,7 @@ class EventMapIndex:
                 acc = part if acc.size == 0 else np.union1d(acc, part)
         if parts is not None and acc.size:
             acc, owner = self._partition_of(acc)
-            acc = acc[np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))]
+            acc = acc[self._part_lut(parts)[owner]]
         return acc
 
     def _count_tags(self, rids: np.ndarray) -> np.ndarray:
@@ -526,12 +551,44 @@ class EventMapIndex:
 
     def _live_posts(self, parts: set[int] | None) -> np.ndarray:
         """본문이 비지 않은 게시물 전부(분면을 주면 그 분면만). rid 오름차순."""
-        lengths = np.diff(self.offsets.astype(np.int64))
-        live = lengths > 0
+        live = self.offsets[1:] > self.offsets[:-1]      # 길이 > 0 (int64 로 바꿔 차분하지 않는다)
         if parts is not None:
-            owner = self.part_arr[:lengths.size]
-            live &= np.isin(owner, np.fromiter(parts, dtype=np.uint8, count=len(parts)))
+            owner = self.part_arr[:live.size]
+            live &= self._part_lut(parts)[owner]
         return np.flatnonzero(live).astype(np.int64)
+
+    def _candidate_pool(self, wanted: list[int], excluded: list[int], parts: set[int] | None,
+                        block, filters) -> np.ndarray:
+        """sample() 의 후보 풀 - 같은 열쇠면 캐시에서. 열쇠 = (핀 · 제외 tid · 분면 · 영구 제외 글 · 찾기 조건).
+
+        영구 제외는 글로 가린다: 막을 것은 `build_block(이 색인, 글)` 이 정하므로 같은 색인 · 같은 글이면 같다.
+        글이 없는 막을 것(`PermanentBlock` 이 아닌 것)이 오면 캐시를 쓰지 않는다. 색인을 닫으면 캐시도 비운다.
+        """
+        token = None if block is None else getattr(block, "text", None)
+        cacheable = block is None or isinstance(token, str)
+        key = (tuple(sorted(set(wanted))), tuple(sorted(set(excluded))),
+               None if parts is None else tuple(sorted(parts)), token,
+               json.dumps(filters, sort_keys=True, ensure_ascii=False) if filters else "")
+        if cacheable:
+            with self._pool_lock:
+                hit = self._pool_cache.get(key)
+                if hit is not None:
+                    self._pool_cache.move_to_end(key)
+                    self.pool_stats["hits"] += 1
+                    return hit
+        pool = self._matching_posts(wanted, parts) if wanted else self._live_posts(parts)
+        rids = self.filter_posts(self._unblocked(self._without(pool, excluded), block), filters)
+        if cacheable and rids.nbytes <= POOL_CACHE_BYTES:
+            with self._pool_lock:
+                self.pool_stats["misses"] += 1
+                if key not in self._pool_cache:
+                    self._pool_cache[key] = rids
+                    self._pool_bytes += rids.nbytes
+                while self._pool_cache and (self._pool_bytes > POOL_CACHE_BYTES
+                                            or len(self._pool_cache) > POOL_CACHE_ITEMS):
+                    _, old = self._pool_cache.popitem(last=False)
+                    self._pool_bytes -= old.nbytes
+        return rids
 
     @staticmethod
     def _unblocked(rids: np.ndarray, block) -> np.ndarray:
@@ -853,8 +910,7 @@ class EventMapIndex:
             out["status"] = "unknown_tag"
             return out
         parts = self._partition_filter(ratings, persons)
-        pool = self._matching_posts(wanted, parts) if wanted else self._live_posts(parts)
-        rids = self.filter_posts(self._unblocked(self._without(pool, excluded), block), filters)
+        rids = self._candidate_pool(wanted, excluded, parts, block, filters)
         out["observed_posts"] = int(rids.size)
         if rids.size == 0:
             out["status"] = "no_match"

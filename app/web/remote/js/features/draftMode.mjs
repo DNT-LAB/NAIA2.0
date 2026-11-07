@@ -296,9 +296,10 @@ export function initDraftMode({
       shownRid = drawn.rid;
       if (!drawnDismissed) openDrawnPanel();
     }
-    drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="dr-chips dr-chips--drawn">${gray.map(g =>
-      `<span class="dr-chip is-drawn${g.pe_hidden ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"
-        title="${g.dropped ? '이번만 뺀 태그 - 눌러서 다시 넣기' : (g.pe_hidden ? 'PE 필터가 지운 태그' : '뽑힌 태그 · 다음 Random 에 바뀜')}"><span class="dr-t">${esc(g.tag)}</span></span>`).join('')}</div>`;
+    // 칩이 아니라 **글**로 - 쉼표로 이은 태그 줄(사용자 지시 11-07). 낱말을 누르면 같은 메뉴(고정 · 제외 · 이번만 빼기).
+    drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="drw-text">${gray.map(g =>
+      `<span class="drw-tag${g.pe_hidden ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"
+        title="${g.dropped ? '이번만 뺀 태그 - 눌러서 다시 넣기' : (g.pe_hidden ? 'PE 필터가 지운 태그' : '뽑힌 태그 · 다음 Random 에 바뀜')}">${esc(g.tag)}</span>`).join(', ')}</div>`;
   }
   function paintSum() {
     const der = snap?.derived || {};

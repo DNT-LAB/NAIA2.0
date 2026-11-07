@@ -34132,7 +34132,11 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .dragpanel.drw .dragpanel-head { background: rgba(255,255,255,0.04); }
 .drw-body { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--text-primary); }
 .drw-meta { font-size: 10.5px; color: var(--text-dim); }
-.drw-body .dr-chips--drawn { gap: 4px; }
+.drw-text { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.7; color: var(--text-primary); word-break: break-word; }
+.drw-tag { cursor: pointer; border-radius: 3px; }
+.drw-tag:hover, .drw-tag:focus-visible { background: rgba(124,106,239,0.22); outline: none; }
+.drw-tag.is-pe-hidden { opacity: 0.45; }
+.drw-tag.is-dropped { opacity: 0.45; text-decoration: line-through; }
 /* 칩 메뉴는 화면 위 고정 - 판 · 창 넘침에 잘리지 않는다. 떠 있는 창들(--z-drag-panel + 순서)보다 위 */
 .dr-menu { position: fixed; z-index: calc(var(--z-drag-panel, 10150) + 500); }
 .dr-btn.is-on { border-color: var(--accent); color: var(--text-primary); }

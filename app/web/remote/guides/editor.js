@@ -82,6 +82,7 @@
     <button type="button" data-block="h3" title="작은 제목 (Ctrl+Alt+3)">작은 제목</button>
     <button type="button" data-cmd="insertUnorderedList" title="글머리 목록">목록</button>
     <button type="button" data-cmd="bold" title="굵게 (Ctrl+B)"><b>B</b></button>
+    <button type="button" data-link title="링크 (Ctrl+K) - 새 브라우저 탭에서 열립니다">링크</button>
     <span class="sep"></span>
     <button type="button" data-box="callout good" title="문단을 녹색 상자로">녹색 상자</button>
     <button type="button" data-box="callout warn" title="문단을 노란 상자로">노란 상자</button>
@@ -113,6 +114,7 @@
     else if (button.dataset.cmd) { frameDoc.execCommand(button.dataset.cmd, false); markDirty(); }
     else if (button.dataset.box) wrapInBox(button.dataset.box);
     else if ('unbox' in button.dataset) unwrapBox();
+    else if ('link' in button.dataset) editLink();
     else if (button.dataset.move) moveInCatalog(Number(button.dataset.move));
     else if ('cancel' in button.dataset) cancelEdits();
     else if ('save' in button.dataset) save();
@@ -207,12 +209,25 @@
     if (image) { event.preventDefault(); insertImage(image); return; }
     // 다른 곳에서 복사한 서식(글꼴 · 색 · 배경)이 문서에 묻지 않게 글자만 넣는다.
     const text = event.clipboardData?.getData('text/plain');
-    if (text) { event.preventDefault(); frameDoc.execCommand('insertText', false, text); }
+    if (!text) return;
+    event.preventDefault();
+    // 주소 하나를 붙여넣으면 링크 - 글자를 골라 두었으면 그 글자에, 아니면 주소 그대로.
+    const url = text.trim();
+    const selection = frameDoc.getSelection();
+    if (LINK_RE.test(url) && selection?.rangeCount) {
+      if (selection.isCollapsed) insertLink(frameDoc, url);
+      else wrapSelectionInLink(frameDoc, url);
+      markDirty();
+      setStatus(`링크를 걸었습니다 · ${url} · 새 탭에서 열립니다.`);
+      return;
+    }
+    frameDoc.execCommand('insertText', false, text);
   }
 
   function onKeydown(event) {
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); save(); return; }
+    if (mod && event.key.toLowerCase() === 'k' && frameDoc) { event.preventDefault(); editLink(); return; }
     if (mod && event.altKey && ['0', '2', '3'].includes(event.key) && frameDoc) {
       event.preventDefault();
       frameDoc.execCommand('formatBlock', false, event.key === '0' ? 'p' : `h${event.key}`);
@@ -227,6 +242,59 @@
     if (alt === null) return;
     img.alt = alt.trim();
     markDirty();
+  }
+
+  // ── 링크 (Ctrl+K) - 늘 새 브라우저 탭에서 열린다 ──────────────────────────────
+  const LINK_RE = /^https?:\/\/\S+$/i;
+  const decorateLink = a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; };
+
+  function linkAtCaret(doc) {
+    const node = doc.getSelection()?.anchorNode;
+    const el = node && (node.nodeType === 1 ? node : node.parentElement);
+    return el?.closest('main.page a') || null;
+  }
+
+  const escapeHtml = text => text.replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+
+  // execCommand 로 넣는다 - 그래야 Ctrl+Z 로 되돌릴 수 있다.
+  function insertLink(doc, href) {
+    // 뒤에 빈칸을 하나 둔다 - 이어 치는 글자가 링크 안으로 들어가지 않게.
+    const html = `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(href)}</a>&nbsp;`;
+    doc.execCommand('insertHTML', false, html);
+    // 브라우저가 속성을 떨굴 수 있으니 한 번 더 단다.
+    mainOf(doc).querySelectorAll('a').forEach(a => { if (a.getAttribute('href') === href) decorateLink(a); });
+  }
+
+  function wrapSelectionInLink(doc, href) {
+    doc.execCommand('createLink', false, href);
+    mainOf(doc).querySelectorAll('a').forEach(a => { if (a.getAttribute('href') === href) decorateLink(a); });
+  }
+
+  function editLink() {
+    const doc = frameDoc;
+    if (!doc) return;
+    const selection = doc.getSelection();
+    if (!selection?.rangeCount || !mainOf(doc).contains(selection.anchorNode)) {
+      setStatus('링크를 걸 글자를 고르거나 그 자리에 커서를 두세요.', true);
+      return;
+    }
+    const existing = linkAtCaret(doc);
+    const range = selection.getRangeAt(0).cloneRange();
+    const answer = prompt(existing ? '링크 주소 - 비우면 링크를 풉니다' : '링크 주소 (http:// 또는 https://)', existing?.getAttribute('href') || 'https://');
+    if (answer === null) return;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const href = answer.trim();
+    if (!href || href === 'https://') {
+      if (existing) { existing.replaceWith(...existing.childNodes); markDirty(); setStatus('링크를 풀었습니다.'); }
+      return;
+    }
+    if (!LINK_RE.test(href)) { setStatus('http:// 또는 https:// 로 시작하는 주소만 걸 수 있습니다.', true); return; }
+    if (existing) { existing.href = href; decorateLink(existing); }
+    else if (range.collapsed) insertLink(doc, href);
+    else wrapSelectionInLink(doc, href);
+    markDirty();
+    setStatus(`링크를 걸었습니다 · ${href} · 새 탭에서 열립니다.`);
   }
 
   function attachFrame(doc) {
@@ -321,6 +389,7 @@
     clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
     clone.querySelectorAll('.guide-uploading').forEach(el => el.remove());
+    clone.querySelectorAll('a[href]').forEach(a => { if (!a.getAttribute('href').startsWith('#')) decorateLink(a); });
     // 문단마다 줄을 바꿔 둔다 - 한 줄로 이어 쓰면 git diff 를 읽을 수 없다.
     for (const parent of [clone, ...clone.querySelectorAll('section, article, .steps, .step-copy, div.callout, .notice, .final')]) {
       for (const child of [...parent.children]) {

@@ -132,6 +132,12 @@ async function showPage({ fresh = false } = {}) {
         if (generation !== loadGeneration) return;
         const doc = frame.contentDocument;
         if (!doc?.querySelector('.page')) return;
+        // 링크는 늘 새 브라우저 탭에서 - 문서 안 # 이동만 제자리.
+        doc.querySelectorAll('a[href]').forEach(a => {
+          if (a.getAttribute('href').startsWith('#')) return;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+        });
         const style = doc.createElement('link');
         style.rel = 'stylesheet';
         style.href = 'document.css?v=4';
@@ -208,7 +214,7 @@ async function loadEditor() {
     if (!status?.enabled) return;
   } catch { return; }
   const script = document.createElement('script');
-  script.src = 'editor.js?v=4';
+  script.src = 'editor.js?v=5';
   document.head.append(script);
 }
 

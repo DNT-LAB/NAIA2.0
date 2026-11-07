@@ -515,6 +515,11 @@ class HeadlessPromptEngineeringService:
         return get_prompt_engineering_store(self.context).persist_all_dirty()
 
     def set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_set_param(key, value)
+
+    def _draft_locked_set_param(self, key: str, value: Any) -> dict[str, Any] | list[dict[str, Any]] | None:
         from core.prompt_engineering_settings import get_prompt_engineering_store, is_randomized_preset_name
 
         context = self.context
@@ -1204,6 +1209,9 @@ class HeadlessPromptEngineeringService:
             preset_data = None
         main_settings = preset_data.get("main_settings") if isinstance(preset_data, dict) else None
         if not isinstance(main_settings, dict) or not main_settings:
+            from core.event_map.draft import active
+            if active(context):
+                context.event_map_draft.rebuild()
             return self.state()
         from core.prompt_engineering_settings import is_snapshot_preset_name
 
@@ -1226,7 +1234,12 @@ class HeadlessPromptEngineeringService:
             },
         ]
 
-    def apply_snapshot_main_settings(self, main_settings: dict[str, Any]) -> list[dict[str, str]]:
+    def apply_snapshot_main_settings(self, main_settings):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_apply_snapshot_main_settings(main_settings)
+
+    def _draft_locked_apply_snapshot_main_settings(self, main_settings: dict[str, Any]) -> list[dict[str, str]]:
         """Apply each Snapshot parameter independently, keeping session A4 keys."""
         from core.snapshot_store import main_setting_section, snapshot_defaults
         from core.headless_remote_state_service import (
@@ -1244,6 +1257,8 @@ class HeadlessPromptEngineeringService:
                  # 없는 세션에서는 '모르는 파라미터' 로 건너뛰고 오류를 띄웠다(실측 2026-10-05 - 빈 사용자 폴더에서
                  # 기본 스냅샷을 불러오면 매번 "되돌리지 못한 항목 1개"). 담을 때는 늘 함께 담긴다.
                  | {"nai_resolution_preset"})
+        from core.event_map.draft import active
+        draft_saved = None
         skipped = []
         for key, value in main_settings.items():
             try:
@@ -1253,53 +1268,74 @@ class HeadlessPromptEngineeringService:
                     raise ValueError("Unknown generation parameter")
                 if key == "model" and nai_model_badge(value, context)["family"] not in {"v4.5", "v5"}:
                     raise ValueError("Unsupported Snapshot model")
-                if key in extra_keys:
+                if key == "prompt" and active(context):
+                    draft_saved = str(value or "")
+                elif key in extra_keys:
                     context.set_param(key, value)
                 else:
                     self._apply_main_settings({key: value}, persist=False)
             except Exception as exc:
                 skipped.append({"section": main_setting_section(key), "key": key, "reason": str(exc)})
+        if active(context):
+            context.event_map_draft.rebuild(saved=draft_saved)
         return skipped
 
     def _apply_main_settings(self, main_settings: dict[str, Any], *, persist: bool = True) -> None:
-        from core.prompt_engineering_settings import normalize_preset_main_settings
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            from core.prompt_engineering_settings import normalize_preset_main_settings
 
-        context = self.context
-        prompt_dirty = False
-        # Strip per-preset runtime-state keys (random_resolution/auto_fit_resolution)
-        # so preset application never clobbers those session flags (future01 parity).
-        for key, value in normalize_preset_main_settings(dict(main_settings or {})).items():
-            if key == "prompt":
-                context.prompt_text = str(value or "")
-                prompt_dirty = True
-            elif key in {"negative", "negative_prompt"}:
-                context.negative_prompt_text = str(value or "")
-                prompt_dirty = True
-            elif key == "webui_hiresfix_assist":
-                enabled = context._coerce_bool(value)
-                state = context._normalized_webui_hiresfix_assist_state(
-                    context.webui_hiresfix_assist_state
-                )
-                state["enabled"] = enabled
-                state["webui_hiresfix_assist"] = enabled
-                context.webui_hiresfix_assist_state = state
-                context.set_param(str(key), enabled)
-            elif key == "webui_hiresfix_assist_target":
-                target = 768 if str(value).strip() == "768" else 512
-                state = context._normalized_webui_hiresfix_assist_state(
-                    context.webui_hiresfix_assist_state
-                )
-                state["target"] = target
-                state["webui_hiresfix_assist_target"] = target
-                context.webui_hiresfix_assist_state = state
-                context.set_param(str(key), target)
-            else:
-                context.set_param(str(key), value)
-        if persist and (main_settings or prompt_dirty):
-            context.save_remote_ui_state()
-            context.publish("remote_params_changed", context.generation_param_schema_payload())
+            context = self.context
+            prompt_dirty = False
+            draft_saved = None
+            # Strip per-preset runtime-state keys (random_resolution/auto_fit_resolution)
+            # so preset application never clobbers those session flags (future01 parity).
+            for key, value in normalize_preset_main_settings(dict(main_settings or {})).items():
+                if key == "prompt":
+                    from core.event_map.draft import active
+                    if active(context):
+                        draft_saved = str(value or "")
+                        if not persist:  # Snapshot applies individual fields before its final rebuild.
+                            context.event_map_draft.state["saved_prompt"] = draft_saved
+                    else:
+                        context.prompt_text = str(value or "")
+                    prompt_dirty = True
+                elif key in {"negative", "negative_prompt"}:
+                    context.negative_prompt_text = str(value or "")
+                    prompt_dirty = True
+                elif key == "webui_hiresfix_assist":
+                    enabled = context._coerce_bool(value)
+                    state = context._normalized_webui_hiresfix_assist_state(
+                        context.webui_hiresfix_assist_state
+                    )
+                    state["enabled"] = enabled
+                    state["webui_hiresfix_assist"] = enabled
+                    context.webui_hiresfix_assist_state = state
+                    context.set_param(str(key), enabled)
+                elif key == "webui_hiresfix_assist_target":
+                    target = 768 if str(value).strip() == "768" else 512
+                    state = context._normalized_webui_hiresfix_assist_state(
+                        context.webui_hiresfix_assist_state
+                    )
+                    state["target"] = target
+                    state["webui_hiresfix_assist_target"] = target
+                    context.webui_hiresfix_assist_state = state
+                    context.set_param(str(key), target)
+                else:
+                    context.set_param(str(key), value)
+            from core.event_map.draft import active
+            if persist and active(context):
+                context.event_map_draft.rebuild(saved=draft_saved)
+            if persist and (main_settings or prompt_dirty):
+                context.save_remote_ui_state()
+                context.publish("remote_params_changed", context.generation_param_schema_payload())
 
-    def restore_main_prompt_from_preset(self) -> bool:
+    def restore_main_prompt_from_preset(self):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_restore_main_prompt_from_preset()
+
+    def _draft_locked_restore_main_prompt_from_preset(self) -> bool:
         """Bug 2b — lazy empty-prompt restore. When the active mode's main prompt
         box is empty, pull the matched (last-used, else resolved current) preset's
         ``main_settings.prompt`` into it and persist that into the mode's prompt
@@ -1313,7 +1349,8 @@ class HeadlessPromptEngineeringService:
         from core.prompt_engineering_settings import get_prompt_engineering_store
 
         context = self.context
-        if str(context.prompt_text or "").strip():
+        from core.event_map.draft import saved_prompt
+        if saved_prompt(context).strip():
             return False
         store = get_prompt_engineering_store(context)
         mode = self._preset_mode()
@@ -1339,7 +1376,11 @@ class HeadlessPromptEngineeringService:
         )
         if not prompt:
             return False
-        context.prompt_text = prompt
+        from core.event_map.draft import active
+        if active(context):
+            context.event_map_draft.state["saved_prompt"] = prompt
+        else:
+            context.prompt_text = prompt
         context.save_remote_ui_state()
         return True
 

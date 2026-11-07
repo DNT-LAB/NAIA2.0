@@ -281,50 +281,66 @@ async def handle_session_command(
         )
         return True
     if command_type == "set_prompt":
-        # 외부 에이전트(NAIA_cli call/batch - 상관 ID 소켓)의 호출은 **보낸 칸만** 바꾼다. 화면은 늘 두 칸을
-        # 함께 보내지만 에이전트는 한 칸만 보내기 쉽고, 빠진 칸을 "" 로 받으면 네거티브가 소리없이 지워진다.
-        agent_call = isinstance(getattr(ws, "call_id", None), str) and bool(getattr(ws, "call_id", ""))
-        has_prompt = not agent_call or "prompt" in command
-        has_negative = not agent_call or "negative_prompt" in command or "negative" in command
-        # ⚠️ **어느 프리셋을 보고 친 글인가를 먼저 본다.** 예전에는 프롬프트를 먼저
-        #    싣고 나중에 표식을 봤는데, 그러면 프리셋 파일은 지켜져도 **살아 있는
-        #    세션 프롬프트**가 앞 프리셋의 글로 바뀐다 - 재접속하거나 다시 편집하면
-        #    그 글이 새 프리셋의 것인 양 되살아난다(Codex 리뷰 2026-08-27).
-        #    표식이 어긋나면 메인 프롬프트는 통째로 무시하고, 화면이 스스로 고치도록
-        #    지금 값을 `force` 로 되돌려 준다.
-        stale_prompt = context.stale_prompt_edit(
-            str(command.get("prompt_origin") or ""),
-            str(command.get("prompt_preset") or ""),
-        )
-        if not stale_prompt and has_prompt:
-            context.prompt_text = str(command.get("prompt") or "")
-        # 네거티브도 같다. `negative_preset` = 그 네거티브를 **치기 시작했을 때** 화면이 믿던 프리셋.
-        # 다른 탭이 프리셋을 바꾼 뒤에 닿은 편집을 받으면 그 글이 **새 프리셋**에 써진다 - 통째로 버리고
-        # 화면이 스스로 고치게 지금 값을 돌려준다(Codex 리뷰 2026-10-10). 표식이 없으면(옛 화면 · 사람이 친 게
-        # 아닌 에코) 판정하지 않는다 - 예전 그대로.
-        stale_negative = context.stale_prompt_edit(
-            str(command.get("origin") or ""),
-            str(command.get("negative_preset") or ""),
-        )
-        if not stale_negative and has_negative:
-            context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
-        context.save_remote_ui_state()
-        # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
-        # 남아 프리셋을 옮기는 순간 사라진다(사용자 지적 2026-08-21).
-        #
-        # ⚠️ `origin == "edit"` 일 때만 한다. 서버가 밀어 준 값을 클라이언트가
-        # 되돌려 보내는 에코 경로가 여럿이라(프리셋 적용·메타데이터 적용·재동기),
-        # 아무 `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에
-        # 굳는다.
-        if not stale_negative and str(command.get("origin") or "") == "edit":
-            context.sync_negative_into_current_preset()
-        # 메인 프롬프트도 같다. 표식이 **따로**인 이유: `origin` 은 "네거티브 칸을
-        # 직접 쳤다" 는 뜻이라 여기에 새 의미를 얹으면 두 칸이 서로의 값을 프리셋에
-        # 밀어 넣는다. Random 이 덮어쓴 값은 `set_prompt` 로 돌아오지 않으므로 이
-        # 빗장 하나로 충분하다(사용자 지적 2026-08-27: A -> B -> A 왕복에서 메인
-        # 프롬프트가 사라지고 옛 저장값이 나타남).
-        if not stale_prompt and str(command.get("prompt_origin") or "") == "edit":
-            context.sync_prompt_into_current_preset(str(command.get("prompt_preset") or ""))
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(context):
+            # 외부 에이전트(NAIA_cli call/batch - 상관 ID 소켓)의 호출은 **보낸 칸만** 바꾼다. 화면은 늘 두 칸을
+            # 함께 보내지만 에이전트는 한 칸만 보내기 쉽고, 빠진 칸을 "" 로 받으면 네거티브가 소리없이 지워진다.
+            agent_call = isinstance(getattr(ws, "call_id", None), str) and bool(getattr(ws, "call_id", ""))
+            has_prompt = not agent_call or "prompt" in command
+            has_negative = not agent_call or "negative_prompt" in command or "negative" in command
+            # ⚠️ **어느 프리셋을 보고 친 글인가를 먼저 본다.** 예전에는 프롬프트를 먼저
+            #    싣고 나중에 표식을 봤는데, 그러면 프리셋 파일은 지켜져도 **살아 있는
+            #    세션 프롬프트**가 앞 프리셋의 글로 바뀐다 - 재접속하거나 다시 편집하면
+            #    그 글이 새 프리셋의 것인 양 되살아난다(Codex 리뷰 2026-08-27).
+            #    표식이 어긋나면 메인 프롬프트는 통째로 무시하고, 화면이 스스로 고치도록
+            #    지금 값을 `force` 로 되돌려 준다.
+            stale_prompt = context.stale_prompt_edit(
+                str(command.get("prompt_origin") or ""),
+                str(command.get("prompt_preset") or ""),
+            )
+            from core.event_map.draft import active, saved_prompt
+            draft_active = active(context)
+            sent_prompt = str(command.get("prompt") or "")
+            late_draft_edit = draft_active and has_prompt and sent_prompt == saved_prompt(context)
+            # 지금 Draft 글 그대로 돌아온 것(네거티브만 고친 화면의 에코) = 아무것도 안 바꾼 것 - 토스트 · 되돌림 없음
+            draft_echo = draft_active and has_prompt and not late_draft_edit and sent_prompt == str(context.prompt_text or "")
+            draft_rejected = draft_active and has_prompt and not late_draft_edit and not draft_echo
+            if not stale_prompt and has_prompt and not draft_active:
+                context.prompt_text = str(command.get("prompt") or "")
+            # 네거티브도 같다. `negative_preset` = 그 네거티브를 **치기 시작했을 때** 화면이 믿던 프리셋.
+            # 다른 탭이 프리셋을 바꾼 뒤에 닿은 편집을 받으면 그 글이 **새 프리셋**에 써진다 - 통째로 버리고
+            # 화면이 스스로 고치게 지금 값을 돌려준다(Codex 리뷰 2026-10-10). 표식이 없으면(옛 화면 · 사람이 친 게
+            # 아닌 에코) 판정하지 않는다 - 예전 그대로.
+            stale_negative = context.stale_prompt_edit(
+                str(command.get("origin") or ""),
+                str(command.get("negative_preset") or ""),
+            )
+            if not stale_negative and has_negative:
+                context.negative_prompt_text = str(command.get("negative_prompt", command.get("negative")) or "")
+            context.save_remote_ui_state()
+            # 네거티브는 **선택된 프리셋에도** 즉시 반영한다. 안 하면 편집분이 세션에만
+            # 남아 프리셋을 옮기는 순간 사라진다(사용자 지적 2026-08-21).
+            #
+            # ⚠️ `origin == "edit"` 일 때만 한다. 서버가 밀어 준 값을 클라이언트가
+            # 되돌려 보내는 에코 경로가 여럿이라(프리셋 적용·메타데이터 적용·재동기),
+            # 아무 `set_prompt` 에서나 반영하면 파이프라인이 만든 네거티브가 프리셋에
+            # 굳는다.
+            if not stale_negative and str(command.get("origin") or "") == "edit":
+                context.sync_negative_into_current_preset()
+            # 메인 프롬프트도 같다. 표식이 **따로**인 이유: `origin` 은 "네거티브 칸을
+            # 직접 쳤다" 는 뜻이라 여기에 새 의미를 얹으면 두 칸이 서로의 값을 프리셋에
+            # 밀어 넣는다. Random 이 덮어쓴 값은 `set_prompt` 로 돌아오지 않으므로 이
+            # 빗장 하나로 충분하다(사용자 지적 2026-08-27: A -> B -> A 왕복에서 메인
+            # 프롬프트가 사라지고 옛 저장값이 나타남).
+            if (not stale_prompt and (not draft_active or late_draft_edit)
+                    and str(command.get("prompt_origin") or "") == "edit"):
+                confirmed = context.prompt_text
+                try:
+                    if late_draft_edit:
+                        context.prompt_text = saved_prompt(context)
+                    context.sync_prompt_into_current_preset(str(command.get("prompt_preset") or ""))
+                finally:
+                    context.prompt_text = confirmed
         await ws.send_text(json.dumps({
             "type": "prompt_sync",
             "prompt": context.prompt_text,
@@ -334,8 +350,11 @@ async def handle_session_command(
             # 덮어써서 맞춘다(`get_prompt` 가 재접속 때 쓰는 것과 같은 처리).
             # `stale_correction` 은 화면이 **보낸 뒤 더 친 글**을 지키게 하는 표식이다 -
             # 그것까지 지우면 방금 친 글자가 소리없이 사라진다(Codex 리뷰 2026-08-27).
-            **({"force": True, "stale_correction": True} if (stale_prompt or stale_negative) else {}),
+            **({"force": True, "stale_correction": True} if (draft_rejected or ((stale_prompt or stale_negative) and not late_draft_edit)) else {}),
         }, ensure_ascii=False))
+        if draft_rejected:
+            await ws.send_text(json.dumps({"type": "toast", "level": "info",
+                                           "message": "Draft 중에는 칩으로 고칩니다"}, ensure_ascii=False))
         if agent_call:
             # 열린 탭들도 에이전트가 바꾼 칸을 받는다(force 없음 - 사람이 치는 중인 탭은 기존 규칙대로 자기 글을 지킨다).
             synced = {"type": "prompt_sync"}
@@ -452,7 +471,22 @@ async def _handle_set_mode(
         }, ensure_ascii=False))
         await ws.send_text(json.dumps(context.api_status_payload(client_host), ensure_ascii=False))
         return
-    context.set_api_mode(requested_mode)
+    from core.event_map.draft import active, saved_prompt
+    from core.headless_random_prompt_service import pipeline_swap_lock
+    with pipeline_swap_lock(context):
+        draft_switch = active(context)
+        context.set_api_mode(requested_mode)
+        if draft_switch:
+            if not saved_prompt(context).strip():
+                context._prompt_engineering_service().restore_main_prompt_from_preset()
+            from core.event_map.draft import DraftError
+            try:
+                context.event_map_draft.rebuild()
+            except DraftError as exc:
+                # 모드는 이미 바뀌었다 - 전환을 깨지 않고 Draft 글만 옛것으로 둔다(commit 이 되돌렸다)
+                await ws.send_text(json.dumps({"type": "toast", "level": "warning",
+                                               "message": f"Draft 글을 다시 만들지 못했습니다: {exc.message}"},
+                                              ensure_ascii=False))
     # Bug 2b — lazy empty-prompt restore for the mode we just entered. set_api_mode
     # activated this mode's prompt plane (blank if it was never used this session).
     # When the box is blank AND Prompt Fixed is off: (a) restore the matched
@@ -466,7 +500,7 @@ async def _handle_set_mode(
     # this lands in the box is persisted to the mode's plane, so later switches back
     # find it remembered and skip this entirely.
     pe_service = context._prompt_engineering_service()
-    if not context.get_options().get("prompt_fixed") and not str(context.prompt_text or "").strip():
+    if not draft_switch and not context.get_options().get("prompt_fixed") and not str(context.prompt_text or "").strip():
         try:
             restored = pe_service.restore_main_prompt_from_preset()
         except Exception as exc:  # noqa: BLE001 — never let restore break mode switch

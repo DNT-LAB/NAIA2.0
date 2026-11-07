@@ -115,6 +115,7 @@ class PromptGenerationService:
         if (
             not final_prompt.strip(" ,\n\r\t")
             and not context.settings.get("wildcard_standalone", False)
+            and not (context.source_row is not None and "draft_protected" in context.source_row)
         ):
             return PromptGenerationResult(
                 context=context,

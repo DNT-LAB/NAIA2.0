@@ -92,29 +92,31 @@ class HeadlessRemoteStateService:
         return self.context.current_api_mode
 
     def set_api_mode(self, mode: str) -> None:
-        normalized = str(mode or "").strip().upper()
-        from core.generation_access_policy import access_policy, GenerationBlocked
-        policy = access_policy(self.context)
-        if policy.blocked and normalized != "NAI":
-            raise GenerationBlocked(policy.reason())
-        if normalized not in SUPPORTED_API_MODES:
-            return
-        if normalized == self.context.current_api_mode:
-            return
-        old_mode = self.context.current_api_mode
-        # Per-mode parameter planes: stash the outgoing mode's params and swap in
-        # the target mode's plane so mode-specific values (sampler/scheduler/steps/
-        # sampling_mode/comfyui_* …) never leak across modes. Leaking COMFYUI's
-        # sampler/scheduler into a NAI generation produced a NAI 500.
-        self._stash_active_param_plane(old_mode)
-        # Same per-mode treatment for the main/negative prompt so each mode keeps
-        # its own prompt (a NAI random prompt must not appear while in COMFYUI).
-        self._stash_active_prompt_plane(old_mode)
-        self.context.current_api_mode = normalized
-        self._activate_param_plane(normalized)
-        self._activate_prompt_plane(normalized)
-        self.context.save_remote_ui_state()
-        self.context.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            normalized = str(mode or "").strip().upper()
+            from core.generation_access_policy import access_policy, GenerationBlocked
+            policy = access_policy(self.context)
+            if policy.blocked and normalized != "NAI":
+                raise GenerationBlocked(policy.reason())
+            if normalized not in SUPPORTED_API_MODES:
+                return
+            if normalized == self.context.current_api_mode:
+                return
+            old_mode = self.context.current_api_mode
+            # Per-mode parameter planes: stash the outgoing mode's params and swap in
+            # the target mode's plane so mode-specific values (sampler/scheduler/steps/
+            # sampling_mode/comfyui_* …) never leak across modes. Leaking COMFYUI's
+            # sampler/scheduler into a NAI generation produced a NAI 500.
+            self._stash_active_param_plane(old_mode)
+            # Same per-mode treatment for the main/negative prompt so each mode keeps
+            # its own prompt (a NAI random prompt must not appear while in COMFYUI).
+            self._stash_active_prompt_plane(old_mode)
+            self.context.current_api_mode = normalized
+            self._activate_param_plane(normalized)
+            self._activate_prompt_plane(normalized)
+            self.context.save_remote_ui_state()
+            self.context.publish("api_mode_changed", {"old_mode": old_mode, "new_mode": normalized})
 
     def _param_planes(self) -> dict[str, dict[str, Any]]:
         planes = getattr(self.context, "remote_param_planes", None)
@@ -148,9 +150,13 @@ class HeadlessRemoteStateService:
     def _stash_active_prompt_plane(self, mode: str) -> None:
         if mode in SUPPORTED_API_MODES:
             self._prompt_planes()[mode] = {
-                "prompt": str(self.context.prompt_text or ""),
+                "prompt": self._user_prompt(),
                 "negative_prompt": str(self.context.negative_prompt_text or ""),
             }
+
+    def _user_prompt(self):
+        from core.event_map.draft import saved_prompt
+        return saved_prompt(self.context)
 
     def _activate_prompt_plane(self, mode: str) -> None:
         plane = self._prompt_planes().get(mode)
@@ -159,7 +165,11 @@ class HeadlessRemoteStateService:
             # carrying the outgoing mode's prompt across (the leak this fixes).
             plane = {"prompt": "", "negative_prompt": ""}
             self._prompt_planes()[mode] = plane
-        self.context.prompt_text = str(plane.get("prompt") or "")
+        from core.event_map.draft import active
+        if active(self.context):
+            self.context.event_map_draft.state["saved_prompt"] = str(plane.get("prompt") or "")
+        else:
+            self.context.prompt_text = str(plane.get("prompt") or "")
         self.context.negative_prompt_text = str(plane.get("negative_prompt") or "")
 
     def _session_options(self) -> dict[str, bool]:
@@ -170,6 +180,14 @@ class HeadlessRemoteStateService:
         return options
 
     def set_option(self, key: str, value: Any) -> None:
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            self._draft_locked_set_option(key, value)
+
+    def _draft_locked_set_option(self, key: str, value: Any) -> None:
+        if key == "wildcard_standalone" and self.coerce_bool(value):
+            from core.event_map.draft import exit_for_owner
+            exit_for_owner(self.context, "WC Solo")
         if key in SESSION_OPTION_DEFAULTS:
             # 세션 옵션 - 메모리에만 둔다. **저장을 부르지 않는다.**
             self._session_options()[key] = self.coerce_bool(value)

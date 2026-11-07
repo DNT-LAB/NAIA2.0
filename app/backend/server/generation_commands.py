@@ -223,6 +223,9 @@ async def apply_ollama_auto_boost(context: WebSessionContext, result: Any) -> bo
     토글 OFF/빈 프롬프트면 no-op. 성공 시 result.prompt·context.prompt_text·ctx.final_prompt 를 부스트본으로
     갱신하고 True. 어떤 실패에서도 raise 하지 않으며 원문을 유지한다(생성 루프 불변). Auto Gen 에서도 재사용.
     """
+    from core.event_map.draft import active
+    if active(context):
+        return False
     try:
         if not getattr(result, "success", False) or not getattr(context, "ollama_auto_boost", False):
             return False
@@ -333,6 +336,8 @@ async def recover_exhausted_random_pool(
       ① 검색이 적용된 순간의 **스냅샷 복원** - 등급도 칩도 건드리지 않는다.
       ② 스냅샷이 없을 때만 예전 경로(등급을 전체로 열고 필터 할당 해제).
     """
+    if getattr(result, "error", "") == "cancelled":
+        return result
     if getattr(result, "event_map_revision", None) is not None:
         return result
     if result.success or bool((overrides or {}).get("wildcard_standalone")):

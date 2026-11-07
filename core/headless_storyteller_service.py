@@ -187,7 +187,12 @@ class HeadlessStorytellerService:
         )]
 
     # -------------------------------------------------- 1.5식 수동 진행 모드
-    def arm_manual(self, value: Any) -> dict[str, Any]:
+    def arm_manual(self, *args, **kwargs):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_arm_manual(*args, **kwargs)
+
+    def _draft_locked_arm_manual(self, value: Any) -> dict[str, Any]:
         """작성한 스텝 시퀀스를 allocator에 무장만 한다(자동 생성 없음). 이후의 모든
         랜덤(수동 포함)이 스텝을 순서대로(순환) 전진시킨다 — 1.5 EV.A처럼 사용자가
         마음에 드는 이미지가 나올 때까지 직접 라운드를 반복한다."""
@@ -208,6 +213,8 @@ class HeadlessStorytellerService:
             steps = self.load_steps()
         nodes = self._build_step_nodes(steps, max(1, len(steps)))
         event_stream = self.context._create_event_stream_runtime()
+        from core.event_map.draft import exit_for_owner
+        exit_for_owner(self.context, "Story")
         event_stream.start_linear(nodes, run_id=f"storyteller-manual-{uuid.uuid4().hex[:8]}")
         state = self.state()
         state["_headless_extra_messages"] = [
@@ -238,7 +245,12 @@ class HeadlessStorytellerService:
         return state
 
     # ------------------------------------------------------------------ start
-    def start_cycle(self, value: Any) -> dict[str, Any]:
+    def start_cycle(self, *args, **kwargs):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_start_cycle(*args, **kwargs)
+
+    def _draft_locked_start_cycle(self, value: Any) -> dict[str, Any]:
         from core.generation_access_policy import access_policy
         if access_policy(self.context).blocked:
             return self._error_state(access_policy(self.context).reason())
@@ -286,6 +298,8 @@ class HeadlessStorytellerService:
         # per-step source row provides the scene.
         nodes = self._build_step_nodes(steps, count)
         event_stream = self.context._create_event_stream_runtime()
+        from core.event_map.draft import exit_for_owner
+        exit_for_owner(self.context, "Story")
         event_stream.start_linear(nodes, run_id=run_id)
 
         self.context.storyteller_runtime_state = {

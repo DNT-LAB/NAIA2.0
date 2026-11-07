@@ -958,6 +958,9 @@ class HeadlessGenerationService:
             params["seed"] = -1
 
         prompt = command.get("prompt")
+        from core.event_map.draft import active
+        if active(self.context) and str(params.get("_remote_queue_source") or "Web") == "Web":
+            prompt = self.context.prompt_text
         negative = command.get("negative_prompt")
         if prompt is not None:
             params["input"] = str(prompt)

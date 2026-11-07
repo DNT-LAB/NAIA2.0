@@ -35,7 +35,13 @@ def link_state(context):
 
 def result_is_current(context, result):
     revision = getattr(result, "event_map_revision", None)
-    return revision is None or revision == link_state(context)["revision"]
+    link = link_state(context)
+    if revision is not None and revision != link["revision"]:
+        return False
+    if link.get("mode") == "draft":
+        from core.event_map.draft import active
+        return active(context) and getattr(result, "draft_rev", None) == context.event_map_draft.state["rev"]
+    return True
 
 
 def reject_stale_result(context, result):

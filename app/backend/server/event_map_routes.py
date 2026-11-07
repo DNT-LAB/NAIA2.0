@@ -173,6 +173,84 @@ def register_event_map_routes(
             await broadcast_json(clients, message)
 
 
+    async def _draft_request(action, body=None):
+        from core.event_map.draft import DraftError, session
+        loop = asyncio.get_running_loop()
+        holder = None
+        try:
+            holder = await run_in_thread(session, session_context)
+            holder.engine.kr_lookup = _kr_lookup(session_context)
+            # Non-HTTP preset/mode changes use the same non-blocking broadcast path.
+            holder.broadcast = lambda message: asyncio.run_coroutine_threadsafe(_broadcast(message), loop)
+            if action == "get":
+                if getattr(holder, "needs_rebuild", False) and holder.state["active"]:
+                    holder.needs_rebuild = False
+                    try:
+                        await run_in_thread(holder.rebuild)
+                    except (DraftError, MapQueryError):
+                        pass  # 색인이 없거나 조립 실패 - 원문 그대로 두고 상태만 돌려준다
+                payload = await run_in_thread(holder.snapshot)
+                messages = []
+            else:
+                payload, messages = await run_in_thread(holder.mutate, action, body or {})
+        except DraftError as exc:
+            payload = exc.to_payload()
+            if exc.status == 409 and holder is not None:
+                payload["snapshot"] = await run_in_thread(holder.snapshot)
+            if exc.code == "owned_by":
+                payload["owned_by"] = "inpaint"
+            return JSONResponse(payload, status_code=exc.status, headers=_no_store())
+        except MapQueryError as exc:
+            return JSONResponse({"ok": False, "error": "too_many", "message": exc.message},
+                                status_code=400, headers=_no_store())
+        for message in messages:
+            await _broadcast(message)
+        return JSONResponse(payload, headers=_no_store())
+
+    @app.get("/api/event-map/draft")
+    async def api_event_map_draft():
+        return await _draft_request("get")
+
+    @app.get("/api/event-map/draft/suggest")
+    async def api_event_map_draft_suggest(q: str = "", zone: str = "include"):
+        return await _draft_request("suggest", {"q": q, "zone": zone})
+
+    @app.post("/api/event-map/draft/enter")
+    async def api_event_map_draft_enter(req: Request):
+        return await _draft_request("enter", await _read_json(req))
+
+    @app.post("/api/event-map/draft/exit")
+    async def api_event_map_draft_exit(req: Request):
+        return await _draft_request("exit", await _read_json(req))
+
+    @app.post("/api/event-map/draft/check")
+    async def api_event_map_draft_check(req: Request):
+        return await _draft_request("check", await _read_json(req))
+
+    @app.post("/api/event-map/draft/chips")
+    async def api_event_map_draft_chips(req: Request):
+        return await _draft_request("chips", await _read_json(req))
+
+    @app.post("/api/event-map/draft/extra")
+    async def api_event_map_draft_extra(req: Request):
+        return await _draft_request("extra", await _read_json(req))
+
+    @app.post("/api/event-map/draft/drawn")
+    async def api_event_map_draft_drawn(req: Request):
+        return await _draft_request("drawn", await _read_json(req))
+
+    @app.post("/api/event-map/draft/rebuild")
+    async def api_event_map_draft_rebuild(req: Request):
+        return await _draft_request("rebuild", await _read_json(req))
+
+    @app.post("/api/event-map/draft/to-staging")
+    async def api_event_map_draft_to_staging(req: Request):
+        return await _draft_request("to-staging", await _read_json(req))
+
+    @app.post("/api/event-map/draft/from-staging")
+    async def api_event_map_draft_from_staging(req: Request):
+        return await _draft_request("from-staging", await _read_json(req))
+
     def _call(fn, *args, **kwargs):
         """서비스 호출을 스레드에서 돌리고 예외를 payload 로 바꾼다."""
         try:
@@ -233,9 +311,25 @@ def register_event_map_routes(
     # 세기나 막힌 소켓이 연결 끄기까지 붙잡았다). 이벤트 맵 갈래 · 끄기는 풀과 상관없어 잠그지 않는다.
     staging_gate = asyncio.Lock()
 
+    def _draft_link_response(payload):
+        from core.event_map.draft import active, session
+        if active(session_context):
+            if payload.get("enabled") is False and link_state(session_context).get("mode") == "draft":
+                return JSONResponse(link_state(session_context), headers=_no_store())
+            return JSONResponse({"ok": False, "error": "draft_active",
+                                 "message": "Draft를 먼저 꺼주세요.",
+                                 "snapshot": session(session_context).snapshot()},
+                                status_code=409, headers=_no_store())
+        return None
+
     @app.post("/api/event-map/random-link")
     async def api_event_map_random_link(req: Request):
         payload = await _read_json(req)
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(session_context):
+            blocked = _draft_link_response(payload)
+            if blocked is not None:
+                return blocked
         if not isinstance(payload.get("enabled"), bool):
             return JSONResponse({"message": "enabled must be boolean"}, status_code=400)
         # 연결은 한 갈래뿐이다: event(이벤트 맵의 지금 조합) 또는 staging(스테이징 풀). 한쪽을 켜면 다른 쪽은 꺼진다 -
@@ -255,8 +349,12 @@ def register_event_map_routes(
                                          "message": "켜진 스테이징 조합이 없습니다."}, status_code=409)
                 state["mode"] = "staging"
                 # 잠금 안에서 쓴다 - 풀이 비지 않았음을 본 그 상태로 켠다
-                state["revision"] = link_state(session_context)["revision"] + 1
-                session_context.event_map_random_link = state
+                with pipeline_swap_lock(session_context):
+                    blocked = _draft_link_response(payload)
+                    if blocked is not None:
+                        return blocked
+                    state["revision"] = link_state(session_context)["revision"] + 1
+                    session_context.event_map_random_link = state
         elif state["enabled"]:
             state["mode"] = "event"
             # filters = 찾기 조건 JSON 글(압축한 이벤트 안 찾기 - 사용자 지시 2026-11-02)
@@ -265,8 +363,12 @@ def register_event_map_routes(
                 if not isinstance(value, str) or len(value) > 8192:
                     return JSONResponse({"message": f"Invalid {key}"}, status_code=400)
                 state[key] = value
-            revision = link_state(session_context)["revision"] + 1
-            session_context.event_map_random_link = {**state, "revision": revision, "pending": True}
+            with pipeline_swap_lock(session_context):
+                blocked = _draft_link_response(payload)
+                if blocked is not None:
+                    return blocked
+                revision = link_state(session_context)["revision"] + 1
+                session_context.event_map_random_link = {**state, "revision": revision, "pending": True}
             try:
                 # Validate the same query used by Random. Empty matches are valid;
                 # generation must fail closed rather than broaden the conditions.
@@ -275,15 +377,23 @@ def register_event_map_routes(
                                                              "compress_cut", "compress_output", "filters")}, n=1,
                                     permanent=True)
             except MapQueryError as exc:
-                if link_state(session_context)["revision"] == revision:
-                    session_context.event_map_random_link = {"enabled": False, "revision": revision}
-                    await _broadcast({"type": "event_map_random_link", **link_state(session_context)})
+                with pipeline_swap_lock(session_context):
+                    failed_link = None
+                    if link_state(session_context)["revision"] == revision:
+                        failed_link = {"enabled": False, "revision": revision}
+                        session_context.event_map_random_link = failed_link
+                if failed_link is not None:
+                    await _broadcast({"type": "event_map_random_link", **failed_link})
                 return _error(exc)
             if link_state(session_context)["revision"] != revision:
                 return JSONResponse({"message": "다른 연결 설정이 적용되었습니다."}, status_code=409)
-        if "revision" not in state:
-            state["revision"] = link_state(session_context)["revision"] + 1
-            session_context.event_map_random_link = state
+        with pipeline_swap_lock(session_context):
+            blocked = _draft_link_response(payload)
+            if blocked is not None:
+                return blocked
+            if "revision" not in state:
+                state["revision"] = link_state(session_context)["revision"] + 1
+                session_context.event_map_random_link = state
         from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
         invalidate_auto_gen_prefetch(session_context)
         if state["enabled"] and session_context._coerce_bool(

@@ -361,6 +361,47 @@ def _source_rating_tags(context: PromptContext) -> list[str]:
     return [t.strip() for t in value if isinstance(t, str) and t.strip()]
 
 
+def _protected_key(tag: str) -> str:
+    """Compare protected tags without changing their weighted representation."""
+    value = str(tag).strip().lower()
+    previous = None
+    while value != previous:
+        previous = value
+        value = re.sub(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)::(.*?)\s*::$", r"\1", value).strip()
+        if value.startswith("(") and value.endswith(")"):
+            value = re.sub(r":[+-]?(?:\d+(?:\.\d*)?|\.\d+)$", "", value[1:-1]).strip()
+        elif (value.startswith("{") and value.endswith("}")) or (value.startswith("[") and value.endswith("]")):
+            value = value[1:-1].strip()
+    return value.replace("_", " ")
+
+
+def _protect_draft(context):
+    row = context.source_row
+    protected = row.get("draft_protected") if row is not None else None
+    if protected is None:
+        return
+    keys = {_protected_key(t) for t in protected}
+    seen = set()
+    kept = []
+    for tag in context.main_tags:
+        key = _protected_key(tag)
+        if key in keys:
+            if key in seen:
+                continue
+            seen.add(key)
+        kept.append(tag)
+    at = next((i for i, t in enumerate(kept) if _protected_key(t) not in ALL_PERSON_TAGS), len(kept))
+    for tag in protected:
+        key = _protected_key(tag)
+        if key in seen:
+            at = max(at, next(i for i, t in enumerate(kept) if _protected_key(t) == key) + 1)
+        else:
+            kept.insert(at, tag)
+            seen.add(key)
+            at += 1
+    context.main_tags = kept
+
+
 def _staging_extra_key(tag: str) -> str:
     """core/event_map/extra_prompt.tag_key 와 같은 규칙 - 와일드카드 구문은 글 그대로(`__sweat__` != sweat)."""
     text = tag.strip().lower()
@@ -504,6 +545,9 @@ class PromptProcessor:
 
         context = self._run_hooks('post_processing', context)
         tracer.record('post_processing', context)
+        if context.source_row is not None and context.source_row.get('draft_protected') is not None:
+            context.metadata['draft_after_pe'] = {_protected_key(t) for t in context.main_tags}
+
 
         _main_before = len(context.main_tags or [])
         context = _apply_staging_extra(
@@ -523,6 +567,7 @@ class PromptProcessor:
         tracer.record('after_wildcard', context)
 
         context = self._run_hooks('final_hookpoint', context)
+        _protect_draft(context)
         tracer.record('final_hookpoint', context)
 
         # Boost v2 접지 스냅샷: 모든 훅(조건부 after_wildcard 포함) 이후, 최종 포맷(인물수→prefix 이동)
@@ -758,25 +803,28 @@ class PromptProcessor:
         # 이 작업은 다른 모든 처리보다 먼저 수행되어야 합니다.
         if context.global_append_tags:
             context.main_tags.extend(context.global_append_tags)
+        _protect_draft(context)  # Final append tags must not reintroduce protected duplicates.
 
         # 인물 태그 세트 — 모듈 상수(PERSON_TAG_SETS/ALL_PERSON_TAGS)를 쓴다.
         person_sets = PERSON_TAG_SETS
         all_person_tags = ALL_PERSON_TAGS
         
+        draft = context.source_row is not None and context.source_row.get('draft_protected') is not None
+        person_key = _protected_key if draft else lambda tag: tag
         person_tags_found = []
         new_main_tags = []
 
         # 1. main_tags에서 인물 관련 태그와 나머지 태그 분리
         for tag in context.main_tags:
-            if tag in all_person_tags:
+            if person_key(tag) in all_person_tags:
                 person_tags_found.append(tag)
             else:
                 new_main_tags.append(tag)
 
         # 2. 찾은 인물 태그들을 boys -> girls -> others 순서로 정렬
         sorted_person_tags = sorted(person_tags_found, key=lambda tag: 
-                                    0 if tag in person_sets["boys"] else 
-                                    1 if tag in person_sets["girls"] else 2)
+                                    0 if person_key(tag) in person_sets["boys"] else
+                                    1 if person_key(tag) in person_sets["girls"] else 2)
 
         # 3. 태그 자동 변환 적용
         tag_conversion_map = {
@@ -974,6 +1022,10 @@ class PromptProcessor:
         if sentence:
             context.main_tags.append(sentence if is_nai else _escape_parens_in_content(sentence))
 
+        draft_extra = context.source_row.get('draft_extra', '') if draft else ''
+        extra_marker = "\x00NAIA_DRAFT_EXTRA\x00"
+        if draft_extra:
+            context.main_tags.append(extra_marker)
         # --- 이하 기존 로직 ---
         all_tags = context.get_all_tags()
         seen_person = set()
@@ -1014,6 +1066,9 @@ class PromptProcessor:
         if is_comfyui and is_anima_mode:
             final_string = add_anima_artist_at(final_string, artist_names(self.app_context))
 
+        if draft_extra:
+            context.main_tags = [draft_extra if t == extra_marker else t for t in context.main_tags]
+            final_string = final_string.replace(extra_marker, draft_extra)
         return final_string
 
     def _apply_prompt_squeeze(self, formatted_prompt: list) -> list:

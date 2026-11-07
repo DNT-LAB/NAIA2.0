@@ -384,7 +384,12 @@ class HeadlessImg2ImgService:
         base = (int(state.get("base_width") or 0), int(state.get("base_height") or 0))
         return canvas != base and all(canvas) and all(base)
 
-    def open_session_from_bytes(
+    def open_session_from_bytes(self, *args, **kwargs):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context):
+            return self._draft_locked_open_session_from_bytes(*args, **kwargs)
+
+    def _draft_locked_open_session_from_bytes(
         self,
         image_bytes: bytes,
         *,
@@ -418,6 +423,8 @@ class HeadlessImg2ImgService:
         image = self._session_image_from_bytes(bytes(image_bytes), resize_1mp=resize_1mp)
         png_bytes = self._image_to_png_bytes(image)
         preview, preview_width, preview_height = self._image_preview_data_url(image)
+        from core.event_map.draft import exit_for_owner
+        exit_for_owner(context, "Inpaint")
         context._img2img_window_counter += 1
         params = dict(generation_params or {})
         prompt_ctx = dict(prompt_context or {})

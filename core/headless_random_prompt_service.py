@@ -53,6 +53,7 @@ class HeadlessRandomPromptResult:
     reset_resolution_detected: bool = False
     extra_messages: list[dict[str, Any]] = field(default_factory=list)
     event_map_revision: int | None = None
+    draft_rev: int | None = None
     # [메인 랜덤 버튼 연결] 이 무작위로 뽑은 작가 - 화면(아티스트 창)이 그 작가로 격자를 넘겨 고른다.
     random_artist: dict[str, Any] | None = None
 
@@ -121,13 +122,11 @@ def pipeline_swap_lock(context: Any) -> Any:
     그 값을 읽는 생성 조립(execute_request)이 함께 쓰는 잠금(컨텍스트당 하나)."""
     lock = getattr(context, "_pipeline_swap_lock", None)
     if lock is None:
-        import threading
-
-        lock = threading.RLock()
-        try:
-            context._pipeline_swap_lock = lock
-        except Exception:
-            pass
+        with _SEARCH_POOL_LOCK_CREATE_GUARD:
+            lock = getattr(context, "_pipeline_swap_lock", None)
+            if lock is None:
+                lock = threading.RLock()
+                context._pipeline_swap_lock = lock
     return lock
 
 
@@ -250,10 +249,25 @@ class HeadlessRandomPromptService:
         """메인 Random. [메인 랜덤 버튼 연결](아티스트 리모컨 · 사용자 지시 2026-10-19)이 켜져 있으면 이번 한 번만
         뽑은 작가를 PE 프리픽스 앞에 얹는다(`random_artist_link`).
         ⚠️ 부른 쪽이 이미 PE 오버라이드를 걸었으면(아티스트 창 · 외부 ComfyUI) 얹지 않는다 - 그쪽이 작가를 정했다."""
+        owner = getattr(self.context, "prompt_owner_gen", 0)
+        from core.event_map.draft import active, session
+        from core.event_map.random_link import link_state
+        link = link_state(self.context)
+        if link.get("enabled") and link.get("mode") == "draft":
+            from core.event_map.service import MapQueryError
+            try:
+                with self.random_artist_link() as picked:
+                    return self.attach_random_artist(session(self.context).random(random_request_id, overrides=overrides), picked)
+            except MapQueryError as exc:
+                return HeadlessRandomPromptResult(False, error=str(exc), random_request_id=random_request_id,
+                                                 event_map_revision=link["revision"])
         with self.random_artist_link() as picked:
-            result = self._generate(active_ratings=active_ratings, overrides=overrides,
-                                    random_request_id=random_request_id, source_row_override=source_row_override)
-            return self.attach_random_artist(result, picked)
+            with pipeline_swap_lock(self.context):
+                if owner != getattr(self.context, "prompt_owner_gen", 0) or active(self.context):
+                    return HeadlessRandomPromptResult(False, error="cancelled", random_request_id=random_request_id)
+                result = self._generate(active_ratings=active_ratings, overrides=overrides,
+                                        random_request_id=random_request_id, source_row_override=source_row_override)
+                return self.attach_random_artist(result, picked)
 
     @staticmethod
     def attach_random_artist(result, picked):
@@ -510,12 +524,20 @@ class HeadlessRandomPromptService:
         random_request_id: str = "",
         source: str = "result_reroll",
         update_context: bool = True,
+        roll_characters: bool = True,
     ) -> HeadlessRandomPromptResult:
+        owner = getattr(self.context, "prompt_owner_gen", 0)
         if update_context:
-            return self._generate_from_source_row(
-                source_row, active_ratings=active_ratings, overrides=overrides,
-                random_request_id=random_request_id, source=source, update_context=True,
-            )
+            from core.event_map.draft import active
+            with pipeline_swap_lock(self.context):
+                if (owner != getattr(self.context, "prompt_owner_gen", 0)
+                        or (active(self.context) and source != "event_map_draft")):
+                    return HeadlessRandomPromptResult(False, error="cancelled", random_request_id=random_request_id)
+                return self._generate_from_source_row(
+                    source_row, active_ratings=active_ratings, overrides=overrides,
+                    random_request_id=random_request_id, source=source, update_context=True,
+                    roll_characters=roll_characters,
+                )
         # 부작용 없는 실행(Auto Gen 다음 컷 미리 만들기)은 파이프라인 동안 공용 current_* 를 잠깐
         # 바꿔 둔다. 그 사이 현재 컷의 전송 조립(execute_request)이 그 값을 읽지 않도록 잠근다.
         with pipeline_swap_lock(self.context):
@@ -533,11 +555,12 @@ class HeadlessRandomPromptService:
         random_request_id: str,
         source: str,
         update_context: bool,
+        roll_characters: bool = True,
     ) -> HeadlessRandomPromptResult:
         settings = self._random_settings(overrides)
         ratings = self._normalize_ratings(active_ratings)
         self._ensure_headless_runtime()
-        self._apply_character_settings(settings)
+        self._apply_character_settings(settings, roll_characters=roll_characters)
 
         normalized_source = self._normalize_source_row(source_row)
         if normalized_source is None:
@@ -862,7 +885,7 @@ class HeadlessRandomPromptService:
                 return pd.Series(data)
         return None
 
-    def _apply_character_settings(self, settings: dict[str, Any]) -> None:
+    def _apply_character_settings(self, settings: dict[str, Any], *, roll_characters: bool = True) -> None:
         from core.character_settings import (
             read_character_roll_snapshot,
             read_reroll_on_generate,
@@ -895,7 +918,7 @@ class HeadlessRandomPromptService:
         mode = self.context.get_api_mode()
         reroll_on_generate = read_reroll_on_generate(self.context, mode)
 
-        if reroll_on_generate:
+        if reroll_on_generate or not roll_characters:
             # Roll deferred to Generate — reuse the existing snapshot (if any) for
             # the random prompt / boost grounding; do NOT advance the roll here and
             # do NOT create one if absent (Generate makes the first roll).

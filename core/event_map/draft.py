@@ -1,4 +1,4 @@
-"""Draft's pure data layer. No session, HTTP, or prompt-pipeline ownership.
+"""Draft data operations and the UNIT 2 session/prompt ownership adapter.
 
 Operations copy their input and advance rev only on change. UNIT 2 can rebuild
 from that candidate, then persist/commit it, without rolling back this module.
@@ -215,7 +215,7 @@ class DraftStore:
         except OSError as exc:
             raise DraftError("rebuild_failed") from exc
 
-    def save(self, state, *, base_rev=None):
+    def save(self, state, *, base_rev=None, force_revision=False):
         with _STORE_LOCK:
             current = self.load()
             if self.path.exists() and state["gen"] != current["gen"]:
@@ -225,7 +225,7 @@ class DraftStore:
             _base(current, base_rev)
             candidate = deepcopy(state)
             comparable = {**candidate, "rev": current["rev"]}
-            if comparable == current:
+            if comparable == current and not force_revision:
                 return current
             candidate["rev"] = current["rev"] + 1
             _validate_state(candidate)
@@ -659,3 +659,286 @@ class EventMapDraft:
     def from_staging_id(self, state, staging, item_id, *, base_rev=None):
         item = next((r for r in staging.list()["items"] if r["id"] == item_id), None)
         return self.from_staging(state, item, base_rev=base_rev)
+
+
+# UNIT 2: session wiring. The data operations above remain copy-on-write.
+def active(context):
+    holder = getattr(context, "event_map_draft", None)
+    return bool(holder and holder.state["active"])
+
+
+def saved_prompt(context):
+    return (context.event_map_draft.state["saved_prompt"] if active(context)
+            else str(getattr(context, "prompt_text", "") or ""))
+
+
+def exit_for_owner(context, owner):
+    if not active(context):
+        return
+    holder = context.event_map_draft
+    _, messages = holder.mutate("exit", {})
+    messages.append({"type": "toast", "level": "info", "message": f"{owner} 사용으로 Draft를 종료했습니다."})
+    if holder.broadcast:
+        for message in messages:
+            holder.broadcast(message)
+
+
+def session(context):
+    from core.headless_random_prompt_service import pipeline_swap_lock
+    with pipeline_swap_lock(context):
+        holder = getattr(context, "event_map_draft", None)
+        if holder is None:
+            holder = DraftSession(context)
+            context.event_map_draft = holder
+        return holder
+
+
+class DraftSession:
+    def __init__(self, context):
+        from core.event_map.random_link import ensure_event_map_service
+        self.context = context
+        self.store = DraftStore.from_context(context)
+        self.state = self.store.load()
+        self.engine = EventMapDraft(ensure_event_map_service(context))
+        self.lock = threading.RLock()
+        self.broadcast = None
+        # 재시작 뒤 켜진 채 읽혔다 = 메인 글은 saved_prompt(원문)뿐이다. 첫 GET 이 한 번 조립한다.
+        self.needs_rebuild = bool(self.state["active"])
+        if self.state["active"]:
+            from core.event_map.random_link import link_state
+            context.event_map_random_link = {"enabled": True, "mode": "draft",
+                                             "revision": link_state(context)["revision"] + 1}
+
+    def snapshot(self):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        from core.prompt_processor import _protected_key
+        with pipeline_swap_lock(self.context), self.lock:
+            derived = self.engine.derive(self.state)
+            metadata = getattr(getattr(self.context, "current_prompt_context", None), "metadata", {})
+            after = metadata.get("draft_after_pe")
+            if after is not None:
+                for gray in derived["gray"]:
+                    gray["pe_hidden"] = _protected_key(gray["tag"]) not in after
+            return {"ok": True, "gen": self.state["gen"], "rev": self.state["rev"],
+                    "available": derived["remaining"] is not None,
+                    "state": {k: deepcopy(v) for k, v in self.state.items() if k not in ("schema", "gen", "rev")},
+                    "derived": derived, "prompt": str(getattr(self.context, "prompt_text", "") or "")}
+
+    def _backup(self):
+        ctx = self.context
+        fields = {k: getattr(ctx, k, None) for k in
+                  ("current_source_row", "current_prompt_context", "prompt_text", "negative_prompt_text")}
+        metadata = getattr(fields["current_prompt_context"], "metadata", {})
+        keys = ("conditional_character_overrides", "_conditional_character_slots", "conditional_character_skips")
+        conditional = {k: deepcopy(metadata[k]) for k in keys if k in metadata}
+        mode = ctx.get_api_mode()
+        rolls = getattr(ctx, "_character_roll_snapshot", {}) or {}
+        return fields, keys, conditional, mode, mode in rolls, deepcopy(rolls.get(mode))
+
+    def _restore(self, backup):
+        fields, keys, conditional, mode, existed, roll = backup
+        for key, value in fields.items():
+            setattr(self.context, key, value)
+        metadata = getattr(fields["current_prompt_context"], "metadata", None)
+        if isinstance(metadata, dict):
+            for key in keys:
+                metadata.pop(key, None)
+            metadata.update(conditional)
+        rolls = getattr(self.context, "_character_roll_snapshot", None)
+        if isinstance(rolls, dict):
+            if existed:
+                rolls[mode] = roll
+            else:
+                rolls.pop(mode, None)
+
+    def commit(self, candidate, *, roll_characters=False, request_id="", overrides=None):
+        """Caller holds pipeline + draft locks; failure never installs a candidate."""
+        from app.backend.server.generation_commands import random_service
+        old = self.state
+        backup = self._backup()
+        result = None
+        try:
+            # Persistence in the pipeline must see the candidate's saved_prompt.
+            self.state = candidate
+            if candidate["active"]:
+                result = random_service(self.context).generate_from_source_row(
+                    build_row(candidate), source="event_map_draft", update_context=True,
+                    roll_characters=roll_characters, random_request_id=request_id,
+                    overrides={**(overrides or {}), "wildcard_standalone": False})
+                if not result.success:
+                    raise DraftError("rebuild_failed")
+            self.state = self.store.save(candidate, force_revision=candidate["rev"] > old["rev"])
+        except Exception as exc:
+            self.state = old
+            self._restore(backup)
+            if isinstance(exc, DraftError):
+                raise
+            raise DraftError("rebuild_failed") from exc
+        return result
+
+    def rebuild(self, *, saved=None, notify=True):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(self.context), self.lock:
+            if not self.state["active"]:
+                return self.snapshot()
+            candidate = deepcopy(self.state)
+            if saved is not None:
+                candidate["saved_prompt"] = saved
+            candidate["rev"] += 1
+            result = self.commit(candidate)
+            snap = self.snapshot()
+            if notify and self.broadcast:
+                if result is not None:
+                    self.broadcast(result.websocket_payload())
+                self.broadcast({"type": "event_map_draft", **snap})
+            return snap
+
+    def mutate(self, action, body):
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        from core.event_map.random_link import link_state, staging_store
+        ctx = self.context
+        with pipeline_swap_lock(ctx), self.lock:
+            if action != "exit":
+                self.engine._index()
+            state = self.state
+            required_text = {"check": ("zone", "text"), "extra": ("text",), "drawn": ("op", "tag"),
+                             "chips": ("op",), "from-staging": ("item_id",)}
+            if any(not isinstance(body.get(k), str) for k in required_text.get(action, ())):
+                raise DraftError("too_many", "요청 형식을 확인해주세요.")
+            for key in ("id", "zone", "text"):
+                if key in body and not isinstance(body[key], str):
+                    raise DraftError("too_many", "요청 형식을 확인해주세요.")
+            result = None
+            extras = {}
+            messages = []
+            if action == "check":
+                return self.engine.check(body.get("zone"), body.get("text"), state=state), messages
+            if action == "suggest":
+                suggestions = self.engine.suggest(body.get("q"), body.get("zone", "include"), state=state)
+                for item in suggestions["items"]:
+                    item.setdefault("bound", None)
+                return suggestions, messages
+            if action in ("enter", "exit"):
+                entering = action == "enter"
+                if state["active"] == entering:
+                    return self.snapshot(), messages
+                if entering and (getattr(ctx, "img2img_session", {}) or {}).get("active"):
+                    raise DraftError("owned_by", "인페인트 세션을 먼저 닫아주세요.")
+                candidate = deepcopy(state)
+                old_link = link_state(ctx)
+                old_prompt = getattr(ctx, "prompt_text", "")
+                if entering:
+                    if "prompt" in body:
+                        if not isinstance(body["prompt"], str):
+                            raise DraftError("too_many")
+                        ctx.prompt_text = body["prompt"]
+                    candidate["saved_prompt"] = ctx.prompt_text
+                    if ctx.get_options().get("wildcard_standalone"):
+                        ctx.set_option("wildcard_standalone", False)
+                        messages.extend([{"type": "options", **ctx.get_options()},
+                                         {"type": "toast", "level": "info", "message": "Draft를 위해 WC Solo를 해제했습니다."}])
+                    story = getattr(ctx, "_storyteller_service", None)
+                    if callable(story):
+                        story = story()
+                        stream = getattr(ctx, "event_stream_runtime", None)
+                        if story.is_running() or getattr(stream, "is_active", False):
+                            stopped = story.stop() if story.is_running() else story.disarm_manual()
+                            messages.extend(stopped.get("_headless_extra_messages", []))
+                            messages.append({"type": "toast", "level": "info", "message": "Draft를 위해 Story를 종료했습니다."})
+                    ctx.event_map_random_link = {"enabled": True, "mode": "draft", "revision": old_link["revision"] + 1}
+                else:
+                    ctx.prompt_text = state["saved_prompt"]
+                    if old_link.get("mode") == "draft":
+                        ctx.event_map_random_link = {"enabled": False, "revision": old_link["revision"] + 1}
+                candidate.update(active=entering, rev=state["rev"] + 1)
+                ctx.prompt_owner_gen = getattr(ctx, "prompt_owner_gen", 0) + 1
+                try:
+                    result = self.commit(candidate)
+                except Exception:
+                    ctx.event_map_random_link = old_link
+                    ctx.prompt_text = old_prompt
+                    raise
+                from app.backend.server.generation_commands import invalidate_auto_gen_prefetch
+                invalidate_auto_gen_prefetch(ctx)
+                ctx.save_remote_ui_state()
+                messages.append({"type": "event_map_random_link", **link_state(ctx)})
+            elif action == "to-staging":
+                value = self.engine.to_staging(state)
+                from core.event_map.library import EventMapLibrary
+                data = staging_store(ctx).add_many([value["selection"]], extras=[value["extra"]])
+                identity = EventMapLibrary._identity(value["selection"])
+                item_id = next(r["id"] for r in data["items"]
+                               if EventMapLibrary._identity(r["selection"]) == identity)
+                messages.append({"type": "event_map_staging", "count": sum(r.get("enabled", True) for r in data["items"]),
+                                 "total": len(data["items"])})
+                return {"ok": True, "item_id": item_id, "snapshot": self.snapshot()}, messages
+            else:
+                base = body.get("base_rev")
+                if base is not None and type(base) is not int:
+                    raise DraftError("too_many")
+                _base(state, base)
+                if action == "chips":
+                    candidate = self.engine.chips(state, body.get("op"), base_rev=base,
+                        **{k: body.get(k) for k in ("id", "zone", "text", "exact")})
+                    if candidate["extra"] != state["extra"]:
+                        extras["routed"] = "extra"
+                elif action == "extra":
+                    candidate = self.engine.extra(state, body.get("text"), base_rev=base)
+                elif action == "drawn":
+                    candidate = self.engine.drawn(state, body.get("op"), body.get("tag"), base_rev=base)
+                elif action == "from-staging":
+                    item = next((r for r in staging_store(ctx).list()["items"] if r["id"] == body.get("item_id")), None)
+                    candidate = self.engine.from_staging(state, item)
+                    dropped = self.engine.discarded(item)
+                    if dropped:
+                        extras["dropped"] = dropped
+                elif action == "rebuild":
+                    if not state["active"]:
+                        return self.snapshot(), messages
+                    candidate = deepcopy(state)
+                    candidate["rev"] += 1
+                else:
+                    raise DraftError("too_many")
+                if candidate != state:
+                    result = self.commit(candidate)
+            if result is not None:
+                messages.append(result.websocket_payload())
+                messages.extend(result.extra_messages)
+            snap = self.snapshot()
+            messages.append({"type": "event_map_draft", **snap})
+            return {**snap, **extras}, messages
+
+    def random(self, request_id="", *, overrides=None):
+        from core.headless_random_prompt_service import HeadlessRandomPromptResult, pipeline_swap_lock
+        from core.event_map.random_link import link_state
+        ctx = self.context
+        for attempt in range(2):
+            with pipeline_swap_lock(ctx), self.lock:
+                state = deepcopy(self.state)
+                revision = link_state(ctx)["revision"]
+                if not state["active"]:
+                    break
+            try:
+                picked = self.engine.pick(state)  # expensive selection stays outside the commit lock
+            except MapQueryError as exc:
+                return HeadlessRandomPromptResult(False, error=str(exc), random_request_id=request_id,
+                                                 event_map_revision=revision, draft_rev=state["rev"])
+            with pipeline_swap_lock(ctx), self.lock:
+                if (state["gen"], state["rev"], revision) != (self.state["gen"], self.state["rev"], link_state(ctx)["revision"]):
+                    continue
+                if not self.state["active"]:
+                    break
+                state["drawn"] = {**picked, "dropped": []}
+                state["rev"] += 1
+                try:
+                    result = self.commit(state, roll_characters=True, request_id=request_id, overrides=overrides)
+                except DraftError as exc:
+                    return HeadlessRandomPromptResult(False, error=exc.message, random_request_id=request_id,
+                                                     event_map_revision=revision, draft_rev=self.state["rev"])
+                result.source = "random"
+                result.event_map_revision = revision
+                result.draft_rev = self.state["rev"]
+                result.extra_messages.append({"type": "event_map_draft", **self.snapshot()})
+                return result
+        return HeadlessRandomPromptResult(False, error="cancelled", random_request_id=request_id,
+                                         event_map_revision=revision, draft_rev=self.state["rev"])

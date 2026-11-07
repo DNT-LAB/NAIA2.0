@@ -389,6 +389,7 @@ async def apply_boost_v2(
     ``prune=False`` 면 응답이 쓴 입력 태그를 main 에서 걷어내지 않는다 — Assist [부스트 생성] · [부스트 넣기] 는 제안한
     태그가 먼저, Boost 문단은 그 뒤다(사용자 지정 10-01: 걷어내기 때문에 Boost 문단만 남았다).
     """
+    owner = getattr(context, "prompt_owner_gen", 0)
     from core.boost_v2 import build_instruction, enabled_sections, format_output
 
     try:
@@ -417,15 +418,24 @@ async def apply_boost_v2(
         new_prompt = inject_block(pruned, addition)
         if new_prompt == prompt:
             return False
-        result.prompt = new_prompt
-        if update_context:
-            context.prompt_text = new_prompt
-        ctx = getattr(result, "context", None)
-        if ctx is not None:
-            try:
-                ctx.final_prompt = new_prompt
-            except Exception:
-                pass
+        from core.headless_random_prompt_service import pipeline_swap_lock
+        with pipeline_swap_lock(context):
+            if owner != getattr(context, "prompt_owner_gen", 0):
+                result.success = False
+                result.error = "cancelled"
+                if isinstance(getattr(result, "extra_messages", None), list):
+                    result.extra_messages.append({"type": "toast", "level": "info",
+                                                  "message": "Draft 전환으로 취소했습니다."})
+                return False
+            result.prompt = new_prompt
+            if update_context:
+                context.prompt_text = new_prompt
+            ctx = getattr(result, "context", None)
+            if ctx is not None:
+                try:
+                    ctx.final_prompt = new_prompt
+                except Exception:
+                    pass
         _record(context, result, {
             "ok": True,
             "input": tags,

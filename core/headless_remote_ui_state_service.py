@@ -292,6 +292,7 @@ def _heal_nai_model_key(context: Any, planes: dict[str, Any]) -> None:
 
 
 def save_remote_ui_state(context: Any) -> dict[str, Any]:
+    from core.event_map.draft import saved_prompt
     settings = _read_app_settings(context)
     mode = context.get_api_mode()
     planes = getattr(context, "remote_param_planes", None)
@@ -308,13 +309,13 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
     # Snapshot the active mode's prompt from the live fields (set_prompt and the
     # random-prompt service write prompt_text directly), so persistence captures it.
     prompt_planes[mode] = {
-        "prompt": str(context.prompt_text or ""),
+        "prompt": saved_prompt(context),
         "negative_prompt": str(context.negative_prompt_text or ""),
     }
     state = {
         "version": STATE_VERSION,
         "api_mode": mode,
-        "prompt": str(context.prompt_text or ""),
+        "prompt": saved_prompt(context),
         "negative_prompt": str(context.negative_prompt_text or ""),
         "remote_options": {
             # ⚠️ `get_options()` 가 아니다 - 그것은 세션 옵션(저장 금지)까지 싣는다.

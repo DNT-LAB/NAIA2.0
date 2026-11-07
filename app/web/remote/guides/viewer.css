@@ -44,6 +44,14 @@ details a {
 }
 details a:hover { background: var(--hover); }
 details a[aria-current=page] { background: rgba(55, 53, 47, 0.08); color: #37352f; font-weight: 500; }
+/* 분류 없는 문서(목차 · 토큰 발급) - 들여쓰지 않고 맨 위에. */
+.top-link {
+  display: flex; align-items: center; min-height: 28px; margin: 1px 0; padding: 4px 10px; border-radius: 6px;
+  font-size: 14px; color: rgba(55, 53, 47, 0.85); line-height: 1.3; text-decoration: none;
+}
+.top-link:hover { background: var(--hover); }
+.top-link[aria-current=page] { background: rgba(55, 53, 47, 0.08); color: #37352f; font-weight: 500; }
+.top-link + details { margin-top: 14px; }
 #empty { padding: 0 10px; font-size: 13px; color: var(--muted); }
 
 main { margin-left: 240px; min-height: 100vh; padding: 0 96px; }

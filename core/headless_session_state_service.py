@@ -97,7 +97,15 @@ class HeadlessSessionStateService:
             "is_generating": bool(context.is_generating),
             "api_mode": context.get_api_mode(),
             "autocomplete": self.autocomplete_status_payload(),
+            # 가이드 뷰어가 'NovelAI 토큰 발급' 을 숨길지 정한다 - 저장 여부만, 토큰은 내보내지 않는다.
+            "nai_configured": self._nai_configured(),
         }
+
+    def _nai_configured(self) -> bool:
+        try:
+            return bool(str(self.context.secure_token_manager.get_token("nai_token") or "").strip())
+        except Exception:
+            return False
 
     def queue_state_payload(self) -> dict[str, Any]:
         context = self.context

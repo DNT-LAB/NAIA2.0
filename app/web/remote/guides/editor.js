@@ -272,7 +272,8 @@
   function fillCategories() {
     const select = bar.querySelector('[data-category]');
     select.replaceChildren();
-    const categories = [...new Set(guide.pages.slice(1).map(entry => entry.category))];
+    select.append(new Option('(분류 없음 · 맨 위)', '', false, !page?.category));
+    const categories = [...new Set(guide.pages.slice(1).map(entry => entry.category).filter(Boolean))];
     for (const category of categories) select.append(new Option(category, category, false, category === page?.category));
     select.append(new Option('새 분류…', '__new__'));
   }
@@ -303,9 +304,9 @@
     try {
       await putCatalog(pages);
       page = guide.pages.find(entry => entry.id === moved.id);
-      byId('breadcrumb').textContent = `가이드 / ${page.category} / ${page.title}`;
+      byId('breadcrumb').textContent = ['가이드', page.category, page.title].filter(Boolean).join(' / ');
       fillCategories();
-      setStatus(`분류를 '${category}' 로 옮겼습니다.`);
+      setStatus(category ? `분류를 '${category}' 로 옮겼습니다.` : '분류 없이 목차 맨 위로 옮겼습니다.');
     } catch (error) {
       fillCategories();
       setStatus(`목차를 저장하지 못했습니다: ${error.message}`, true);
@@ -366,7 +367,7 @@
     <form hidden>
       <label>제목<input name="title" required maxlength="80" placeholder="와일드카드 기초"></label>
       <label>문서 이름 (주소 · 파일 이름)<input name="id" required maxlength="64" pattern="[a-z0-9][a-z0-9\\-]*" placeholder="wildcard-basics"></label>
-      <label>분류<input name="category" required maxlength="40" list="guideCategories"></label>
+      <label>분류 (비우면 맨 위)<input name="category" maxlength="40" list="guideCategories"></label>
       <label>요약<input name="summary" maxlength="300" placeholder="한 줄 설명"></label>
       <datalist id="guideCategories"></datalist>
       <div class="err" role="alert"></div>
@@ -377,7 +378,7 @@
   newDoc.querySelector('[data-open]').addEventListener('click', () => {
     if (dirty && !confirm('저장하지 않은 변경이 있습니다. 버리고 새 문서를 만들까요?')) return;
     const list = newDoc.querySelector('datalist');
-    list.replaceChildren(...[...new Set(guide.pages.slice(1).map(entry => entry.category))].map(category => new Option(category)));
+    list.replaceChildren(...[...new Set(guide.pages.slice(1).map(entry => entry.category).filter(Boolean))].map(category => new Option(category)));
     form.category.value = page?.category && page.id !== 'welcome' ? page.category : '';
     form.hidden = false;
     form.title.focus();
@@ -419,6 +420,7 @@
   guide.onShown = shown => {
     page = shown;
     frameDoc = null;
+    if (guide.showHidden !== editing) { guide.showHidden = editing; guide.refreshNavigation(); }
     const editable = editing && !!shown.file;
     toggle.setAttribute('aria-pressed', String(editing));
     toggle.textContent = editing ? '편집 끄기' : '편집';

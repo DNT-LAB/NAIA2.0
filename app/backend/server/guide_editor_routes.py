@@ -27,6 +27,8 @@ from core.headless_payload_utils import is_loopback_host
 
 DOC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 RESERVED_IDS = {"welcome", "index", "catalog", "assets"}
+# 목차에서 숨기는 조건 - 뷰어가 /api/status 의 같은 이름 값을 본다.
+HIDE_WHEN = {"", "nai_configured"}
 MAX_IMAGE_BYTES = 40 * 1024 * 1024
 MAX_HTML_CHARS = 2_000_000
 MAX_SIDE = 1600
@@ -164,17 +166,23 @@ def validate_catalog(payload: Any, guides_dir: Path) -> dict[str, Any]:
         if not (guides_dir / f"{doc_id}.html").is_file():
             raise ValueError(f"문서 파일이 없습니다: {doc_id}.html")
         title = _clean_text(page.get("title"), 80)
-        category = _clean_text(page.get("category"), 40)
-        if not title or not category:
-            raise ValueError(f"제목과 분류는 비울 수 없습니다: {doc_id}")
-        clean.append({
+        if not title:
+            raise ValueError(f"제목은 비울 수 없습니다: {doc_id}")
+        hide_when = str(page.get("hide_when") or "")
+        if hide_when not in HIDE_WHEN:
+            raise ValueError(f"알 수 없는 숨김 조건입니다: {hide_when}")
+        entry = {
             "id": doc_id,
-            "category": category,
+            # 빈 분류 = 분류 없이 목차 맨 위
+            "category": _clean_text(page.get("category"), 40),
             "title": title,
             "summary": _clean_text(page.get("summary"), 300),
             "keywords": _clean_text(page.get("keywords"), 200),
             "file": f"{doc_id}.html",
-        })
+        }
+        if hide_when:
+            entry["hide_when"] = hide_when
+        clean.append(entry)
     return {"version": 1, "pages": clean}
 
 
@@ -267,8 +275,8 @@ def register_guide_editor_routes(app: FastAPI, root_web_dir: Path) -> None:
             return _fail("같은 이름의 문서가 이미 있습니다.", 409, "EXISTS")
         title = _clean_text(payload.get("title"), 80)
         category = _clean_text(payload.get("category"), 40)
-        if not title or not category:
-            return _fail("제목과 분류를 적어 주세요.")
+        if not title:
+            return _fail("제목을 적어 주세요.")
         catalog = _read_catalog(guides_dir)
         catalog["pages"].append({
             "id": doc_id, "category": category, "title": title,

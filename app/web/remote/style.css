@@ -34087,9 +34087,9 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   cursor: pointer;
 }
 .dr-btn:hover { border-color: var(--accent); color: var(--text-primary); }
-/* 칸 나누기(사용자 11-07): 포함 · 제외가 남는 높이를 2:1 로 나눠 갖고, Extra 는 두 줄 남짓으로 줄인다. */
+/* 칸 나누기(사용자 11-07): 포함 · 제외가 남는 높이를 2:1 로 나눠 갖고(둘 다 최소 칩 두 줄), Extra 는 두 줄 남짓으로 줄인다. */
 .dr-zone[data-dr-zone="include"] { flex: 2 1 auto; min-height: 84px; }
-.dr-zone[data-dr-zone="exclude"] { flex: 1 1 auto; min-height: 56px; }
+.dr-zone[data-dr-zone="exclude"] { flex: 1 1 auto; min-height: 84px; }
 .dr-zone--extra { flex: none; }
 .dr-extra-text { min-height: 34px; max-height: 52px; }
 /* 칸 색(사용자 11-07 - 눈으로 바로 가르게): 칸 위 곧은 색 줄 + 제목 같은 색. 포함 초록 · 제외 빨강 · Extra 파랑. */
@@ -34155,3 +34155,16 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 /* 칩 메뉴는 화면 위 고정 - 판 · 창 넘침에 잘리지 않는다. 떠 있는 창들(--z-drag-panel + 순서)보다 위 */
 .dr-menu { position: fixed; z-index: calc(var(--z-drag-panel, 10150) + 500); }
 .dr-btn.is-on { border-color: var(--accent); color: var(--text-primary); }
+
+/* 칸 높이 손잡이(draftMode.mjs - 사용자 지시 11-07). 칸 사이 높이 0 짜리 형제 · 잡히는 폭 10px · 올리면 아래 칸 색 줄이 굵어진다. */
+.dr-rh { flex: none; height: 0; position: relative; z-index: 3; touch-action: none; cursor: row-resize; }
+.dr-rh::before { content: ""; position: absolute; left: 0; right: 0; top: -4px; height: 10px; cursor: row-resize; }
+.dr-rh::after { content: ""; position: absolute; left: 0; right: 0; top: -1px; height: 4px; background: currentColor; opacity: 0; transition: opacity 0.12s; pointer-events: none; }
+.dr-rh:hover::after, .dr-rh.is-drag::after { opacity: 1; }
+.dr-rh--include { color: rgba(224,85,97,0.9); }
+.dr-rh--exclude { color: rgba(90,169,230,0.9); }
+.dr-rh--extra { color: rgba(232,232,240,0.4); }
+/* 끈 칸 = 고정 높이(넘치면 칸 안에서 스크롤) · 끌지 않은 칸은 원래 flex 로 남은 높이를 나눈다 */
+.dr-zone.is-sized { flex: 0 0 auto; min-height: 0; overflow-y: auto; }
+.dr-zone--extra.is-sized { display: flex; flex-direction: column; overflow: hidden; }
+.dr-zone--extra.is-sized .dr-extra-text { flex: 1 1 auto; max-height: none; }

@@ -168,6 +168,107 @@ export function initDraftMode({
   const sumEl = board.querySelector('[data-dr-sum]');
   const suggestEl = board.querySelector('[data-dr-suggest]');
   const bands = [...board.querySelectorAll('[data-dr-pe]')];
+
+  // ---- 칸 높이 손잡이(사용자 지시 11-07) ----
+  // 칸 위 색 줄이 곧 손잡이다: 제외 위 줄 = 포함 높이 · Extra 위 줄 = 제외 높이 · postfix 위 줄 = Extra 높이.
+  // 끈 칸만 고정 높이가 되고 나머지는 남은 높이를 나눠 갖는다. 최소 = 칩 두 줄(Extra 는 글 두 줄). 두 번 누르면 기본으로.
+  // 높이는 이 브라우저에만 기억한다(화면 취향 - 서버에 두지 않는다. PC · 휴대폰이 서로 덮지 않게).
+  const ZONE_KEY = 'naia.draft.zoneHeights.v1';
+  const zoneEls = {
+    include: board.querySelector('.dr-zone[data-dr-zone="include"]'),
+    exclude: board.querySelector('.dr-zone[data-dr-zone="exclude"]'),
+    extra: board.querySelector('.dr-zone--extra'),
+  };
+  // 손잡이는 칸 **사이**의 높이 0 짜리 형제다 - 칸 안에 두면 고정 높이 칸의 넘침(스크롤)에 잘린다.
+  const handleBefore = { include: zoneEls.exclude, exclude: zoneEls.extra, extra: board.querySelector('.dr-band--post') };
+  function readZoneHeights() {
+    try {
+      const v = JSON.parse(localStorage.getItem(ZONE_KEY) || '{}');
+      return v && typeof v === 'object' ? v : {};
+    } catch (_) { return {}; }
+  }
+  function writeZoneHeights(v) { try { localStorage.setItem(ZONE_KEY, JSON.stringify(v)); } catch (_) {} }
+  function setZoneHeight(name, px) {
+    const el = zoneEls[name];
+    if (px == null) { el.classList.remove('is-sized'); el.style.height = ''; return; }
+    el.classList.add('is-sized');
+    el.style.height = `${Math.round(px)}px`;
+  }
+  /** 칩 두 줄(Extra 는 글 두 줄)이 들어가는 높이 - 끌기 시작할 때 잰다(판이 보일 때). */
+  function zoneMin(name) {
+    const el = zoneEls[name];
+    const cs = getComputedStyle(el);
+    const box = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom) + parseFloat(cs.borderTopWidth);
+    const head = el.querySelector('.dr-zh');
+    const headH = head ? head.offsetHeight + (parseFloat(getComputedStyle(head).marginBottom) || 0) : 0;
+    if (name === 'extra') {
+      const lh = parseFloat(getComputedStyle(extraEl).lineHeight) || 18;
+      return Math.ceil(box + headH + lh * 2 + 2);
+    }
+    const chips = el.querySelector('.dr-chips');
+    const chip = chips.querySelector('.dr-chip');
+    const row = Math.max(chip ? chip.offsetHeight : 0, 22);
+    const gap = parseFloat(getComputedStyle(chips).rowGap) || 5;
+    return Math.ceil(box + headH + row * 2 + gap);
+  }
+  Object.entries(handleBefore).forEach(([name, next]) => {
+    if (!next) return;
+    const h = document.createElement('div');
+    h.className = `dr-rh dr-rh--${name}`;
+    h.dataset.drRh = name;
+    h.title = '끌어서 위 칸 높이 조정 · 두 번 누르면 기본';
+    h.setAttribute('aria-hidden', 'true');
+    next.before(h);
+  });
+  {
+    const saved = readZoneHeights();
+    Object.keys(zoneEls).forEach(name => {
+      const v = Number(saved[name]);
+      if (Number.isFinite(v) && v > 0) setZoneHeight(name, v);
+    });
+  }
+  board.addEventListener('pointerdown', event => {
+    const h = event.target.closest?.('[data-dr-rh]');
+    if (!h || event.button !== 0) return;
+    const name = h.dataset.drRh;
+    const el = zoneEls[name];
+    event.preventDefault();
+    const y0 = event.clientY;
+    const h0 = el.getBoundingClientRect().height;
+    const min = zoneMin(name);
+    let last = h0;
+    let moved = false;
+    h.classList.add('is-drag');
+    try { h.setPointerCapture(event.pointerId); } catch (_) {}
+    const move = ev => {
+      moved = true;
+      last = Math.max(min, Math.min(900, h0 + ev.clientY - y0));
+      setZoneHeight(name, last);
+    };
+    const up = () => {
+      h.classList.remove('is-drag');
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', up);
+      h.removeEventListener('pointercancel', up);
+      if (!moved) return;
+      const saved = readZoneHeights();
+      saved[name] = Math.round(last);
+      writeZoneHeights(saved);
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  });
+  board.addEventListener('dblclick', event => {
+    const h = event.target.closest?.('[data-dr-rh]');
+    if (!h) return;
+    event.preventDefault();
+    const name = h.dataset.drRh;
+    setZoneHeight(name, null);
+    const saved = readZoneHeights();
+    delete saved[name];
+    writeZoneHeights(saved);
+  });
   const inputs = {};
   ['include', 'exclude'].forEach(zone => {
     const input = document.createElement('input');

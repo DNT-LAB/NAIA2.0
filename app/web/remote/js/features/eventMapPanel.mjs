@@ -104,7 +104,9 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   // 랜덤 연결은 한 갈래뿐이다(서버 상태 하나): event = 이 창의 지금 조합, staging = S 창의 스테이징 풀
   // (사용자 지시 2026-10-14 - 한쪽을 켜면 다른 쪽이 꺼진다). 이 창의 체크박스 · 핀 동기화는 event 갈래일 때만.
-  const eventLinked = () => randomLink.enabled && randomLink.mode !== 'staging';
+  // ⚠️ 셋째 갈래 draft(Draft Mode - 2026-11-07)가 생겼다. 'staging 이 아니면 EV' 로 읽으면 Draft 연결을 이 창의 조합으로
+  //    덮어 읽고, 실패 처리에서 연결을 꺼 버린다(재검수 B5). mode 가 없던 옛 상태는 event 다.
+  const eventLinked = () => randomLink.enabled && (randomLink.mode || 'event') === 'event';
   let linkUncertain = false;
   let linkQueue = Promise.resolve(), linkKey = '';
   function paintRandomLink() {

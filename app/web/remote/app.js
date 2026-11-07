@@ -1168,6 +1168,7 @@ function syncAssetsV5Mode(activeRightTab) {
   // 덮개는 **제작 · 바리에이션 화면에서만** 올라온다. 신 사양 탭의 기본 화면(캐릭터 선택)에서는 메인 프롬프트가
   // 그대로 보이고 Generate 도 평소대로다(사용자 정정 2026-10-11). 화면이 바뀌면 모듈이 `onViewChange` 로 다시 부른다.
   const cover = shown && !!characterBuilderV5Control?.wantsCover?.();
+  if (cover && window.draftMode?.isActive?.()) void window.draftMode.exit({toast: 'Assets 신 사양 화면을 열어 Draft 를 껐습니다'});
   document.body.classList.toggle('assets-v5-mode', cover);
   // 블록 줄은 Prompt 탭 안에 있다. 다른 탭(Params 등)을 보고 있었으면 덮개가 안 보인다.
   if (cover && activePromptTab !== 'prompt') switchTab('prompt');
@@ -1645,7 +1646,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261102-cmp13')
+import('./js/features/eventMapPanel.mjs?v=20261107-draft1')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1681,7 +1682,7 @@ import('./js/features/eventMapPanel.mjs?v=20261102-cmp13')
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
 // S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
-import('./js/features/eventMapStaging.mjs?v=20261102-stc3')
+import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .then(({initEventMapStaging}) => {
     window.eventStaging = initEventMapStaging({
       showToast,
@@ -1694,6 +1695,62 @@ import('./js/features/eventMapStaging.mjs?v=20261102-stc3')
     });
   })
   .catch(error => console.error('Failed to initialize Staging', error));
+// Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
+// 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
+import('./js/features/draftMode.mjs?v=20261107-draft2')
+  .then(({initDraftMode}) => {
+    window.draftMode = initDraftMode({
+      host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
+      pill: document.getElementById('draftPill'),
+      escHtml,
+      showToast,
+      getPeField: key => peFieldText(key),
+      setPeField: (key, text) => {
+        if (!slashPeSetField(key, text)) throw new Error('WS 연결이 끊겨 있습니다');
+      },
+      bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
+      isAutocompleteEnabled: () => tagAutocompleteEnabled(),
+      // 인페인트 세션이 입력창을 쥐고 있으면 쓰지 않는다 - 세션을 닫을 때 원본(promptBeforeInpaint)이 돌아온다.
+      applyServerPrompt: (prompt, source) => { if (!inpaintOwnsPromptBox()) updatePromptOnly({prompt, source}); },
+      // 안 보낸 편집이 있으면 지금 보내고 그 글을 enter 에 싣는다 - WS 와 HTTP 는 순서가 보장되지 않는다(DRAFT_MODE_API.md).
+      takePendingPrompt: () => {
+        if (!promptSendTimer && !_localPromptDirty) return null;
+        const text = promptTextForSave();
+        firePendingPromptSend();
+        return text;
+      },
+      prepareEnter: async () => draftPrepareEnter(),
+      dropForeignOwners: () => draftDropForeignOwners(),
+      openEventMap: () => { try { void window.eventMap?.show?.(); } catch (_) {} },
+      openStaging: () => window.eventStaging?.show?.('stage'),
+      onActiveChange: () => { updateGenerateButtonMode(); window.eventStaging?.paint?.(); },
+    });
+  })
+  .catch(error => console.error('Failed to initialize Draft Mode', error));
+
+/** Draft 를 켜기 전 - 겹치는 기능(D24)을 끄거나 막는다. Interactive 는 기존 끄기(원문 복원)를 쓴다. */
+async function draftPrepareEnter() {
+  if (virtualCharacterSession() || inpaintOwnsPromptBox()) {
+    return {ok: false, message: '인페인트 세션을 닫은 뒤 Draft 를 켜세요'};
+  }
+  if (document.body.classList.contains('assets-v5-mode')) {
+    return {ok: false, message: 'Assets 신 사양 제작 화면을 닫은 뒤 Draft 를 켜세요'};
+  }
+  if (interactivePanel?.isActive?.()) {
+    interactivePanel.setActive(false);
+    showToast('Draft 를 켜려고 Interactive 를 껐습니다', 'info');
+  }
+  return {ok: true};
+}
+
+/** 다른 창이 Draft 를 켰다(재검수 C6) - 이 탭이 쥔 Interactive 를 **원문 복원 없이** 내려놓는다(서버가 이미 보관했다). */
+function draftDropForeignOwners() {
+  if (interactivePanel?.isActive?.()) {
+    promptBeforeInteractive = null;
+    interactivePanel.setActive(false);
+    showToast('다른 창에서 Draft 를 켰습니다', 'info');
+  }
+}
 // Wire-Flow · 조건부 와일드카드(사용자 지시 2026-10-31) - 노드 그래프 창 + 모드. 모드가 켜지면 조건부 프롬프트 · E · S 가
 // 일시 해제되고 결과 가장자리에 W 가 뜬다(W 단추 · 상태 읽기 때문에 처음부터 싣는다 - 창은 처음 열 때 만든다).
 // ⛔ 아직 개발 중이라 임시로 막는다(사용자 지시 2026-11-03): 런처 줄(moduleLauncher.mjs)과 같은 개발 표식
@@ -2513,9 +2570,14 @@ function applyVirtualMainPrompt() {
       }
       // Interactive 가 이미 입력창을 가져갔다면 화면의 것은 **조립값**이다. 그것을
       // 맡아 두면 세션을 닫은 뒤 조립값이 '사용자 원본' 행세를 한다(Codex MED 3).
-      promptBeforeInpaint = promptBeforeInteractive !== null
-        ? String(promptBeforeInteractive)
-        : String(box.value || '');
+      // Draft 가 켜져 있었으면 입력창은 Draft 조립 글이다 - 원본은 Draft 가 보관한 글이고, Draft 는 끈다(D24).
+      const draftWasOn = !!window.draftMode?.isActive?.();
+      promptBeforeInpaint = draftWasOn
+        ? window.draftMode.savedPrompt()
+        : (promptBeforeInteractive !== null
+          ? String(promptBeforeInteractive)
+          : String(box.value || ''));
+      if (draftWasOn) void window.draftMode.exit({toast: '인페인트 세션을 열어 Draft 를 껐습니다'});
       syncingPrompt = true;
       box.value = String(session.main_prompt || '');
       syncingPrompt = false;
@@ -2648,6 +2710,11 @@ function syncRefVibePillVisibility() {
 function applyInteractiveModeGate(isActive) {
   // Interactive 에서는 최종 프롬프트를 상시 노출하지 않는다(사용자 결정). 전체 문자열은
   // 나중에 별도 미리보기 팝업으로만 확인한다.
+  if (isActive && window.draftMode?.isActive?.()) {
+    // Draft 가 켜져 있었다(D24) - 입력창의 글은 Draft 조립 글이다. 사용자 원본은 Draft 가 보관한 글이다.
+    if (promptBeforeInteractive === null) promptBeforeInteractive = window.draftMode.savedPrompt();
+    void window.draftMode.exit({toast: 'Interactive 를 켜서 Draft 를 껐습니다'});
+  }
   if (isActive) {
     // **원본을 먼저 잡는다.** `restoreInteractiveState()` 는 살아 있는 패널에
     // emitChange 를 일으켜 입력창을 조립값으로 덮는다 — 복원을 먼저 하면 그 조립값을
@@ -5362,6 +5429,7 @@ function afterWsJsonMessage(m) {
   if (m.type === 'event_map_random_link') { window.eventMap?.receiveRandomLink?.(m); window.eventStaging?.paint?.(); }
   if (m.type === 'event_map_staging') window.eventStaging?.receiveCount?.(m);
   if (m.type === 'event_map_staging_presets') window.eventStaging?.receivePresets?.();
+  if (m.type === 'event_map_draft') window.draftMode?.receive?.(m);
   if (m.type === 'wireflow_state') window.wireFlow?.reload?.();
   // Update search count from prompt_generated
   if (m.type === 'prompt_generated' && 'remaining' in m) {
@@ -5805,6 +5873,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
         void window.eventMap?.refreshRandomLink?.();
         // 스테이징도 다시 받는다 - 서버가 늦게 떴거나 다시 켜졌으면 첫 조회가 실패해 S 단추 · 배지가 비어 있다(재실행 점검 2026-10-15).
         void window.eventStaging?.reconnected?.();
+        void window.draftMode?.reload?.();
         _initDone = false;
         setBootIndicator('Loading state…', 60, false);
         if (setupController) setupController.resetInitialProbe();
@@ -6271,7 +6340,7 @@ function unlockRandomButton({clearRequest = true} = {}) {
   stopRndTimer();  // boost 경과 타이머 정지 + 'Random' 라벨 복원
   // Interactive 는 블록이 프롬프트를 조립한다 — Random 이 넣을 자리가 없다.
   // Prompt Fixed 와 같은 취급으로 잠근다(사용자 지시).
-  const locked = getOptionChecked('prompt_fixed') || !!interactivePanel?.isActive?.();
+  const locked = promptFixedHoldsRandom() || !!interactivePanel?.isActive?.();
   btnRnd.disabled = locked;
   btnRnd.style.opacity = locked ? '0.4' : '';
 }
@@ -6381,6 +6450,7 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     || source === 'auto_generate'
     || source === 'result_reroll'
     || source === 'event_map'     // Ctrl+E 실제 조합 [적용] - Random 과 같은 파이프라인 산출물
+    || source === 'event_map_draft' // Draft Mode 가 확정한 메인 글(칩 · Extra 재조립 · 끌 때 복원) - 재검수 C3
     || source === 'event_compress' // 이벤트 압축 창 [랜덤](/api/event-compress/random) - 같은 파이프라인 산출물
     || source === 'assist'        // Assist [프롬프트에 넣기] · [부스트 넣기](/api/assist/apply) - 같은 파이프라인 산출물
     || source === 'storyteller'   // RC-3: 스토리텔러 자동생성 프롬프트도 좌측 패널에 반영
@@ -7962,6 +8032,9 @@ function promptTextForSave() {
   // ⚠️ 인페인트 세션이 입력창을 가졌으면 화면의 것은 **세션 문장**이다. 그것을
   //    저장하면 사용자의 진짜 프롬프트가 사라진다 - 맡아 둔 원본을 돌려준다.
   if (inpaintOwnsPromptBox()) return promptBeforeInpaint;
+  // Draft 가 켜져 있으면 칸에 든 것은 **조립한 Draft 글**이다 - 원문(saved_prompt)을 보낸다.
+  //    서버는 원문과 같은 set_prompt 를 조용히 받는다(네거티브만 고친 경우 · DRAFT_MODE_API late set_prompt).
+  if (window.draftMode?.isActive?.()) return window.draftMode.savedPrompt();
   return promptBeforeInteractive !== null ? promptBeforeInteractive : promptEdit.value;
 }
 
@@ -10439,12 +10512,18 @@ function setGen(v) {
   if (resultEnhance) resultEnhance.update();
 }
 
+/** Prompt Fixed 가 수동 [Random] 을 막는가. Draft 중에는 막지 않는다 - Draft 의 [Random] 은 늘 새로 뽑고(D12)
+ *  Prompt Fixed 는 Auto Gen 의 반복만 정한다. */
+function promptFixedHoldsRandom() {
+  return getOptionChecked('prompt_fixed') && !window.draftMode?.isActive?.();
+}
+
 function updateGenerateButtonMode() {
   if (!btnGen) return;
   const presetMode = activePromptTab === 'preset';
   btnGen.classList.toggle('preset-mode', presetMode);
   if (btnRnd) {
-    const promptFixed = getOptionChecked('prompt_fixed');
+    const promptFixed = promptFixedHoldsRandom();
     // Sequence 탭은 이벤트 맵 연결을 기다리지 않는다 - 그 탭의 Random 은 시퀀스 것이다.
     const linkPending = activePromptTab !== 'sequence' && window.eventMap?.isRandomLinkPending?.();
     btnRnd.disabled = linkPending || (presetMode && !window.eventMap?.isRandomLinked?.()
@@ -10643,7 +10722,9 @@ function randomButtonLabel() {
   // 쥐고 있어도 이 탭에서는 시퀀스가 먼저 받는다(`send('random')`) - 글자도 그 순서를 따른다.
   if (activePromptTab === 'sequence') return 'SEQ Random (생성)';
   if (!window.eventMap?.isRandomLinked?.()) return 'Random';
-  return window.eventMap.randomLinkMode?.() === 'staging' ? 'ST Random' : 'EV Random';
+  const linkMode = window.eventMap.randomLinkMode?.();
+  if (linkMode === 'draft') return 'DR Random';
+  return linkMode === 'staging' ? 'ST Random' : 'EV Random';
 }
 
 /** Generate 버튼의 **기본 글자**. Sequence 탭에서 고른 이야기가 있으면 `#번호 Generate`(사용자 2026-10-18). */
@@ -13586,6 +13667,7 @@ function onModuleState(m) {
     try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
     // 메인 칸의 [prefix] [postfix] 창도 같은 값을 비춘다.
     try { mainPeQuick?.sync(); } catch (_) {}
+    try { window.draftMode?.syncPe?.(); } catch (_) {}
     try { peQuickSwitch?.sync(); } catch (_) {}
     // 삽입 그룹 판 - 손으로 고친 글 · 프리셋 전환(= 확정)을 맞춘다.
     try { artistInsertTray?.reconcile(); } catch (_) {}
@@ -15767,6 +15849,7 @@ import('./js/features/peFieldHub.mjs?v=20261010-review5')
     peFieldHub.subscribe(() => {
       try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
       try { mainPeQuick?.sync(); } catch (_) {}
+      try { window.draftMode?.syncPe?.(); } catch (_) {}
       try { artistInsertTray?.reconcile(); } catch (_) {}
     });
   })

@@ -30,6 +30,8 @@ import { createRowCompress, cutSummary } from './stagingRowCompress.mjs?v=202611
 export function initEventMapStaging({ showToast, getPromptText, generateNow, confirmDialog, promptDialog,
                                       getEventMap = () => window.eventMap, isTabHidden = () => false } = {}) {
   const tabBtn = document.getElementById('stagingTab');
+  // Draft Mode 단추 둘(사용자 결정 D20 - Draft 가 켜져 있을 때만 보인다): 하단 [드래프트 조건 추가] · 펼친 줄 [드래프트로 불러오기].
+  const draftOn = () => Boolean(window.draftMode?.isActive?.());
   const badge = tabBtn?.querySelector('.st-badge');
   let panel = null, open = false, tab = 'stage', busy = 0;
   let staged = [], saved = [], categories = [], stagedCount = 0, savedCount = 0;
@@ -475,7 +477,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         <div class="st-bd"><div class="st-head"><span class="st-name">${esc(r.selection.pins.join(', '))}${filterSuffix(r.selection.filters)}</span>${countHtml(r)}</div>
         <div class="st-meta">${metaHtml(r.selection, false)}${extraChip(r.extra)}</div>
         </div>
-        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
+        ${openRow !== r.id ? '' : `<div class="st-acts st-acts-open"><button type="button" data-st-random>랜덤</button><button type="button" class="is-primary" data-st-random-gen>랜덤+생성</button><button type="button" data-st-open>맵에서 열기</button>${draftOn() ? '<button type="button" data-st-draft-load title="이 줄의 조건을 Draft 칩으로 불러옵니다(지금 칩 · Extra 를 바꿉니다)">드래프트로 불러오기</button>' : ''}${rfBtn(r)}<button type="button" class="is-danger" data-st-remove>제외</button></div>${rfOpen === r.id ? rfHtml(r) : ''}${extraHtml(r)}`}
       </div>`).join('')
       : '<div class="st-empty">스테이징된 조합이 없습니다. 이벤트 맵 [⋯] 의 <b>스테이징에 넣기</b>, 또는 저장된 조합의 <b>스테이징 +</b>.</div>';
     // 하단 = 공통 추가 프롬프트(켜기 · 끄기 - 꺼도 글은 남는다) + [통째로 저장] [비우기] ...... [옵션]
@@ -484,7 +486,7 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
         <textarea class="st-extra-text" data-st-common-text rows="2" maxlength="2000" spellcheck="false" aria-label="공통 추가 프롬프트"
           placeholder="모든 조합 뒤에 붙일 태그 - 예: masterpiece, detailed background">${esc(extraText('common', common))}</textarea>
       </div>`;
-    const buttonsHtml = `<button type="button" data-st-bundle ${staged.length ? '' : 'disabled'} title="지금 스테이징을 저장된 조합의 '묶음' 하나로(추가 프롬프트 포함)">통째로 저장</button>
+    const buttonsHtml = `${draftOn() ? '<button type="button" data-st-draft-add title="Draft 의 지금 칩 조건을 스테이징 줄 하나로">드래프트 조건 추가</button>' : ''}<button type="button" data-st-bundle ${staged.length ? '' : 'disabled'} title="지금 스테이징을 저장된 조합의 '묶음' 하나로(추가 프롬프트 포함)">통째로 저장</button>
       <button type="button" data-st-clear ${staged.length ? '' : 'disabled'} title="조합만 비웁니다 - 공통 추가 프롬프트는 남습니다">비우기</button>
       <span class="st-foot-gap"></span>
       <button type="button" class="st-opt-btn${common.mode !== 'merge' ? ' has-on' : ''}" data-st-opt aria-haspopup="true"
@@ -701,6 +703,8 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     const id = t.closest('[data-st-id]')?.dataset.stId;
     const stagedRow = staged.find(r => r.id === id), savedRow = saved.find(r => r.id === id);
     if (stagedRow && t.closest('[data-stc-manage], [data-stc-release]')) { await rowCmp.onClick(t, stagedRow); return; }
+    if (t.closest('[data-st-draft-load]') && stagedRow) { await window.draftMode?.loadFromStaging?.(id); return; }
+    if (t.closest('[data-st-draft-add]')) { await window.draftMode?.sendToStaging?.(); return; }
     if (t.closest('[data-st-random]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, false, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-random-gen]') && stagedRow) { await run(() => randomFrom(stagedRow.selection, true, { stagingId: id }), { readsExtras: true }); return; }
     if (t.closest('[data-st-open]') && stagedRow) { await run(() => openInMap(stagedRow.selection)); return; }

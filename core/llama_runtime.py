@@ -19,6 +19,8 @@ GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외�
   확실한 중단이다. 다음 요청이 다시 올린다.
 - 유휴 ``idle_seconds`` 가 지나면 내려서 RAM(약 1.3~2.5 GiB)을 돌려준다.
 - Windows 에선 Job Object(KILL_ON_JOB_CLOSE)에 넣어 백엔드가 강제 종료돼도 고아가 남지 않게 한다.
+- 내릴 때는 먼저 Ctrl+C 로 엔진이 스스로 정리하고 나가게 한다(Windows · ``_send_ctrl_c``). 정해진 시간 안에 안 나가거나
+  신호를 못 보내면 예전처럼 강제 종료(terminate → kill)한다.
 - 앱 종료 직전(``shutdown``)에는 새로 올리기를 막고 도는 요청을 잠시 기다린 뒤 내린다. 엔진을 내릴 때마다 이유 ·
   장치 · 결과를 엔진 로그에 한 줄 남긴다(11-07 '부스트를 끄거나 앱을 닫으면 블루스크린' 제보 — 원인 미확정, 다음 제보의
   판단 근거). 프롬프트 내용은 적지 않는다.
@@ -48,6 +50,37 @@ DEFAULT_IDLE_SECONDS = 180.0
 # 이 값을 벗어나지 않는다(사용자 지정 2026-09-26): 모든 요청(Boost · Assist)에 여기서만 싣고, 부르는 쪽은 넘기지 못한다.
 # min_p 는 권장에 없다(= 끔) — llama.cpp 기본 0.05 가 끼어들지 않게 0 을 적는다.
 SAMPLING: dict[str, float] = {"temperature": 1.0, "top_p": 0.95, "top_k": 64, "min_p": 0.0}
+# 엔진을 내릴 때 Ctrl+C 뒤 스스로 나가기를 기다리는 시간 — 넘기면 강제 종료(0 이면 곧바로 강제 종료).
+GRACEFUL_EXIT_SECONDS = 5.0
+
+# 별도 프로세스에서 엔진의 (창 없는) 콘솔에 붙어 Ctrl+C 를 보낸다. CTRL_C_EVENT 는 특정 프로세스로 보낼 수 없고
+# 같은 콘솔에 붙은 모두(그룹 0)에게 간다 — 엔진의 콘솔엔 엔진과 이 도우미만 있고, 도우미는 스스로 무시한다.
+# 백엔드 자신의 콘솔을 떼었다 붙이지 않으려고 도우미를 따로 띄운다.
+_CTRL_C_HELPER = (
+    "import ctypes, sys\n"
+    "k = ctypes.WinDLL('kernel32', use_last_error=True)\n"
+    "k.FreeConsole()\n"
+    "if not k.AttachConsole(int(sys.argv[1])): sys.exit(2)\n"
+    "k.SetConsoleCtrlHandler(None, True)\n"
+    "ok = k.GenerateConsoleCtrlEvent(0, 0)\n"
+    "k.FreeConsole()\n"
+    "sys.exit(0 if ok else 3)\n"
+)
+
+
+def _send_ctrl_c(pid: int) -> bool:
+    """엔진(pid)에 Ctrl+C 를 보낸다 — 보냈으면 True. llama-server 는 첫 Ctrl+C 에 요청을 끊고 모델 · GPU 자원을 풀고 나간다."""
+    if os.name != "nt":
+        return False
+    try:
+        done = subprocess.run(
+            [sys.executable, "-I", "-c", _CTRL_C_HELPER, str(int(pid))],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=5,
+        )
+        return done.returncode == 0
+    except Exception:
+        return False
 
 
 class LlamaRuntimeError(RuntimeError):
@@ -291,26 +324,32 @@ class LlamaServerRuntime:
 
     # ── 수명 ─────────────────────────────────────────────────────────────
 
-    def stop(self, reason: str = "") -> None:
-        """엔진을 내린다. 떠 있던 프로세스가 있으면 이유 · 장치 · 결과를 엔진 로그에 한 줄 남긴다."""
+    def stop(self, reason: str = "", graceful: bool = True) -> None:
+        """엔진을 내린다. 떠 있던 프로세스가 있으면 이유 · 장치 · 결과를 엔진 로그에 한 줄 남긴다.
+        ``graceful=False`` 는 곧바로 강제 종료 — 요청이 도는 중인 줄 아는 때(제한시간 초과)에 쓴다: 실측(11-07 b10830)
+        생성 도중의 Ctrl+C 는 정리를 시작하지만 5초 안에 끝나지 않았다(쉬는 엔진은 0.5~0.7초)."""
         with self._proc_lock:
             self._cancel_idle_timer()
             proc, self._proc = self._proc, None
             note: dict[str, Any] | None = None
             if proc is not None and proc.poll() is None:
                 started = time.monotonic()
-                note = {"pid": proc.pid, "gpu": self.effective_gpu, "device": self.device or "auto",
-                        "method": "terminate"}
-                proc.terminate()
-                try:
-                    proc.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    note["method"] = "terminate+kill"
-                    proc.kill()
+                note = {"pid": proc.pid, "gpu": self.effective_gpu, "device": self.device or "auto"}
+                method = self._graceful_exit(proc) if graceful else "skip"
+                if method != "ctrl_c":
+                    # 정상 종료가 안 됐다 — 예전 방식(강제 종료)
+                    method += "+terminate"
+                    proc.terminate()
                     try:
                         proc.wait(timeout=3)
                     except subprocess.TimeoutExpired:
-                        note["method"] = "terminate+kill(not-exited)"
+                        method += "+kill"
+                        proc.kill()
+                        try:
+                            proc.wait(timeout=3)
+                        except subprocess.TimeoutExpired:
+                            method += "(not-exited)"
+                note["method"] = method
                 note["exit"] = proc.poll()
                 note["seconds"] = round(time.monotonic() - started, 2)
             _close_job(self._job)
@@ -328,6 +367,19 @@ class LlamaServerRuntime:
                     f"engine stop reason={reason or 'unknown'} pid={note['pid']} gpu={note['gpu']} "
                     f"device={note['device']} engine={self._engine_label()} method={note['method']} "
                     f"exit={note['exit']} seconds={note['seconds']}")
+
+    def _graceful_exit(self, proc: Any) -> str:
+        """Ctrl+C 를 보내고 ``GRACEFUL_EXIT_SECONDS`` 까지 기다린다. 나갔으면 'ctrl_c', 아니면 왜 못 했는지.
+        내가 띄운 진짜 프로세스(Popen)에만 보낸다 — 가짜 · 남의 pid 에 신호가 가지 않게."""
+        if GRACEFUL_EXIT_SECONDS <= 0 or os.name != "nt" or not isinstance(proc, subprocess.Popen):
+            return "skip"
+        if not _send_ctrl_c(proc.pid):
+            return "ctrl_c_failed"
+        try:
+            proc.wait(timeout=GRACEFUL_EXIT_SECONDS)
+            return "ctrl_c"
+        except subprocess.TimeoutExpired:
+            return "ctrl_c_timeout"
 
     def _engine_label(self) -> str:
         if not self.managed_engine:
@@ -367,7 +419,10 @@ class LlamaServerRuntime:
         got = self._slot.acquire(timeout=max(0.0, float(timeout)))
         waited = round(time.monotonic() - started, 2)
         try:
-            self.stop(reason="app_exit" if got else "app_exit_after_wait_timeout")
+            if got:
+                self.stop(reason="app_exit")
+            else:
+                self.stop(reason="app_exit_after_wait_timeout", graceful=False)
         finally:
             if got:
                 self._slot.release()
@@ -694,7 +749,7 @@ class LlamaServerRuntime:
                 }
             return {"ok": False, "error": "llama-server 통신 실패", "elapsed": round(time.monotonic() - started, 2)}
         except (TimeoutError, socket.timeout):
-            self.stop(reason="request_timeout")  # 요청 단위 취소가 없다 — 내려야 다음 요청이 막히지 않는다.
+            self.stop(reason="request_timeout", graceful=False)  # 요청 단위 취소가 없다 — 내려야 다음 요청이 막히지 않는다.
             return {"ok": False, "error": f"{timeout:.0f}초 제한시간 초과", "elapsed": round(time.monotonic() - started, 2)}
         except Exception as exc:
             return {"ok": False, "error": str(exc), "elapsed": round(time.monotonic() - started, 2)}

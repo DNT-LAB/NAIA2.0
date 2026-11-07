@@ -177,6 +177,29 @@ export function initDraftMode({
   let lastDrawnRid;          // undefined = 아직 안 그렸다 - 새로고침 · 처음 그릴 때는 깜빡이지 않는다
   let drawnFlashPending = false;
   drawnBtnEl.addEventListener('animationend', () => drawnBtnEl.classList.remove('is-flash'));
+  // 단추 위에 마우스 = 실제로 들어간 태그만 반투명 판에 미리보기(사용자 지시 11-07).
+  // PE 가 지운 것 · 이번만 뺀 것은 넣지 않는다. 상세보기 창이 열려 있으면 띄우지 않는다.
+  const peekEl = document.createElement('div');
+  peekEl.className = 'dr-drawn-peek';
+  peekEl.hidden = true;
+  document.body.appendChild(peekEl);
+  function showPeek() {
+    if (!active() || !snap?.state?.drawn || drawnPanel?.isOpen()) { hidePeek(); return; }
+    const tags = (snap?.derived?.gray || []).filter(g => !g.dropped && !g.pe_hidden).map(g => g.tag);
+    peekEl.textContent = tags.length ? tags.join(', ') : '들어간 태그가 없습니다';
+    peekEl.hidden = false;
+    const r = drawnBtnEl.getBoundingClientRect();
+    const w = Math.min(420, window.innerWidth - 16);
+    peekEl.style.width = `${w}px`;
+    peekEl.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
+    const h = peekEl.offsetHeight;
+    const top = r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(r.bottom + 8, window.innerHeight - h - 8);
+    peekEl.style.top = `${Math.max(8, top)}px`;
+  }
+  function hidePeek() { peekEl.hidden = true; }
+  drawnBtnEl.addEventListener('mouseenter', showPeek);
+  drawnBtnEl.addEventListener('mouseleave', hidePeek);
+  drawnBtnEl.addEventListener('click', hidePeek);
 
   // ---- 칸 높이 손잡이(사용자 지시 11-07) ----
   // 칸 위 색 줄이 곧 손잡이다: 제외 위 줄 = 포함 높이 · Extra 위 줄 = 제외 높이 · postfix 위 줄 = Extra 높이.
@@ -427,14 +450,20 @@ export function initDraftMode({
     if (lastDrawnRid !== undefined && drawn.rid !== lastDrawnRid) drawnFlashPending = true;
     lastDrawnRid = drawn.rid;
     const gray = der.gray || [];
-    const hidden = gray.filter(g => g.pe_hidden).length;
-    const head = `${gray.filter(g => !g.dropped).length}개${hidden ? ` · PE 가 ${hidden}개 지움` : ''}`;
+    // PE 가 지운 태그는 쓸모가 없으니 아래 '숨겨진 태그:' 한 줄로(사용자 지시 11-07). 이번만 뺀 태그는 위 줄에 둔다 - 눌러 다시 넣는다.
+    // (이번만 뺀 태그도 프롬프트에 없어 pe_hidden 이 켜진다 - 그래서 dropped 를 먼저 본다)
+    const isHidden = g => g.pe_hidden && !g.dropped;
+    const shown = gray.filter(g => !isHidden(g));
+    const hiddenTags = gray.filter(isHidden);
+    const applied = shown.filter(g => !g.dropped).length;
+    const head = `${applied}개 들어감${hiddenTags.length ? ` · PE 가 ${hiddenTags.length}개 숨김` : ''}`;
     if (drawnPanel) drawnPanel.setTitle(`뽑힌 결과 · #${drawn.rid}`);
     shownRid = drawn.rid;
     // 칩이 아니라 **글**로 - 쉼표로 이은 태그 줄(사용자 지시 11-07). 낱말을 누르면 같은 메뉴(고정 · 제외 · 이번만 빼기).
-    drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="drw-text">${gray.map(g =>
-      `<span class="drw-tag${g.pe_hidden ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"
-        title="${g.dropped ? '이번만 뺀 태그 - 눌러서 다시 넣기' : (g.pe_hidden ? 'PE 필터가 지운 태그' : '뽑힌 태그 · 다음 Random 에 바뀜')}">${esc(g.tag)}</span>`).join(', ')}</div>`;
+    const tagHtml = g => `<span class="drw-tag${isHidden(g) ? ' is-pe-hidden' : ''}${g.dropped ? ' is-dropped' : ''}" data-dr-gray="${esc(g.tag)}" tabindex="0" role="button"
+        title="${g.dropped ? '이번만 뺀 태그 - 눌러서 다시 넣기' : (isHidden(g) ? 'PE 필터가 지운 태그' : '뽑힌 태그 · 다음 Random 에 바뀜')}">${esc(g.tag)}</span>`;
+    drawnEl.innerHTML = `<div class="drw-meta">${head}</div><div class="drw-text">${shown.map(tagHtml).join(', ')}</div>`
+      + (hiddenTags.length ? `<div class="drw-hidden"><span class="drw-hidden-k">숨겨진 태그:</span> ${hiddenTags.map(tagHtml).join(', ')}</div>` : '');
   }
   function paintSum() {
     const der = snap?.derived || {};
@@ -456,7 +485,8 @@ export function initDraftMode({
     drawnBtnEl.textContent = `이번에 뽑힌 프롬프트 : ${fmt(n)}`;
     drawnBtnEl.classList.toggle('is-on', open);
     drawnBtnEl.setAttribute('aria-pressed', String(open));
-    drawnBtnEl.title = `뽑힌 게시물 #${drawn.rid} 의 태그 창 열기 · 닫기`;
+    drawnBtnEl.title = '누르면 상세보기 창이 열립니다';
+    if (!peekEl.hidden) showPeek();   // 마우스를 올린 채 새로 뽑혔다 - 미리보기도 새 글로
     if (drawnFlashPending) {
       drawnFlashPending = false;
       drawnBtnEl.classList.remove('is-flash');
@@ -481,7 +511,7 @@ export function initDraftMode({
     const on = active();
     board.hidden = !on;
     document.body.classList.toggle('draft-mode', on);
-    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); return; }
+    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); return; }
     paintZone('include');
     paintZone('exclude');
     paintDrawn();

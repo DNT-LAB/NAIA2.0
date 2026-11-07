@@ -34211,3 +34211,38 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .drw-foot .drw-keep { flex: 1 1 auto; width: 100%; background: linear-gradient(135deg, #5b52d6, #7c6aef); color: #fff;
   box-shadow: 0 4px 16px rgba(124,106,239,0.25); }
 .drw-foot .drw-keep:hover { filter: brightness(1.08); }
+
+/* [이번에 뽑힌 프롬프트] 위 미리보기(사용자 지시 11-07) - 실제로 들어간 태그만 · 반투명 · 마우스를 막지 않는다 */
+.dr-drawn-peek {
+  position: fixed;
+  z-index: calc(var(--z-drag-panel) + 5);
+  pointer-events: none;
+  max-height: 50vh;
+  overflow: hidden;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(63,182,139,0.55);
+  background: rgba(16,16,26,0.82);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.dr-drawn-peek[hidden] { display: none; }
+/* 뽑힌 결과 창 - 들어간 태그 위 · 늘어나는 틈 · 맨 아래 '숨겨진 태그:' 한 줄(PE 가 지운 것) */
+.dragpanel.drw .drw-body { flex: 1 0 auto; }
+.drw-hidden {
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px solid rgba(232,232,240,0.07);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.drw-hidden-k { font-family: var(--font-sans, inherit); color: var(--text-secondary); }
+.drw-hidden .drw-tag.is-pe-hidden { opacity: 0.8; }

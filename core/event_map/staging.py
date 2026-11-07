@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.event_map.extra_prompt import clean_mode, clean_text, common_of, extra_of
-from core.event_map.library import EventMapLibrary, normalize_terms, selection
+from core.event_map.library import EventMapLibrary, has_include, normalize_terms, selection
 from core.event_map.service import MapQueryError
 
 _LOCK = threading.RLock()
@@ -124,8 +124,8 @@ class EventMapStaging:
         flags = [bool(enabled[i]) if enabled and i < len(enabled) else True for i in range(len(clean))]
         extras = extras if isinstance(extras, list) else []
         texts = [extra_of(extras[i]) if i < len(extras) else extra_of(None) for i in range(len(clean))]
-        if any(not s["pins"] for s in clean):
-            raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
+        if any(not has_include(s) for s in clean):
+            raise MapQueryError("bad_request", "포함 조건이 하나 이상 있어야 합니다.")
         with _LOCK:
             items, rev = self._load()
             index = {EventMapLibrary._identity(r["selection"]): i for i, r in enumerate(items)}
@@ -197,8 +197,8 @@ class EventMapStaging:
             if not isinstance(row, dict):
                 raise MapQueryError("bad_request", "조합 목록을 확인해주세요.")
             selected = selection(row.get("selection"))
-            if not selected["pins"]:
-                raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 스테이징할 수 있습니다.")
+            if not has_include(selected):
+                raise MapQueryError("bad_request", "포함 조건이 하나 이상 있어야 합니다.")
             items.append({"id": str(uuid.uuid4()), "selection": selected, "enabled": row.get("enabled") is not False,
                           "extra": extra_of(row.get("extra")), "added_at": datetime.now(timezone.utc).isoformat()})
         items = self._merge_same(items)   # 같은 조합은 한 줄(옛 프리셋에 압축 줄 · 일반 줄이 같이 있어도)

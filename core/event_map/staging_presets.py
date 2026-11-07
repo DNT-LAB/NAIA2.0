@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core.event_map.extra_prompt import extra_of
-from core.event_map.library import EventMapLibrary, selection
+from core.event_map.library import EventMapLibrary, has_include, selection
 from core.event_map.service import MapQueryError
 from core.event_map.staging import MAX_ITEMS
 
@@ -28,8 +28,8 @@ def _rows(rows):
         if not isinstance(row, dict):
             raise MapQueryError("bad_request", "조합 목록을 확인해주세요.")
         selected = selection(row.get("selection"))
-        if not selected["pins"]:
-            raise MapQueryError("bad_request", "태그를 하나 이상 꽂은 조합만 저장할 수 있습니다.")
+        if not has_include(selected):
+            raise MapQueryError("bad_request", "포함 조건이 하나 이상 있어야 합니다.")
         result.append({"selection": selected, "enabled": row.get("enabled") is not False,
                        "extra": extra_of(row.get("extra"))})
     return result

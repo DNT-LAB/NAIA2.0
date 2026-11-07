@@ -81,6 +81,19 @@ def filter_fingerprint(groups):
     return tuple(sorted((tuple(sorted(set(g["terms"]))), g["invert"]) for g in groups))
 
 
+def has_include(selected):
+    """A staging row needs a pin or a positive term in a non-inverted group."""
+    return bool(selected.get("pins")) or any(
+        term and not term.startswith("-")
+        for group in selected.get("filters", []) if not group.get("invert", False)
+        for term in group["terms"])
+
+
+def selection_name(selected):
+    return ", ".join(selected["pins"] + [term for group in selected.get("filters", [])
+                                       for term in group["terms"]])
+
+
 def selection(value):
     if not isinstance(value, dict):
         raise MapQueryError("bad_request", "저장할 조합이 없습니다.")
@@ -181,10 +194,10 @@ class EventMapLibrary:
         except (ValueError, TypeError, AttributeError) as exc:
             raise MapQueryError("bad_request", "저장 요청 ID가 잘못되었습니다.") from exc
         selected = selection(payload.get("selection"))
-        if not selected["pins"]:
-            raise MapQueryError("bad_request", "태그를 하나 이상 선택한 뒤 저장해주세요.")
+        if not has_include(selected):
+            raise MapQueryError("bad_request", "포함 조건이 하나 이상 있어야 합니다.")
         row = {"id": item_id,
-               "name": _text(payload.get("name", ", ".join(selected["pins"])[:100]), "이름", 100, True),
+               "name": _text(payload.get("name", selection_name(selected)[:100]), "이름", 100, True),
                "category": _text(payload.get("category", ""), "분류", 60),
                "selection": selected}
         with _LOCK:

@@ -328,6 +328,8 @@ class EventMapIndex:
             self._pool_bytes = 0
 
     def close(self) -> None:
+        from .draft import TEXT_CACHE
+        TEXT_CACHE.retire(self)
         self.posting.cache_clear()
         self.clear_pool_cache()
         # numpy 뷰가 mmap 을 붙들고 있으면 닫히지 않는다 - 먼저 놓는다.
@@ -418,6 +420,26 @@ class EventMapIndex:
         lut[[int(p) for p in parts]] = True
         return lut
 
+    def matching_tags(self, clean: str, exact: bool = False) -> np.ndarray:
+        """Shared vocabulary matcher for body filters and Draft posting unions."""
+        key = (clean, exact)
+        tidmask = self._filter_masks.get(key)
+        if tidmask is None:
+            tidmask = np.zeros(self.n_tags, dtype=bool)
+            if exact:
+                tid = self.resolve(clean)
+                if tid is not None:
+                    tidmask[tid] = True
+            else:
+                if self._filter_names is None:
+                    self._filter_names = [self.by_id[t].lower() for t in range(self.n_tags)]
+                tidmask = np.fromiter((clean in name for name in self._filter_names),
+                                      dtype=bool, count=self.n_tags)
+            if len(self._filter_masks) >= 256:
+                self._filter_masks.clear()
+            self._filter_masks[key] = tidmask
+        return tidmask
+
     def filter_posts(self, rids, groups) -> np.ndarray:
         """AND chip groups over gathered post bodies; never union tag postings."""
         if not groups or not rids.size:
@@ -438,22 +460,7 @@ class EventMapIndex:
                 clean = token[1:] if negate else token
                 exact = clean.startswith("*")
                 clean = clean[1:] if exact else clean
-                key = (clean, exact)
-                tidmask = self._filter_masks.get(key)
-                if tidmask is None:
-                    tidmask = np.zeros(self.n_tags, dtype=bool)
-                    if exact:
-                        tid = self.resolve(clean)
-                        if tid is not None:
-                            tidmask[tid] = True
-                    else:
-                        if self._filter_names is None:
-                            self._filter_names = [self.by_id[t].lower() for t in range(self.n_tags)]
-                        tidmask = np.fromiter((clean in name for name in self._filter_names),
-                                              dtype=bool, count=self.n_tags)
-                    if len(self._filter_masks) >= 256:
-                        self._filter_masks.clear()
-                    self._filter_masks[key] = tidmask
+                tidmask = self.matching_tags(clean, exact)
                 hit = np.zeros(rids.size, dtype=bool)
                 if gathered.size:
                     hit[nonempty] = np.logical_or.reduceat(tidmask[gathered], reduce_at)
@@ -464,11 +471,29 @@ class EventMapIndex:
     def posts_for(self, pins, *, exclude=None, ratings=None, persons=None, block=None, filters=None) -> np.ndarray:
         """이 조합(핀 전부 · 제외 없음 · 고른 분면 · 영구 제외 밖)에 맞는 게시물 rid(오름차순). 스테이징의 수 세기용."""
         wanted, unknown = self._resolve_many(pins)
-        if unknown or not wanted:
+        if unknown:
             return np.empty(0, dtype=np.int64)
         excluded, _ = self._resolve_many(exclude)
         excluded = [t for t in excluded if t not in wanted]
-        rids = self._without(self._matching_posts(wanted, self._partition_filter(ratings, persons)), excluded)
+        parts = self._partition_filter(ratings, persons)
+        if wanted:
+            rids = self._matching_posts(wanted, parts)
+        else:
+            # Only positive, non-inverted terms can seed a zero-pin staging row.
+            term = next((t for g in (filters or []) if not g.get("invert", False)
+                         for t in g["terms"] if not t.startswith("-")), None)
+            if term is None:
+                return np.empty(0, dtype=np.int64)
+            if term.startswith("*"):
+                tid = self.resolve(term[1:])
+                rids = self.posting(tid) if tid is not None else np.empty(0, dtype=np.int64)
+            else:
+                from .draft import TEXT_CACHE
+                rids = TEXT_CACHE.posts(self, term)
+            if parts is not None:
+                rids, owner = self._partition_of(rids)
+                rids = rids[self._part_lut(parts)[owner]]
+        rids = self._without(rids, excluded)
         return self.filter_posts(self._unblocked(rids, block), filters)
 
     def _matching_posts_relaxed(self, tids: list[int], parts: set[int] | None) -> np.ndarray:
@@ -871,6 +896,19 @@ class EventMapIndex:
                 "min_posts": max(1, int(min_posts)),
                 "elapsed_ms": round((time.perf_counter() - started) * 1000, 1)}
 
+    def post_tags(self, rid: int, *, pinned, include_color: bool) -> dict:
+        """One observed post, with the same population/pin/rest order as sample."""
+        wanted = list(pinned)
+        pinned = set(wanted)
+        tids = self.body[self.offsets[rid]:self.offsets[rid + 1]].tolist()
+        kept = [t for t in tids if include_color or t in pinned or not self.color_arr[t]]
+        population = [t for t in kept if self.role.get(t) == "population"]
+        head = population + [t for t in wanted if t in kept and t not in population]
+        rest = [t for t in kept if t not in set(head)]
+        return {"tags": [self.by_id[t] for t in head + rest],
+                "partition": self.partitions[self.part_arr[rid]] if rid < self.part_arr.size else None,
+                "dropped_color": len(tids) - len(kept)}
+
     def sample(self, pins, *, exclude=None, ratings=None, persons=None, n=5,
                include_color=False, seed=None, block=None, filters=None) -> dict:
         """핀 전부를 포함하는 **실제 게시물**을 무작위로 골라 그 게시물의 태그 전체를 준다.
@@ -918,22 +956,10 @@ class EventMapIndex:
             return out
 
         rng = random.Random(seed)
-        pinned = set(wanted)
-        table = self.part_arr
         for i in rng.sample(range(int(rids.size)), min(n, int(rids.size))):
-            rid = int(rids[i])
-            tids = self.body[self.offsets[rid]:self.offsets[rid + 1]].tolist()
-            kept = [t for t in tids if include_color or t in pinned or not self.color_arr[t]]
-            # 인원 태그 -> 핀 -> 나머지(id 순 = 흔한 태그 먼저). 프롬프트로 바로 쓸 수 있게.
-            population = [t for t in kept if self.role.get(t) == "population"]
-            head = population + [t for t in wanted if t in kept and t not in population]
-            rest = [t for t in kept if t not in set(head)]
-            tags = [self.by_id[t] for t in head + rest]
-            out["samples"].append({
-                "tags": tags, "prompt": ", ".join(tags),
-                "partition": self.partitions[table[rid]] if rid < table.size else None,
-                "dropped_color": len(tids) - len(kept),
-            })
+            post = self.post_tags(int(rids[i]), pinned=wanted, include_color=include_color)
+            out["samples"].append({"tags": post["tags"], "prompt": ", ".join(post["tags"]),
+                                   "partition": post["partition"], "dropped_color": post["dropped_color"]})
         out["status"] = "matched"
         out["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 1)
         return out

@@ -319,6 +319,10 @@ class EventMapService:
             except Exception:
                 pass
 
+    def close(self) -> None:
+        """Release the index and all index-owned query caches."""
+        self.invalidate()
+
     # -- 상태 ----------------------------------------------------------------
     def status(self) -> dict[str, Any]:
         """절대 예외를 내지 않는다. 화면 머리줄과 칩 목록의 재료 전부."""
@@ -429,6 +433,58 @@ class EventMapService:
         return max(1, min(cap, n))
 
     # -- 질의 ----------------------------------------------------------------
+    def suggest_candidates(self, raw, limit, *, kr_lookup=None, within=None):
+        """Shared gathering only; callers own ranking and blocked policy."""
+        idx = self.index()
+        buckets = {}
+        bucket = "prefix"
+        q = raw.casefold()
+        picked: list[tuple[int, str, int]] = []
+        seen: set[str] = set()
+
+        def take(name: str) -> None:
+            tid = idx.by_name.get(name)
+            if tid is None or name in seen:
+                return
+            # within = 압축한 조합 안 출현 수(pool_counts) - 없는 태그는 거르고 수는 그 안의 것으로(사용자 결정 2026-11-02)
+            if within is not None and not within[tid]:
+                return
+            seen.add(name)
+            buckets[name] = bucket
+            picked.append((int(within[tid]) if within is not None else idx.observed[tid], name, tid))
+
+        # 1) 앞부분 일치. 정렬 목록에 bisect - 어휘 10만을 키 입력마다 훑지 않는다.
+        names = self._sorted_names
+        start = bisect.bisect_left(names, q)
+        prefix = []
+        for name in names[start:start + 4000]:
+            if not name.startswith(q):
+                break
+            prefix.append(name)
+        for name in prefix:
+            take(name)
+        # 2) 가운데 일치. 앞부분만으로 모자랄 때만 훑는다.
+        bucket = "infix"
+        if len(picked) < limit:
+            for name in names:
+                if q in name and name not in seen:
+                    take(name)
+        # 3) 한글 다리. 태그 사전이 준 이름 중 맵 어휘에 있는 것만.
+        bucket = "korean"
+        translated: list[str] = []
+        if kr_lookup is not None and len(picked) < limit:
+            try:
+                for name in kr_lookup(raw, limit * 3):
+                    tid = idx.resolve(name)
+                    if tid is None or idx.by_id[tid] in seen:
+                        continue
+                    translated.append(idx.by_id[tid])
+                    take(idx.by_id[tid])
+            except Exception:
+                translated = []      # 사전이 없어도 영문 검색은 계속 된다
+
+        return picked, translated, buckets
+
     def suggest(self, query: str, limit: int = DEFAULT_SUGGEST, *,
                 kr_lookup: Callable[[str, int], Iterable[str]] | None = None, within: Any = None) -> dict[str, Any]:
         """이름으로 태그를 찾는다. **못 꽂는 태그도 왜 못 꽂는지 붙여서** 낸다.
@@ -444,47 +500,7 @@ class EventMapService:
         if not raw:
             return {"ok": True, "status": "empty", "query": raw, "items": []}
 
-        q = raw.casefold()
-        picked: list[tuple[int, str, int]] = []
-        seen: set[str] = set()
-
-        def take(name: str) -> None:
-            tid = idx.by_name.get(name)
-            if tid is None or name in seen:
-                return
-            # within = 압축한 조합 안 출현 수(pool_counts) - 없는 태그는 거르고 수는 그 안의 것으로(사용자 결정 2026-11-02)
-            if within is not None and not within[tid]:
-                return
-            seen.add(name)
-            picked.append((int(within[tid]) if within is not None else idx.observed[tid], name, tid))
-
-        # 1) 앞부분 일치. 정렬 목록에 bisect - 어휘 10만을 키 입력마다 훑지 않는다.
-        names = self._sorted_names
-        start = bisect.bisect_left(names, q)
-        prefix = []
-        for name in names[start:start + 4000]:
-            if not name.startswith(q):
-                break
-            prefix.append(name)
-        for name in prefix:
-            take(name)
-        # 2) 가운데 일치. 앞부분만으로 모자랄 때만 훑는다.
-        if len(picked) < limit:
-            for name in names:
-                if q in name and name not in seen:
-                    take(name)
-        # 3) 한글 다리. 태그 사전이 준 이름 중 맵 어휘에 있는 것만.
-        translated: list[str] = []
-        if kr_lookup is not None and len(picked) < limit:
-            try:
-                for name in kr_lookup(raw, limit * 3):
-                    tid = idx.resolve(name)
-                    if tid is None or idx.by_id[tid] in seen:
-                        continue
-                    translated.append(idx.by_id[tid])
-                    take(idx.by_id[tid])
-            except Exception:
-                translated = []      # 사전이 없어도 영문 검색은 계속 된다
+        picked, translated, _ = self.suggest_candidates(raw, limit, kr_lookup=kr_lookup, within=within)
 
         # The dictionary already ranks translated candidates by query relevance.
         # Sorting them by corpus frequency would bury precise Korean matches.

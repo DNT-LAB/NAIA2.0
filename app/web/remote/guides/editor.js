@@ -111,7 +111,11 @@
     const button = event.target.closest('button');
     if (!button || !frameDoc) return;
     if (button.dataset.block) { frameDoc.execCommand('formatBlock', false, button.dataset.block); markDirty(); }
-    else if (button.dataset.cmd) { frameDoc.execCommand(button.dataset.cmd, false); markDirty(); }
+    else if (button.dataset.cmd) {
+      frameDoc.execCommand(button.dataset.cmd, false);
+      if (button.dataset.cmd === 'insertUnorderedList') { stripListMarks(frameDoc); liftLists(mainOf(frameDoc)); }
+      markDirty();
+    }
     else if (button.dataset.box) wrapInBox(button.dataset.box);
     else if ('unbox' in button.dataset) unwrapBox();
     else if ('link' in button.dataset) editLink();
@@ -225,6 +229,7 @@
   }
 
   function onKeydown(event) {
+    if (autoList(event)) return;
     const mod = event.ctrlKey || event.metaKey;
     if (mod && event.key.toLowerCase() === 's') { event.preventDefault(); save(); return; }
     if (mod && event.key.toLowerCase() === 'k' && frameDoc) { event.preventDefault(); editLink(); return; }
@@ -242,6 +247,68 @@
     if (alt === null) return;
     img.alt = alt.trim();
     markDirty();
+  }
+
+  // ── 목록 - 문단 맨 앞에 '* ' · '- ' 를 치면 글머리 목록, '1. ' 이면 번호 목록 (Notion 과 같음) ──
+  const LIST_MARK_RE = /^\s*[*\-•]\s+/;
+
+  // 크롬은 문단 안에서 목록을 만들면 <p><ul>…</ul></p> 로 둔다 - 저장하면 HTML 이 깨지므로 문단 밖으로 꺼낸다.
+  function liftLists(root) {
+    const doc = root.ownerDocument;
+    const selection = doc.getSelection();
+    const caret = selection?.rangeCount ? [selection.anchorNode, selection.anchorOffset] : null;
+    let moved = false;
+    for (const list of [...root.querySelectorAll('p > ul, p > ol')]) {
+      const para = list.parentElement;
+      const rest = doc.createElement('p');
+      while (list.nextSibling) rest.append(list.nextSibling);
+      para.after(list);
+      if (rest.textContent.trim() || rest.querySelector('img')) list.after(rest);
+      if (!para.textContent.trim() && !para.querySelector('img')) para.remove();
+      moved = true;
+    }
+    if (moved && caret && root.contains(caret[0])) {
+      const range = doc.createRange();
+      range.setStart(caret[0], Math.min(caret[1], caret[0].length ?? caret[0].childNodes.length));
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+
+  // [목록] 단추로 바꾼 문단에 손으로 친 '* ' 가 남아 있으면 지운다.
+  function stripListMarks(doc) {
+    const selection = doc.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    for (const li of mainOf(doc).querySelectorAll('li')) {
+      if (!range.intersectsNode(li)) continue;
+      const first = doc.createTreeWalker(li, NodeFilter.SHOW_TEXT).nextNode();
+      if (first && LIST_MARK_RE.test(first.data)) first.data = first.data.replace(LIST_MARK_RE, '');
+    }
+  }
+
+  function autoList(event) {
+    if (event.key !== ' ' || event.ctrlKey || event.metaKey || event.altKey) return false;
+    if (!frameDoc || event.target?.ownerDocument !== frameDoc) return false;
+    const selection = frameDoc.getSelection();
+    if (!selection?.isCollapsed || !selection.rangeCount) return false;
+    const block = blockAtCaret(frameDoc);
+    if (!block || block.tagName !== 'P') return false;
+    const marker = frameDoc.createRange();
+    marker.setStart(block, 0);
+    marker.setEnd(selection.anchorNode, selection.anchorOffset);
+    const typed = marker.toString();
+    const command = ['*', '-', '•'].includes(typed) ? 'insertUnorderedList' : typed === '1.' ? 'insertOrderedList' : '';
+    if (!command) return false;
+    event.preventDefault();
+    selection.removeAllRanges();
+    selection.addRange(marker);
+    frameDoc.execCommand('delete');
+    frameDoc.execCommand(command);
+    liftLists(mainOf(frameDoc));
+    markDirty();
+    return true;
   }
 
   // ── 링크 (Ctrl+K) - 늘 새 브라우저 탭에서 열린다 ──────────────────────────────
@@ -389,9 +456,10 @@
     clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
     clone.querySelectorAll('[spellcheck]').forEach(el => el.removeAttribute('spellcheck'));
     clone.querySelectorAll('.guide-uploading').forEach(el => el.remove());
+    liftLists(clone);
     clone.querySelectorAll('a[href]').forEach(a => { if (!a.getAttribute('href').startsWith('#')) decorateLink(a); });
     // 문단마다 줄을 바꿔 둔다 - 한 줄로 이어 쓰면 git diff 를 읽을 수 없다.
-    for (const parent of [clone, ...clone.querySelectorAll('section, article, .steps, .step-copy, div.callout, .notice, .final')]) {
+    for (const parent of [clone, ...clone.querySelectorAll('section, article, .steps, .step-copy, div.callout, .notice, .final, ul, ol')]) {
       for (const child of [...parent.children]) {
         if (child.previousSibling?.nodeType === 1 || (child === parent.firstChild)) child.before('\n');
       }

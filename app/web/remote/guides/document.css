@@ -28,9 +28,9 @@ body { background: #fff; color: #37352f; min-height: 0; display: flow-root; -web
 }
 .btn:hover { text-decoration-color: #37352f; }
 
-p, ul, .step p { color: #37352f; font-size: 16px; line-height: 1.5; }
+p, ul, ol, .step p { color: #37352f; font-size: 16px; line-height: 1.5; }
 p { margin: 0 0 12px; }
-ul { margin: 4px 0 12px; padding-left: 24px; }
+ul, ol { margin: 4px 0 12px; padding-left: 24px; }
 li { margin: 0 0 4px; }
 strong { font-weight: 600; }
 a { color: inherit; }

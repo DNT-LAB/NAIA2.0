@@ -140,7 +140,7 @@ async function showPage({ fresh = false } = {}) {
         });
         const style = doc.createElement('link');
         style.rel = 'stylesheet';
-        style.href = 'document.css?v=4';
+        style.href = 'document.css?v=5';
         const ready = () => {
           if (generation !== loadGeneration) return;
           const resize = () => { frame.style.height = `${Math.ceil(Math.max(doc.body.scrollHeight, doc.body.getBoundingClientRect().height)) + 2}px`; };
@@ -214,7 +214,7 @@ async function loadEditor() {
     if (!status?.enabled) return;
   } catch { return; }
   const script = document.createElement('script');
-  script.src = 'editor.js?v=5';
+  script.src = 'editor.js?v=8';
   document.head.append(script);
 }
 

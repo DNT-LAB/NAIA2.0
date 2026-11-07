@@ -3402,9 +3402,24 @@ function setExtensionLauncherItems(items, onClick) {
     // 도구"/Automation 카테고리 버튼은 비활성으로 보였다(Bug 1). 캐시 상태를 replay해 복원.
     replayLauncherModuleStates();
     moduleLauncherControl.updateState();
+    refillLauncherSettingControls();
     return;
   }
   pendingExtLauncherItems = {items, onClick}; // 런처 모듈 초기화 후 flush
+}
+
+// 런처를 다시 그리면(첫 그리기 · 확장 항목 갱신) 런처 안의 설정 칸이 **빈 채로 새로** 생긴다 -
+// 들고 있는 상태로 다시 채운다. 다시 그리는 길이 둘이라 여기 한 곳에 모은다.
+// (2026-11-07: 확장 갱신 길이 이 일을 안 해서, 켜 둔 NAI 해상도 프리셋이 '꺼짐 · 빈 목록'으로 보였다.)
+// WEBUI/COMFYUI 해상도 프리셋의 상태는 index.html 의 p*ResolutionPreset* 칸이 들고 있다(런처 칸은 사본).
+function refillLauncherSettingControls() {
+  ensureResolutionPresetOptions();
+  for (const mode of ['WEBUI', 'COMFYUI']) {
+    const state = activeResolutionPresetState(mode);
+    if (state) syncResolutionPresetControls(mode, state.enabled, state.preset);
+  }
+  syncNaiResolutionBandControls();
+  updateWebUiHiresfixAssistControls();
 }
 const extensionsPanelReady = import('./js/features/extensionsPanel.mjs?v=20260831-extupdate')
   .then(({createExtensionsUi}) => {
@@ -12501,9 +12516,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261102-
     // leaf 클래스를 심고 updateState 로 카테고리 status 를 첫 페인트에 반영한다.
     replayLauncherModuleStates();
     moduleLauncherControl.updateState();
-    ensureResolutionPresetOptions();
-    syncNaiResolutionBandControls();   // 런처가 방금 그린 NAI 밴드 행도 채운다
-    updateWebUiHiresfixAssistControls();
+    refillLauncherSettingControls();   // 런처가 방금 그린 해상도 프리셋 · Hiresfix 칸을 채운다
     refreshResolutionPresetDisplay(currentMode || modeSelect?.value || 'NAI');
   })
   .catch(error => {

@@ -249,7 +249,10 @@ export function createTagAssistController({
   // 그린다), 다른 칸으로 넘어가면 여기로 되돌린다.
   const tooltipHome = tagTooltip ? tagTooltip.parentNode : null;
 
-  function autocompleteOn() {
+  // 끄기는 프롬프트 칸에만 건다 - 검색칸(bindTagAssist 의 searchField: Search Keyword · 심층 검색 · 시퀀스 포함/제외)은
+  // 늘 켠다(Codex 리뷰 2026-11-07 P2-2). target 을 안 주면 지금 칸(acTarget)으로 판정한다.
+  function autocompleteOn(target = acTarget) {
+    if (target && target._acSearchField) return true;
     try { return isAutocompleteEnabled() !== false; } catch (_) { return true; }
   }
 
@@ -1758,7 +1761,7 @@ export function createTagAssistController({
 
   function checkTagHint() {
     if (acMode) return;
-    if (!autocompleteOn()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
+    if (!autocompleteOn(acTarget || promptEdit)) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     // 호스트가 억제 중이면 조회 자체를 하지 않는다(WS 왕복도 아낀다).
     if (suppressedTagInfo()) { closeTagInfoTooltips(); lastLookupTag = ''; return; }
     const target = acTarget || promptEdit;
@@ -1777,6 +1780,7 @@ export function createTagAssistController({
     tagTooltip.classList.remove('open', 'ac-mode', 'preset-event-mode', 'preset-event-observed-mode', 'preset-event-staged-mode', 'preset-event-expression-mode');
     window.clearTimeout(tagLookupTimer);
     tagLookupTimer = window.setTimeout(() => {
+      if (!autocompleteOn(target)) return;                 // 기다리는 사이에 꺼졌다
       if (isLocalPresetQuery(tag)) {
         void lookupPresetEventTokenInfo(tag, {readOnly: false});
         return;
@@ -1787,7 +1791,7 @@ export function createTagAssistController({
   }
 
   function openPresetAutocompleteAtCursor(textarea) {
-    if (!autocompleteOn()) return false;
+    if (!autocompleteOn(textarea || acTarget || promptEdit)) return false;
     const target = textarea || acTarget || promptEdit;
     const info = getActiveTokenInfo(target);
     if (!info || !isLocalPresetQuery(info.stripped)) return false;
@@ -2173,11 +2177,11 @@ export function createTagAssistController({
   }
 
   function scheduleAutocomplete(options = {}) {
-    if (!autocompleteOn()) {
+    const target = options.target || acTarget || promptEdit;
+    if (!autocompleteOn(target)) {
       if (acMode) hideAutocomplete();
       return;
     }
-    const target = options.target || acTarget || promptEdit;
     const info = options.info || getActiveTokenInfo(target);
     const allowTriggers = target !== negEdit;
     // lora:예약어 - 목록은 이미 손에 있다(서버에 묻지 않는다). 캐럿이 예약어 자리를 벗어나면(강도 위) 닫는다.
@@ -2220,6 +2224,8 @@ export function createTagAssistController({
     window.clearTimeout(acTimer);
     window.clearTimeout(tagLookupTimer);
     acTimer = window.setTimeout(() => {
+      // 기다리는 사이에 다른 연결이 끄기를 켰다 - 프리셋 · 종속 와일드카드는 서버를 거치지 않아 응답 가드로 못 막는다(P2-1).
+      if (!autocompleteOn(target)) return;
       const s = query;
       if (allowTriggers && s.startsWith('__')) {
         const spec = wildcardAutocompleteSpec(s);
@@ -2330,7 +2336,7 @@ export function createTagAssistController({
   }
 
   function onAutocompleteResult(m) {
-    if (!autocompleteOn()) return;                        // 끄기 직전에 보낸 요청의 늦은 답
+    if (!autocompleteOn(acTarget)) return;                // 끄기 직전에 보낸 요청의 늦은 답
     if (Object.prototype.hasOwnProperty.call(m || {}, 'translated_query')) {
       const requestId = String(m.requestId || '');
       if (requestId && requestId !== lastTranslationRequestId) {
@@ -3089,6 +3095,7 @@ export function createTagAssistController({
   }
 
   function renderAutocomplete() {
+    if (!slashEntry && !autocompleteOn(acTarget)) { hideAutocomplete(); return; }
     hideTagChipInfoTooltip();
     if (presetAutocompleteMeta?.axis === 'events' || presetAutocompleteMeta?.axis === 'clothes' || presetAutocompleteMeta?.axis === 'expressions') {
       renderPresetEventAutocomplete();
@@ -3879,6 +3886,8 @@ export function createTagAssistController({
     textarea._excludeE621Autocomplete = !!options.excludeE621;
     // 사람이 고른 후보만 넣는다(↑↓ · 마우스) - Enter 는 칸의 주인에게 흘려보낸다(firstDefaultAutocompleteIndex 참조).
     textarea._acExplicitSelect = !!options.explicitSelect;
+    // 검색 조건 칸 - 설정 > [태그 자동완성 끄기] 가 걸리지 않는다(autocompleteOn).
+    textarea._acSearchField = !!options.searchField;
     // 자동완성·태그 정보를 떠 있는 팝업 대신 이 요소 안에 그린다(syncTooltipHost).
     textarea._tagAssistInlineHost = options.inlineHost || null;
     // 카테고리 통째로 빼기. Interactive 의 글로벌 태그 칸이 캐릭터·아티스트를
@@ -4162,15 +4171,26 @@ export function createTagAssistController({
   window.addEventListener('scroll', followAssistWindow, true);
 
   // 설정이 바뀌면 떠 있는 것을 바로 맞춘다 - 끄면 닫고, 자리를 바꾸면 다시 놓는다.
+  // ⚠️ 서버는 옵션 하나만 바뀌어도 전체 options 를 다시 보낸다 - 값이 그대로면 닫지 않는다(Codex 리뷰 P2-3).
+  //    닫을 때도 프롬프트의 자동 후보 · 자동 카드만: 슬래시 목록 · 생성 정보에서 연 읽기 전용 카드 · 검색칸 후보는 둔다.
+  let lastSettingEnabled = null;
   function refreshAutocompleteSetting() {
     if (!tagTooltip) return;
-    if (!autocompleteOn()) {
-      if (acMode) hideAutocomplete();
-      closeTagInfoTooltips();
-      lastLookupTag = '';
+    const enabled = autocompleteOn(promptEdit);
+    const was = lastSettingEnabled;
+    lastSettingEnabled = enabled;
+    if (enabled || was === enabled) {
+      if (tagTooltip.classList.contains('open') && !slashEntry) positionTagTooltip();
       return;
     }
-    if (tagTooltip.classList.contains('open')) positionTagTooltip();
+    if (acTarget && acTarget._acSearchField) return;
+    window.clearTimeout(acTimer);
+    window.clearTimeout(tagLookupTimer);
+    stopAutocompletePendingRetry();
+    clearAutocompleteTranslationTimer();
+    const readOnlyCard = tagLookupReadOnly && !acMode && tagTooltip.classList.contains('open');
+    if (!slashEntry && !readOnlyCard) hideAutocomplete();
+    if (!readOnlyCard) lastLookupTag = '';
   }
 
   return {

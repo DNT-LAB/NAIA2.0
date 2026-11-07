@@ -1191,7 +1191,7 @@ export function createSearchPanel({
       const element = moduleBody.querySelector(`#${id}`);
       if (!element) return;
       // 자동완성·태그 정보는 창 아래 빈 자리에 그린다(inlineHost). 우클릭은 이 창 메뉴(disableChunkBridge).
-      bindTagAssist(element, { excludeE621: true, inlineHost: acHost, disableChunkBridge: true });
+      bindTagAssist(element, { excludeE621: true, inlineHost: acHost, disableChunkBridge: true, searchField: true });
       // Re-focusing a field means the user is editing it again — drop its pending
       // echo guard so server values can flow back once they move on (and a fresh
       // guard is set on the next blur/change via saveFilterState).

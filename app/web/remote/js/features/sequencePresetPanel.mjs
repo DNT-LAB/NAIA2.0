@@ -272,8 +272,8 @@ export function createSequencePresetPanel({panel, escHtml, showToast, bindTagAss
     // Enter 가 그것을 넣고 검색을 삼켰다(아티스트 검색 칸과 같은 규칙).
     if (typeof bindTagAssist === 'function') {
       try {
-        bindTagAssist(incEl, {excludeE621: true, explicitSelect: true});
-        bindTagAssist(excEl, {excludeE621: true, explicitSelect: true});
+        bindTagAssist(incEl, {excludeE621: true, explicitSelect: true, searchField: true});
+        bindTagAssist(excEl, {excludeE621: true, explicitSelect: true, searchField: true});
       } catch (_) { /* tagAssist 미준비 */ }
     }
     refreshVibeGate();   // 현재 모드 기준 Vibe 체크박스 활성/비활성 동기화

@@ -319,7 +319,7 @@ export function createRefinePanel({
     if (typeof bindTagAssist !== 'function') return;
     for (const id of ['depthQuery', 'depthExclude']) {
       const el = document.getElementById(id);
-      if (el) bindTagAssist(el, { excludeE621: true });
+      if (el) bindTagAssist(el, { excludeE621: true, searchField: true });
     }
   }
 

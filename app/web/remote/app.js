@@ -3566,7 +3566,7 @@ const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261105-ips2
   .catch(error => {
     console.error('Failed to initialize Img2Img panel', error);
   });
-const refinePanelReady = import('./js/features/refinePanel.mjs?v=20260926-temp-live2')
+const refinePanelReady = import('./js/features/refinePanel.mjs?v=20261107-acsearch1')
   .then(({createRefinePanel}) => {
     refinePanelControl = createRefinePanel({
       document,
@@ -3712,7 +3712,7 @@ const searchQuickWindowReady = import('./js/features/searchQuickWindow.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize search window module', error);
   });
-const searchPanelReady = import('./js/features/searchPanel.mjs?v=20260926-temp-live2')
+const searchPanelReady = import('./js/features/searchPanel.mjs?v=20261107-acsearch1')
   .then(({createSearchPanel}) => {
     searchPanelControl = createSearchPanel({
       document,
@@ -3776,7 +3776,7 @@ const danbooruFeedbackReady = import('./js/features/danbooruFeedback.mjs?v=20260
   .catch(error => {
     console.error('Failed to initialize Danbooru feedback module', error);
   });
-const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261018-ratings1')
+const sequencePresetReady = import('./js/features/sequencePresetPanel.mjs?v=20261107-acsearch1')
   .then(({createSequencePresetPanel}) => {
     sequencePresetControl = createSequencePresetPanel({
       panel: $('sequencePresetPanel'),
@@ -3888,7 +3888,7 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202611
   .catch(error => {
     console.error('Failed to initialize inpaint canvas panel', error);
   });
-const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20260825-isequence1')
+const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20261107-acsearch1')
   .then(({createInpaintSequencePanel}) => {
     inpaintSequenceControl = createInpaintSequencePanel({
       panel: $('inpaintSequencePanel'),
@@ -15969,12 +15969,14 @@ function tagAutocompleteEnabled() {
 // [터치 기기에서 후보 위치] - 기기마다(localStorage). 기본 = 화면 아래, 윈도 기기만 커서 옆 - 터치 화면 윈도 노트북에서
 // 후보가 맨 아래로 간다는 제보(2026-11-07). 8인치 윈도 태블릿처럼 아래가 나은 기기는 여기서 바꾼다.
 var AC_TOUCH_PLACEMENT_KEY = 'naia.tagAutocomplete.touchPlacement';
+var acTouchPlacementPicked = null;        // 이 화면에서 고른 값 - 저장소에 못 써도 이것을 쓴다(Codex 리뷰 P3-2)
 function isWindowsDevice() {
   const nav = window.navigator || {};
   const platform = String(nav.userAgentData?.platform || nav.platform || '');
   return /^win/i.test(platform) || /Windows NT/i.test(String(nav.userAgent || ''));
 }
 function touchAutocompletePlacement() {
+  if (acTouchPlacementPicked === 'bottom' || acTouchPlacementPicked === 'caret') return acTouchPlacementPicked;
   try {
     const saved = window.localStorage.getItem(AC_TOUCH_PLACEMENT_KEY);
     if (saved === 'bottom' || saved === 'caret') return saved;
@@ -15988,20 +15990,21 @@ function paintTouchPlacementSetting() {
   root.querySelectorAll('[data-ac-placement]').forEach(button => {
     const on = button.dataset.acPlacement === current;
     button.classList.toggle('is-on', on);
-    button.setAttribute('aria-checked', on ? 'true' : 'false');
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
   root.classList.toggle('is-disabled', !tagAutocompleteEnabled());
 }
 $('acTouchPlacement')?.addEventListener('click', event => {
   const button = event.target.closest?.('[data-ac-placement]');
   if (!button) return;
-  try { window.localStorage.setItem(AC_TOUCH_PLACEMENT_KEY, button.dataset.acPlacement); } catch (_) { /* 이번 화면만 */ }
+  acTouchPlacementPicked = button.dataset.acPlacement;
+  try { window.localStorage.setItem(AC_TOUCH_PLACEMENT_KEY, acTouchPlacementPicked); } catch (_) { /* 이번 화면만 */ }
   paintTouchPlacementSetting();
   tagAssist?.refreshAutocompleteSetting?.();
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-acset1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261107-acset2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

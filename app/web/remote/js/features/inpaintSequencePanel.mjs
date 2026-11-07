@@ -195,8 +195,8 @@ export function createInpaintSequencePanel({panel, escHtml, showToast, bindTagAs
     // 시퀀스 데이터는 danbooru 기반이라 e621 제안은 제외(excludeE621).
     if (typeof bindTagAssist === 'function') {
       try {
-        bindTagAssist(incEl, {excludeE621: true});
-        bindTagAssist(excEl, {excludeE621: true});
+        bindTagAssist(incEl, {excludeE621: true, searchField: true});
+        bindTagAssist(excEl, {excludeE621: true, searchField: true});
       } catch (_) { /* tagAssist 미준비 */ }
     }
     refreshVibeGate();   // 현재 모드 기준 Vibe 체크박스 활성/비활성 동기화

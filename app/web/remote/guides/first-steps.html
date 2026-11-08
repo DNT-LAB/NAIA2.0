@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>처음 시작하기</title>
+<link rel="stylesheet" href="document.css?v=4">
+<style>html { overflow: auto; } .page { max-width: 708px; margin: 0 auto; padding: 48px 24px 64px; }
+table { width: 100%; table-layout: fixed; } th:first-child, td:first-child { width: 34%; }
+kbd { display: inline-block; padding: 1px 6px; border: 1px solid #d3d1cb; border-bottom-width: 2px; border-radius: 4px; background: #f7f6f3; font: 600 12px/1.5 ui-monospace, Consolas, monospace; color: #37352f; }</style>
+</head>
+<body>
+<main class="page">
+<p><span style="font-size: 24px; font-weight: 600;">NAIA를 아예 설치하지 않은 상태인 경우 (Community)</span></p>
+<ul>
+<li>다음 페이지에 방문합니다 :&nbsp;<a href="https://github.com/DNT-LAB/NAIA2.0/releases" target="_blank" rel="noopener noreferrer">https://github.com/DNT-LAB/NAIA2.0/releases</a>&nbsp;</li>
+<li>가장 최신 버전 (On this page 바로 아래에 보이는 숫자의 버전) NAIA-Portable을 다운로드 합니다.</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-234427.webp" alt="" width="1401" height="580"></figure>
+<p>Mac 운영체제를 사용하시는 분들은 설치판이 아닌&nbsp;<a href="https://arca.live/b/aiart/173698731" target="_blank" rel="noopener noreferrer">https://arca.live/b/aiart/173698731</a>&nbsp;를 참고합니다. 잘 안되면 AI의 도움을 받으세요.&nbsp;</p>
+<ul>
+<li>다운로드 받은 NAIA-Portable 압축파일을 압축해제 합니다.&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-235315.webp" alt="" width="1201" height="349"></figure>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-235333.webp" alt="" width="1074" height="280"></figure>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-235449.webp" alt="" width="1600" height="696"></figure>
+<ul>
+<li>NAIA.exe 를 실행하면 Windows의 PC 보호 화면이 나타납니다. 빨간색 상자를 확인하고 추가정보 -&gt; 실행을 눌러주세요.&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-235753.webp" alt="" width="1600" height="537"></figure>
+<ul>
+<li>NAIA의 초기 설치에는 꽤 오랜 시간이 소요됩니다. (Electron 의존성 설치 및 파이썬 의존성 설치)&nbsp;</li>
+<li>작업이 완료되면 NAIA 태그 데이터 준비 화면이 나타나고 <b>[허깅페이스에서 다운로드]</b> 버튼을 눌러 NAIA 태그 리스트를 셋업합니다.</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261107-235938.webp" alt="" width="1600" height="1075"></figure>
+<ul>
+<li>모든 준비가 완료되면 그림과 같이 [ API 설정 ] 화면이 나타납니다.&nbsp;</li>
+<li>NAIA를 먼저 체험해 보시려면 상단의 [ NO API 모드 ]를, 바로 Novel AI나 Comfy UI, ANIMA 등의 백엔드에 연결하시려면 아래를 참고합니다.&nbsp;</li></ul>
+<h2>1. 생성 백엔드 연결</h2>
+<p>NAIA는 NovelAI · WebUI · ComfyUI에 그림을 맡겨 생성합니다.</p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-000609.webp" alt="" width="877" height="291"></figure>
+<ul>
+<li><b>NovelAI</b> : NovelAI 사이트의 Account Settings에서 <b>영구 토큰</b>(<code>pst-</code>로 시작)을 받아 <b>영구 토큰</b> 칸에 붙여넣고 [확인 후 저장]을 누릅니다. 자세한 순서는 <a href="index.html#novelai-token" target="_blank" rel="noopener noreferrer">NovelAI 토큰 발급</a>에 있습니다.</li></ul>
+<ul>
+<li><b>WebUI · ComfyUI</b> : 실행 중인 UI의 주소를 붙여넣습니다. WebUI는 <code>webui-user.bat</code>을 편집해 <code>set COMMANDLINE_ARGS=--api</code>를 넣어야 연결됩니다.</li></ul>
+<p>이 가이드는 NAI를 기준으로 합니다.&nbsp;</p>
+<div class="callout warn">
+<p><b>[Disclaimer]</b> NAIA의 사용자는 명확한 할당량이 부여된 Novel AI v5 외에 <b>NAI v3, NAI v4, NAI v4.5</b> 등을 사용할 수 있습니다. Anlatan은 공식적으로 Novel AI 서비스 품질에 영향을 끼칠 수 있는 자동화를 허용하고 있지 않으며 <b>NAIA의 과도한 자동화 기능 사용으로 인한 계정 사용 제한</b>에 대해 v5를 포함하여 어떠한 책임도 지지 않습니다.&nbsp;</p>
+<p><b>마지막으로 확인된 정지 케이스</b> : v5 업데이트 이후 <b>하루종일 NAIA를 이용하여 3천장 이상의 NAI v4 이미지를 생성</b>했던 사용자가 정지된 사례가 있습니다. v5를 제외한 이미지 생성은 하루 1,200장 안쪽으로 쓰기를 권장합니다.&nbsp;&nbsp;</p></div>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-000447.webp" alt="" width="1600" height="1075"></figure>
+<ul>
+<li>NAI API로 연동한 경우 다음과 같은 화면이 나타날 것 입니다. Search Window는 당장 신경쓰지 마세요.</li>
+<li>처음에는 사용자의 이해를 돕기 위해 기본 프롬프트 및 설정이 잡혀 있습니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-110022.webp" alt="" width="865" height="240"></figure>
+<ul>
+<li>어차피 나중에 다시 볼 테니까 현재는 X 버튼을 눌러 닫습니다.&nbsp;</li></ul>
+<h2>2. Random → Generate로 첫 그림 생성하기</h2>
+<p>NAIA에 대해 자세히 알아보기 전에, 기본적인 NAIA의 이미지 및 프롬프트 생성 기능 작동 방식에 대해 간단히 이해하는 것이 좋습니다.</p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-112715.webp" alt="" width="1600" height="1053"></figure>
+<ul>
+<li>Novel AI 공식 홈페이지에서 Base Prompt 공간은 사용자가 직접 수정/삭제하지 않는 한 지속적으로 유지되는 작업 영역입니다.&nbsp;</li></ul>
+<h3>공식 홈페이지에서의 고정 스타일 태그 작성 방식 (예시)</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-114201.webp" alt="" width="1045" height="730"></figure>
+<p><br></p>
+<p>사용자는 자신이 원하는 스타일을 고정하기 위해 통상적으로 상/하단 영역을 나눠 스타일을 제어할 수 있는 프롬프트와 품질을 제어할 수 있는 프롬프트를 고정하고 나머지 프롬프트를 가운데 공간에 작성합니다.&nbsp;</p>
+<p><br></p>
+<h3>NAIA에서 프롬프트 공간은 휘발성</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-114717.webp" alt="" width="1600" height="1038"></figure>
+<p><br></p>
+<p>이러한 구조 자체는 기본적으로 NAIA도 동일합니다. 시험 삼아 Generate 버튼을 눌러 보시면 입력되어 있는 프롬프트로 이미지 한장이 생성됩니다.</p>
+<ul>
+<li>초기 설정값은 Novel AI v4.5로 <b>사용자의 v5 사용량을 차감하지 않습니다.</b> (Anlas가 들지 않는 것은 Opus 구독 + 28스텝 · 1MP 이하일 때뿐입니다. 다른 구독은 Anlas가 소모됩니다.) v4.5에서 사용법을 숙지하신 뒤 v5로 넘어갑니다.&nbsp;<br><br></li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-115630.webp" alt="" width="1600" height="1034"></figure>
+<p><br></p>
+<p>이미지 생성 후, 사용자는 Generate 버튼을 다시 눌러 현재 메인 프롬프트 창에 올라와 있는 프롬프트로 다시 이미지를 생성하거나, 랜덤 버튼을 눌러 무작위 프롬프트를 다시 배정받을 수 있습니다.&nbsp;</p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-120154.webp" alt="" width="1495" height="1206"></figure>
+<p><br></p>
+<p>이 때, 이미지 스타일을 조정하기 위해서 메인 프롬프트 영역을 수정하면 다음 <b>[랜덤 프롬프트] </b>가 동작할 때 작업 내용이 전부 유실됩니다.&nbsp;</p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-122907.webp" alt="" width="1600" height="982"></figure>
+<p><br></p>
+<p>아무튼 <b>[랜덤] -&gt; [생성] </b>버튼을 계속 누르면 그림과 같이 계속 무작위 이미지가 생성되는 것을 확인할 수 있습니다.&nbsp;</p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-123753.webp" alt="" width="1600" height="687"></figure>
+<p><br></p>
+<p>이렇게 해서 생성되는 캐릭터는 <b>전부 랜덤 프롬프트 안에 내장된 </b>조합입니다. 물론, 이렇게 고정된 랜덤 캐릭터를 받는 것을 선호하시는 분들도 계시겠지만<b> 내가 만들고 싶은 캐릭터를 고정하기 위해 </b>프롬프트 엔지니어링 모듈을 살펴보도록 합시다.&nbsp;</p>
+<p><br></p>
+<h2>3. 프롬프트 엔지니어링 모듈 살펴보기</h2>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-124406.webp" alt="" width="1600" height="838"></figure>
+<ul>
+<li>왼쪽 아래의 <b>[프롬프트 엔지니어링]</b> 버튼을 누르면 복잡한 창 하나가 열립니다.&nbsp;</li></ul>
+<p><br></p>
+<h3>특징 제거 옵션</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-130030.webp" alt="" width="1600" height="556"></figure>
+<ul>
+<li>기본적으로<b> 7개의 특징 제거 옵션이 비활성화</b> 되어있습니다.</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-130409.webp" alt="" width="1525" height="535"></figure>
+<ul>
+<li>이해를 위해 모든 <b>[특징 제거]</b> 옵션을 다 켜고<b> [랜덤] </b>버튼을 눌러봅시다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-130606.webp" alt="" width="702" height="90"></figure>
+<ul>
+<li>대부분의 상황에서 랜덤 프롬프트 출력 영역에 "solo" 하나의 태그만 나타납니다.</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-130811.webp" alt="" width="1600" height="324"></figure>
+<ul>
+<li><b>[캐릭터 특징]</b>과 <b>[색상]</b> 버튼을 해제하고 랜덤을 돌려보면<b> "머리 색", "눈 색", "헤어스타일" </b>등에 해당하는 태그들이 랜덤 프롬프트에 반영됩니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-131005.webp" alt="" width="1600" height="281"></figure>
+<ul>
+<li>반대로<b> [의상], [의상 이벤트], [표정], [포즈·동작] </b>등만 해제하고 랜덤을 돌려보면 위에서 봤던 <b>캐릭터 특징 및 색상 태그를 제외한 태그</b>만 남게 됩니다. (필요한 경우 배경도 해제)&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-131313.webp" alt="" width="1596" height="1228"></figure>
+<p><br></p>
+<p>이전 페이지에서 NAIA의 주요 목적에 대해 설명해 드렸던 적이 있습니다. 지금&nbsp;<b> [의상], [의상 이벤트], [표정], [포즈·동작] </b>등만 해제한 상태가 "남은 것" 에 해당하는 부분인데 이제 <b>캐릭터 프롬프트쪽</b>을 채우면 캐릭터를 고정할 수 있게 됩니다.&nbsp;</p>
+<p><br></p>
+<h3>캐릭터 프롬프트 슬롯</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-132511.webp" alt="" width="1600" height="591"></figure>
+<p><br></p>
+<p>이미지 영역 좌측 상단을 살펴보면<b> [ CHARACTER&nbsp; &nbsp; &nbsp; &nbsp; &nbsp;0 ] </b>으로 표시되는 버튼이 있습니다. 이를 눌러보면 <b>캐릭터 프롬프트를 활성화 하고, 캐릭터를 추가할 수 있는 슬롯</b>이 나타납니다.&nbsp;</p>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-133007.webp" alt="" width="1164" height="364"></figure>
+<ul>
+<li><b>[캐릭터 프롬프트] </b>의 기본적인 작성 규칙으로, 시작은 대상 인물의 성별이 됩니다.</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-133208.webp" alt="" width="1452" height="325"></figure>
+<ul>
+<li>사용자가 만약 NAIA에 색인된 캐릭터의 이름을 입력하면, 그 캐릭터의 특징 프롬프트를 한 번에 받아올 수 있습니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-133325.webp" alt="" width="1600" height="1048"></figure>
+<ul>
+<li>이 상태로 생성 버튼을 누르게 되면 그 때부터는 <b>메인 프롬프트 + 캐릭터 프롬프트</b> 조합으로 이미지가 생성됩니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-133528.webp" alt="" width="1474" height="1240"></figure>
+<ul>
+<li>이후에는 <b>[랜덤] -&gt; [생성]</b>을 반복 할 때 마다 적용한 캐릭터로 랜덤 이미지가 생성됩니다.&nbsp;</li></ul>
+<p><br></p>
+<h3>랜덤 프롬프트 요약</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-133857.webp" alt="" width="1093" height="577"></figure>
+<ul>
+<li><b>[프롬프트 엔지니어링] 모듈</b>에서<b> [캐릭터 특징]</b>과 <b>[색상]</b> 제거를 켜고, 의상 · 표정 · 포즈 등은 꺼 둡니다.&nbsp;</li>
+<li><b>[캐릭터 프롬프트] 슬롯</b>에 고정할 캐릭터를 입력합니다.&nbsp;</li>
+<li>랜덤 버튼을 누르고 생성합니다.</li></ul>
+<p><br></p>
+<h2>4. 랜덤 프롬프트 정제하기 (방법1)&nbsp;</h2>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-134604.webp" alt="" width="1600" height="1027"></figure>
+<p><br></p>
+<p>2026년 11월 7일 기준으로, 현재 NAIA에는 랜덤 프롬프트를 호출하는 사양이 여러개로 갈라져있습니다. 이 섹션에서는 가장 기본적인 랜덤 프롬프트 정제 방법에 대해 다룹니다.</p>
+<ul>
+<li>상단 <b>Quick </b>버튼을 누르면 <b>[Tag Filter] </b>창이 나타납니다.</li>
+<li>NAIA의 최초 설치시 당황스러운 상황을 막기 위해 무조건 랜덤 프롬프트가<b> 1girl, solo + 건전한 이미지 ~ 성적 행위가 없는 nsfw 이미지 까지만</b> 출력하도록 제한되어 있습니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-135245.webp" alt="" width="649" height="319"></figure>
+<ul>
+<li>이러한 이미지 수위는 G / S / Q / E 버튼을 조작하여 On / Off 할 수 있습니다.&nbsp;</li></ul>
+<p><br></p>
+<p>각 버튼은 Danbooru의 콘텐츠 등급(Rating) 4단계입니다. 그림의 노출 수위와 성적 묘사 정도로 나뉩니다.</p>
+<table>
+<thead>
+<tr><th>버튼 · 등급</th><th>기준과 예</th></tr>
+</thead>
+<tbody>
+<tr><td><b>G</b> · General<br><code>rating:general</code></td><td><b>전체 이용가.</b> 노출이나 성적 암시가 없는 그림 - 일상 일러스트, 풍경, 메카닉, 평범한 옷차림의 인물화</td></tr>
+<tr><td><b>S</b> · Sensitive<br><code>rating:sensitive</code></td><td><b>약한 선정성.</b> 직접 노출은 없지만 성적 매력이 강조된 그림 - 수영복 · 비키니, 바니걸, 몸에 붙는 옷, 가슴골, 판치라</td></tr>
+<tr><td><b>Q</b> · Questionable<br><code>rating:questionable</code></td><td><b>준성인(nsfw).</b> 성행위는 없지만 노출이 크거나 성적 암시가 강한 그림 - 유두 노출, 노출이 큰 란제리, 도발적인 성적 포즈. 성기 노출 · 성행위는 들어가지 않습니다.</td></tr>
+<tr><td><b>E</b> · Explicit<br><code>rating:explicit</code></td><td><b>성인물(porn, R-18).</b> 노골적인 성적 묘사 - 성기 노출, 성행위, 성적인 맥락의 체액, 하드코어 페티시</td></tr>
+</tbody>
+</table>
+<p>같은 이름의 태그(<code>rating:general</code> 등)를 프롬프트에 넣어 수위를 유도하거나, 네거티브에 넣어 원치 않는 수위를 막는 데도 씁니다.</p>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-140144.webp" alt="" width="646" height="274"></figure>
+<ul>
+<li>G / S / Q / E 버튼은 끄고 켤 수 있으며, 랜덤 프롬프트 풀에 즉각적으로 반영됩니다.</li>
+<li>Explicit 유형의 이미지를 생성해보고자 하는 경우, 그림과 같이 E만 활성화 된 상태에서 랜덤 프롬프트 버튼을 눌러 테스트 합니다.</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-140406.webp" alt="" width="654" height="247"></figure>
+<ul>
+<li>include tag와 exclude tag는 랜덤 프롬프트 풀에서 '특정 태그' 를 포함하는 랜덤 프롬프트만 찾거나 제외하는 것 입니다.</li>
+<li>이 검색 영역은 <b>한글 태그</b>를 지원합니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-140841.webp" alt="" width="1600" height="412"></figure>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-141406.webp" alt="" width="1600" height="1032"></figure>
+<ul>
+<li>이런 느낌으로 특정 구도가 강조되는 이미지를 랜덤으로 생성할 수 있게 됩니다.&nbsp;</li></ul>
+<p><br></p>
+<p><b>그러나:&nbsp;</b></p>
+<ul>
+<li>NAIA 최초 실행시 Tag Filter에서 미리 불러오는 랜덤 프롬프트는 <b>NAIA 전체 랜덤 프롬프트의 0.7% (65000개)</b>로 제한됩니다.</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-142020.webp" alt="" width="1416" height="802"></figure>
+<p><br></p>
+<ul>
+<li>NAIA의 전체 랜덤 프롬프트를 불러오고자 하는 경우 상단<b> [Prompt] </b>영역을 눌러 Search Keyword에 "girl" 입력 후 <b>[검색] </b>버튼을 누릅니다.</li>
+<li>이 경우 <b>NAIA 단독으로 13GB 정도의 시스템 메모리</b>를 사용합니다.&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-142219.webp" alt="" width="643" height="45"></figure>
+<p><br></p>
+<ul>
+<li>이정도 크기의 랜덤 프롬프트를 정제하는 것은 매우 높은 리소스를 요구합니다.&nbsp;</li>
+<li>그래서 컷오프 범위를 지정하고, 사용하지 않을 Rating은 과감하게 버리는것을 권장합니다.</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-142634.webp" alt="" width="657" height="415"></figure>
+<p><br></p>
+<ul>
+<li>좀 더 자세한 내용은 추후 <b>Search, Tag Filter, 심층 검색 </b>등을 다루는 챕터에서 다시 이야기 하겠습니다.</li>
+<li>지금은 다루지 않지만 exclude tags에 <b>"furry female", "splatoon", "one-eyed", "guro", "scat"</b> 등의 태그를 미리 넣어두는게 권장됩니다.&nbsp;&nbsp;</li></ul>
+<p><br></p>
+<h3>랜덤 프롬프트에서 적절한 해상도 받아오기</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-143545.webp" alt="" width="1600" height="788"></figure>
+<ul>
+<li>하단 Auto Res를 체크한 상태로 Generate 버튼을 누르면 랜덤 프롬프트에 맞는 해상도로 이미지가 생성됩니다.</li>
+<li><b>Rnd Res </b>만 켰을 때 : 매 생성마다 무작위 1MP 해상도로 이미지가 생성됩니다.</li>
+<li><b>Auto Res </b>만 켰을 때 : 랜덤 프롬프트에 담긴 고정 해상도 비율로 이미지가 생성됩니다.</li>
+<li><b>둘 다 켰을 때</b> : 첫 이미지 생성은 고정 해상도 비율로, 이후 생성은 랜덤 해상도로 이미지가 생성됩니다. (Auto Gen 기준. [생성]을 직접 누를 때는 Rnd Res가 우선해 매번 무작위 해상도가 됩니다)&nbsp;</li></ul>
+<h2>5. 스타일 수정하기</h2>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144002.webp" alt="" width="1600" height="994"></figure>
+<ul>
+<li>프롬프트 엔지니어링 모듈을 몇 번 열어보셨으니 아시겠지만 Prefix Prompt내 프롬프트와 Postfix Prompt 내 프롬프트가 계속 위 아래에 붙어서 들어갑니다.&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144122.webp" alt="" width="1280" height="965"></figure>
+<p><br></p>
+<ul>
+<li>여기까지 따라오시면 대략적인 구조가 이해되셨을 거라 생각됩니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144253.webp" alt="" width="1245" height="472"></figure>
+<ul>
+<li>프롬프트 엔지니어링 모듈에서 Add 버튼을 누르면 현재 프리셋을 복제할 수 있는 화면이 나타납니다.&nbsp;</li>
+<li>Prefix / Postfix를 수정하기 전에, 이후 재사용 하고 싶은 고정 프롬프트는 백업하고 진행하는 것이 좋습니다. (수정 후 복구하기가 어렵습니다)&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144512.webp" alt="" width="1168" height="928"></figure>
+<p><b>테스트 케이스:</b></p>
+<ul>
+<li>artist:naga u, -0.92::artist collaboration ::</li>
+<li>year 2024, masterpiece, best quality, very aesthetic, highres, best illustration, novel illustration, -1.2::simple illustration ::</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144613.webp" alt="" width="1600" height="991"></figure>
+<ul>
+<li>이후에는<b> [랜덤 프롬프트] </b>버튼을 누를 때 현재 설정값으로 프롬프트가 조립됩니다.&nbsp;</li></ul>
+<p><br></p>
+<h3>모델의 변경</h3>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144832.webp" alt="" width="1549" height="765"></figure>
+<ul>
+<li>PARAMS 탭을 누르면 모델을 변경할 수 있는 화면이 나타납니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-144907.webp" alt="" width="1053" height="376"></figure>
+<ul>
+<li>모델을 바꾸게 되면 경고창이 나타납니다. 지금 프리셋을 그대로 고쳐도 될 때는 [프리셋을 유지한채로 모델 변경], 그 외의 상황에서는 [현재 프리셋을 복제] 하시면 됩니다.&nbsp;</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-145230.webp" alt="" width="697" height="441"></figure>
+<ul>
+<li>모델 변경 후에는 사고가 나지 않게 설정값을 미리 바꿔두시는게 좋습니다. (입력 값은 참고용)</li></ul>
+<p><br></p>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-145725.webp" alt="" width="1600" height="936"></figure>
+<ul>
+<li>프롬프트 엔지니어링 모듈 상단의 <b>[추천 설정 적용] </b>버튼을 누르면 참고용 NAID5F 프리셋을 하나 꺼내올 수 있습니다.&nbsp;</li></ul>
+<p><br></p>
+<h2>6. 이미지 자동 생성</h2>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-150200.webp" alt="" width="700" height="174"></figure>
+<ul>
+<li>Auto Gen (자동 생성) 체크 후 [랜덤] 버튼을 누르면 그 때부터 자동 생성이 시작됩니다.&nbsp;</li></ul>
+<figure class="image-wrap"><img src="assets/first-steps-20261108-150414.webp" alt="" width="709" height="178"></figure>
+<ul>
+<li><b>[자동화 / 고급 기능] </b>의 Automation 항목에서 생성 딜레이를 주거나, 타이머 설정을 하거나, 횟수 제한을 둘 수 있습니다</li></ul>
+</main>
+</body>
+</html>

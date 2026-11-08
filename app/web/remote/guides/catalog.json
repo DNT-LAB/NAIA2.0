@@ -27,6 +27,14 @@
       "file": "naia-feature-map.html"
     },
     {
+      "id": "first-steps",
+      "category": "1. NAIA 소개",
+      "title": "처음 시작하기",
+      "summary": "",
+      "keywords": "시작 처음 설치 첫 생성 검색 랜덤 토큰",
+      "file": "first-steps.html"
+    },
+    {
       "id": "conditional-prompt",
       "category": "2. 프롬프트",
       "title": "조건부 프롬프트",

@@ -180,6 +180,36 @@ def find_artists(text, *, known=frozenset()) -> list[dict]:
             if (row := _classify(event, keys))]
 
 
+def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
+    """`find_artists` + 그 작가에 걸린 가중치(`weight`). 아티스트 태그 관리 창이 쓴다(2026-11-11).
+
+    `0.6::artist:a, b ::` 는 둘 다 0.6 · 겹쳤으면 가장 안쪽 숫자 · SD 꼴 `(name:1.2)` 는 그 숫자.
+    숫자가 없으면 중괄호 · 대괄호 겹수(1.05 배씩)이고, 아무것도 없으면 1.
+    """
+    keys, events = _known_keys(known), _events(text)
+    opens = {event.group: event.text.strip() for event in events if event.kind == "OPEN"}
+    rows = []
+    for event in events:
+        row = _classify(event, keys) if event.kind == "TAG" else None
+        if not row:
+            continue
+        number, factor = None, 1.0
+        for gid in event.groups:                      # 바깥 -> 안쪽 차례
+            opener = opens.get(gid, "")
+            if opener.startswith("{"):
+                factor *= 1.05
+            elif opener.startswith("["):
+                factor /= 1.05
+            elif (match := re.match(_NUMBER, opener)):
+                number = float(match[0])
+        sd = re.search(rf":\s*({_NUMBER})\)$", event.text.strip()) if _SD.fullmatch(event.text.strip()) else None
+        if sd:
+            number = float(sd[1])
+        row["weight"] = round(number if number is not None else factor, 2)
+        rows.append(row)
+    return rows
+
+
 def _remove(text, events, remove):
     if not remove:
         return text

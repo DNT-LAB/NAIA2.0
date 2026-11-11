@@ -939,11 +939,16 @@ def register_artist_thumbnail_routes(
         mode = str(payload.get("mode") or "")
 
         def _run():
-            from core.prompt_artist_strip import find_artists
+            from core.prompt_artist_strip import find_artists_weighted
 
-            rows = find_artists(text, known=_mix_known_artists(session_context))
-            names = [row["name"] for row in rows if row.get("reason") != "anchor"]
-            return artist_thumbnail_service(session_context).used_artist_tiles(names, mode)
+            # 같은 작가를 두 번 썼으면 처음 것 하나만(가중치도 그것).
+            first: dict[str, tuple[str, float]] = {}
+            for row in find_artists_weighted(text, known=_mix_known_artists(session_context)):
+                name = " ".join(str(row["name"]).split())
+                if row.get("reason") != "anchor" and name:
+                    first.setdefault(name.casefold(), (name, row["weight"]))
+            tiles = artist_thumbnail_service(session_context).used_artist_tiles([n for n, _ in first.values()], mode)
+            return [{**tile, "weight": weight} for tile, (_, weight) in zip(tiles, first.values())]
 
         try:
             return {"ok": True, "artists": await run_in_thread(_run)}

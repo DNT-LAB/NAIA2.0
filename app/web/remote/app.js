@@ -12475,7 +12475,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw2')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw3')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,

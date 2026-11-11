@@ -16,16 +16,21 @@ const ATW_CSS = `
 .atw-note { margin: auto; padding: 24px 16px; text-align: center; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
 .atw-note.is-error { color: #ffb4b4; }
 .atw-grid { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 10px;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; align-content: start;
+  /* 한 줄에 많아야 넷(사용자 지시 2026-11-11 - 작으면 안 보인다). 넷이 들어갈 폭(25% - 틈)을 하한으로 두면 넓은 창에서도
+     다섯째가 못 들어온다. 좁은 창에서는 120px 하한으로 셋 · 둘로 준다. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(max(120px, calc(25% - 6px)), 1fr)); gap: 8px; align-content: start;
   /* 줄 높이를 내용에 맞춘다 - 안 하면 타일(overflow hidden)이 창 높이에 맞춰 눌려 이름 줄이 잘린다(실측 150 -> 77px). */
   grid-auto-rows: max-content; }
 .atw-tile { min-width: 0; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; background: var(--bg-surface); }
 .atw-img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; background: #0c0c12; }
 .atw-none { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 3 / 4;
   background: #0c0c12; color: var(--text-dim); font-size: 11px; }
-.atw-name { padding: 4px 6px 0; font-size: 11px; color: var(--text-primary);
+.atw-name { padding: 6px 6px 0; font-size: 13px; color: var(--text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.atw-meta { padding: 0 6px 5px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); text-align: right; }
+.atw-meta { display: flex; justify-content: space-between; gap: 8px; padding: 2px 6px 6px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
+.atw-weight { color: var(--text-primary); }
+.atw-weight.is-neg { color: #ff8f8f; }
 `;
 
 function ensureStyle(doc) {
@@ -60,7 +65,7 @@ export function createArtistTagWindow({
   const panel = createDraggablePanel({
     document: doc, window: win, id: 'artistTagWindow', title: '아티스트 태그 관리',
     variant: 'em-overlay em-window atw-window', storageKey: 'artist-tag-manager',
-    width: 500, height: 460, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
+    width: 560, height: 520, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
     escHtml,
     onOpen: () => { load(); onVisibilityChange(); },
     onClose: () => { serial += 1; onVisibilityChange(); },
@@ -76,12 +81,15 @@ export function createArtistTagWindow({
   function tileHtml(row) {
     const name = String(row.name || '');
     const posts = shortCount(row.count);
+    const weight = Number.isFinite(Number(row.weight)) ? Number(row.weight) : 1;
     const tip = row.image_url ? `${name} · ${row.pack_label || row.pack || ''}` : `${name} · 받은 팩에 이 작가의 그림이 없습니다`;
     const picture = row.image_url
       ? `<img class="atw-img" loading="lazy" alt="" src="${escHtml(row.image_url)}">`
       : '<div class="atw-none">데이터 없음</div>';
     return `<div class="atw-tile" title="${escHtml(tip)}">${picture}`
-      + `<div class="atw-name">${escHtml(name)}</div><div class="atw-meta">${escHtml(posts || ' ')}</div></div>`;
+      + `<div class="atw-name">${escHtml(name)}</div><div class="atw-meta">`
+      + `<span class="atw-weight${weight < 0 ? ' is-neg' : ''}" title="가중치">${escHtml(String(weight))}</span>`
+      + `<span title="게시물 수">${escHtml(posts)}</span></div></div>`;
   }
 
   async function load() {

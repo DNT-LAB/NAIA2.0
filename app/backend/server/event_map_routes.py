@@ -121,6 +121,32 @@ def _kr_lookup(context: WebSessionContext) -> Callable[[str, int], list[str]]:
     return lookup
 
 
+def _describe_lookup(context):
+    def lookup(tags):
+        try:
+            raw = getattr(context, "kr_tags_raw", None)
+            if not isinstance(raw, dict) or not raw:
+                return {}
+            import re
+            from core.tag_relation_pack import korean_description, load_pack
+            from app.backend.server.autocomplete_commands import _tag_data_roots
+
+            pack = load_pack(_tag_data_roots(context))
+            descriptions = {}
+            for tag in tags:
+                key = tag.strip().lower()
+                description = korean_description(pack, key) or raw.get(key, {}).get("description")
+                if not isinstance(description, str) or not re.search(r"[\u1100-\u11ff\u3130-\u318f\uac00-\ud7a3]", description):
+                    continue
+                description = " ".join(description.split())
+                descriptions[tag] = description[:300] + "…" if len(description) > 300 else description
+            return descriptions
+        except Exception:
+            return {}
+
+    return lookup
+
+
 def _error(exc: MapQueryError) -> JSONResponse:
     return JSONResponse(exc.to_payload(),
                         status_code=STATUS_BY_CODE.get(exc.code, 400),
@@ -180,6 +206,7 @@ def register_event_map_routes(
         try:
             holder = await run_in_thread(session, session_context)
             holder.engine.kr_lookup = _kr_lookup(session_context)
+            holder.engine.describe = _describe_lookup(session_context)
             # Non-HTTP preset/mode changes use the same non-blocking broadcast path.
             holder.broadcast = lambda message: asyncio.run_coroutine_threadsafe(_broadcast(message), loop)
             if action == "get":

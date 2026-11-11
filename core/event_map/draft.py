@@ -22,13 +22,14 @@ import weakref
 import numpy as np
 
 from .extra_prompt import MAX_TEXT
-from .index import _intersect_sorted
 from .library import selection
 from .service import MapQueryError, PERSON_LABELS
 from core.tag_combo.person import PERSON_GROUPS
 
 SCHEMA = "naia-event-map-draft-v1"
 TEXT_CACHE_BYTES = 64 << 20
+POOL_INLINE = 2_000
+POOL_LIMIT = 50_000
 RATINGS = dict(zip("gsqe", ("general", "sensitive", "questionable", "explicit")))
 RATING_ALIASES = {alias: rating for rating, name in RATINGS.items()
                   for alias in (name, "rating:" + name, "rating:" + rating)}
@@ -69,6 +70,7 @@ class TextPostCache:
     def __init__(self, budget=TEXT_CACHE_BYTES):
         self.budget = budget
         self.entries = OrderedDict()
+        self._counts = {}
         self.bytes = 0
         self._flights = {}
         self._lock = threading.Lock()
@@ -80,6 +82,7 @@ class TextPostCache:
         with self._lock:
             self._epoch += 1
             self.entries.clear()
+            self._counts.clear()
             self.bytes = 0
 
     def retire(self, idx):
@@ -89,6 +92,7 @@ class TextPostCache:
             for key in list(self.entries):
                 if key[0] is idx:
                     self.bytes -= self.entries.pop(key).nbytes
+                    self._counts.pop(key, None)
         with self._compute:
             pass
 
@@ -115,15 +119,24 @@ class TextPostCache:
                     if idx in self._retired:
                         raise DraftError("unavailable")
                 mask = np.zeros(idx.offsets.size - 1, dtype=bool)
-                for tid in np.flatnonzero(idx.matching_tags(key[1])):
+                if key[1].startswith("*"):
+                    tid = idx.resolve(key[1][1:])
+                    tids = () if tid is None else (tid,)
+                else:
+                    tids = np.flatnonzero(idx.matching_tags(key[1]))
+                for tid in tids:
                     mask[idx.posting(int(tid))] = True
                 packed = np.packbits(mask)
                 packed.flags.writeable = False
+                count = int(np.bitwise_count(packed).sum(dtype=np.int64))
             with self._lock:
                 if epoch == self._epoch and idx not in self._retired and packed.nbytes <= self.budget:
                     while self.entries and self.bytes + packed.nbytes > self.budget:
-                        self.bytes -= self.entries.popitem(last=False)[1].nbytes
+                        old_key, old = self.entries.popitem(last=False)
+                        self.bytes -= old.nbytes
+                        self._counts.pop(old_key, None)
                     self.entries[key] = packed
+                    self._counts[key] = count
                     self.bytes += packed.nbytes
             future.set_result(packed)
             return packed
@@ -137,8 +150,107 @@ class TextPostCache:
     def posts(self, idx, text):
         return np.flatnonzero(np.unpackbits(self.packed(idx, text))).astype(np.int64)
 
+    def count(self, idx, text):
+        packed = self.packed(idx, text)
+        with self._lock:
+            count = self._counts.get((idx, text.lower()))
+        return count if count is not None else int(np.bitwise_count(packed).sum(dtype=np.int64))
+
 
 TEXT_CACHE = TextPostCache()
+
+
+class _Cond:
+    """One immutable condition, with thread-safe lazy views and body counts."""
+
+    def __init__(self, packed, size):
+        packed.flags.writeable = False
+        self.packed = packed
+        self.size = size
+        self.count = int(np.bitwise_count(packed).sum(dtype=np.int64))
+        self._lock = threading.RLock()
+        self._rids = self._mask = self._cumulative = None
+        self._tag_counts = self._gathered = self._reduce_at = self._present = None
+
+    def rids(self):
+        with self._lock:
+            if self._rids is None:
+                self._rids = np.flatnonzero(np.unpackbits(self.packed)[:self.size]).astype(np.int64)
+                self._rids.flags.writeable = False
+            return self._rids
+
+    def mask(self):
+        with self._lock:
+            if self._mask is None:
+                self._mask = np.unpackbits(self.packed)[:self.size].view(bool)
+                self._mask.flags.writeable = False
+            return self._mask
+
+    def has(self, rid):
+        return 0 <= rid < self.size and bool(self.packed[rid >> 3] & (0x80 >> (rid & 7)))
+
+    def nth(self, k):
+        if k < 0:
+            k += self.count
+        if not 0 <= k < self.count:
+            raise IndexError(k)
+        with self._lock:
+            if self._cumulative is None:
+                self._cumulative = np.cumsum(np.bitwise_count(self.packed), dtype=np.int64)
+            byte = int(np.searchsorted(self._cumulative, k, side="right"))
+            before = int(self._cumulative[byte - 1]) if byte else 0
+        bit = np.flatnonzero(np.unpackbits(self.packed[byte:byte + 1]))[k - before]
+        return byte * 8 + int(bit)
+
+    def __len__(self):
+        return self.count
+
+    def __getitem__(self, k):
+        return self.nth(k)
+
+    def has_tag_counts(self):
+        with self._lock:
+            return self._tag_counts is not None
+
+    def tag_counts(self, idx):
+        if self.count > POOL_LIMIT:
+            return None
+        with self._lock:
+            if self._tag_counts is None:
+                rids = np.flatnonzero(self.mask())
+                starts = idx.offsets[rids].astype(np.int64)
+                lengths = idx.offsets[rids + 1].astype(np.int64) - starts
+                before = np.zeros(rids.size, dtype=np.int64)
+                np.cumsum(lengths[:-1], out=before[1:])
+                picks = np.repeat(starts - before, lengths) + np.arange(int(lengths.sum()), dtype=np.int64)
+                self._gathered = idx.body[picks]
+                self._reduce_at = before[lengths > 0]
+                self._tag_counts = np.bincount(self._gathered, minlength=idx.n_tags)[:idx.n_tags]
+                self._tag_counts.flags.writeable = False
+            return self._tag_counts
+
+    def present(self, idx):
+        """조건 안에 있는 태그의 (소문자 이름, tid) 목록. 후보 이름이 든 태그는 어휘 전체가 아니라 여기서만 찾는다."""
+        counts = self.tag_counts(idx)
+        with self._lock:
+            if self._present is None:
+                self._present = [(idx.by_id[int(tid)].lower(), int(tid)) for tid in np.flatnonzero(counts)]
+            return self._present
+
+    def text_hits(self, idx, text, scope=None):
+        """`text` 가 이름에 든 태그가 하나라도 달린 조건 안 게시물 수 = 텍스트 칩으로 넣었을 때의 합집합 수.
+
+        `scope` 는 찾아볼 (소문자 이름, tid) 목록이고 없으면 조건 안 태그 전부다. `idx.matching_tags()` 로 어휘 전체를
+        훑지 않는다 - 후보 20개마다 5.8만 이름을 돌아 키 하나에 40~150ms 가 들었고(실측 2026-11-11, 이름 응답이 그만큼
+        늦었다) 칩이 쓰는 이름표 캐시(256칸)도 후보가 밀어냈다. 조건 밖 태그는 어차피 수에 보태지 않는다.
+        """
+        counts = self.tag_counts(idx)
+        matching = [tid for name, tid in (self.present(idx) if scope is None else scope) if text in name]
+        if len(matching) < 2:
+            return int(counts[matching[0]]) if matching else 0
+        tidmask = np.zeros(idx.n_tags, dtype=bool)
+        tidmask[matching] = True
+        return int(np.count_nonzero(np.logical_or.reduceat(tidmask[self._gathered], self._reduce_at)))
 
 
 def new_state():
@@ -330,18 +442,17 @@ def build_row(state):
 class EventMapDraft:
     """Read-only queries and copy-on-write operations over explicit states."""
 
-    def __init__(self, service, *, kr_lookup=None):
+    def __init__(self, service, *, kr_lookup=None, describe=None):
         self.service = service
         self.kr_lookup = kr_lookup
-        # 마지막 조건의 게시물 목록 하나(실측 2026-11-07: 큰 조건이면 ~280ms) - 자동완성 키마다 · 스냅숏마다 같은 조건을
-        # 다시 센다. 열쇠 = 색인 · 영구 제외 객체 · 조건 글. 색인이 바뀌면(invalidate) 객체가 달라져 저절로 빗나간다.
-        self._memo_key = None
-        self._memo_rids = None
-        # 그 게시물 목록의 비트 표(rid -> 있나) - 자동완성 후보 수를 교집합 대신 모아 읽기로 센다(실측 11-07:
-        # 'w' 후보 1,677개 교집합 3.9초 -> 75ms). 열쇠 = 위 목록 객체 그대로(is).
-        self._mask_for = None
-        self._mask = None
+        self.describe = describe
+        self._conditions = []
         self._memo_lock = threading.Lock()
+        self._cache_idx = None
+        self._part_cache = OrderedDict()
+        self._live = None
+        self._block_for = None
+        self._blocked = None
 
     def _index(self):
         try:
@@ -350,55 +461,104 @@ class EventMapDraft:
             raise DraftError("unavailable") from exc
 
     @staticmethod
-    def _set(idx, chip):
+    def _chip_count(idx, chip):
         if chip["exact"]:
             tid = idx.resolve(chip["text"])
-            return idx.posting(tid) if tid is not None else np.empty(0, dtype=np.int64)
-        return TEXT_CACHE.posts(idx, chip["text"])
+            return int(idx.posting(tid).size) if tid is not None else 0
+        return TEXT_CACHE.count(idx, chip["text"])
 
     def posts(self, state, *, idx=None):
         idx = idx or self._index()
-        block = self.service.permanent_block(idx)
-        key = (id(idx), id(block), json.dumps([state["include"], state["exclude"], state["ratings"],
-                                                state["tags"]], sort_keys=True))
-        with self._memo_lock:
-            if self._memo_key == key:
-                return self._memo_rids
-        rids = self._posts(state, idx, block)
-        rids.flags.writeable = False
-        with self._memo_lock:
-            self._memo_key, self._memo_rids = key, rids
-        return rids
+        return self._condition(state, idx, self.service.permanent_block(idx)).rids()
 
-    def _posts_mask(self, rids, idx):
-        with self._memo_lock:
-            if self._mask_for is rids:
-                return self._mask
-        mask = np.zeros(max(int(idx.offsets.size), int(rids[-1]) + 1 if rids.size else 0), dtype=bool)
-        mask[rids] = True
-        with self._memo_lock:
-            self._mask_for, self._mask = rids, mask
-        return mask
+    def _condition_key(self, state):
+        return json.dumps([state["include"], state["exclude"], state["ratings"], state["tags"]], sort_keys=True)
 
-    def _posts(self, state, idx, block):
+    def _cached_condition(self, key, idx, block):
+        with self._memo_lock:
+            for at, (old_idx, old_block, old_key, cond) in enumerate(self._conditions):
+                if old_idx is idx and old_block is block and old_key == key:
+                    self._conditions.append(self._conditions.pop(at))
+                    return cond
+        return None
+
+    def _condition(self, state, idx, block, *, memo=True):
+        key = self._condition_key(state)
+        if memo:
+            hit = self._cached_condition(key, idx, block)
+            if hit is not None:
+                return hit
+        cond = self._build_condition(state, idx, block)
+        if memo:
+            with self._memo_lock:
+                for old_idx, old_block, old_key, old in self._conditions:
+                    if old_idx is idx and old_block is block and old_key == key:
+                        return old
+                self._conditions.append((idx, block, key, cond))
+                self._conditions = self._conditions[-2:]
+        return cond
+
+    def _auxiliary(self, state, idx, block):
+        size = idx.offsets.size - 1
         parts = idx._partition_filter(state["ratings"], state["tags"]["persons"])
-        sets = sorted((self._set(idx, c) for c in state["include"]), key=len)
-        if sets:
-            rids = sets[0]
-            for other in sets[1:]:
-                rids = _intersect_sorted(rids, other)
+        key = (frozenset(state["ratings"]), frozenset(state["tags"]["persons"]))
+        with self._memo_lock:
+            if self._cache_idx is not idx:
+                self._cache_idx = idx
+                self._part_cache.clear()
+                self._live = self._blocked = self._block_for = None
+                self._conditions.clear()
+            partition = None
             if parts is not None:
-                rids, owners = idx._partition_of(rids)
-                rids = rids[idx._part_lut(parts)[owners]]
-        else:
-            rids = idx._live_posts(parts)
+                partition = self._part_cache.get(key)
+                if partition is None:
+                    mask = np.zeros(size, dtype=bool)
+                    owners = idx.part_arr[:size]
+                    mask[:owners.size] = idx._part_lut(parts)[owners]
+                    partition = np.packbits(mask)
+                    partition.flags.writeable = False
+                    self._part_cache[key] = partition
+                    if len(self._part_cache) > 16:
+                        self._part_cache.popitem(last=False)
+                self._part_cache.move_to_end(key)
+            if not state["include"] and self._live is None:
+                self._live = np.packbits(idx.offsets[1:] > idx.offsets[:-1])
+                self._live.flags.writeable = False
+            if self._block_for is not block:
+                self._block_for = block
+                self._blocked = np.packbits(block.posts) if block is not None else None
+                if self._blocked is not None:
+                    self._blocked.flags.writeable = False
+            return partition, self._live, self._blocked
+
+    def _build_condition(self, state, idx, block):
+        partition, live, blocked = self._auxiliary(state, idx, block)
+        packed = None
+        for chip in state["include"]:
+            other = TEXT_CACHE.packed(idx, ("*" if chip["exact"] else "") + chip["text"])
+            if packed is None:
+                packed = other.copy()
+            else:
+                packed &= other
+        if packed is None:
+            packed = live.copy()
+        if partition is not None:
+            packed &= partition
         for chip in state["exclude"]:
-            rids = rids[~np.isin(rids, self._set(idx, chip), assume_unique=True)]
-        rids = idx.filter_posts(rids, state["tags"]["groups"])
-        return np.array(idx._unblocked(rids, block), copy=True)
+            packed &= ~TEXT_CACHE.packed(idx, ("*" if chip["exact"] else "") + chip["text"])
+        size = idx.offsets.size - 1
+        if state["tags"]["groups"]:
+            rids = np.flatnonzero(np.unpackbits(packed)[:size])
+            mask = np.zeros(size, dtype=bool)
+            mask[idx.filter_posts(rids, state["tags"]["groups"])] = True
+            packed = np.packbits(mask)
+        if blocked is not None:
+            packed &= ~blocked
+        return _Cond(packed, size)
 
     def count(self, state):
-        return int(self.posts(state).size)
+        idx = self._index()
+        return self._condition(state, idx, self.service.permanent_block(idx)).count
 
     def _parse(self, text):
         raw = str(text or "").strip()
@@ -451,7 +611,7 @@ class EventMapDraft:
                 out["count_after"] = 0
                 return blocked("permanent_excluded")
             _chip(candidate, zone, clean, exact)
-        out["count_after"] = int(self.posts(candidate, idx=idx).size)
+        out["count_after"] = self._condition(candidate, idx, self.service.permanent_block(idx)).count
         return blocked("zero_match") if not out["count_after"] else out
 
     def _recheck(self, state):
@@ -459,9 +619,8 @@ class EventMapDraft:
         if drawn is None:
             return
         idx = self._index()
-        rids = self.posts(state, idx=idx)
-        at = np.searchsorted(rids, drawn["rid"])
-        if at == rids.size or rids[at] != drawn["rid"]:
+        cond = self._condition(state, idx, self.service.permanent_block(idx))
+        if not cond.has(drawn["rid"]):
             state["drawn"] = None
         else:
             pinned = [idx.resolve(c["text"]) for c in state["include"] if c["exact"]]
@@ -551,10 +710,10 @@ class EventMapDraft:
         except DraftError:
             idx = None
         if idx is not None:
-            result["remaining"] = int(self.posts(state, idx=idx).size)
+            result["remaining"] = self._condition(state, idx, self.service.permanent_block(idx)).count
         for zone in ("include", "exclude"):
             for c in state[zone]:
-                row = {"id": c["id"], "count": int(self._set(idx, c).size) if idx else 0,
+                row = {"id": c["id"], "count": self._chip_count(idx, c) if idx else 0,
                        "hits": int(np.count_nonzero(idx.matching_tags(c["text"], c["exact"]))) if idx else 0}
                 if zone == "include":
                     row["chip_hits"] = chip_hits[c["id"]]
@@ -563,10 +722,10 @@ class EventMapDraft:
 
     def pick(self, state, *, rng=None):
         idx = self._index()
-        rids = self.posts(state, idx=idx)
-        if not rids.size:
+        cond = self._condition(state, idx, self.service.permanent_block(idx))
+        if not cond.count:
             raise MapQueryError("no_match", _MESSAGES["zero_match"])
-        rid = int((rng or random).choice(rids))
+        rid = int((rng or random).choice(cond))
         pinned = [idx.resolve(c["text"]) for c in state["include"] if c["exact"]]
         post = idx.post_tags(rid, pinned=pinned, include_color=True)
         return {"rid": rid, "partition": post["partition"], "post_tags": post["tags"]}
@@ -574,10 +733,7 @@ class EventMapDraft:
     build_row = staticmethod(build_row)
 
     def suggest(self, q, zone, *, state=None, counts=True):
-        """후보 20개. `counts=False` 면 이름만(1ms 안쪽) - 화면이 먼저 띄우고 수는 `counts=True` 로 따로 받는다
-        (사용자 지시 11-07: '자동완성은 미리 보여주고 수만 잠시 후에'). 차례는 두 번 모두 같다 = 무리(rating · 앞 · 가운데 ·
-        한글) 안에서 **전체 출현 수** 순. 옛 차례(지금 조건 안의 수)는 후보 전부(앞부분 일치만 'w' 1,677개)를 세야 정해져
-        키 하나에 4~9초였다. 이제 세는 것은 보여 줄 20개뿐이다."""
+        """Global names/counts, or exact pool suggestions on a small condition."""
         state = state if state is not None else new_state()
         raw = str(q or "").strip().lower()
         exact = raw.startswith("*")
@@ -587,55 +743,108 @@ class EventMapDraft:
         if len(raw) > 160 or zone not in ("include", "exclude"):
             raise DraftError("too_many")
         idx = self._index()
+        block = self.service.permanent_block(idx)
+        current = self._cached_condition(self._condition_key(state), idx, block)
+        # Snapshots/checks already memoize the current condition. A names-only
+        # request must not build an unknown large condition just to select a lane.
+        if current is None and not counts and idx.offsets.size - 1 <= min(POOL_INLINE, POOL_LIMIT):
+            current = self._condition(state, idx, block)
+        pool = (not counts and current is not None and current.count <= POOL_LIMIT
+                and (current.count <= POOL_INLINE or current.has_tag_counts()))
+        vector = current.tag_counts(idx) if pool else None
         items = []
         for rating, name in RATINGS.items():
             if rating in state["ratings"] or not any(a.startswith(raw) for a, r in RATING_ALIASES.items() if r == rating):
                 continue
             items.append({"tag": "rating:" + name, "kind": "rating", "rating": rating,
                           "label": "rating:" + name, "kr": None, "group": "rating",
-                          "count_after": None, "slow": False, "blocked": zone == "exclude"})
+                          "count_after": None, "slow": False, "blocked": zone == "exclude",
+                          "hits": None, "observed": None, "major": {"id": "rating", "label": "등급"},
+                          "minor": None, "path": None, "desc": None})
         picked, _, groups = self.service.suggest_candidates(raw, 20, kr_lookup=self.kr_lookup)
         existing = {c["text"] for z in ("include", "exclude") for c in state[z]}
-        block = self.service.permanent_block(idx)
-        # 후보 수는 **그 태그 하나의 게시물 목록**으로 센다(실측 2026-11-07: 후보마다 텍스트 합집합을 만들면
-        # 키 하나에 1~4초 · 64MB 캐시를 후보가 밀어낸다). 텍스트 칩의 실제 수는 합집합이라 이보다 작아질 수 없다 -
-        # 포함 칸은 하한, 제외 칸은 남는 수의 상한이다. `bound` 로 알린다(화면 ≥ · ≤). 칩 추가는 늘 정확히 센다(check).
-        bound = None if exact else ("min" if zone == "include" else "max")
+        bound = None if pool or exact else ("min" if zone == "include" else "max")
         by_group = {g: [] for g in ("prefix", "infix", "korean")}
         for observed, name, tid in picked:
             if name in existing or name in RATING_ALIASES:
                 continue
             by_group[groups[name]].append((observed, name, tid))
+        rows = []
+        scope = None
+        if pool:
+            # 조건 안에 있는 태그 중 이름에 입력이 든 것. 줄의 후보이자, 후보의 합집합 수를 셀 때 찾아볼 범위다 -
+            # 후보 이름에 입력이 들어 있으면 그 이름이 든 태그는 전부 이 안에 있다(이미 칩인 태그도 수에는 보탠다).
+            scope = [(lower, tid) for lower, tid in current.present(idx) if raw in lower]
+            present = [(int(vector[tid]), int(idx.observed[tid]), idx.by_id[tid], tid) for _, tid in scope
+                       if idx.by_id[tid] not in existing and idx.by_id[tid] not in RATING_ALIASES]
+            present.sort(key=lambda r: (-r[0], -r[1]))
+            rows.extend((name, tid, "prefix" if name.lower().startswith(raw) else "infix")
+                        for _, _, name, tid in present)
+        seen = {name for name, _, _ in rows}
+        for group, candidates in by_group.items():
+            if not pool or group != "korean":
+                candidates.sort(key=lambda r: -r[0])
+            for _, name, tid in candidates:
+                if name not in seen:
+                    rows.append((name, tid, group))
+                    seen.add(name)
         tids = {}
-        for group, rows in by_group.items():
-            rows.sort(key=lambda r: -r[0])
-            for _, name, tid in rows:
-                tids[name] = tid
-                items.append({"tag": name, "kind": "tag", "kr": None, "group": group,
-                              "count_after": None, "bound": bound, "slow": False,
-                              "blocked": block is not None and bool(block.tags[tid])})
-        items = items[:20]
-        if counts and items:
-            current = self.posts(state, idx=idx)
-            mask = self._posts_mask(current, idx)
+        for name, tid, group in rows[:max(0, 20 - len(items))]:
+            tids[name] = tid
+            try:
+                facets = self.service.tag_facets(idx, tid)
+            except Exception:
+                facets = {"major": None, "minor": None, "path": None}
+            items.append({"tag": name, "kind": "tag", "kr": None, "group": group,
+                          "count_after": None, "bound": bound, "slow": False,
+                          "blocked": block is not None and bool(block.tags[tid]),
+                          "hits": None, "observed": int(idx.observed[tid]),
+                          "major": facets.get("major"), "minor": facets.get("minor"),
+                          "path": facets.get("path"), "desc": None})
+        try:
+            descriptions = self.describe(list(tids)) if self.describe is not None and tids else {}
+            for item in items:
+                if item["kind"] == "tag":
+                    item["desc"] = descriptions.get(item["tag"])
+        except Exception:
+            pass
+        if (counts or pool) and items:
+            if current is None:
+                current = self._condition(state, idx, block)
+            tag_items = [i for i in items if i["kind"] == "tag"]
+            if tag_items and current.count <= POOL_LIMIT:
+                vector = current.tag_counts(idx)
+            mask = current.mask() if tag_items and vector is None else None
             for item in items:
                 if item["kind"] == "rating":
                     if item["blocked"]:
-                        continue   # 제외 칸의 rating 은 칩이 될 수 없다 - 셀 것도 없다
-                    # check() 는 posts() 한 칸 메모를 이 후보 조건으로 덮는다 - 다음 키에서 지금 조건을 다시 센다.
+                        continue
                     candidate = deepcopy(state)
                     candidate["ratings"].append(item["rating"])
-                    item["count_after"] = int(self._posts(candidate, idx, block).size)
+                    item["count_after"] = self._condition(candidate, idx, block, memo=False).count
                     item["blocked"] = item["count_after"] == 0
                     continue
-                posting = idx.posting(tids[item["tag"]])
-                if posting.size and posting[-1] >= mask.size:
-                    posting = posting[posting < mask.size]
-                hits = int(np.count_nonzero(mask[posting])) if posting.size else 0
-                count = hits if zone == "include" else int(current.size) - hits
-                item["count_after"] = count
+                tid = tids[item["tag"]]
+                if pool and not exact:
+                    lower = item["tag"].lower()
+                    hits = current.text_hits(idx, lower, scope if raw in lower else None)
+                elif vector is not None:
+                    hits = int(vector[tid])
+                else:
+                    posting = idx.posting(tid)
+                    if posting.size and posting[-1] >= mask.size:
+                        posting = posting[posting < mask.size]
+                    hits = int(np.count_nonzero(mask[posting])) if posting.size else 0
+                count = hits if zone == "include" else current.count - hits
+                item.update(hits=hits, count_after=count)
                 item["blocked"] = item["blocked"] or (count == 0 and bound != "min")
-        return {"ok": True, "items": items, "counted": bool(counts)}
+            if pool:
+                ratings = [i for i in items if i["kind"] == "rating"]
+                positive = [i for i in tag_items if i["hits"] > 0 and i["group"] != "korean"]
+                positive.sort(key=lambda i: -i["hits"])
+                korean = [i for i in tag_items if i["hits"] > 0 and i["group"] == "korean"]
+                items = ratings + positive + korean + [i for i in tag_items if i["hits"] == 0]
+        return {"ok": True, "items": items, "counted": bool(counts or pool), "order": "pool" if pool else "global"}
 
     def to_staging(self, state):
         _limits(state)

@@ -433,6 +433,27 @@ class EventMapService:
         return max(1, min(cap, n))
 
     # -- 질의 ----------------------------------------------------------------
+    def tag_facets(self, idx, tid) -> dict:
+        result = {"major": {"id": "unsorted", "label": "미분류"}, "minor": None, "path": None}
+        try:
+            if self._group_arr is not None:
+                group = C.groups()[int(self._group_arr[tid])]
+                result["major"] = {"id": group["id"], "label": group["label"]}
+        except Exception:
+            pass
+        try:
+            if self._sub_arr is not None:
+                minor = self._sub_names[int(self._sub_arr[tid])]
+                result["minor"] = None if minor.startswith("__") else minor
+        except Exception:
+            pass
+        try:
+            path = self._bound_tree(idx).first_path(tid)
+            result["path"] = path.get("ko") if path else None
+        except Exception:
+            pass
+        return result
+
     def suggest_candidates(self, raw, limit, *, kr_lookup=None, within=None):
         """Shared gathering only; callers own ranking and blocked policy."""
         idx = self.index()

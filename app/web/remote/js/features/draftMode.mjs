@@ -163,14 +163,29 @@ export function initDraftMode({
         placeholder="고정적으로 추가하고 싶은 태그를 자유롭게 작성합니다."></textarea>
     </div>
     <div class="dr-band dr-band--post"><span class="dr-band-name">postfix</span>
-      <textarea class="dr-band-text" data-dr-pe="post_prompt" rows="1" spellcheck="false" aria-label="Postfix Prompt"></textarea></div>
-    <div class="dr-suggest" data-dr-suggest hidden role="listbox"></div>`;
+      <textarea class="dr-band-text" data-dr-pe="post_prompt" rows="1" spellcheck="false" aria-label="Postfix Prompt"></textarea></div>`;
   const footer = host.querySelector('.prompt-token-footer');
   host.insertBefore(board, footer || null);
   const extraEl = board.querySelector('[data-dr-extra]');
   let extraShown = null;   // 칸에 마지막으로 반영한 서버 Extra - 칸의 글이 이것과 다르면 아직 저장 못 한 사용자 글
   const sumEl = board.querySelector('[data-dr-sum]');
-  const suggestEl = board.querySelector('[data-dr-suggest]');
+  // 자동완성 목록은 화면 위 고정(body)이다 - 판 안에 두면 판의 가로 넘침에 잘려 넓힐 수 없다(사용자 지시 11-11: 펼치기 모드).
+  // 줄 = [종류][태그][수]. 아래 띠의 [펼치기] 를 누르면 넓어지고 태그 아래에 설명이 두 줄까지 보인다. 고른 모드는 브라우저에 기억한다.
+  const SUGGEST_EXPANDED_KEY = 'naia.draft.suggestExpanded.v1';
+  const suggestEl = document.createElement('div');
+  suggestEl.className = 'dr-suggest';
+  suggestEl.hidden = true;
+  suggestEl.innerHTML = '<div class="dr-sg-list" role="listbox" data-dr-sg-list></div>'
+    + '<div class="dr-sg-foot"><button type="button" class="dr-sg-exp" data-dr-sg-exp aria-expanded="false"></button></div>';
+  document.body.appendChild(suggestEl);
+  const suggestListEl = suggestEl.querySelector('[data-dr-sg-list]');
+  const suggestExpEl = suggestEl.querySelector('[data-dr-sg-exp]');
+  const suggestTipEl = document.createElement('div');
+  suggestTipEl.className = 'dr-sg-tip';
+  suggestTipEl.hidden = true;
+  document.body.appendChild(suggestTipEl);
+  let suggestExpanded = false;
+  try { suggestExpanded = localStorage.getItem(SUGGEST_EXPANDED_KEY) === '1'; } catch (_) {}
   const bands = [...board.querySelectorAll('[data-dr-pe]')];
   // [이번에 뽑힌 프롬프트 : N] - 포함 칸 오른쪽 아래(사용자 지시 11-07). 새로 뽑힐 때마다 배경이 깜빡인다(Usage 알약처럼).
   const drawnFootEl = board.querySelector('[data-dr-drawn-foot]');
@@ -645,16 +660,25 @@ export function initDraftMode({
   // ---- 자동완성(포함 · 제외 = 맵 색인 안) ----
   // 두 번에 나눠 받는다(사용자 지시 11-07: 자동완성은 미리, 수만 잠시 후에): 이름 20개(counts=0 · 수 ms) 를 바로 띄우고,
   // 입력이 멈추면 같은 20개의 수(counts=1)를 받아 **제자리에** 채운다 - 줄 차례는 안 바뀐다(고르던 줄이 도망가지 않게).
+  // 남는 게시물이 적은 조건이면 서버가 첫 응답에 수까지 실어 보낸다(counted: true · 조건 안에 있는 태그가 앞) - 한 번으로 끝난다.
   const SUGGEST_COUNT_DELAY_MS = 180;
-  let suggestTimer = null, countTimer = null, suggestSeq = 0, suggestZone = '', suggestItems = [], suggestIndex = -1;
+  const SUGGEST_TIP_DELAY_MS = 350;
+  let suggestTimer = null, countTimer = null, tipTimer = null, suggestSeq = 0, suggestZone = '', suggestItems = [], suggestIndex = -1;
   let suggestQ = '';   // 지금 떠 있는 목록이 어느 입력의 것인가 - 다른 글이면 키보드로 고르지 못한다(옛 목록에서 Enter = 엉뚱한 칩)
+  let tipRow = -1;     // 말풍선을 띄웠거나 띄우려는 줄
+  function hideSuggestTip() {
+    clearTimeout(tipTimer);
+    tipRow = -1;
+    suggestTipEl.hidden = true;
+  }
   function hideSuggest() {
     // 기다리는 조회도 끊는다 - Escape 로 닫은 뒤 늦게 온 이름 응답이 목록을 다시 열었다(Codex 리뷰 11-07)
     clearTimeout(suggestTimer);
     clearTimeout(countTimer);
+    hideSuggestTip();
     suggestSeq++;
     suggestEl.hidden = true;
-    suggestEl.innerHTML = '';
+    suggestListEl.innerHTML = '';
     suggestItems = [];
     suggestIndex = -1;
     suggestZone = '';
@@ -674,13 +698,76 @@ export function initDraftMode({
     if (it.blocked && it.count_after !== 0 && (it.count_after != null || it.kind === 'tag')) return '<span class="dr-sg-n">영구 제외</span>';
     if (it.slow) return '<span class="dr-sg-n" title="걸리는 태그가 많아 세지 않았습니다">…</span>';
     // 후보 수는 그 태그 하나로 센 값이다 - 텍스트 칩이면 포함 칸은 하한(≥) · 제외 칸은 남는 수의 상한(≤).
+    // 조건이 작아 서버가 정확히 센 줄은 bound 가 없다(기호 없이 수만).
     if (Number.isFinite(it.count_after)) {
       return `<span class="dr-sg-n">${zone === 'exclude' ? '남음 ' : ''}${it.bound === 'min' ? '≥' : (it.bound === 'max' ? '≤' : '')}${fmt(it.count_after)}</span>`;
     }
     return '<span class="dr-sg-n is-pending" aria-hidden="true"></span>';
   }
   function suggestRowClass(it) {
-    return `dr-sg${it.blocked ? ' is-blocked' : ''}${it.count_after === 0 ? ' is-zero' : ''}`;
+    // is-absent = 지금 조건의 게시물에 없는 태그(흐리게 · 서버가 맨 뒤로 보낸다)
+    return `dr-sg${it.blocked ? ' is-blocked' : ''}${it.count_after === 0 ? ' is-zero' : ''}${it.hits === 0 ? ' is-absent' : ''}`;
+  }
+  /** 한 줄 = [종류][태그][수] + 설명(펼치기 모드에서만 보인다 - CSS). 수 칸(.dr-sg-n)은 줄에 하나뿐이어야 한다(나중에 갈아 끼운다). */
+  function suggestRowHtml(it, i, zone) {
+    const name = it.kind === 'rating' ? (it.label || RATING_LABEL[it.rating] || it.tag) : it.tag;
+    const major = it.major && typeof it.major === 'object' ? it.major : null;
+    const kind = `<span class="dr-sg-k"${major?.id ? ` data-g="${esc(major.id)}"` : ''}>${esc(major?.label || '')}</span>`;
+    const desc = it.desc ? `<span class="dr-sg-d">${esc(it.desc)}</span>` : '';
+    return `<div class="${suggestRowClass(it)}" role="option" data-dr-sg="${i}">${kind}<span class="dr-sg-t">${esc(name)}</span>${suggestCountHtml(it, zone)}${desc}</div>`;
+  }
+  function paintSuggestMode() {
+    suggestEl.classList.toggle('is-expanded', suggestExpanded);
+    suggestExpEl.textContent = suggestExpanded ? '« 접기' : '» 펼치기';
+    suggestExpEl.setAttribute('aria-expanded', String(suggestExpanded));
+  }
+  /** 입력칸 바로 아래에 고정으로 놓는다. 아래가 좁고 위가 더 넓으면 위로. 화면 밖으로 나가지 않게 폭 · 높이를 줄인다. */
+  function placeSuggest() {
+    if (suggestEl.hidden || !suggestZone) return;
+    const box = inputs[suggestZone].input.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const width = Math.min(suggestExpanded ? 500 : 320, vw - 8);
+    const wantList = suggestExpanded ? 440 : 300;
+    const foot = suggestExpEl.parentElement.offsetHeight || 24;
+    const below = vh - box.bottom - 10, above = box.top - 10;
+    const up = below < Math.min(wantList, 200) + foot && above > below;
+    suggestListEl.style.maxHeight = `${Math.max(96, Math.min(wantList, (up ? above : below) - foot))}px`;
+    suggestEl.style.width = `${width}px`;
+    suggestEl.style.left = `${Math.max(4, Math.min(box.left, vw - width - 4))}px`;
+    suggestEl.style.top = up ? `${Math.max(4, box.top - 2 - suggestEl.offsetHeight)}px` : `${box.bottom + 2}px`;
+  }
+  /** 줄의 설명 말풍선 - 목록 옆(오른쪽에 자리가 없으면 왼쪽)에 그 줄 높이로 띄운다. 목록을 가리지 않는다.
+   *  일반 모드: 설명이나 지도 경로가 있는 줄. 펼치기 모드: 두 줄을 넘겨 잘린 줄만(이미 보이는 글을 또 띄우지 않는다). */
+  function showSuggestTip(i) {
+    const it = suggestItems[i];
+    const row = suggestListEl.querySelector(`[data-dr-sg="${i}"]`);
+    if (!it || !row || it.kind !== 'tag' || suggestEl.hidden) { suggestTipEl.hidden = true; return; }
+    const descEl = row.querySelector('.dr-sg-d');
+    const clipped = !!descEl && descEl.scrollHeight > descEl.clientHeight + 1;
+    if (suggestExpanded ? !clipped : !(it.desc || it.path)) { suggestTipEl.hidden = true; return; }
+    const where = [it.major?.label, it.minor].filter(Boolean).join(' › ');
+    const counts = [Number.isFinite(it.hits) ? `이 조건 ${fmt(it.hits)}` : '', Number.isFinite(it.observed) ? `전체 ${fmt(it.observed)}` : '']
+      .filter(Boolean).join(' · ');
+    suggestTipEl.innerHTML = `<div class="dr-sg-tip-t">${esc(it.tag)}</div>`
+      + (where || counts ? `<div class="dr-sg-tip-m">${esc([where, counts].filter(Boolean).join(' · '))}</div>` : '')
+      + (it.path ? `<div class="dr-sg-tip-m">지도: ${esc(it.path)}</div>` : '')
+      + (it.desc ? `<div class="dr-sg-tip-d">${esc(it.desc)}</div>` : '');
+    suggestTipEl.hidden = false;
+    const pop = suggestEl.getBoundingClientRect(), r = row.getBoundingClientRect();
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const w = Math.min(340, vw - 16);
+    suggestTipEl.style.width = `${w}px`;
+    const h = suggestTipEl.offsetHeight;
+    const left = pop.right + 6 + w <= vw - 4 ? pop.right + 6 : (pop.left - 6 - w >= 4 ? pop.left - 6 - w : Math.max(4, vw - w - 4));
+    suggestTipEl.style.left = `${left}px`;
+    suggestTipEl.style.top = `${Math.max(4, Math.min(r.top, vh - h - 4))}px`;
+  }
+  function scheduleSuggestTip(i) {
+    clearTimeout(tipTimer);
+    suggestTipEl.hidden = true;
+    tipRow = i;
+    if (i < 0) return;
+    tipTimer = setTimeout(() => showSuggestTip(i), SUGGEST_TIP_DELAY_MS);
   }
   async function loadSuggestCounts(zone, q, seq) {
     let data;
@@ -689,9 +776,9 @@ export function initDraftMode({
     const byTag = new Map((data.items || []).map(it => [`${it.kind}:${it.tag}`, it]));
     suggestItems.forEach((it, i) => {
       const got = byTag.get(`${it.kind}:${it.tag}`);
-      const row = suggestEl.querySelector(`[data-dr-sg="${i}"]`);
+      const row = suggestListEl.querySelector(`[data-dr-sg="${i}"]`);
       if (!row) return;
-      if (got) Object.assign(it, { count_after: got.count_after, blocked: got.blocked, bound: got.bound, slow: got.slow });
+      if (got) Object.assign(it, { count_after: got.count_after, blocked: got.blocked, bound: got.bound, slow: got.slow, hits: got.hits ?? null });
       else it.count_after = it.count_after ?? null;
       row.className = `${suggestRowClass(it)}${i === suggestIndex ? ' is-on' : ''}`;
       const old = row.querySelector('.dr-sg-n');
@@ -710,21 +797,16 @@ export function initDraftMode({
     suggestQ = q;
     suggestIndex = -1;
     if (!suggestItems.length) { hideSuggest(); return; }
-    suggestEl.innerHTML = suggestItems.map((it, i) => {
-      const name = it.kind === 'rating' ? (it.label || RATING_LABEL[it.rating] || it.tag) : it.tag;
-      const kr = it.kr ? `<span class="dr-sg-kr">${esc(it.kr)}</span>` : '';
-      return `<div class="${suggestRowClass(it)}" role="option" data-dr-sg="${i}"><span class="dr-sg-t">${esc(name)}</span>${kr}${suggestCountHtml(it, zone)}</div>`;
-    }).join('');
+    hideSuggestTip();
+    suggestListEl.innerHTML = suggestItems.map((it, i) => suggestRowHtml(it, i, zone)).join('');
+    suggestListEl.scrollTop = 0;
     if (data.counted === false) {
       clearTimeout(countTimer);
       countTimer = setTimeout(() => void loadSuggestCounts(zone, q, seq), SUGGEST_COUNT_DELAY_MS);
     }
-    const { input } = inputs[zone];
-    const boardBox = board.getBoundingClientRect();
-    const box = input.getBoundingClientRect();
-    suggestEl.style.left = `${Math.max(4, Math.min(box.left - boardBox.left, boardBox.width - 260))}px`;
-    suggestEl.style.top = `${box.bottom - boardBox.top + board.scrollTop + 2}px`;
+    paintSuggestMode();
     suggestEl.hidden = false;
+    placeSuggest();
   }
   function pickSuggest(i) {
     const it = suggestItems[i];
@@ -744,8 +826,9 @@ export function initDraftMode({
       event.preventDefault();
       const n = suggestItems.length;
       suggestIndex = event.key === 'ArrowDown' ? (suggestIndex + 1) % n : (suggestIndex - 1 + n) % n;
-      suggestEl.querySelectorAll('[data-dr-sg]').forEach((el, i) => el.classList.toggle('is-on', i === suggestIndex));
-      suggestEl.querySelector('.is-on')?.scrollIntoView({ block: 'nearest' });
+      suggestListEl.querySelectorAll('[data-dr-sg]').forEach((el, i) => el.classList.toggle('is-on', i === suggestIndex));
+      suggestListEl.querySelector('.is-on')?.scrollIntoView({ block: 'nearest' });
+      scheduleSuggestTip(suggestIndex);   // 키보드로 고른 줄의 설명도 같은 말풍선으로
       return true;
     }
     if ((event.key === 'Enter' || event.key === 'Tab') && suggestIndex >= 0) {
@@ -756,11 +839,35 @@ export function initDraftMode({
     if (event.key === 'Escape') { event.preventDefault(); hideSuggest(); return true; }
     return false;
   }
-  suggestEl.addEventListener('mousedown', event => event.preventDefault());
+  suggestEl.addEventListener('mousedown', event => event.preventDefault());   // 입력칸 초점을 지킨다(줄 · 펼치기 단추 모두)
   suggestEl.addEventListener('click', event => {
+    if (event.target.closest('[data-dr-sg-exp]')) {
+      suggestExpanded = !suggestExpanded;
+      try { localStorage.setItem(SUGGEST_EXPANDED_KEY, suggestExpanded ? '1' : '0'); } catch (_) {}
+      hideSuggestTip();
+      paintSuggestMode();
+      placeSuggest();
+      suggestListEl.querySelector('.is-on')?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     const row = event.target.closest('[data-dr-sg]');
     if (row) pickSuggest(Number(row.dataset.drSg));
   });
+  suggestListEl.addEventListener('mouseover', event => {
+    const row = event.target.closest('[data-dr-sg]');
+    const i = row ? Number(row.dataset.drSg) : -1;
+    if (i !== tipRow) scheduleSuggestTip(i);
+  });
+  suggestListEl.addEventListener('mouseleave', hideSuggestTip);
+  suggestListEl.addEventListener('scroll', hideSuggestTip, { passive: true });
+  // 창 크기가 바뀌면 닫지 않고 다시 놓는다 - 휴대폰은 화면 키보드가 뜰 때마다 resize 가 온다(닫으면 치는 도중에 목록이 사라진다)
+  window.addEventListener('resize', () => { if (!suggestEl.hidden) { hideSuggestTip(); placeSuggest(); } });
+  // 입력칸을 품은 것(판 · 왼쪽 패널)이 스크롤되면 목록이 입력칸을 따라간다 - 목록은 화면에 고정이라 저절로는 안 움직인다.
+  document.addEventListener('scroll', event => {
+    if (suggestEl.hidden || !suggestZone) return;
+    const t = event.target;
+    if (t instanceof Node && t !== suggestListEl && t.contains(inputs[suggestZone].input)) { hideSuggestTip(); placeSuggest(); }
+  }, true);
 
   // ---- 칩 메뉴 ----
   function closeMenu() { menuEl?.remove(); menuEl = null; }

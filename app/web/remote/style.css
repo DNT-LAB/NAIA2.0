@@ -34117,16 +34117,57 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   font-size: 11.5px;
   overflow: hidden;
 }
-.dr-suggest { width: 260px; max-height: 240px; overflow-y: auto; }
+/* 자동완성 목록 - 화면 위 고정(body). 판 안에 두면 판의 가로 넘침에 잘린다(사용자 지시 11-11).
+   줄 = [종류][태그][수]. 펼치기 모드(.is-expanded)면 넓어지고 태그 아래에 설명이 두 줄까지 보인다. 폭 · 높이 · 자리는 draftMode.mjs 가 준다. */
+.dr-suggest { position: fixed; z-index: calc(var(--z-drag-panel, 10150) + 500); width: 320px; display: flex; flex-direction: column; }
 .dr-suggest[hidden] { display: none; }
-.dr-sg { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; }
+.dr-sg-list { overflow-y: auto; max-height: 300px; overscroll-behavior: contain; }
+.dr-sg { display: grid; grid-template-columns: 62px minmax(0, 1fr) auto; column-gap: 8px; align-items: baseline; padding: 4px 10px; cursor: pointer; }
+.dr-suggest.is-expanded .dr-sg { padding: 6px 10px; }
 .dr-sg:hover,
 .dr-sg.is-on { background: rgba(124,106,239,0.22); }
-.dr-sg-t { font-family: var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dr-sg-kr { color: var(--text-dim); font-size: 10.5px; white-space: nowrap; }
-.dr-sg-n { color: var(--text-dim); font-size: 10.5px; font-family: var(--font-mono); white-space: nowrap; }
+/* 종류 = 이벤트 맵 12갈래. 색은 이벤트 맵 창의 갈래 색(.em-g-*)과 같다 - 배지가 아니라 글자색. */
+.dr-sg-k { color: var(--text-dim); font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dr-sg-k[data-g="clothing"] { color: #ffb86b; }
+.dr-sg-k[data-g="body"] { color: #7fd1ff; }
+.dr-sg-k[data-g="cast"] { color: #d7a6ff; }
+.dr-sg-k[data-g="expression"] { color: #ffe08a; }
+.dr-sg-k[data-g="action"] { color: #b5e07a; }
+.dr-sg-k[data-g="adult"] { color: #ff7b9c; }
+.dr-sg-k[data-g="scene"] { color: #8fd3c8; }
+.dr-sg-k[data-g="object"] { color: #f0a884; }
+.dr-sg-k[data-g="situation"] { color: #c7b6ff; }
+.dr-sg-k[data-g="meta"] { color: #a9b4c8; }
+.dr-sg-k[data-g="franchise"] { color: #9aa0a6; }
+.dr-sg-t { font-family: var(--font-mono); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-sg-n { color: var(--text-dim); font-size: 10.5px; font-family: var(--font-mono); white-space: nowrap; text-align: right; }
+.dr-sg-d { display: none; grid-column: 2 / 4; margin-top: 1px; color: var(--text-dim); font-size: 11px; line-height: 1.45; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.dr-suggest.is-expanded .dr-sg-d { display: -webkit-box; }
 .dr-sg.is-zero .dr-sg-n { color: #ff7b86; }
+/* 지금 조건의 게시물에 없는 태그 - 흐리게(붉은 수는 '빼면 0건' 인 줄에만 남긴다) */
+.dr-sg.is-absent { opacity: 0.55; }
+.dr-sg.is-absent .dr-sg-n { color: var(--text-dim); }
 .dr-sg.is-blocked { opacity: 0.45; cursor: default; }
+.dr-sg-foot { display: flex; justify-content: flex-end; padding: 2px 4px; border-top: 1px solid rgba(232,232,240,0.1); }
+.dr-sg-exp { border: 0; border-radius: 4px; padding: 2px 6px; background: transparent; color: var(--text-dim); font: inherit; font-size: 10.5px; cursor: pointer; }
+.dr-sg-exp:hover { background: rgba(124,106,239,0.22); color: var(--text-primary); }
+/* 줄의 설명 말풍선 - 목록 옆에 뜬다(태그 카드 말풍선과 같은 글 모양) */
+.dr-sg-tip {
+  position: fixed;
+  z-index: calc(var(--z-drag-panel, 10150) + 501);
+  padding: 8px 10px;
+  color: #f7f6ff;
+  background: rgba(17,17,24,0.98);
+  border: 1px solid rgba(130,160,255,0.28);
+  border-radius: 7px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.dr-sg-tip[hidden] { display: none; }
+.dr-sg-tip-t { color: var(--accent-light); font-family: var(--font-mono); font-size: 11px; font-weight: 600; line-height: 1.3; }
+.dr-sg-tip-m { margin-top: 2px; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+.dr-sg-tip-d { margin-top: 5px; color: var(--text-primary); font-size: 12px; line-height: 1.55; }
 .dr-menu { min-width: 170px; display: flex; flex-direction: column; }
 .dr-menu-label { padding: 5px 10px; color: var(--text-dim); font-size: 10.5px; border-bottom: 1px solid rgba(232,232,240,0.1); }
 .dr-menu button {

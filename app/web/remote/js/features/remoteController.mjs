@@ -287,6 +287,8 @@ export function createRemoteController({
       if (drawn || ticket !== zoomTicket) return;
       drawn = true;
       const box = hoverBox();
+      // 넓게 보기(아티스트 태그 관리 창 - 타일이 이미 200px 를 넘어 320px 로는 크게 보는 뜻이 없다). 옷은 부르는 쪽이 입힌다.
+      box.classList.toggle('is-wide', Boolean(info.wide));
       box.innerHTML = `<img src="${escHtml(info.src)}" alt="">`
         + `<div class="rctl-zoom-cap"><b>${escHtml(info.title || '')}</b>`
         + (info.note ? `<span>${escHtml(info.note)}</span>` : '') + '</div>';

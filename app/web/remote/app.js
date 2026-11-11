@@ -2935,7 +2935,7 @@ const naiDirectorModalReady = import('./js/features/naiDirectorModal.mjs?v=20261
 //        마지막 하나가 빠지면 닫힌다. 표시/숨김 설정을 따로 두지 않는다(규칙이 둘이면
 //        어긋난다). 지금 온보딩하는 곳은 Artists 탭 하나뿐이다. ---
 let remoteController = null;
-const remoteControllerReady = import('./js/features/remoteController.mjs?v=20260930-reviewfix')
+const remoteControllerReady = import('./js/features/remoteController.mjs?v=20261111-wide')
   .then(({createRemoteController}) => {
     remoteController = createRemoteController({document, window, showToast, escHtml});
   })
@@ -12475,13 +12475,15 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw3')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw4')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,
         window,
         getPrompt: () => (promptEdit ? promptEdit.value : ''),
         getThumbMode: () => document.getElementById('artistThumbMode')?.value || '',
+        showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
+        hideZoom: () => remoteController?.hideZoom?.(),
         escHtml,
         onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
       });

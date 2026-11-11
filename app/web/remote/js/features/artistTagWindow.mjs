@@ -5,6 +5,8 @@
 //   - 그림은 서버가 팩을 통째로 올리지 않고 그 작가의 자리만 읽어 낸다(core/artist_pack_index). 처음 여는 팩은
 //     자리 색인을 만드느라 몇 초가 든다 - 그동안 '찾는 중' 을 보여 준다.
 //   - 작가의 그림은 여러 팩에 나뉘어 있다. 받은 팩 어디에도 없으면 그 타일은 '데이터 없음'.
+//   - 타일에 마우스를 올리면 창 옆에 크게 뜬다 - Artist Thumbnail 리모컨의 확대 상자를 그대로 쓴다
+//     (remoteController.showZoomBeside · 사용자 지시 2026-11-11 "기존 Artist Thumbnail 의 기능을 점검"). 폭만 넓힌다(is-wide).
 // 껍데기는 다른 떠 있는 창과 같다(em-overlay em-window). 옷은 이 파일이 직접 넣는다(style.css 를 건드리지 않는다).
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
@@ -31,6 +33,10 @@ const ATW_CSS = `
   font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
 .atw-weight { color: var(--text-primary); }
 .atw-weight.is-neg { color: #ff8f8f; }
+.rctl-zoom.is-wide { width: 460px; max-width: 46vw; }
+.rctl-zoom.is-wide img { max-height: 82vh; }
+.rctl-zoom.is-wide .rctl-zoom-cap b { font-size: 14px; }
+.rctl-zoom.is-wide .rctl-zoom-cap span { font-size: 12px; }
 `;
 
 function ensureStyle(doc) {
@@ -59,6 +65,9 @@ export function createArtistTagWindow({
   getThumbMode = () => '',
   escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   onVisibilityChange = () => {},
+  // 창 옆에 크게 보기 · 걷기(리모컨의 확대 상자). 없으면 올려도 아무 일도 없다.
+  showZoom = null,
+  hideZoom = () => {},
 }) {
   ensureStyle(doc);
   let serial = 0;      // 늦게 온 응답이 새 목록을 덮지 않게
@@ -68,7 +77,7 @@ export function createArtistTagWindow({
     width: 560, height: 520, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
     escHtml,
     onOpen: () => { load(); onVisibilityChange(); },
-    onClose: () => { serial += 1; onVisibilityChange(); },
+    onClose: () => { serial += 1; leaveTile(); onVisibilityChange(); },
   });
   const count = doc.createElement('span');
   count.className = 'atw-count';
@@ -116,6 +125,38 @@ export function createArtistTagWindow({
     if (!rows.length) { note('메인 프롬프트에 작가 태그가 없습니다.'); return; }
     panel.body.innerHTML = `<div class="atw-grid">${rows.map(tileHtml).join('')}</div>`;
   }
+
+  // ── 올리면 창 옆에 크게 ──────────────────────────────────────────────
+  const HOVER_DELAY_MS = 140;      // 리모컨과 같은 뜸 - 지나가는 마우스에는 안 뜬다
+  let hoverTile = null;
+  let hoverTimer = null;
+
+  function leaveTile() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    if (hoverTile) { hoverTile = null; hideZoom(); }
+  }
+
+  panel.body.addEventListener('mouseover', event => {
+    const tile = event.target?.closest?.('.atw-tile');
+    if (tile === hoverTile) return;
+    leaveTile();
+    const src = tile?.querySelector('.atw-img')?.getAttribute('src');
+    if (!src || typeof showZoom !== 'function') return;      // '데이터 없음' 은 띄울 것이 없다
+    hoverTile = tile;
+    hoverTimer = (win || globalThis).setTimeout(() => {
+      hoverTimer = null;
+      if (hoverTile !== tile || !panel.isOpen()) return;
+      showZoom(tile, {
+        src,
+        title: tile.querySelector('.atw-name')?.textContent || '',
+        note: [...tile.querySelectorAll('.atw-meta span')].map(s => s.textContent).filter(Boolean).join(' · '),
+        wide: true,
+      }, panel.el.getBoundingClientRect());
+    }, HOVER_DELAY_MS);
+  });
+  panel.body.addEventListener('mouseleave', leaveTile);
+  panel.body.addEventListener('scroll', leaveTile, true);
+  panel.el.addEventListener('dragpanel-move', leaveTile);
 
   // 그림을 못 읽은 타일은 '데이터 없음' 으로 바꾼다(팩이 그사이 갈린 경우).
   panel.body.addEventListener('error', event => {

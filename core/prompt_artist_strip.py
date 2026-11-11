@@ -210,6 +210,30 @@ def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
     return rows
 
 
+def solo_artist(text, token, *, known=frozenset()) -> dict:
+    """작가를 전부 걷고 `token`(서식이 끝난 작가 태그) 하나만 넣은 글. 아티스트 태그 관리 창의 [이 아티스트로만 생성].
+
+    자리는 맨 앞 인원 수 태그(1girl · 1boy ...) 바로 뒤다(사용자 확인 2026-11-11) - 메인 생성의 최종 포맷과 같은 차례.
+    음수 가중치로 넣은 작가도 걷는다. 작가가 아닌 것(`artist collaboration` 등)은 그대로 둔다.
+    """
+    text = str(text or "")
+    events, keys = _events(text), _known_keys(known)
+    remove, removed = set(), []
+    for i, event in enumerate(events):
+        if event.kind != "TAG":
+            continue
+        row = _classify(event, keys)
+        if row:
+            remove.add(i)
+            removed.append(row)
+        elif event.body.lstrip().startswith("#"):
+            # 주석 조각(`#랜덤프롬프트`)도 걷는다 - 생성이 어차피 버리는 글이다. 남겨 두면 작가가 빠진 가중치 묶음의
+            # 여는 표식이 그 앞에 붙어(`0.75::#랜덤프롬프트`) 주석이 아니게 되고, 그 글이 프롬프트로 나간다(실측).
+            remove.add(i)
+    people, body = _hoist_people(_remove(text, events, remove))
+    return {"prompt": _join(", ".join(people), token, body), "removed": removed}
+
+
 def _remove(text, events, remove):
     if not remove:
         return text

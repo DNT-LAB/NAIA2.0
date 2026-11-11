@@ -450,6 +450,7 @@
         {"method": "POST", "path": "/api/artist-thumb/load-cancel", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/image", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/artist-thumb/used", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/artist-thumb/used-solo", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/artist-thumb/used-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/favorite-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/group-image", "smoke": "asset_runtime"},

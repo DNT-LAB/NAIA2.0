@@ -7,6 +7,9 @@
 //   - 작가의 그림은 여러 팩에 나뉘어 있다. 받은 팩 어디에도 없으면 그 타일은 '데이터 없음'.
 //   - 타일에 마우스를 올리면 창 옆에 크게 뜬다 - Artist Thumbnail 리모컨의 확대 상자를 그대로 쓴다
 //     (remoteController.showZoomBeside · 사용자 지시 2026-11-11 "기존 Artist Thumbnail 의 기능을 점검"). 폭만 넓힌다(is-wide).
+//   - 타일 우클릭 = [이 아티스트로만 생성](사용자 지시 2026-11-11 - 이 창을 만든 까닭): [현재 프롬프트로] · [랜덤+생성] + 가중치.
+//     다른 작가를 전부 걷고 이 작가만 넣은 글로 한 장 생성한다. 글을 만들고 보내는 것은 app.js(soloGenerate) - 프롬프트 칸은
+//     바꾸지 않는다(랜덤+생성은 Random 을 누른 것과 같아 칸이 새 글로 바뀐다).
 // 껍데기는 다른 떠 있는 창과 같다(em-overlay em-window). 옷은 이 파일이 직접 넣는다(style.css 를 건드리지 않는다).
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
@@ -33,6 +36,21 @@ const ATW_CSS = `
   font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); }
 .atw-weight { color: var(--text-primary); }
 .atw-weight.is-neg { color: #ff8f8f; }
+.atw-tile.is-menu { border-color: var(--accent); }
+.atw-menu { position: fixed; z-index: calc(var(--z-drag-panel-zoom, 10195) + 5); width: 250px;
+  background: var(--bg-elevated); border: 1px solid var(--border-glow); border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.6); overflow: hidden; user-select: none; }
+.atw-menu[hidden] { display: none !important; }
+.atw-menu-head { padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+  border-bottom: 1px solid var(--border-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atw-menu-sec { padding: 8px 12px 2px; font-size: 11px; color: var(--text-dim); }
+.atw-menu-item { display: block; width: 100%; padding: 7px 12px; border: 0; background: transparent; cursor: pointer;
+  text-align: left; font-size: 13px; color: var(--text-primary); font-family: inherit; }
+.atw-menu-item:hover, .atw-menu-item:focus-visible { background: var(--bg-hover); outline: none; }
+.atw-menu-weight { display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 8px 12px 10px;
+  border-top: 1px solid var(--border-dim); font-size: 12px; color: var(--text-muted); }
+.atw-menu-weight input { flex: 1 1 auto; min-width: 0; }
+.atw-menu-weight b { min-width: 34px; text-align: right; font-family: var(--font-mono); font-weight: 600; color: var(--text-primary); }
 .rctl-zoom.is-wide { width: 460px; max-width: 46vw; }
 .rctl-zoom.is-wide img { max-height: 82vh; }
 .rctl-zoom.is-wide .rctl-zoom-cap b { font-size: 14px; }
@@ -68,6 +86,10 @@ export function createArtistTagWindow({
   // 창 옆에 크게 보기 · 걷기(리모컨의 확대 상자). 없으면 올려도 아무 일도 없다.
   showZoom = null,
   hideZoom = () => {},
+  // [이 아티스트로만 생성] - {artist, weight, random} 으로 한 장 생성한다(app.js). 보냈으면 true, 못 보냈으면 까닭(글) 또는 false.
+  // 없으면 우클릭 메뉴를 띄우지 않는다.
+  soloGenerate = null,
+  notify = () => {},
 }) {
   ensureStyle(doc);
   let serial = 0;      // 늦게 온 응답이 새 목록을 덮지 않게
@@ -77,7 +99,7 @@ export function createArtistTagWindow({
     width: 560, height: 520, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
     escHtml,
     onOpen: () => { load(); onVisibilityChange(); },
-    onClose: () => { serial += 1; leaveTile(); onVisibilityChange(); },
+    onClose: () => { serial += 1; leaveTile(); closeMenu(); onVisibilityChange(); },
   });
   const count = doc.createElement('span');
   count.className = 'atw-count';
@@ -95,7 +117,7 @@ export function createArtistTagWindow({
     const picture = row.image_url
       ? `<img class="atw-img" loading="lazy" alt="" src="${escHtml(row.image_url)}">`
       : '<div class="atw-none">데이터 없음</div>';
-    return `<div class="atw-tile" title="${escHtml(tip)}">${picture}`
+    return `<div class="atw-tile" title="${escHtml(tip)}" data-atw-artist="${escHtml(name)}" data-atw-weight="${escHtml(String(weight))}">${picture}`
       + `<div class="atw-name">${escHtml(name)}</div><div class="atw-meta">`
       + `<span class="atw-weight${weight < 0 ? ' is-neg' : ''}" title="가중치">${escHtml(String(weight))}</span>`
       + `<span title="게시물 수">${escHtml(posts)}</span></div></div>`;
@@ -138,6 +160,7 @@ export function createArtistTagWindow({
 
   panel.body.addEventListener('mouseover', event => {
     const tile = event.target?.closest?.('.atw-tile');
+    if (menuTile) return;                 // 메뉴가 떠 있는 동안은 크게 보기를 띄우지 않는다(메뉴를 가린다)
     if (tile === hoverTile) return;
     leaveTile();
     const src = tile?.querySelector('.atw-img')?.getAttribute('src');
@@ -157,6 +180,100 @@ export function createArtistTagWindow({
   panel.body.addEventListener('mouseleave', leaveTile);
   panel.body.addEventListener('scroll', leaveTile, true);
   panel.el.addEventListener('dragpanel-move', leaveTile);
+
+  // ── 우클릭 = 이 아티스트로만 생성 ────────────────────────────────────
+  const WEIGHT_MIN = 0, WEIGHT_MAX = 2, WEIGHT_STEP = 0.01;    // 범위는 Artist Thumbnail 의 슬라이더와 같다. 눈금은 0.01 - 0.05 면 타일의 0.83 이 0.85 로 바뀐 채 시작한다
+  let menuEl = null;
+  let menuTile = null;
+  let menuBusy = false;
+
+  const weightText = value => String(Math.round(Number(value) * 100) / 100);
+
+  function menuBox() {
+    if (menuEl) return menuEl;
+    menuEl = doc.createElement('div');
+    menuEl.className = 'atw-menu';
+    menuEl.hidden = true;
+    menuEl.setAttribute('role', 'menu');
+    menuEl.innerHTML = `
+      <div class="atw-menu-head" data-atw-menu-name></div>
+      <div class="atw-menu-sec">이 아티스트로만 생성</div>
+      <button type="button" class="atw-menu-item" role="menuitem" data-atw-solo="current">현재 프롬프트로</button>
+      <button type="button" class="atw-menu-item" role="menuitem" data-atw-solo="random">랜덤+생성</button>
+      <label class="atw-menu-weight"><span>가중치</span>
+        <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" data-atw-weight aria-label="가중치">
+        <b data-atw-weight-out></b></label>`;
+    doc.body.appendChild(menuEl);
+    menuEl.addEventListener('input', event => {
+      if (event.target?.matches?.('[data-atw-weight]')) {
+        menuEl.querySelector('[data-atw-weight-out]').textContent = weightText(event.target.value);
+      }
+    });
+    menuEl.addEventListener('click', event => {
+      const item = event.target?.closest?.('[data-atw-solo]');
+      if (item) void runSolo(item.dataset.atwSolo === 'random');
+    });
+    menuEl.addEventListener('contextmenu', event => event.preventDefault());
+    return menuEl;
+  }
+
+  function closeMenu() {
+    if (menuTile) menuTile.classList.remove('is-menu');
+    menuTile = null;
+    if (menuEl) menuEl.hidden = true;
+  }
+
+  function openMenu(tile, x, y) {
+    leaveTile();
+    closeMenu();
+    const box = menuBox();
+    menuTile = tile;
+    tile.classList.add('is-menu');
+    box.querySelector('[data-atw-menu-name]').textContent = tile.dataset.atwArtist || '';
+    // 처음 값은 그 타일의 가중치. 슬라이더 범위 밖(0 이하 · 2 초과)이면 1 에서 시작한다.
+    const own = Number(tile.dataset.atwWeight);
+    const start = Number.isFinite(own) && own > WEIGHT_MIN && own <= WEIGHT_MAX ? own : 1;
+    box.querySelector('[data-atw-weight]').value = String(start);
+    box.querySelector('[data-atw-weight-out]').textContent = weightText(start);
+    box.hidden = false;
+    const view = win || doc.defaultView;
+    const rect = box.getBoundingClientRect();
+    box.style.left = `${Math.round(Math.max(6, Math.min(x, view.innerWidth - rect.width - 6)))}px`;
+    box.style.top = `${Math.round(Math.max(6, Math.min(y, view.innerHeight - rect.height - 6)))}px`;
+  }
+
+  async function runSolo(random) {
+    if (!menuTile || menuBusy) return;
+    const artist = menuTile.dataset.atwArtist || '';
+    const weight = Number(menuEl.querySelector('[data-atw-weight]').value);
+    closeMenu();
+    if (!artist) return;
+    menuBusy = true;                      // 연타가 두 장이 되지 않게(랜덤+생성은 Random 응답을 기다린다)
+    try {
+      const sent = await soloGenerate({artist, weight, random});
+      if (typeof sent === 'string' && sent) notify(sent, 'info');
+    } catch (error) {
+      notify(`생성을 보내지 못했습니다 - ${error?.message || error}`, 'error');
+    } finally {
+      menuBusy = false;
+    }
+  }
+
+  panel.body.addEventListener('contextmenu', event => {
+    const tile = event.target?.closest?.('.atw-tile');
+    if (!tile || typeof soloGenerate !== 'function') return;
+    event.preventDefault();
+    openMenu(tile, event.clientX, event.clientY);
+  });
+  // 메뉴 밖을 누르거나 · Esc · 스크롤 · 창 이동이면 닫는다.
+  doc.addEventListener('pointerdown', event => {
+    if (menuTile && !menuEl.contains(event.target)) closeMenu();
+  }, true);
+  doc.addEventListener('keydown', event => {
+    if (menuTile && event.key === 'Escape') { event.stopPropagation(); closeMenu(); }
+  }, true);
+  panel.body.addEventListener('scroll', closeMenu, true);
+  panel.el.addEventListener('dragpanel-move', closeMenu);
 
   // 그림을 못 읽은 타일은 '데이터 없음' 으로 바꾼다(팩이 그사이 갈린 경우).
   panel.body.addEventListener('error', event => {

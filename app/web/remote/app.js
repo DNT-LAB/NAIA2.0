@@ -175,6 +175,7 @@ let _promptDirtyPreset = '';
 let _lastSentPromptValue = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let pendingRandomRequestId = '';
+let randomArrivalWaiter = null;   // 내 Random 응답을 기다리는 약속의 resolve(requestRandomAndWait) - 한 번에 하나
 let initialStateRefreshTimer = null;
 let promptHighlightIndexTimer = null;
 let initialHistoryRefreshTimer = null;
@@ -6499,6 +6500,9 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
   // 명시적인 prompt 생성 이벤트는 서버의 generation state가 authoritative하다.
   if (acceptsGeneratedPrompt) {
     if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
+    // 내 Random 을 기다리는 쪽(아티스트 태그 관리의 [랜덤+생성])에게 알린다. 약속의 뒷일은 이 핸들러가 끝난 뒤에 돈다 -
+    // 그때는 프롬프트 칸에 새 글이 들어가 있다.
+    if (isMyRandom && randomArrivalWaiter) { const done = randomArrivalWaiter; randomArrivalWaiter = null; done(true); }
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -12466,6 +12470,60 @@ async function generateViewpointInstant(suffix) {
   }, null, {queue: true});
 }
 
+/** Random 을 보내고 **내 응답이 프롬프트 칸에 들어올 때까지** 기다린다. 못 보냈거나(Prompt Fixed · 프리셋 탭 · 끊김) 안 오면 false.
+ *  '랜덤을 누를 때 생성' 은 걸리지 않는다(pressed 를 싣지 않는다) - 부르는 쪽이 제 글로 따로 생성한다. */
+function requestRandomAndWait(timeoutMs = 70000) {
+  return new Promise(resolve => {
+    if (randomArrivalWaiter || !requestRandomPrompt()) { resolve(false); return; }
+    const done = ok => { clearTimeout(timer); resolve(ok); };
+    const timer = setTimeout(() => {
+      if (randomArrivalWaiter === done) randomArrivalWaiter = null;
+      resolve(false);
+    }, timeoutMs);
+    randomArrivalWaiter = done;
+  });
+}
+
+/** 아티스트 태그 관리 창의 [이 아티스트로만 생성](사용자 지시 2026-11-11) - 지금 프롬프트에서 다른 작가를 전부 걷고 이 작가만
+ *  넣은 글로 **한 장만** 생성한다. 구도 / 시점 제어의 즉시 생성(generateViewpointInstant)과 같은 길 · 같은 문턱이다 -
+ *  프롬프트 칸에는 쓰지 않는다. `random` 이면 먼저 Random 을 받아(칸이 새 글로 바뀐다) 그 글로 만든다. */
+async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
+  const name = String(artist || '').trim();
+  if (!name) return false;
+  if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 보내지 않습니다(한 장으로 끝나지 않는다)';
+  if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 보내지 않습니다';
+  if (interactivePanel?.isActive?.()) return 'Interactive 에서는 쓸 수 없습니다';
+  if (!canQueueGenerate()) return '이 탭에서는 생성을 보내지 않습니다';
+  const now = performance.now();
+  if (now - lastHumanGenerateAt < 300) return false;
+  lastHumanGenerateAt = now;
+  if (random && !(await requestRandomAndWait())) return 'Random 프롬프트를 받지 못했습니다(Prompt Fixed · 프리셋 탭이면 Random 이 잠긴다)';
+  // 서식은 Artist Thumbnail 과 같은 함수(모드별 표기가 셋이다). 그 탭이 아직 안 올라왔으면 NAI 꼴로.
+  const w = Number.isFinite(Number(weight)) ? Number(weight) : 1;
+  const token = artistThumbControl?.formatArtistToken?.(name, w, true)
+    || (w === 1 ? `artist:${name}` : `${String(Math.round(w * 100) / 100)}::artist:${name} ::`);
+  let prompt = '';
+  try {
+    const response = await fetch('/api/artist-thumb/used-solo', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text: promptEdit ? promptEdit.value : '', token}),
+    });
+    const data = await response.json();
+    if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+    prompt = String(data.prompt || '');
+  } catch (error) {
+    return `프롬프트를 만들지 못했습니다 - ${error?.message || error}`;
+  }
+  if (!prompt) return false;
+  const negative = negEdit ? negEdit.value : '';
+  return generateWithInteractiveSnapshot({
+    prompt,
+    negative_prompt: negative,
+    overrides: buildWebGenerationOverrides(prompt, negative),
+  }, null, {queue: true});
+}
+
 // [자동화 / 고급 기능] > [아티스트 태그 관리](사용자 지시 2026-11-11) - 메인 프롬프트의 작가를 부른 그때 한 번 타일로 보여 준다.
 let artistTagWindow = null;
 let artistTagWindowLoading = null;
@@ -12475,7 +12533,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw4')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw5')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,
@@ -12484,6 +12542,8 @@ function openArtistTagTool() {
         getThumbMode: () => document.getElementById('artistThumbMode')?.value || '',
         showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
         hideZoom: () => remoteController?.hideZoom?.(),
+        soloGenerate: generateArtistSolo,
+        notify: (msg, type) => showToast(msg, type),
         escHtml,
         onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
       });

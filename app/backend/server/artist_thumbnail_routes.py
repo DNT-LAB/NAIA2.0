@@ -955,6 +955,32 @@ def register_artist_thumbnail_routes(
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Artist tags failed: {exc}"}, status_code=500)
 
+    # [이 아티스트로만 생성] 이 보낼 글 - 작가를 전부 걷고 고른 작가의 태그(서식은 화면이 만든다) 하나만 넣는다.
+    # 글만 돌려준다. 프롬프트 칸 · 세션 · 파일은 건드리지 않는다.
+    @app.post("/api/artist-thumb/used-solo")
+    async def api_artist_thumb_used_solo(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        text = str(payload.get("text") or "")[:60000]
+        token = " ".join(str(payload.get("token") or "").split())[:400]
+        if not token:
+            return JSONResponse({"ok": False, "error": "token is required"}, status_code=400)
+
+        def _run():
+            from core.prompt_artist_strip import solo_artist
+
+            return solo_artist(text, token, known=_mix_known_artists(session_context))
+
+        try:
+            result = await run_in_thread(_run)
+            return {"ok": True, "prompt": result["prompt"], "removed": len(result["removed"])}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Artist solo failed: {exc}"}, status_code=500)
+
     @app.get("/api/artist-thumb/used-image")
     async def api_artist_thumb_used_image(mode: str = "", artist: str = ""):
         try:

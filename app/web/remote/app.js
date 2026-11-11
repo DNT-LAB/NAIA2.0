@@ -2173,7 +2173,7 @@ const resultImageInputReady = import('./js/features/resultImageInput.mjs?v=20261
   .catch(error => {
     console.error('Failed to initialize result image input module', error);
   });
-const queuePanelReady = import('./js/features/queuePanel.mjs?v=20261021-qstart2')
+const queuePanelReady = import('./js/features/queuePanel.mjs?v=20261110-qstop')
   .then(({createQueuePanelController}) => {
     queuePanel = createQueuePanelController({
       document,
@@ -5673,6 +5673,11 @@ const wsMessageHandlers = {
     const msg = String(m.message || '');
     if (!m.is_generating && generating && (msg === 'queued' || msg === 'blocked')) return;
     if (!m.is_generating) lastGenerationOk = (msg === 'completed');
+    // 멈춘 장(Queue 패널 Stop)이 Find [생성] 이었다 - 결과도 generation_error 도 안 오므로 그 기다림만 여기서 푼다.
+    // 서버가 그 장의 id 를 실어 줄 때만(다른 장을 멈춘 것으로 대기 중인 Find [생성] 을 풀지 않는다).
+    if (!m.is_generating && msg === 'cancelled' && m.character_viewer_request_id) {
+      characterQuickPanel?.noteCharacterError?.({character_viewer_request_id: String(m.character_viewer_request_id)});
+    }
     // V5 Scene 연속 생성의 런 표. 완료가 **누구 것인지** 가르는 유일한 단서다 -
     // 이 알림은 모든 탭에 가므로, 표가 없으면 남의 완료로 자기 컷을 넘긴다.
     lastGenerationRunTag = String(m.v5_scene_run || '');

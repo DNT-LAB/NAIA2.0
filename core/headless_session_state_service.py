@@ -121,9 +121,23 @@ class HeadlessSessionStateService:
             "total": int(stats.get("total", len(queued)) or 0),
             "has_urgent": bool(stats.get("has_urgent", False)),
             "priority_counts": stats.get("priority_counts", {}),
-            "active": None,
+            "active": self.active_queue_item(),
             "items": queued,
         }
+
+    def active_queue_item(self) -> dict[str, Any] | None:
+        """지금 도는 장 — ``items`` 와 같은 모양 + ``cancellable``. 도는 장이 없으면 None.
+
+        러너가 꺼낸 장은 대기 목록(items)에 없다. 예전엔 여기가 늘 None 이라 대기가 0장인 한 장 생성 동안
+        Queue 패널이 뜰 근거가 없었다(2026-11-10). ``cancellable`` 은 POST /api/generation/cancel 이 이 장을 멈출 수
+        있는가다 — 지금 도는 **그 요청**의 api_mode 로 정한다(화면의 현재 모드가 아니다, core/local_generation_cancel.py).
+        ⚠️ 모든 모드의 도는 장을 싣는다. 패널은 cancellable 일 때만 이 장으로 뜬다(queuePanel.mjs - NAI 한 장은 예전처럼 안 뜬다)."""
+        from core.local_generation_cancel import registry_for
+
+        handle = registry_for(self.context).active()
+        if handle is None or handle.request is None:
+            return None
+        return {**self.serialize_queue_request(handle.request, position=None), "cancellable": handle.cancellable}
 
     @staticmethod
     def queue_preview(value: Any, limit: int = 140) -> str:

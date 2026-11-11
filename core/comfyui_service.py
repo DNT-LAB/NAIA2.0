@@ -9,6 +9,11 @@ from io import BytesIO
 # combo 선택지 추출은 legacy/V3 두 스키마를 아는 이 헬퍼 하나로 모은다.
 from core.headless_api_option_service import extract_combo_options
 
+# 한 장을 기다리는 한도(초). 넘기면 작업을 멈추고 큐에서 정리한다 — 예전엔 기다림만 끝내고 작업은 ComfyUI 에 남겨,
+# 다음 생성이 그 뒤에 줄을 섰다(사용자 제보 2026-11-10).
+GENERATION_TIMEOUT_SECONDS = 180
+
+
 class ComfyUIService:
     """
     ComfyUI API 통신을 담당하는 서비스 클래스
@@ -26,7 +31,10 @@ class ComfyUIService:
 
         self.client_id = str(uuid.uuid4())
         self.progress_callback: Optional[Callable] = None
-    
+        self.last_error_detail = ""
+
+    POLL_INTERVAL_SECONDS = 0.5
+
     def set_progress_callback(self, callback: Callable[[int, int], None]):
         """진행률 콜백 함수 설정"""
         self.progress_callback = callback
@@ -81,61 +89,139 @@ class ComfyUIService:
             return None
     
     def wait_for_completion(self, prompt_id: str, timeout: int = 300) -> bool:
-        """워크플로우 완료 대기 (순수 HTTP 폴링)"""
+        """워크플로우 완료 대기 (순수 HTTP 폴링). 성공이면 True — 실패 · 시간 초과를 가르려면 wait_for_prompt 를 쓴다."""
+        return self.wait_for_prompt(prompt_id, timeout=timeout) == "success"
+
+    def wait_for_prompt(self, prompt_id: str, timeout: float = 300, cancel_event=None) -> str:
+        """prompt_id 가 끝나기를 기다린다(순수 HTTP 폴링, 0.5초마다 /history).
+
+        반환: ``"success"`` · ``"error"``(ComfyUI 가 실패로 끝냄) · ``"timeout"``(한도 초과 — 작업은 아직 살아 있다)
+        · ``"cancelled"``(cancel_event 가 세워짐). 쉬는 동안 cancel_event 를 기다리므로 중단에 곧바로 깬다.
+        시간 초과 · 중단 뒤의 정리(cancel_prompt)는 부르는 쪽(generate_image)이 한다."""
         print(f"🔄 워크플로우 완료 대기 시작 (HTTP 폴링): {prompt_id}")
-
-        start_time = time.time()
+        self.last_error_detail = ""
+        start_time = time.monotonic()
         last_progress = 0
-        last_poll_time = 0
-
         try:
-            while time.time() - start_time < timeout:
-                current_time = time.time()
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    print(f"[ComfyUI] wait cancelled prompt_id={prompt_id}", flush=True)
+                    return "cancelled"
+                elapsed = time.monotonic() - start_time
+                if elapsed >= timeout:
+                    print("❌ 워크플로우 완료 대기 시간 초과")
+                    return "timeout"
+                try:
+                    response = requests.get(f"{self.server_url}/history/{prompt_id}", timeout=5)
 
-                # HTTP 폴링으로 완료 상태 확인 (0.5초마다)
-                if current_time - last_poll_time >= 0.5:
-                    last_poll_time = current_time
+                    if response.status_code == 200:
+                        history = response.json()
 
-                    try:
-                        response = requests.get(f"{self.server_url}/history/{prompt_id}", timeout=5)
+                        if prompt_id in history:
+                            result = history[prompt_id]
+                            status = result.get('status', {})
 
-                        if response.status_code == 200:
-                            history = response.json()
-
-                            if prompt_id in history:
-                                result = history[prompt_id]
-                                status = result.get('status', {})
-
-                                # 완료 상태 확인
-                                if status.get('status_str') == 'success':
-                                    print("✅ 워크플로우 실행 완료 (HTTP 폴링)")
-                                    if self.progress_callback:
-                                        self.progress_callback(100, 100)
-                                    return True
-                                elif status.get('status_str') == 'error':
-                                    print(f"❌ 워크플로우 실행 실패: {status}")
-                                    return False
-
-                                # 진행률 추정 (실행 시간 기반)
+                            # 완료 상태 확인
+                            if status.get('status_str') == 'success':
+                                print("✅ 워크플로우 실행 완료 (HTTP 폴링)")
                                 if self.progress_callback:
-                                    elapsed = current_time - start_time
-                                    estimated_progress = min(int((elapsed / 60) * 100), 95)  # 최대 95%까지
-                                    if estimated_progress > last_progress:
-                                        self.progress_callback(estimated_progress, 100)
-                                        last_progress = estimated_progress
+                                    self.progress_callback(100, 100)
+                                return "success"
+                            elif status.get('status_str') == 'error':
+                                print(f"❌ 워크플로우 실행 실패: {status}")
+                                self.last_error_detail = self._history_error_detail(status)
+                                return "error"
 
-                    except Exception as poll_e:
-                        print(f"⚠️ 폴링 체크 실패: {poll_e}")
+                            # 진행률 추정 (실행 시간 기반)
+                            if self.progress_callback:
+                                estimated_progress = min(int((elapsed / 60) * 100), 95)  # 최대 95%까지
+                                if estimated_progress > last_progress:
+                                    self.progress_callback(estimated_progress, 100)
+                                    last_progress = estimated_progress
 
-                # 0.1초 대기
-                time.sleep(0.1)
+                except Exception as poll_e:
+                    print(f"⚠️ 폴링 체크 실패: {poll_e}")
 
-            print("❌ 워크플로우 완료 대기 시간 초과")
-            return False
+                remaining = timeout - (time.monotonic() - start_time)
+                delay = min(self.POLL_INTERVAL_SECONDS, max(0.0, remaining))
+                if cancel_event is not None:
+                    cancel_event.wait(delay)
+                else:
+                    time.sleep(delay)
 
         except Exception as e:
             print(f"❌ 워크플로우 완료 대기 중 예외 발생: {e}")
+            return "error"
+
+    @staticmethod
+    def _history_error_detail(status: Dict[str, Any]) -> str:
+        """history 의 실패 기록에서 화면에 보여 줄 짧은 단서(노드 종류 · 예외 문구)를 꺼낸다."""
+        try:
+            for message in status.get('messages') or []:
+                if not isinstance(message, (list, tuple)) or len(message) < 2:
+                    continue
+                kind, data = message[0], message[1] if isinstance(message[1], dict) else {}
+                if kind == 'execution_interrupted':
+                    return "ComfyUI 쪽에서 중단됨"
+                if kind == 'execution_error':
+                    node_type = str(data.get('node_type') or '').strip()
+                    detail = " ".join(str(data.get('exception_message') or '').split())[:160]
+                    return " - ".join(part for part in (node_type, detail) if part)
+        except Exception:
+            pass
+        return ""
+
+    def _queue_ids(self):
+        """GET /queue → (실행 중 prompt_id 집합, 대기 중 prompt_id 집합). 읽지 못하면 (None, None).
+        항목 모양은 [number, prompt_id, prompt, extra_data, outputs_to_execute, ...] 다."""
+        try:
+            response = requests.get(f"{self.server_url}/queue", timeout=5)
+            if response.status_code != 200:
+                return None, None
+            payload = response.json()
+        except Exception as exc:
+            print(f"[ComfyUI] queue read failed: {ascii(str(exc))}", flush=True)
+            return None, None
+
+        def ids(items):
+            found = set()
+            for item in items or []:
+                if isinstance(item, (list, tuple)) and len(item) > 1:
+                    found.add(str(item[1]))
+            return found
+
+        return ids(payload.get('queue_running')), ids(payload.get('queue_pending'))
+
+    def _post_json(self, path: str, payload: Dict[str, Any]) -> bool:
+        try:
+            response = requests.post(f"{self.server_url}{path}", json=payload, timeout=5)
+            return response.status_code == 200
+        except Exception as exc:
+            print(f"[ComfyUI] POST {path} failed: {ascii(str(exc))}", flush=True)
             return False
+
+    def cancel_prompt(self, prompt_id: str) -> str:
+        """**내 prompt_id 만** 멈춘다 — 돌고 있으면 interrupt, 큐에서 기다리는 중이면 큐에서 지운다.
+
+        - 남의 작업은 건드리지 않는다: /queue 로 내 것이 지금 도는지 먼저 확인한 뒤에만 /interrupt 를 보낸다.
+          본문에 prompt_id 를 실어 그 작업일 때만 멈추게 한다(ComfyUI 0.22 — 예전 판은 본문을 무시하는 전역 중단이라
+          확인을 먼저 한다). 중단 표식은 다음 작업이 시작될 때 지워지므로 다음 장으로 번지지 않는다.
+        - 지우는 사이 실행이 시작됐을 수 있어 다시 본다(최대 3번).
+        반환: ``"interrupted"`` · ``"deleted"`` · ``"not_found"``(이미 끝났거나 없다) · ``"failed"``(큐를 못 읽음)."""
+        outcome = "not_found"
+        for _ in range(3):
+            running, pending = self._queue_ids()
+            if running is None:
+                return "failed" if outcome == "not_found" else outcome
+            if prompt_id in running:
+                self._post_json("/interrupt", {"prompt_id": prompt_id})
+                return "interrupted"
+            if prompt_id in pending:
+                self._post_json("/queue", {"delete": [prompt_id]})
+                outcome = "deleted"
+                continue
+            return outcome
+        return outcome
     
     @staticmethod
     def _node_sort_key(node_id: Any):
@@ -292,22 +378,52 @@ class ComfyUIService:
         progress_callback: Optional[Callable] = None,
         extra_pnginfo: Optional[Dict[str, Any]] = None,
         preferred_output_node_id: Optional[str] = None,
+        cancel_event=None,
+        timeout: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
-        """완전한 이미지 생성 파이프라인"""
+        """완전한 이미지 생성 파이프라인.
+
+        cancel_event(threading.Event)가 세워지면 내 작업만 정리하고 ``{'status': 'cancelled'}`` 를 돌려준다 — 오류가 아니다.
+        한도(timeout, 기본 GENERATION_TIMEOUT_SECONDS)를 넘기면 같은 정리를 하고 ``no_retry`` 오류를 돌려준다
+        (같은 작업을 다시 보내도 또 넘긴다)."""
+        from core.local_generation_cancel import CANCELLED_MESSAGE
+
+        if timeout is None:
+            timeout = GENERATION_TIMEOUT_SECONDS
         if progress_callback:
             self.set_progress_callback(progress_callback)
-        
+
+        if cancel_event is not None and cancel_event.is_set():
+            return {'status': 'cancelled', 'message': CANCELLED_MESSAGE}
+
         print("🚀 ComfyUI 이미지 생성 시작")
-        
+
         # 1. 워크플로우 큐에 추가
         prompt_id = self.queue_workflow(workflow, extra_pnginfo=extra_pnginfo)
         if not prompt_id:
             return {'status': 'error', 'message': '워크플로우 큐 등록 실패'}
-        
+
         # 2. 실행 완료 대기
-        if not self.wait_for_completion(prompt_id, timeout=180):
-            return {'status': 'error', 'message': '워크플로우 실행 실패 또는 시간 초과'}
-        
+        outcome = self.wait_for_prompt(prompt_id, timeout=timeout, cancel_event=cancel_event)
+        if outcome == "cancelled":
+            cleanup = self.cancel_prompt(prompt_id)
+            print(f"[ComfyUI] cancelled prompt_id={prompt_id} cleanup={cleanup}", flush=True)
+            return {'status': 'cancelled', 'message': CANCELLED_MESSAGE, 'prompt_id': prompt_id}
+        if outcome == "timeout":
+            cleanup = self.cancel_prompt(prompt_id)
+            print(f"[ComfyUI] timeout after {timeout:g}s prompt_id={prompt_id} cleanup={cleanup}", flush=True)
+            return {
+                'status': 'error',
+                'message': f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 에서 이 작업을 멈추고 큐에서 정리했습니다',
+                'no_retry': True,
+                'timeout': True,
+                'prompt_id': prompt_id,
+            }
+        if outcome != "success":
+            detail = str(getattr(self, 'last_error_detail', '') or '')
+            message = '워크플로우 실행 실패(ComfyUI 실행 오류)'
+            return {'status': 'error', 'message': f'{message}: {detail}' if detail else message}
+
         # 3. 결과 조회 (이제 리스트를 반환받음)
         # [수정] 변수명을 복수형(result_infos)으로 변경하여 리스트임을 명시
         result_infos = self.get_generation_result(

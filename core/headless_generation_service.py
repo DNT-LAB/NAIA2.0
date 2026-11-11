@@ -693,6 +693,13 @@ class HeadlessGenerationService:
             progress_callback=progress_callback,
             preview_callback=preview_callback,
         )
+        if api_result.get("status") == "cancelled":
+            # 사용자가 멈춘 로컬 생성(core/local_generation_cancel.py) - 실패가 아니다. 러너가 오류와 따로 처리한다.
+            from core.local_generation_cancel import CANCELLED_MESSAGE, GenerationCancelled
+
+            message = str(api_result.get("message") or CANCELLED_MESSAGE)
+            request.mark_failed(message)
+            raise GenerationCancelled(message)
         if api_result.get("status") == "error":
             error_message = str(api_result.get("message") or "Unknown API error")
             request.mark_failed(error_message)

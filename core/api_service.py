@@ -857,11 +857,21 @@ class APIService:
         # NAI: 총 대기 상한은 **첫 시도부터** 잰다 - 재시도는 남은 시간 안에서만 한다(NAI_REQUEST_DEADLINE_S 설명 참고)
         nai_guard = _NaiDeadlineGuard() if api_mode == "NAI" else None
 
+        # 러너가 실행 중인 로컬 생성(COMFYUI)이면 중단 손잡이가 이 스레드에 묶여 있다 - 재시도 사이에서도 멈춘다.
+        # 시도가 돌려준 {'status': 'cancelled'} 는 아래에서 'error' 만 다시 보내므로 그대로 위로 간다(오류 아님).
+        from core.local_generation_cancel import CANCELLED_MESSAGE, current_handle
+        cancel_handle = current_handle()
+        if cancel_handle is not None and not cancel_handle.cancellable:
+            cancel_handle = None
+
         def _retry_wait(seconds: float) -> None:
             if nai_guard is not None:
                 seconds = min(seconds, max(0.0, nai_guard.remaining()))
             if seconds > 0:
-                time.sleep(seconds)
+                if cancel_handle is not None:
+                    cancel_handle.wait(seconds)
+                else:
+                    time.sleep(seconds)
 
         # ComfyUI 자동 모드 스왑 자격: basic(내장) eps/anima 워크플로우만(스펙: EPS↔ANIMA).
         # custom/bypass/free 워크플로우·artist thumbnail·사전 빌드 workflow dict·v_prediction은 제외.
@@ -889,6 +899,9 @@ class APIService:
 
         result = None
         for attempt in range(1, max_retries + 1):
+            if cancel_handle is not None and cancel_handle.cancelled:
+                print(f"[CANCEL] generation stopped before attempt {attempt}/{max_retries}", flush=True)
+                return {'status': 'cancelled', 'message': CANCELLED_MESSAGE}
             if attempt > 1:
                 print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
             # 2회 실패 후 마지막 시도에서만 EPS↔ANIMA 자동 전환. 성공 시에만 result에
@@ -2695,12 +2708,23 @@ class APIService:
             )
             if params.get("_anima_meta"):
                 extra_pnginfo["naia_profile"] = params["_anima_meta"]
+            # 러너가 실행 중인 요청이면 중단 손잡이가 이 스레드에 묶여 있다(core/local_generation_cancel.py).
+            from core.local_generation_cancel import current_handle
+            cancel_handle = current_handle()
             result = self.comfyui_service.generate_image(
                 workflow,
                 _comfyui_progress,
                 extra_pnginfo=extra_pnginfo,
                 preferred_output_node_id=params.get("_comfyui_output_node_id"),
+                cancel_event=cancel_handle.event if cancel_handle is not None else None,
             )
+
+            # 중단은 오류가 아니다 · 시간 초과는 다시 보내지 않는다 — 표식을 그대로 위로 넘긴다(아래 raise 는 표식을 지운다).
+            if result and result.get('status') == 'cancelled':
+                return result
+            if result and result.get('status') == 'error' and result.get('no_retry'):
+                print(f"[ComfyUI] generation failed without retry (timeout={bool(result.get('timeout'))})", flush=True)
+                return result
 
             if result and result['status'] == 'success':
                 print(f"✅ ComfyUI 이미지 생성 완료: {result['filename']}")

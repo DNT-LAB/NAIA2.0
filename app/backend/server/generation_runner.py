@@ -42,6 +42,7 @@ from core.headless_image_module_param_service import (
     REFERENCE_INSET_LIVE_REFETCH_KEYS,
     VIBE_TRANSFER_LIVE_REFETCH_KEYS,
 )
+from core.local_generation_cancel import GenerationCancelled, registry_for, run_bound
 from core.web_session_context import WebSessionContext
 
 # Event/Remote Preset completions count toward a running Automation's count/timer.
@@ -527,6 +528,12 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
                 img2img_service
                 and img2img_service.record_generation_started(request_params, request.request_id)
             )
+            # 도는 장의 손잡이 - 요청마다 새로 만든다(늦게 온 중단이 다음 장을 멈추지 않게). queue_state 의 active(Queue 패널 ·
+            # 멈출 수 있는 장인가)도 여기서 나오므로 '생성 중' 을 알리기 **전에** 세운다(core/local_generation_cancel.py).
+            cancel_registry = registry_for(context)
+            cancel_handle = cancel_registry.begin(
+                request.request_id, str(request_params.get("api_mode") or "NAI"), request=request,
+            )
             context.is_generating = True
             await broadcast_json(clients, {"type": "status", "is_generating": True, "message": "generating"})
             await broadcast_json(clients, context.queue_state_payload())
@@ -548,10 +555,21 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             if streaming_on and (getattr(request, "params", {}) or {}).get("api_mode") == "NAI":
                 preview_callback = _make_nai_preview_callback(clients, loop)
             try:
-                stored = await asyncio.to_thread(
-                    generation_service(context).execute_request, request,
-                    preview_callback,
-                )
+                try:
+                    # 손잡이를 실행 스레드에 묶는다 - ComfyUI 대기가 중단을 본다.
+                    stored = await asyncio.to_thread(
+                        run_bound, cancel_handle,
+                        generation_service(context).execute_request, request,
+                        preview_callback,
+                    )
+                finally:
+                    # 이 장은 끝났다 - 아래 성공 · 실패 · 중단 알림이 싣는 queue_state 에 active 가 남지 않게 **먼저** 푼다
+                    # (남으면 마지막 장 뒤 Queue 패널이 '도는 장' 을 단 채 떠 있다).
+                    cancel_registry.end(cancel_handle)
+            except GenerationCancelled as exc:
+                # 사용자가 멈췄다 - 실패가 아니다(오류 토스트 · 자동 재시도 · 연속 실패 수에 넣지 않는다). 다음 대기 장으로 간다.
+                await _broadcast_generation_cancelled(context, clients, request, str(exc))
+                continue
             except Exception as exc:
                 _release_auto_gen_prefetch(context)  # 생성 실패 → 이번 예약 홀더 폐기(stale 방지)
                 await _broadcast_generation_error(context, clients, request, str(exc), exc)
@@ -774,6 +792,8 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
     finally:
         context.is_generating = False
         context.headless_generation_runner_active = False
+        # 손잡이를 세운 뒤 실행 전에 러너가 넘어졌으면 남아 있다 - 도는 장이 없는데 active 가 실리지 않게 비운다.
+        registry_for(context).reset()
         # 큐 루프 종료(정상/중단/예외) — 남은 예약 홀더는 폐기(detached task 누수·stale 방지).
         _release_auto_gen_prefetch(context)
 
@@ -2029,6 +2049,63 @@ async def _broadcast_generation_error(
         await _broadcast_automation_state(context, clients)
         for extra_message in failure.get("messages", []):
             await broadcast_json(clients, extra_message)
+    await _broadcast_waiting_window_failure(clients, request, params, message)
+    await broadcast_json(clients, context.queue_state_payload())
+    if img2img_failed:
+        await _broadcast_img2img_generation_state(context, clients)
+
+
+async def _broadcast_generation_cancelled(
+    context: WebSessionContext,
+    clients: set[WebSocket],
+    request,
+    message: str,
+) -> None:
+    """사용자가 멈춘 로컬 생성 한 장의 마무리(core/local_generation_cancel.py). **실패가 아니다.**
+
+    - 오류 토스트 · ``generation_error`` 를 보내지 않는다. status 는 ``"cancelled"`` - 화면은 ``completed`` 가 아니면
+      다음 장을 예약하지 않고(Interactive · V5 Scene 의 lastGenerationOk) 생성 중 표시를 내린다(Generate 잠금이 풀린다).
+    - 자동 재시도 · Auto Gen 연속 일시 오류 수(_auto_gen_transient_streak)에 넣지 않는다.
+    - 스스로 다음 장을 부르는 것(Auto Gen · Storyteller · Automation · Sequence)이 있으면 **함께 멈춘다** - 멈춘 장 뒤로
+      다음 장이 곧바로 또 나가면 중단이 안 먹은 것처럼 보인다(stop_all_generation_loops: 루프 표식이 있는 대기 프레임만
+      걷는다). 사용자가 손수 쌓은 Generate 는 그대로 다음 차례로 간다.
+    - 결과를 기다리는 창(Enhance · 프리셋 · 시퀀스 · 캐릭터 에셋 · img2img)에는 실패와 같은 통로로 끝을 알린다 -
+      안 알리면 그 창이 잠긴 채 남는다(core/CLAUDE.md '새 특수 요청 타입' 규칙).
+    """
+    context.is_generating = False
+    _release_auto_gen_prefetch(context)
+    params = getattr(request, "params", {}) or {}
+    img2img_service = _img2img_lifecycle_service(context)
+    img2img_failed = bool(
+        img2img_service
+        and img2img_service.record_generation_failed(params, request.request_id, "Generation cancelled")
+    )
+    loops_stopped = _auto_gen_loop_engaged(context, request)
+    loop_messages = await stop_all_generation_loops(context, clients) if loops_stopped else []
+    print(f"[CANCEL] generation cancelled id={request.request_id[:8]} loops_stopped={loops_stopped}", flush=True)
+    # character_viewer_request_id: 멈춘 장이 캐릭터 퀵 패널 Find [생성] 이면 그 기다림을 푼다(app.js status - 결과 ·
+    # generation_error 가 안 온다). 필드만 더한다(새 WS 타입은 웹 스모크 계약을 깬다).
+    await broadcast_json(clients, {"type": "status", "is_generating": False, "message": "cancelled",
+                                  "v5_scene_run": str(params.get("v5_scene_run") or ""),
+                                  "character_viewer_request_id": str(params.get("character_viewer_request_id") or "")})
+    await _broadcast_waiting_window_failure(clients, request, params, message)
+    for extra_message in loop_messages:
+        await broadcast_json(clients, extra_message)
+    await broadcast_json(clients, context._toast(
+        f"{message} - 자동 생성도 멈췄습니다" if loops_stopped else message, level="info",
+    ))
+    await broadcast_json(clients, context.queue_state_payload())
+    if img2img_failed:
+        await _broadcast_img2img_generation_state(context, clients)
+
+
+async def _broadcast_waiting_window_failure(
+    clients: set[WebSocket],
+    request,
+    params: dict,
+    message: str,
+) -> None:
+    """결과를 기다리던 창에 '이 요청은 끝났다(결과 없음)' 를 알린다 - 실패와 중단이 함께 쓴다."""
     if params.get("result_enhance_request"):
         await broadcast_json(clients, {
             "type": "result_enhance_state",
@@ -2073,9 +2150,6 @@ async def _broadcast_generation_error(
             "candidate": params.get("character_asset_candidate"),
             "message": message,
         })
-    await broadcast_json(clients, context.queue_state_payload())
-    if img2img_failed:
-        await _broadcast_img2img_generation_state(context, clients)
 
 
 async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dict) -> None:

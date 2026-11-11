@@ -170,12 +170,14 @@
         "core/web_session_app.py",
         "app/backend/server/state_routes.py",
         "core/web_session_context.py",
+        "core/local_generation_cancel.py",
         "app/web/remote/js/features/queuePanel.mjs",
         "app/web/remote/js/features/setupController.mjs"
       ],
       "legacy_dependency": "none",
       "routes": [
         {"method": "GET", "path": "/api/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/generation/cancel", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/runtime/capabilities", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/pipeline/prompt-runs", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/pipeline/prompt-runs/{prompt_run_id}", "smoke": "non_destructive"},

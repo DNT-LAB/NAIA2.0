@@ -1,3 +1,31 @@
+// Stop(2026-11-10 · 사용자 승인 목업) - 도는 로컬 생성 한 장을 멈춘다. 빨간 바탕은 .mod-stop(자동화 '정지')을 그대로 쓰고
+// 크기 · 모양만 여기서 준다(다른 기능처럼 모듈이 제 style 을 싣는다 - style.css 를 건드리지 않는다).
+// .queue-panel-btn 이 아니다: 접힌 띠는 그 단추들(Pause · Clear)을 숨기지만 Stop 은 접혀도 보여야 한다.
+const QSTOP_CSS = `
+.queue-panel-stop {
+  height: 26px; padding: 0 10px; border: 1px solid rgba(240,64,64,0.9); border-radius: 5px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 800; cursor: pointer; flex: none;
+}
+.queue-panel-stop[hidden] { display: none; }
+.queue-panel-stop:hover:not(:disabled) { filter: brightness(1.15); }
+.queue-panel-stop:disabled { opacity: 0.45; cursor: default; }
+.queue-panel.collapsed .queue-panel-stop { height: 18px; padding: 0 7px; font-size: 9px; border-radius: 4px; }
+@media (max-width: 767px) {
+  .queue-panel-stop,
+  .queue-panel.collapsed .queue-panel-stop { min-height: 38px; min-width: 56px; padding: 0 12px; font-size: 12px; }
+  .queue-panel.collapsed.has-stop .queue-panel-header { height: auto; padding-top: 3px; padding-bottom: 3px; }
+}
+`;
+
+function ensureStopStyle(document) {
+  if (!document || typeof document.createElement !== 'function' || !document.head) return;
+  if (typeof document.getElementById === 'function' && document.getElementById('queue-stop-style')) return;
+  const style = document.createElement('style');
+  style.id = 'queue-stop-style';
+  style.textContent = QSTOP_CSS;
+  document.head.appendChild(style);
+}
+
 export function createQueuePanelController({
   document,
   fetch: fetchFn = window.fetch.bind(window),
@@ -17,6 +45,7 @@ export function createQueuePanelController({
   const title = root.querySelector('[data-queue-title]');
   const body = root.querySelector('[data-queue-body]');
   const meta = root.querySelector('[data-queue-meta]');
+  const stopBtn = root.querySelector('[data-queue-stop]');
   const pauseBtn = root.querySelector('[data-queue-action="pause"]');
   const clearBtn = root.querySelector('[data-queue-action="clear"]');
   const collapseBtn = root.querySelector('[data-queue-collapse]');
@@ -33,11 +62,23 @@ export function createQueuePanelController({
   let pulseTimer = 0;
   let idleQueuedSince = 0;
   let graceTimer = 0;
+  // 중단을 보낸 장 {id}. 서버가 그 장이 끝났다고 보여 줄 때(queue_state 의 active 가 바뀜)까지 Stop 을 잠근다 - 화면이 먼저
+  // 닫지 않는다. 연타 · 머리줄 Stop 과 RUN 줄 × 를 함께 눌러도 한 번만 보낸다.
+  let stopSent = null;
+  ensureStopStyle(document);
+
+  // 도는 장. 서버는 모든 모드의 도는 장을 싣지만(queue_state.active), 패널이 그 장으로 뜨는 것은 멈출 수 있는
+  // 로컬 생성(cancellable - 외부 ComfyUI · 내장 ANIMA)일 때뿐이다(사용자 결정 2026-11-10: 중단 단추를 Queue 패널에 둔다).
+  // NAI · WebUI 의 한 장은 예전처럼 안 뜨고, 대기가 쌓였을 때의 개수 · 문구도 예전 그대로다(그때도 이 장은 세지 않는다).
+  function shownActive(nextState) {
+    const active = nextState?.active;
+    return active && active.cancellable ? active : null;
+  }
 
   function visibleState(nextState) {
     const waiting = Array.isArray(nextState?.items) && nextState.items.length > 0;
     return Boolean(
-      nextState?.active
+      shownActive(nextState)
       || (waiting && (nextState?.is_generating
         || (idleQueuedSince && Date.now() - idleQueuedSince >= IDLE_QUEUE_GRACE_MS)))
       || nextState?.paused
@@ -70,8 +111,11 @@ export function createQueuePanelController({
       item?.char_ref_count ? badgeHtml(`R${item.char_ref_count}`, 'nai') : '',
     ].join('');
     const seed = item?.seed ? `<span>${escHtml(String(item.seed))}</span>` : '';
+    // 도는 장(RUN): 멈출 수 있으면 대기 줄의 × 와 같은 모양 · 같은 자리의 중단 단추, 아니면 예전처럼 'current'.
     const remove = active
-      ? '<span class="queue-active-lock">current</span>'
+      ? (item?.cancellable
+        ? `<button type="button" class="queue-icon-btn danger" data-queue-stop-row="${escHtml(item?.id || '')}" title="생성 중단" aria-label="생성 중단"${stopLocked(item) ? ' disabled' : ''}>×</button>`
+        : '<span class="queue-active-lock">current</span>')
       : `<button type="button" class="queue-icon-btn danger" data-queue-remove="${escHtml(item?.id || '')}" title="Remove from queue" aria-label="Remove from queue">×</button>`;
     return `
       <div class="queue-item${active ? ' active' : ''}">
@@ -99,16 +143,72 @@ export function createQueuePanelController({
         if (requestId) performAction('remove', {request_id: requestId});
       });
     });
+    root.querySelectorAll('[data-queue-stop-row]').forEach(button => {
+      button.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopPropagation();
+        requestStop(button.getAttribute('data-queue-stop-row') || '');
+      });
+    });
+  }
+
+  function stopLocked(active) {
+    return Boolean(active && stopSent && stopSent.id === String(active.id || ''));
+  }
+
+  // 지금 도는 그 장만 멈춘다 - 그 장의 id 를 싣는다(서버는 지금 도는 장과 같을 때만 멈춘다: A 가 끝나고 B 가 막 시작된 순간의
+  // 누름이 B 를 멈추지 않게). 누르면 곧바로 잠그고(문구는 그대로), 풀거나 치우는 것은 서버의 queue_state 다(handleState).
+  async function requestStop(rowId = '') {
+    const active = shownActive(state);
+    if (!active) return;
+    const id = String(active.id || '');
+    if (rowId && rowId !== id) return;            // 다시 그리기 전의 낡은 줄
+    if (stopLocked(active)) return;               // 연타 - 한 번만 보낸다
+    stopSent = {id};
+    render();
+    let data = {};
+    try {
+      const response = await fetchFn('/api/generation/cancel', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(id ? {request_id: id} : {}),
+      });
+      data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    } catch (error) {
+      console.error('Generation stop failed', error);
+      if (stopSent && stopSent.id === id) stopSent = null;
+      render();
+      showToast(error.message || 'Stop failed', 'error');
+      return;
+    }
+    if (data.accepted !== false) return;          // 받았다 - 잠근 채로 서버의 queue_state 를 기다린다
+    if (data.reason === 'not_running' || data.reason === 'idle') {
+      // 그 장은 이미 끝났다 - 조용히 넘어가고 서버의 지금 상태를 받아 단추를 치운다.
+      refresh();
+      return;
+    }
+    // 멈출 수 없다(unsupported_mode 등) - 서버가 준 말을 알리고 단추를 푼다.
+    if (stopSent && stopSent.id === id) stopSent = null;
+    render();
+    if (data.message) showToast(data.message, 'info');
   }
 
   function render() {
     const items = Array.isArray(state.items) ? state.items : [];
-    const hasActive = Boolean(state.active);
+    const active = shownActive(state);
+    const hasActive = Boolean(active);
     const pendingCount = Number(state.total ?? items.length) || items.length;
     const displayCount = pendingCount + (hasActive ? 1 : 0);
     root.hidden = !visibleState(state);
     root.classList.toggle('collapsed', collapsed);
     root.classList.toggle('paused', Boolean(state.paused));
+    root.classList.toggle('has-stop', hasActive);
+    if (stopBtn) {
+      // 멈출 수 있는 도는 장이 있을 때만(shownActive = cancellable) - 접혀도 보인다(CSS 는 QSTOP_CSS)
+      stopBtn.hidden = !hasActive;
+      stopBtn.disabled = stopLocked(active);
+    }
     if (title) title.textContent = 'Queue';
     if (countEl) countEl.textContent = String(displayCount);
     if (meta) {
@@ -135,7 +235,7 @@ export function createQueuePanelController({
       return;
     }
 
-    const activeHtml = hasActive ? renderItem(state.active, {active: true}) : '';
+    const activeHtml = hasActive ? renderItem(active, {active: true}) : '';
     const pendingHtml = items.length
       ? items.map(item => renderItem(item)).join('')
       : `<div class="queue-empty">${Date.now() < holdVisibleUntil ? 'Waiting for queue update...' : 'No pending items'}</div>`;
@@ -180,6 +280,9 @@ export function createQueuePanelController({
       ...nextState,
       items: Array.isArray(nextState.items) ? nextState.items : [],
     };
+    // 서버가 보여 준다: 중단을 보낸 그 장이 더는 도는 장이 아니면(끝남 · 중단됨 · 다음 장) 잠금을 푼다.
+    const runningNow = shownActive(state);
+    if (stopSent && (!runningNow || String(runningNow.id || '') !== stopSent.id)) stopSent = null;
     const idleWaiting = state.items.length > 0 && !state.is_generating;
     if (!idleWaiting) {
       idleQueuedSince = 0;
@@ -222,6 +325,11 @@ export function createQueuePanelController({
         const action = button.dataset.queueAction;
         if (action) performAction(action);
       });
+    });
+    stopBtn?.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();   // 접힌 띠를 펴지 않는다
+      requestStop();
     });
     if (collapseBtn) {
       collapseBtn.addEventListener('click', event => {

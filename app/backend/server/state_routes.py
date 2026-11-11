@@ -57,6 +57,22 @@ def register_state_routes(
             return {"ok": False, "error": ascii(str(remaining)), "llm": llm}
         return {"ok": True, "tag_filter_remaining": remaining, "llm": llm}
 
+    @app.post("/api/generation/cancel")
+    async def api_generation_cancel(req: Request):
+        """지금 도는 로컬 생성(외부 ComfyUI · 내장 ANIMA) **한 장**을 멈춘다(core/local_generation_cancel.py).
+        도는 것이 없으면 아무것도 하지 않는다 · NAI · WebUI 는 멈출 수 없다고 답한다(accepted=false).
+        본문 ``{"request_id": ...}`` 가 있으면 그 장이 지금 도는 장일 때만 멈춘다(아니면 accepted=false · reason not_running).
+        본문이 없으면 지금 도는 장을 멈춘다(하위 호환).
+        큐에 쌓인 다른 Generate 는 건드리지 않는다. 마무리(status 'cancelled' · 토스트 · 다음 장)는 러너가 WS 로 알린다."""
+        from core.local_generation_cancel import cancel_local_generation
+
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        request_id = payload.get("request_id") if isinstance(payload, dict) else None
+        return cancel_local_generation(session_context, request_id=str(request_id or "") or None)
+
     @app.get("/api/queue/state")
     async def api_queue_state():
         return session_context.queue_state_payload()

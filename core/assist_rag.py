@@ -30,11 +30,13 @@ def _verify(path: Path, digest: str) -> None:
 
 
 class EmbeddingRuntime(LlamaServerRuntime):
+    # Launch/env/logging come from LlamaServerRuntime._launch (implicit Vulkan layers off in the child env).
     def server_args(self, port: int) -> list[str]:
+        # CPU only: "-ngl 0" alone still lets the Vulkan build grab a GPU for compute buffers (see llama_runtime).
         return [str(self.engine_path), "-m", str(self.model_path),
                 "--host", "127.0.0.1", "--port", str(port), "--embedding",
                 "--pooling", "mean", "--parallel", "1", "-c", "2048",
-                "-b", "2048", "-ub", "2048", "-t", str(self.threads), "-ngl", "0"]
+                "-b", "2048", "-ub", "2048", "-t", str(self.threads), "-ngl", "0", "--device", "none"]
 
     def embed(self, query: str, timeout: float = 30.0) -> np.ndarray:
         deadline = time.monotonic() + timeout

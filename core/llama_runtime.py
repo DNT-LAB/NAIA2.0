@@ -8,7 +8,12 @@
 GPU(기본): ``-ngl 99 -fa on`` — 동봉 엔진은 공식 Vulkan 판이라 GPU(내장 그래픽 포함)가 있으면 거기서,
 없거나 드라이버가 없으면 **자동으로 CPU** 로 돈다(실측 2026-09-23, 장치를 숨겨도 6/6 정상). 285H/Arc 140T
 실측: 평소 호출 6.75초로 CPU(6.86초)와 같지만, CPU 가 바쁠 때 CPU 판은 25초로 느려지고 GPU 는 6.7초
-그대로다. ``use_gpu=False`` 면 ``-ngl 0`` 으로 CPU 를 강제한다.
+그대로다. CPU 로 띄울 때(``use_gpu=False`` · GPU 실패 뒤 재시도)는 ``-ngl 0 --device none`` 이다 — Vulkan 판은
+``-ngl 0`` 만으로는 GPU 장치를 그대로 잡아 연산 버퍼를 VRAM 에 올린다(실측 b10830: ``Vulkan1 compute buffer size =
+133.88 MiB``). 그래서 VRAM 이 모자라 GPU 시작이 죽으면 CPU 재시도도 같은 까닭으로 죽었다(11-10 제보: 로컬 Anima 를 쓰는
+RTX 4090 에서 Assist 가 '엔진이 시작 중 종료됨' · 앱을 다시 켜야 풀림). ``--device none`` 이면 CPU 버퍼만 잡는다(실측 /health 200).
+GPU 실패 기록(``gpu_failed``)은 ``GPU_RETRY_SECONDS`` 가 지나고 엔진이 내려가 있을 때 다음 올림에서 지우고 GPU 를 한 번
+다시 시도한다(VRAM 부족은 일시적이다 — ``_maybe_retry_gpu``).
 
 GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외장 우선). 실측 RTX 5090 Laptop: 호출 1.07초
 (생성 177 tok/s) — Arc 140T 6.34초, CPU 6.86초. 첫 실행은 장치별 셰이더 준비로 한 번 느리다(5090 26초).
@@ -23,7 +28,26 @@ GPU 가 여럿이면 ``--device`` 로 하나를 고른다(기본 '자동' = 외�
   신호를 못 보내면 예전처럼 강제 종료(terminate → kill)한다.
 - 앱 종료 직전(``shutdown``)에는 새로 올리기를 막고 도는 요청을 잠시 기다린 뒤 내린다. 엔진을 내릴 때마다 이유 ·
   장치 · 결과를 엔진 로그에 한 줄 남긴다(11-07 '부스트를 끄거나 앱을 닫으면 블루스크린' 제보 — 원인 미확정, 다음 제보의
-  판단 근거). 프롬프트 내용은 적지 않는다.
+  판단 근거). 로그의 GPU 여부 · 장치는 **띄울 때의 인자**에서 잡은 값이다(``_launch_snapshot``). 프롬프트 내용은 적지 않는다.
+
+암시적 Vulkan 레이어를 끈다(``engine_env``): 엔진 · ``--list-devices`` · 드라이버 조회(``_VK_PROBE``) 자식 프로세스에만
+``VK_LOADER_LAYERS_DISABLE=~implicit~`` 를 얹은 환경 사본을 준다(백엔드 자신의 환경은 그대로). 암시적 레이어는 오버레이 ·
+녹화 프로그램이 등록해 Vulkan 을 여는 모든 프로세스에 끼어드는 DLL 이다 — 언어 모델 엔진엔 필요 없다. ``--device none`` 도
+Vulkan 로딩 자체는 건너뛰지 않는다(그때도 장치 목록이 찍힌다).
+- 까닭(11-10 제보): '관리자 권한으로 실행할 때만 Assist 가 된다'. Khronos Vulkan-Loader 문서(LoaderInterfaceArchitecture.md
+  · LoaderLayerInterface.md)에 Windows 로더는 관리자 권한 프로세스에서 HKEY_CURRENT_USER 의 레이어를 찾지 않는다고 적혀
+  있다 — 그래서 사용자 계정(HKCU)에 등록된 레이어가 엔진을 죽였다는 것이 1순위 가설이다. **문서가 근거이고, 사용자 PC 에서
+  확인한 것은 아니다.**
+- 변수: ``~implicit~`` 는 모든 암시적 레이어를 끈다(문서). Vulkan 헤더 1.3.234 이후로 빌드한 로더만 읽는다(문서 다른 곳엔
+  1.3.262) — 낡은 로더는 이 변수를 모를 뿐 그대로 돈다(추론). 사용자가 이미 적어 둔 값이 있으면 그 뒤에 덧붙인다.
+- 실측(11-10 · 이 PC · 로더 1.4.321 · Arc 140T + RTX 5090 Laptop · 동봉 엔진): 변수 없이 실린 암시적 레이어는
+  VK_LAYER_NV_present · VK_LAYER_NV_optimus(NVIDIA 드라이버), 찾았지만 안 실린 것은 Steam 둘. 변수를 주면 넷 다
+  'forced disabled' — ``--list-devices`` 장치 목록 · 순서 · 드라이버가 밝힌 종류 · /health 200 · 짧은 chat(약 110 tok/s)이
+  모두 같았다. 장치를 잘못 고르는 일은 보이지 않아 '늘 끈다' 를 고른다.
+- 탈출구: 환경변수 ``NAIA_LLAMA_KEEP_VK_LAYERS=1`` 이면 끄지 않는다(레이어가 꼭 필요한 PC).
+
+장치 조회(``list_device_entries``)는 엔진 파일마다 한 번만 재지만, 조회 **실패**(프로세스를 못 띄움 · 시간 초과 · 목록 머리줄
+없이 끝남)는 ``DEVICE_FAILURE_CACHE_SECONDS`` 만 기억한다 — 실패를 'GPU 없음' 으로 굳히면 앱을 다시 켤 때까지 CPU 였다.
 """
 
 from __future__ import annotations
@@ -52,6 +76,29 @@ DEFAULT_IDLE_SECONDS = 180.0
 SAMPLING: dict[str, float] = {"temperature": 1.0, "top_p": 0.95, "top_k": 64, "min_p": 0.0}
 # 엔진을 내릴 때 Ctrl+C 뒤 스스로 나가기를 기다리는 시간 — 넘기면 강제 종료(0 이면 곧바로 강제 종료).
 GRACEFUL_EXIT_SECONDS = 5.0
+# GPU 로 못 띄웠거나 GPU 에서 죽은 뒤 GPU 를 다시 시도하기까지(초). 실패 시각부터 잰다 — 다시 실패하면 그때부터 또 잰다.
+# 엔진이 내려가 있을 때 다음 올림에서만 시도한다(떠 있는 CPU 엔진을 바꾸지 않는다). Assist 임대(10분)와 같은 길이.
+GPU_RETRY_SECONDS = 600.0
+# 장치 조회가 실패했을 때 그 답(빈 목록)을 기억하는 시간(초) — 설정 화면이 상태를 물을 때마다 20초씩 다시 재지 않게.
+# 진짜 'GPU 없음'(목록 머리줄 + (none))은 엔진 파일이 바뀔 때까지 기억한다.
+DEVICE_FAILURE_CACHE_SECONDS = 60.0
+# 암시적 Vulkan 레이어(모듈 설명) — 엔진 자식 프로세스의 환경 사본에만 싣는다. 탈출구 변수가 켜져 있으면 싣지 않는다.
+VK_LAYERS_DISABLE_VAR = "VK_LOADER_LAYERS_DISABLE"
+VK_LAYERS_DISABLE_VALUE = "~implicit~"
+KEEP_VK_LAYERS_VAR = "NAIA_LLAMA_KEEP_VK_LAYERS"
+
+
+def engine_env(base: Any = None) -> dict[str, str]:
+    """엔진(과 장치 조회) 자식 프로세스에 줄 환경 **사본** — 암시적 Vulkan 레이어를 끈다. ``base``(기본 os.environ)는
+    바꾸지 않는다. ``NAIA_LLAMA_KEEP_VK_LAYERS=1`` 이면 그대로 돌려준다. 이미 적힌 끌 목록이 있으면 뒤에 덧붙인다."""
+    env = dict(os.environ if base is None else base)
+    if str(env.get(KEEP_VK_LAYERS_VAR, "")).strip().lower() in ("1", "true", "yes", "on"):
+        return env
+    current = [part.strip() for part in str(env.get(VK_LAYERS_DISABLE_VAR, "")).split(",") if part.strip()]
+    if VK_LAYERS_DISABLE_VALUE not in current and "~all~" not in current:
+        current.append(VK_LAYERS_DISABLE_VALUE)
+    env[VK_LAYERS_DISABLE_VAR] = ",".join(current)
+    return env
 
 # 별도 프로세스에서 엔진의 (창 없는) 콘솔에 붙어 Ctrl+C 를 보낸다. CTRL_C_EVENT 는 특정 프로세스로 보낼 수 없고
 # 같은 콘솔에 붙은 모두(그룹 0)에게 간다 — 엔진의 콘솔엔 엔진과 이 도우미만 있고, 도우미는 스스로 무시한다.
@@ -89,6 +136,34 @@ class LlamaRuntimeError(RuntimeError):
 
 class LlamaStartError(LlamaRuntimeError):
     """엔진이 떴다가 죽었거나 준비되지 못했다 — GPU 로 시작했다면 CPU 로 다시 해 볼 만한 실패."""
+
+
+def _exit_label(code: Any) -> str:
+    """프로세스 종료 코드를 읽을 만한 글로. Windows 의 NTSTATUS(예: 3221225477)는 16진(0xC0000005)으로 — 그래야 찾아본다."""
+    try:
+        value = int(code)
+    except (TypeError, ValueError):
+        return str(code)
+    if -256 < value < 256:
+        return str(value)
+    return f"0x{value & 0xFFFFFFFF:08X}"
+
+
+def _arg_after(args: list[str], *flags: str) -> str | None:
+    for flag in flags:
+        if flag in args:
+            index = args.index(flag)
+            return str(args[index + 1]) if index + 1 < len(args) else None
+    return None
+
+
+def _launch_snapshot(args: list[str]) -> dict[str, Any]:
+    """띄우는 **인자**로 본 실제 조건 — 로그에 적는 GPU 여부 · ``--device`` 값(CPU 면 none, 안 실었으면 auto).
+    죽거나 내릴 때의 설정(``effective_gpu`` · ``device``)은 그 사이 바뀔 수 있다: /health 대기는 락 밖이고, GPU 실패를
+    적는 순간 effective_gpu 가 False 가 되며, 장치를 바꾸면 stale 로 내린다."""
+    layers = _arg_after(args, "-ngl", "--n-gpu-layers", "--gpu-layers")
+    device = _arg_after(args, "--device", "-dev") or "auto"
+    return {"gpu": layers != "0" and device != "none", "device": device}
 
 
 def _free_port() -> int:
@@ -190,6 +265,8 @@ class LlamaServerRuntime:
         self.use_gpu = bool(use_gpu)
         self.device = device or None
         self.gpu_failed: str | None = None     # GPU 로 못 띄웠거나 GPU 에서 죽은 이유 — 장치 선택을 바꾸면 지운다
+        self._gpu_failed_at: float | None = None  # gpu_failed 를 적은 때(monotonic) — GPU 재시도는 이로부터 잰다
+        self.gpu_retry_seconds = GPU_RETRY_SECONDS
         self._running_key: tuple | None = None  # 지금 떠 있는 엔진이 어떤 설정으로 떴는가
         self.engine_path = Path(engine_path) if engine_path else None
         self.model_path = Path(model_path) if model_path else None
@@ -202,6 +279,7 @@ class LlamaServerRuntime:
         self._slot = threading.Lock()          # 요청 단일 슬롯
         self._proc_lock = threading.RLock()    # 프로세스 핸들·포트·세대
         self._proc: subprocess.Popen | None = None
+        self._launch_info: dict[str, Any] | None = None   # _proc 를 띄운 조건(_launch_snapshot) — 로그는 이것을 적는다
         self._job: Any = None
         self._log_file: Any = None
         self._port: int | None = None
@@ -238,6 +316,7 @@ class LlamaServerRuntime:
         with self._proc_lock:
             if (gpu, dev) != (self.use_gpu, self.device):
                 self.gpu_failed = None
+                self._gpu_failed_at = None
             self.engine_path, self.model_path, self.use_gpu, self.device = engine, model, gpu, dev
             if managed_engine is not None:
                 self.managed_engine = managed_engine
@@ -282,7 +361,9 @@ class LlamaServerRuntime:
             if self.device:
                 args += ["--device", self.device]
         else:
-            args += ["-ngl", "0"]
+            # 진짜 CPU 전용 — '-ngl 0' 만으로는 Vulkan 판이 GPU 장치를 잡아 연산 버퍼를 VRAM 에 올린다(모듈 설명 · 11-10 실측).
+            # VRAM 이 모자라 GPU 시작이 죽은 뒤의 CPU 재시도가 같은 까닭으로 죽지 않게 장치를 하나도 쓰지 않는다.
+            args += ["-ngl", "0", "--device", "none"]
         return args
 
     def is_running(self) -> bool:
@@ -331,10 +412,15 @@ class LlamaServerRuntime:
         with self._proc_lock:
             self._cancel_idle_timer()
             proc, self._proc = self._proc, None
+            launch, self._launch_info = self._launch_info, None
             note: dict[str, Any] | None = None
             if proc is not None and proc.poll() is None:
                 started = time.monotonic()
-                note = {"pid": proc.pid, "gpu": self.effective_gpu, "device": self.device or "auto"}
+                # 띄울 때의 조건 — 지금 설정은 그 사이 바뀌었을 수 있다(stale 로 내릴 때는 늘 바뀌어 있다)
+                launch = launch or {"gpu": self.effective_gpu, "device": self.device or "auto",
+                                    "engine": self._engine_label()}
+                note = {"pid": proc.pid, "gpu": launch["gpu"], "device": launch["device"],
+                        "engine": launch.get("engine") or self._engine_label()}
                 method = self._graceful_exit(proc) if graceful else "skip"
                 if method != "ctrl_c":
                     # 정상 종료가 안 됐다 — 예전 방식(강제 종료)
@@ -365,7 +451,7 @@ class LlamaServerRuntime:
             if note is not None:
                 self._log_event(
                     f"engine stop reason={reason or 'unknown'} pid={note['pid']} gpu={note['gpu']} "
-                    f"device={note['device']} engine={self._engine_label()} method={note['method']} "
+                    f"device={note['device']} engine={note['engine']} method={note['method']} "
                     f"exit={note['exit']} seconds={note['seconds']}")
 
     def _graceful_exit(self, proc: Any) -> str:
@@ -458,14 +544,44 @@ class LlamaServerRuntime:
         finally:
             self._slot.release()
 
+    def _mark_gpu_failed(self, reason: str) -> None:
+        """GPU 를 못 쓴 이유를 적는다 — 이 뒤로는 CPU 로 띄운다(effective_gpu). 다시 시도하는 시각은 이 때부터 잰다.
+        두 칸은 ``_proc_lock`` 안에서 함께 적는다(configure · _maybe_retry_gpu 가 같은 락으로 읽고 지운다)."""
+        with self._proc_lock:
+            self.gpu_failed = reason
+            self._gpu_failed_at = time.monotonic()
+
+    def _maybe_retry_gpu(self) -> None:
+        """GPU 실패 기록이 ``gpu_retry_seconds`` 넘게 묵었고 엔진이 내려가 있으면 기록을 지워 **이번 올림에서** GPU 를 한 번
+        다시 시도한다 — VRAM 부족은 일시적이다(로컬 생성 모델이 내려가면 풀린다. 11-10 제보: 예전엔 앱을 끌 때까지 CPU 였다).
+        - 떠 있는 엔진은 건드리지 않는다: 여기서 지우면 _desired_key 가 바뀌어 is_stale 이 도는 CPU 엔진을 내리러 든다.
+        - 다시 실패하면 _ensure 가 기록을 새로 적는다 — 다음 시도는 또 그만큼 뒤다. 요청마다 'GPU 실패 -> CPU' 두 번
+          올림을 되풀이하지 않는다. chat() 의 'GPU 에서 죽으면 CPU 로 한 번 더' 도 방금 적은 기록이라 여기서 안 지워진다.
+        슬롯을 쥔 쪽(chat · warm · embed 의 _ensure)에서만 부른다. 확인 · 경과 계산 · 지우기는 한 ``_proc_lock`` 구간이다 —
+        configure() 는 슬롯 없이 이 락 안에서 기록을 지운다(락 밖에서 확인한 뒤 빼기를 하면 그 사이 None 이 되어 TypeError)."""
+        with self._proc_lock:
+            failed_at = self._gpu_failed_at
+            if self.gpu_failed is None or not self.use_gpu or failed_at is None:
+                return
+            waited = time.monotonic() - failed_at
+            if waited < self.gpu_retry_seconds:
+                return
+            if self._proc is not None and self._proc.poll() is None:
+                return
+            self.gpu_failed = None
+            self._gpu_failed_at = None
+            device = self.device or "auto"
+        self._log_event(f"gpu retry after={round(waited)}s device={device}")
+
     def _ensure(self, deadline: float) -> int:
         """엔진을 요구 설정대로 띄워 둔다. GPU 로 시작하지 못하면 이유를 남기고 **CPU 로 한 번 더** 띄운다."""
+        self._maybe_retry_gpu()
         try:
             return self._launch(deadline)
         except LlamaStartError as exc:
             if not self.effective_gpu:
                 raise
-            self.gpu_failed = f"{self.device or 'GPU'} 로 시작하지 못함 — {exc}"
+            self._mark_gpu_failed(f"{self.device or 'GPU'} 로 시작하지 못함 — {exc}")
             # CPU 재시도에는 최소한의 시간을 준다(GPU 시도가 제한시간을 거의 다 썼어도).
             return self._launch(max(deadline, time.monotonic() + 30.0))
 
@@ -505,6 +621,7 @@ class LlamaServerRuntime:
                     raise LlamaRuntimeError("엔진 파일이 없거나 손상되었습니다 — AI 모델 설정에서 엔진 복구를 눌러 주세요.")
             port = _free_port()
             args = self.server_args(port)
+            launch = {**_launch_snapshot(args), "engine": self._engine_label()}
             if self.log_path is not None:
                 self.log_path.parent.mkdir(parents=True, exist_ok=True)
                 self._log_file = self.log_path.open("ab")
@@ -514,8 +631,9 @@ class LlamaServerRuntime:
             started = time.monotonic()
             self._proc = subprocess.Popen(
                 args, cwd=str(self.engine_path.parent), stdin=subprocess.DEVNULL, stdout=out, stderr=out,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                env=engine_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+            self._launch_info = launch
             self._job = _attach_kill_on_close_job(self._proc)
             self._port = port
             self._running_key = self._desired_key()
@@ -523,9 +641,15 @@ class LlamaServerRuntime:
             proc = self._proc
         # 준비 대기는 락 밖에서(stop 이 끼어들 수 있게). /health 200 전엔 요청을 보내지 않는다.
         while True:
-            if proc.poll() is not None:
+            code = proc.poll()
+            if code is not None:
+                # stop() 은 떠 있던 프로세스만 적는다 — 스스로 나간 엔진의 종료 코드는 여기서 남긴다(프롬프트는 적지 않는다).
+                # GPU 여부 · 장치는 띄울 때의 인자로(launch) — 대기는 락 밖이라 그 사이 설정이 바뀔 수 있다.
                 self.stop(reason="start_exited")
-                raise LlamaStartError("엔진이 시작 중 종료됨(엔진 로그 확인)")
+                label = _exit_label(code)
+                self._log_event(f"engine start_exited pid={proc.pid} gpu={launch['gpu']} device={launch['device']} "
+                                f"engine={launch['engine']} exit={label}")
+                raise LlamaStartError(f"엔진이 시작 중 종료됨(종료 코드 {label} · 엔진 로그 확인)")
             if time.monotonic() >= deadline:
                 self.stop(reason="start_timeout")
                 raise LlamaStartError("엔진 준비 시간 초과")
@@ -724,7 +848,7 @@ class LlamaServerRuntime:
                     crashed_on_gpu = self.effective_gpu
                     self.stop(reason="connection_lost")
                     if crashed_on_gpu and attempt == 0:
-                        self.gpu_failed = f"{self.device or 'GPU'} 에서 엔진이 멈춤 — {exc}"
+                        self._mark_gpu_failed(f"{self.device or 'GPU'} 에서 엔진이 멈춤 — {exc}")
                         deadline = max(deadline, time.monotonic() + 30.0)
                         continue  # CPU 로 한 번 더
                     return {"ok": False, "error": f"llama-server 통신 실패: {exc}",
@@ -799,7 +923,8 @@ class LlamaServerRuntime:
 
 # ── 장치 감지 ──────────────────────────────────────────────────────────────
 
-_DEVICE_CACHE: dict[tuple[str, float], list[dict[str, str]]] = {}
+# (엔진 경로, 수정시각) -> (장치 목록, 만료 시각(monotonic) — 성공 · 진짜 'GPU 없음' 은 inf, 조회 실패는 짧게)
+_DEVICE_CACHE: dict[tuple[str, float], tuple[list[dict[str, str]], float]] = {}
 
 # 드라이버에게 못 물었을 때만 쓰는 이름 규칙. 외장: NVIDIA 전부 · 'Graphics' 가 안 붙은 Radeon(RX · PRO · VII —
 # APU 내장은 'Radeon(TM) Graphics' · 'Radeon 780M Graphics' 처럼 붙는다) · Intel Arc A · B5xx 이상 · Arc Pro.
@@ -860,7 +985,7 @@ def _vulkan_device_types() -> dict[str, str]:
         out = subprocess.run(
             [sys.executable, "-c", _VK_PROBE], capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=20,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env=engine_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         types: dict[str, str] = {}
         for name, code in json.loads((out.stdout or "").strip().splitlines()[-1]):
@@ -893,25 +1018,28 @@ def choose_device(entries: list[dict[str, str]], preference: str | None) -> str 
 def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
     """``llama-server --list-devices`` 결과를 [{id:'Vulkan1', name:'NVIDIA GeForce RTX 5090 Laptop GPU',
     vram_mib, kind:'discrete'|'integrated'}] 로. 종류는 드라이버에게 묻고(못 물으면 이름으로), CPU 로 흉내 내는
-    가짜 GPU 는 뺀다. 엔진 파일(경로·수정시각)마다 한 번만 잰다 — 둘을 함께 재서 약 1~3초."""
+    가짜 GPU 는 뺀다. 엔진 파일(경로·수정시각)마다 한 번만 잰다 — 둘을 함께 재서 약 1~3초. 단, 조회가 **실패**했으면
+    (못 띄움 · 시간 초과 · 'Available devices' 머리줄 없이 끝남) 빈 목록을 ``DEVICE_FAILURE_CACHE_SECONDS`` 만 기억한다 —
+    머리줄 뒤 '(none)' 인 진짜 'GPU 없음' 과 가른다."""
     path = Path(engine_path) if engine_path else None
     if path is None or not path.is_file():
         return []
     key = (str(path), path.stat().st_mtime)
-    if key in _DEVICE_CACHE:
-        return [dict(entry) for entry in _DEVICE_CACHE[key]]
+    cached = _DEVICE_CACHE.get(key)
+    if cached is not None and time.monotonic() < cached[1]:
+        return [dict(entry) for entry in cached[0]]
 
     driver_types: dict[str, str] = {}
     asker = threading.Thread(target=lambda: driver_types.update(_vulkan_device_types()), daemon=True)
     asker.start()
     devices: list[dict[str, Any]] = []
+    seen = False   # 목록 머리줄을 봤나 — 못 봤으면 조회 실패(진짜 'GPU 없음' 이 아니다)
     try:
         out = subprocess.run(
             [str(path), "--list-devices"], cwd=str(path.parent), capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=20,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env=engine_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        seen = False
         for line in (out.stdout or "").splitlines() + (out.stderr or "").splitlines():
             if line.strip().startswith("Available devices"):
                 seen = True
@@ -924,12 +1052,13 @@ def list_device_entries(engine_path: str | Path | None) -> list[dict[str, str]]:
                 devices.append({"id": device_id, "name": clean, "vram_mib": int(mem.group(1)) if mem else 0})
     except Exception:
         devices = []
+        seen = False
     if devices:
         asker.join(timeout=25)
     for entry in devices:
         entry["kind"] = driver_types.get(entry["name"]) or _kind_from_name(entry["name"])
     devices = [entry for entry in devices if entry["kind"] != "cpu"]
-    _DEVICE_CACHE[key] = devices
+    _DEVICE_CACHE[key] = (devices, math.inf if seen else time.monotonic() + DEVICE_FAILURE_CACHE_SECONDS)
     return [dict(entry) for entry in devices]
 
 

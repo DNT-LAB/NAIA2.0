@@ -89,6 +89,8 @@ GATHER_BATCH = 250_000   # 한 번에 긁는 게시물 수. 색인 배열이 메
 # 1인 G·S 풀이 33.6MiB · 전체 풀이 69.6MiB(int64) - 예산을 넘는 풀 하나는 담지 않는다.
 POOL_CACHE_BYTES = 128 << 20
 POOL_CACHE_ITEMS = 64
+POSTING_CACHE_ITEMS = 512
+POSTING_CACHE_BYTES = 384 << 20
 
 
 def _intersect_sorted(acc: np.ndarray, arr: np.ndarray) -> np.ndarray:
@@ -106,6 +108,33 @@ def _intersect_sorted(acc: np.ndarray, arr: np.ndarray) -> np.ndarray:
 
 
 def decode_postings(buf: bytes) -> np.ndarray:
+    """Decode short posting deltas per value; keep the generic path for the rest."""
+    if not buf:
+        return np.empty(0, dtype=np.int64)
+    raw = np.frombuffer(buf, dtype=np.uint8)
+    ends = np.flatnonzero(raw < 0x80)
+    if ends.size == 0:
+        raise ValueError("postings 바이트가 varint 로 끝나지 않는다")
+    if ends[0] >= 5 or ends[-1] != raw.size - 1:
+        return _decode_postings_generic(buf)
+    lens = np.diff(ends, prepend=-1)
+    if np.any(lens[1:] > 3):
+        return _decode_postings_generic(buf)
+    count = 0
+    for i, byte in enumerate(raw[:ends[0] + 1].tolist()):
+        count |= (byte & 0x7F) << (7 * i)
+    e, ln = ends[1:1 + count], lens[1:1 + count]
+    if e.size != count:
+        raise ValueError("postings 개수와 실제 값이 안 맞는다")
+    vals = raw[e].astype(np.int64)
+    two = np.flatnonzero(ln >= 2)
+    vals[two] = (vals[two] << 7) | (raw[e[two] - 1] & 0x7F)
+    three = np.flatnonzero(ln == 3)
+    vals[three] = (vals[three] << 7) | (raw[e[three] - 2] & 0x7F)
+    return np.cumsum(vals + 1) - 1
+
+
+def _decode_postings_generic(buf: bytes) -> np.ndarray:
     """`개수 + 차분 varint` 를 오름차순 절대값 배열로 편다. **postings 전용**이다.
 
     바이트를 배열로 눕혀서 한 번에 푼다 - 파이썬으로 한 바이트씩 돌면 `1girl`
@@ -184,6 +213,9 @@ class EventMapIndex:
         self._pool_bytes = 0
         self._pool_lock = threading.Lock()
         self.pool_stats = {"hits": 0, "misses": 0}
+        self._posting_cache: OrderedDict[int, np.ndarray] = OrderedDict()
+        self._posting_bytes = 0
+        self._posting_lock = threading.Lock()
         self.db = None
         self._pack = None
         self._body_file = self._body_map = None
@@ -327,10 +359,15 @@ class EventMapIndex:
             self._pool_cache.clear()
             self._pool_bytes = 0
 
+    def clear_posting_cache(self) -> None:
+        with self._posting_lock:
+            self._posting_cache.clear()
+            self._posting_bytes = 0
+
     def close(self) -> None:
         from .draft import TEXT_CACHE
         TEXT_CACHE.retire(self)
-        self.posting.cache_clear()
+        self.clear_posting_cache()
         self.clear_pool_cache()
         # numpy 뷰가 mmap 을 붙들고 있으면 닫히지 않는다 - 먼저 놓는다.
         self.offsets = self.body = self.part_arr = self._post_index = None
@@ -385,13 +422,32 @@ class EventMapIndex:
             out[rating] = out.get(rating, 0) + int(per_part[pid])
         return tuple(sorted(out.items()))
 
-    @lru_cache(maxsize=512)
     def posting(self, tid: int) -> np.ndarray:
-        """태그의 게시물 목록(오름차순). 태그마다 한 번만 풀고 캐시에 남는다."""
+        """태그의 게시물 목록(오름차순). 항목 수와 바이트 예산 안에서 캐시한다."""
+        with self._posting_lock:
+            while self._posting_cache and (self._posting_bytes > POSTING_CACHE_BYTES
+                                           or len(self._posting_cache) > POSTING_CACHE_ITEMS):
+                _, old = self._posting_cache.popitem(last=False)
+                self._posting_bytes -= old.nbytes
+            hit = self._posting_cache.get(tid)
+            if hit is not None:
+                self._posting_cache.move_to_end(tid)
+                return hit
         blob = self.posting_blob(tid)
-        if not blob:
-            return np.empty(0, dtype=np.int64)
-        return decode_postings(zlib.decompress(blob))
+        rids = decode_postings(zlib.decompress(blob)) if blob else np.empty(0, dtype=np.int64)
+        with self._posting_lock:
+            hit = self._posting_cache.get(tid)
+            if hit is not None:
+                self._posting_cache.move_to_end(tid)
+                rids = hit
+            elif rids.nbytes <= POSTING_CACHE_BYTES:
+                self._posting_cache[tid] = rids
+                self._posting_bytes += rids.nbytes
+            while self._posting_cache and (self._posting_bytes > POSTING_CACHE_BYTES
+                                           or len(self._posting_cache) > POSTING_CACHE_ITEMS):
+                _, old = self._posting_cache.popitem(last=False)
+                self._posting_bytes -= old.nbytes
+        return rids
 
     def _partition_of(self, rids: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """게시물 -> 분면. 파이썬 반복문으로 돌면 610만 번이라 배열로 민다."""

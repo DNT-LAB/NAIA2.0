@@ -12466,6 +12466,34 @@ async function generateViewpointInstant(suffix) {
   }, null, {queue: true});
 }
 
+// [자동화 / 고급 기능] > [아티스트 태그 관리](사용자 지시 2026-11-11) - 메인 프롬프트의 작가를 부른 그때 한 번 타일로 보여 준다.
+let artistTagWindow = null;
+let artistTagWindowLoading = null;
+function openArtistTagTool() {
+  if (artistTagWindow) {
+    artistTagWindow.toggle();
+    return;
+  }
+  if (artistTagWindowLoading) return;
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw2')
+    .then(({createArtistTagWindow}) => {
+      artistTagWindow = createArtistTagWindow({
+        document,
+        window,
+        getPrompt: () => (promptEdit ? promptEdit.value : ''),
+        getThumbMode: () => document.getElementById('artistThumbMode')?.value || '',
+        escHtml,
+        onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+      });
+      artistTagWindow.open();
+    })
+    .catch(error => {
+      console.error('Failed to open artist tag window', error);
+      showToast('아티스트 태그 관리를 열지 못했습니다', 'error');
+    })
+    .finally(() => { artistTagWindowLoading = null; });
+}
+
 function openDanbooruBrowserTool() {
   if (danbooruTabControl?.openBrowser) {
     danbooruTabControl.openBrowser();
@@ -12480,7 +12508,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261102-wfgate')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261111-atw1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -12494,6 +12522,8 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261102-
       openDanbooruBrowser: openDanbooruBrowserTool,
       openViewpointControl: openViewpointControlTool,
       isViewpointControlOpen: () => Boolean(viewpointControl && viewpointControl.isOpen()),
+      openArtistTags: openArtistTagTool,
+      isArtistTagsOpen: () => Boolean(artistTagWindow && artistTagWindow.isOpen()),
       openWireFlow: () => { wireFlowReady.then(() => wireFlowControl?.toggle()); },
       isWireFlowOpen: () => Boolean(wireFlowControl?.isOpen()),
       isWireFlowOn: () => Boolean(wireFlowControl?.isModeOn()),

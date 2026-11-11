@@ -433,7 +433,9 @@
         "core/artist_mix_preset.py",
         "core/artist_affinity.py",
         "core/artist_search.py",
+        "core/artist_pack_index.py",
         "app/web/remote/js/features/artistThumbTab.mjs",
+        "app/web/remote/js/features/artistTagWindow.mjs",
         "app/web/remote/js/features/artistSearchPanel.mjs",
         "app/web/remote/js/features/artistLinkPanel.mjs",
         "app/web/remote/artist-viewer.html"
@@ -447,6 +449,8 @@
         {"method": "GET", "path": "/api/artist-thumb/load-status", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/load-cancel", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/image", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/artist-thumb/used", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/artist-thumb/used-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/favorite-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/group-image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/artist-thumb/view-image", "smoke": "asset_runtime"},

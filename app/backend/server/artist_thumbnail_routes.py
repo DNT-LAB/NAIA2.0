@@ -925,6 +925,45 @@ def register_artist_thumbnail_routes(
             headers={"Cache-Control": "public, max-age=3600"},
         )
 
+    # 아티스트 태그 관리 창(사용자 지시 2026-11-11) - 메인 프롬프트에 쓴 작가를 **부른 그때 한 번** 타일로 보여 준다.
+    # 팩을 올리지 않고 자리 색인으로 그 작가의 그림만 읽는다(core/artist_pack_index).
+    @app.post("/api/artist-thumb/used")
+    async def api_artist_thumb_used(req: Request):
+        try:
+            payload = await req.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        text = str(payload.get("text") or "")[:60000]
+        mode = str(payload.get("mode") or "")
+
+        def _run():
+            from core.prompt_artist_strip import find_artists
+
+            rows = find_artists(text, known=_mix_known_artists(session_context))
+            names = [row["name"] for row in rows if row.get("reason") != "anchor"]
+            return artist_thumbnail_service(session_context).used_artist_tiles(names, mode)
+
+        try:
+            return {"ok": True, "artists": await run_in_thread(_run)}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Artist tags failed: {exc}"}, status_code=500)
+
+    @app.get("/api/artist-thumb/used-image")
+    async def api_artist_thumb_used_image(mode: str = "", artist: str = ""):
+        try:
+            image_bytes, media_type = await run_in_thread(
+                artist_thumbnail_service(session_context).used_image_payload, mode, artist)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        except (FileNotFoundError, KeyError) as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Artist Thumb image failed: {exc}"}, status_code=500)
+        return Response(content=image_bytes, media_type=media_type,
+                        headers={"Cache-Control": "public, max-age=3600"})
+
     @app.get("/api/artist-bench-views")
     async def api_artist_bench_views_list():
         try:

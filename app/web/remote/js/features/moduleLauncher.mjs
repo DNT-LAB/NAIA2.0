@@ -204,6 +204,13 @@ const MODULE_REGISTRY = {
     action: 'module',
     badgeId: 'badgeAuto',
   },
+  // 아티스트 태그 관리(사용자 지시 2026-11-11) - 메인 프롬프트에 쓴 작가의 썸네일을 한 번 보여 주는 떠 있는 창(artistTagWindow).
+  artist_tags: {
+    label: '아티스트 태그 관리',
+    title: '아티스트 태그 관리 - 메인 프롬프트에 쓴 작가의 썸네일을 봅니다',
+    category: 'assistant_tools',
+    action: 'artist_tags',
+  },
 };
 
 // 단축키(Ctrl+글자) -> 모듈(사용자 지정 2026-09-29). 위 표의 `shortcut` 이 단 하나의 원본이다 - 단추 말풍선의
@@ -272,7 +279,7 @@ const CATEGORY_REGISTRY = [
     id: 'assistant_tools',
     label: '자동화 / 고급 기능',
     title: '자동화 / 고급 기능',
-    moduleIds: ['automation'],
+    moduleIds: ['automation', 'artist_tags'],
   },
 ];
 
@@ -288,6 +295,9 @@ export function createModuleLauncher({
   // 구도 / 시점 제어 창 열기(다시 누르면 닫힌다) · 열려 있나.
   openViewpointControl = null,
   isViewpointControlOpen = () => false,
+  // 아티스트 태그 관리 창 열기(다시 누르면 닫힌다) · 열려 있나.
+  openArtistTags = null,
+  isArtistTagsOpen = () => false,
   // Wire-Flow 창 열기(다시 누르면 닫힌다) · 열려 있나 · 모드가 켜져 있나 · 모드 바꾸기.
   openWireFlow = null,
   isWireFlowOpen = () => false,
@@ -601,6 +611,8 @@ export function createModuleLauncher({
       openDanbooruBrowser?.();
     } else if (config.action === 'viewpoint_control') {
       openViewpointControl?.();
+    } else if (config.action === 'artist_tags') {
+      openArtistTags?.();
     } else if (config.action === 'wire_flow') {
       openWireFlow?.();
     } else if (config.action === 'comfyui_workflow_default') {
@@ -701,6 +713,7 @@ export function createModuleLauncher({
     if (moduleId === 'chunk') return isChunkOpen();
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
     if (MODULE_REGISTRY[moduleId]?.action === 'viewpoint_control') return Boolean(isViewpointControlOpen());
+    if (MODULE_REGISTRY[moduleId]?.action === 'artist_tags') return Boolean(isArtistTagsOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'wire_flow') return Boolean(isWireFlowOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;

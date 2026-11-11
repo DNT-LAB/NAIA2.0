@@ -220,6 +220,9 @@ class ArtistThumbnailService:
         self._image_cache: dict[tuple[str, str], tuple[bytes, str]] = {}
         # 사본 캐시(관심 · 그룹)의 **이름만** - 경로 -> ((파일 번호, mtime_ns, size), 이름들).
         self._copy_names_memo: dict[str, tuple[tuple[int, int, int], frozenset]] = {}
+        # 팩의 자리 색인(core/artist_pack_index) - 팩 키 -> 색인. 팩을 통째로 읽지 않고 작가 몇 명만 꺼내는 자리가 쓴다.
+        self._pack_indexes: dict[str, Any] = {}
+        self._pack_index_lock = threading.Lock()
         # 작가 사전(artist_dictionary.py)의 표 - (파일 지문, 표). 파일이 그대로면 다시 읽지 않는다(_dictionary_weights).
         self._dictionary_memo: tuple[tuple[int, int], dict[str, int]] | None = None
         # 가상 모드의 작가 -> 주인 팩 표 - 모드 -> (구성원 지문, 표). 구성원이 그대로면 다시 만들지 않는다.
@@ -2187,6 +2190,110 @@ class ArtistThumbnailService:
                 self._image_cache.pop(next(iter(self._image_cache)), None)
             self._image_cache[cache_key] = (image_bytes, media_type)
         return image_bytes, media_type
+
+    # ── 지금 쓰는 작가만 (아티스트 태그 관리 창 · 사용자 지시 2026-11-11) ────────────────────────
+    #  팩을 메모리에 올리지 않는다. 팩마다 작가의 바이트 자리를 한 번 훑어 적어 두고(`artist_thumb/pack_index/`),
+    #  그 뒤로는 필요한 작가의 자리만 읽는다. 1.37GB 팩 실측: 통째 3.7초 · 3.9GB -> 13명 10~20ms · 21MB.
+
+    @staticmethod
+    def _pack_family(mode: str) -> str:
+        return str(mode or "").strip().split("-")[0]
+
+    def _used_pack_order(self, mode: str = "") -> list[str]:
+        """찾아볼 팩의 차례 - 고른 모드의 팩이 먼저, 그다음 같은 계열(NAID5 · ANIMA ...)의 나머지. 받은 것만."""
+        mode_key = str(mode or "").strip()
+        if not mode_key:
+            api = str(self._mode_getter() or "NAI").upper()
+            mode_key = {"COMFYUI": "ANIMA", "WEBUI": "NoobNAI"}.get(api, "NAID5-CURATED")
+        if self.is_virtual_mode(mode_key):
+            first = self.virtual_members(mode_key)
+        else:
+            first = [mode_key] if mode_key in self.ARTIST_THUMB_MODES else []
+        family = self._pack_family(mode_key)
+        rest = [key for key in self.ARTIST_THUMB_MODES if self._pack_family(key) == family and key not in first]
+        return [key for key in first + rest if self._file_state(self.ARTIST_THUMB_MODES[key])["exists"]]
+
+    def _pack_index(self, key: str):
+        """팩의 자리 색인. 팩이 없거나 못 읽으면 None. 팩이 갈렸으면(크기 · 시각) 다시 훑는다."""
+        from core.artist_pack_index import ArtistPackIndex
+
+        if key not in self.ARTIST_THUMB_MODES:
+            return None
+        with self._pack_index_lock:
+            index = self._pack_indexes.get(key)
+            if index is not None and index.is_current():
+                return index
+            path = self._mode_path(key)
+            try:
+                index = ArtistPackIndex(path, self.state_root / "pack_index" / f"{path.name}.idx.json")
+            except Exception as exc:
+                _safe_log(f"🌐 Headless Artist Thumb: pack index failed ({key}) — {exc}",
+                          f"[WARN] Headless Artist Thumb: pack index failed ({key}) - {exc}")
+                return None
+            if index.signature is None:
+                return None
+            self._pack_indexes[key] = index
+            return index
+
+    def used_artist_tiles(self, names: list[str], mode: str = "") -> list[dict]:
+        """작가 이름들 -> 타일(이름 · 게시물 수 · 그림 주소). 그림이 없으면 `image_url` 이 빈 글이다.
+
+        팩은 차례대로 보고, 전부 찾으면 남은 팩은 훑지 않는다(첫 색인은 팩마다 몇 초가 든다).
+        """
+        from urllib.parse import quote
+
+        wanted: list[str] = []
+        for name in names:
+            clean = " ".join(str(name or "").split())
+            if clean and clean.casefold() not in {w.casefold() for w in wanted}:
+                wanted.append(clean)
+        found: dict[str, tuple[str, str]] = {}
+        for key in self._used_pack_order(mode):
+            missing = [name for name in wanted if name not in found]
+            if not missing:
+                break
+            index = self._pack_index(key)
+            if index is None:
+                continue
+            for name in missing:
+                actual = index.find(name)
+                if actual is not None:
+                    found[name] = (key, actual)
+        weights = self._dictionary_weights()
+        rows = []
+        for name in wanted:
+            key, actual = found.get(name, ("", ""))
+            rows.append({
+                "name": actual or name,
+                "count": int(weights.get(actual or name) or weights.get(name.lower()) or 0),
+                "pack": key,
+                "pack_label": str(self.ARTIST_THUMB_MODES[key].get("label") or key) if key else "",
+                "image_url": (f"/api/artist-thumb/used-image?mode={quote(key, safe='')}"
+                              f"&artist={quote(actual, safe='')}") if key else "",
+            })
+        return rows
+
+    def used_image_payload(self, mode: str, artist: str) -> tuple[bytes, str]:
+        """`image_payload` 와 같은 그림을 팩을 올리지 않고 낸다(같은 캐시를 쓴다)."""
+        mode_key = str(mode or "").strip()
+        artist_name = str(artist or "").strip()
+        if not mode_key or not artist_name:
+            raise ValueError("mode and artist are required")
+        cache_key = (mode_key, artist_name)
+        with self._lock:
+            cached = self._image_cache.get(cache_key)
+            if cached:
+                return cached
+        index = self._pack_index(mode_key)
+        actual = index.find(artist_name) if index is not None else None
+        if actual is None:
+            raise FileNotFoundError(f"Artist thumbnail not found: {artist_name}")
+        payload = self._image_payload_from_encoded(index.read(actual))
+        with self._lock:
+            if len(self._image_cache) > 512:
+                self._image_cache.pop(next(iter(self._image_cache)), None)
+            self._image_cache[cache_key] = payload
+        return payload
 
     GENERATED_THUMB_MAX_SIZE = (896, 1152)
     GENERATED_UNKNOWN_MODEL = "unknown"

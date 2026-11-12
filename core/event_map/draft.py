@@ -38,7 +38,8 @@ _MESSAGES = {
     "zero_match": "조건에 맞는 게시물이 없습니다.",
     "stale": "조건이 바뀌었습니다. 최신 상태에서 다시 시도해주세요.",
     "duplicate": "이미 있는 칩입니다.",
-    "rating_in_exclude": "등급은 포함 칸에서 고르세요",
+    "rating_toggle": "등급은 위 G · S · Q · E 단추로 고릅니다",
+    "rating_empty": "등급은 하나 이상 켜져 있어야 합니다.",
     "too_many": "칩 개수 또는 글자 수 상한을 넘었습니다.",
     "no_include": "포함 조건이 하나 이상 있어야 합니다.",
     "unavailable": "이벤트 맵 색인을 먼저 받아주세요.",
@@ -560,6 +561,17 @@ class EventMapDraft:
         idx = self._index()
         return self._condition(state, idx, self.service.permanent_block(idx)).count
 
+    def rating_counts(self, state, *, idx=None):
+        """등급별 남는 게시물 수 - 등급 조건만 뺀 나머지 조건 안에서. 0 인 축은 켤 수 없다."""
+        idx = idx or self._index()
+        block = self.service.permanent_block(idx)
+        base = self._condition(dict(state, ratings=[]), idx, block)
+        out = {}
+        for rating in RATINGS:
+            partition, _, _ = self._auxiliary(dict(state, ratings=[rating]), idx, block)
+            out[rating] = int(np.bitwise_count(base.packed & partition).sum(dtype=np.int64))
+        return out
+
     def _parse(self, text):
         raw = str(text or "").strip()
         exact = raw.startswith("*")
@@ -587,12 +599,8 @@ class EventMapDraft:
             return blocked("too_many")
         candidate = deepcopy(state)
         if rating:
-            out.update(kind="rating", rating=rating)
-            if zone == "exclude":
-                return blocked("rating_in_exclude")
-            if rating in state["ratings"]:
-                return blocked("duplicate")
-            candidate["ratings"].append(rating)
+            # 등급은 칩이 아니다 - 판의 G · S · Q · E 단추(`chips` op "ratings")로만 고른다(사용자 결정 2026-11-12).
+            return blocked("rating_toggle")
         else:
             mask = idx.matching_tags(clean, exact)
             out["hits"] = int(np.count_nonzero(mask))
@@ -639,10 +647,22 @@ class EventMapDraft:
             if result["kind"] == "extra":
                 candidate["extra"] += (", " if candidate["extra"] else "") + result["text"]
                 return _finish(state, candidate)
-            if result["kind"] == "rating":
-                candidate["ratings"].append(result["rating"])
-            else:
-                _chip(candidate, zone, result["text"], result["exact"])
+            _chip(candidate, zone, result["text"], result["exact"])
+        elif op == "ratings":
+            # text = 켜 둘 등급 글자들("sq"). 빈 state["ratings"] = 넷 다 켬(등급 조건 없음).
+            want = set(text) if isinstance(text, str) else None
+            if want is None or want - set(RATINGS) or len(text) != len(want):
+                raise DraftError("too_many", "등급을 확인해주세요.")
+            if not want:
+                raise DraftError("rating_empty")
+            was = set(state["ratings"] or RATINGS)
+            if want - was:
+                counts = self.rating_counts(state)
+                if any(not counts[r] for r in want - was):
+                    raise DraftError("zero_match")       # 남는 게시물이 없는 축은 켤 수 없다
+            candidate["ratings"] = [] if want == set(RATINGS) else [r for r in RATINGS if r in want]
+            if candidate["ratings"] != state["ratings"] and not self.count(candidate):
+                raise DraftError("zero_match")
         elif op == "remove" and id == "persons":
             candidate["tags"]["persons"] = []
         elif op == "remove" and id in ["r:" + r for r in candidate["ratings"]]:
@@ -709,8 +729,11 @@ class EventMapDraft:
             idx = self._index()
         except DraftError:
             idx = None
+        result["ratings_on"] = [r for r in RATINGS if r in (state["ratings"] or RATINGS)]
+        result["rating_counts"] = None
         if idx is not None:
             result["remaining"] = self._condition(state, idx, self.service.permanent_block(idx)).count
+            result["rating_counts"] = self.rating_counts(state, idx=idx)
         for zone in ("include", "exclude"):
             for c in state[zone]:
                 row = {"id": c["id"], "count": self._chip_count(idx, c) if idx else 0,
@@ -752,15 +775,7 @@ class EventMapDraft:
         pool = (not counts and current is not None and current.count <= POOL_LIMIT
                 and (current.count <= POOL_INLINE or current.has_tag_counts()))
         vector = current.tag_counts(idx) if pool else None
-        items = []
-        for rating, name in RATINGS.items():
-            if rating in state["ratings"] or not any(a.startswith(raw) for a, r in RATING_ALIASES.items() if r == rating):
-                continue
-            items.append({"tag": "rating:" + name, "kind": "rating", "rating": rating,
-                          "label": "rating:" + name, "kr": None, "group": "rating",
-                          "count_after": None, "slow": False, "blocked": zone == "exclude",
-                          "hits": None, "observed": None, "major": {"id": "rating", "label": "등급"},
-                          "minor": None, "path": None, "desc": None})
+        items = []      # 등급 줄은 없다 - 등급은 판의 단추로 고른다(2026-11-12)
         picked, _, groups = self.service.suggest_candidates(raw, 20, kr_lookup=self.kr_lookup)
         existing = {c["text"] for z in ("include", "exclude") for c in state[z]}
         bound = None if pool or exact else ("min" if zone == "include" else "max")

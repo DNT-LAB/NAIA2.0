@@ -34178,7 +34178,21 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   border-top: 1px solid rgba(232,232,240,0.08);
   font-size: 11.5px;
 }
-.dr-sum .dr-rating { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 등급 단추 G · S · Q · E(사용자 지시 11-12). 색은 이벤트 맵 등급 단추(.em-rating-btn)와 같다. */
+.dr-rates { flex: none; display: inline-flex; gap: 2px; align-items: center; }
+.dr-rate {
+  position: relative; padding: 3px 7px; border: 1px solid var(--border-dim); border-radius: 4px;
+  background: transparent; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 700; line-height: 1.2; cursor: pointer;
+}
+.dr-rate:hover { border-color: var(--text-dim); }
+.dr-rate.is-on[data-dr-rate="g"] { background: #2e7d32; color: #fff; border-color: #4CAF50; }
+.dr-rate.is-on[data-dr-rate="s"] { background: #1565C0; color: #fff; border-color: #2196F3; }
+.dr-rate.is-on[data-dr-rate="q"] { background: #e65100; color: #fff; border-color: #FF9800; }
+.dr-rate.is-on[data-dr-rate="e"] { background: #c62828; color: #fff; border-color: #F44336; }
+.dr-rate.is-zero { opacity: 0.35; }
+.dr-rate.is-zero:not(.is-on) { cursor: not-allowed; text-decoration: line-through; }
+.dr-rate.is-out::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: -4px; height: 2px; background: #c9a227; }
 .dr-sum .dr-btn { flex: none; }
 .dr-btn--icon { padding: 3px 8px; font-size: 12px; line-height: 1; }
 .dr-big { font-size: 13px; font-weight: 600; color: #9d8bff; font-family: var(--font-mono); }

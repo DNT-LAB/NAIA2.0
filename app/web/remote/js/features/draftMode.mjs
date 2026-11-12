@@ -505,7 +505,6 @@ export function initDraftMode({
     const der = snap?.derived || {};
     let html = '';
     if (zone === 'include') {
-      html += (st.ratings || []).map(r => tagChipHtml(`r:${r}`, RATING_LABEL[r] || r, '등급 - 여럿이면 그중 하나(OR)', ' is-rating')).join('');
       if ((st.tags?.persons || []).length) html += tagChipHtml('persons', `인원: ${der.persons_label || st.tags.persons.join(', ')}`, '스테이징에서 온 인원 분면 - 지우기만 됩니다');
       html += (st.include || []).map(c => chipHtml(c, 'include', derivedOf(der.include, c.id))).join('');
     } else {
@@ -553,7 +552,21 @@ export function initDraftMode({
   function paintSum() {
     const der = snap?.derived || {};
     const remaining = der.remaining;
-    const rating = der.rating_out ? `<span class="dr-rating" title="이 등급 태그가 프롬프트에 들어갑니다">${esc(der.rating_out)}</span>` : '';
+    // 등급 = G · S · Q · E 켜고 끄기(사용자 지시 11-12 - 글로 치지 않는다). 넷 다 켬 = 등급 조건 없음.
+    // 남는 게시물이 없는 축은 켤 수 없다(is-zero). 켜 둔 축이 나중에 0건이 되면 켜진 채 흐리게만 - 저절로 끄지 않는다.
+    // 프롬프트에 들어가는 등급(뽑힌 게시물의 등급)은 그 단추 아래 노란 줄로 보인다.
+    const on = new Set(der.ratings_on || ['g', 's', 'q', 'e']);
+    const counts = der.rating_counts || null;
+    const out = String(der.rating_out || '').replace(/^rating:/, '').charAt(0);
+    const rating = `<span class="dr-rates" role="group" aria-label="등급">${['g', 's', 'q', 'e'].map(r => {
+      const n = counts ? Number(counts[r] || 0) : null;
+      const zero = n === 0;
+      const name = RATING_LABEL[r].replace('rating:', '');
+      const tip = zero ? `${name} - 이 조건에는 게시물이 없습니다${on.has(r) ? '' : ' (켤 수 없음)'}`
+        : `${name}${n == null ? '' : ` ${fmt(n)}`}${out === r ? ' · 이 등급 태그가 프롬프트에 들어갑니다' : ''}`;
+      return `<button type="button" class="dr-rate${on.has(r) ? ' is-on' : ''}${zero ? ' is-zero' : ''}${out === r ? ' is-out' : ''}"`
+        + ` data-dr-rate="${r}" aria-pressed="${on.has(r)}"${zero && !on.has(r) ? ' aria-disabled="true"' : ''} title="${esc(tip)}">${r.toUpperCase()}</button>`;
+    }).join('')}</span>`;
     sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}
       <span class="dr-gap"></span>
       <button type="button" class="dr-btn dr-btn--icon" data-dr-stage title="스테이징으로 보내기 - 지금 칩 조건을 스테이징 줄 하나로"
@@ -662,6 +675,22 @@ export function initDraftMode({
     }
     return true;
   }
+  /** 등급 단추 - 켜 둘 집합을 통째로 보낸다(`op: ratings`). 서버가 한 번 더 막는다(0건 축 · 전부 끔). */
+  function toggleRating(r) {
+    const der = snap?.derived || {};
+    const on = new Set(der.ratings_on || ['g', 's', 'q', 'e']);
+    if (on.has(r)) {
+      if (on.size === 1) { showToast('등급은 하나 이상 켜져 있어야 합니다', 'warning'); return; }
+      on.delete(r);
+    } else {
+      if (der.rating_counts && !Number(der.rating_counts[r] || 0)) {
+        showToast('이 조건에는 그 등급의 게시물이 없어 켤 수 없습니다', 'warning');
+        return;
+      }
+      on.add(r);
+    }
+    void chipOp({ op: 'ratings', text: ['g', 's', 'q', 'e'].filter(x => on.has(x)).join('') });
+  }
   async function chipOp(body) {
     try { receive(await edit('/draft/chips', body)); }
     catch (error) { showToast(error.message || 'Draft 요청 실패', error.code === 'zero_match' ? 'warning' : 'error'); }
@@ -675,7 +704,6 @@ export function initDraftMode({
     if (zone === 'include') {
       if ((st.include || []).length) return st.include[st.include.length - 1].id;
       if ((st.tags?.persons || []).length) return 'persons';
-      if ((st.ratings || []).length) return `r:${st.ratings[st.ratings.length - 1]}`;
       return '';
     }
     if ((st.tags?.groups || []).length) return st.tags.groups[st.tags.groups.length - 1].id;
@@ -986,6 +1014,8 @@ export function initDraftMode({
     const gray = t.closest('[data-dr-gray]');
     if (gray) { grayMenu(gray); return; }
     if (t.closest('[data-dr-drawn-open]')) { toggleDrawnPanel(); return; }
+    const rate = t.closest('[data-dr-rate]');
+    if (rate) { toggleRating(rate.dataset.drRate); return; }
     if (t.closest('[data-dr-stage]')) { void sendToStaging(); return; }
     if (t.closest('[data-dr-from]')) { openStaging(); return; }
     const zone = t.closest('[data-dr-zone]');

@@ -80,7 +80,7 @@ def register_state_routes(
         if not isinstance(payload, dict):
             return bad
         request_id = payload.get("request_id")
-        if request_id is not None and not isinstance(request_id, str):
+        if "request_id" in payload and not isinstance(request_id, str):   # null 도 글이 아니다
             return bad
         return cancel_local_generation(session_context, request_id=(request_id or "").strip() or None)
 

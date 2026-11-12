@@ -410,12 +410,17 @@ class LlamaServerRuntime:
 
     # ── 수명 ─────────────────────────────────────────────────────────────
 
-    def stop(self, reason: str = "", graceful: bool = True, graceful_seconds: float | None = None) -> None:
+    def stop(self, reason: str = "", graceful: bool = True, deadline: float | None = None) -> None:
         """엔진을 내린다. 떠 있던 프로세스가 있으면 이유 · 장치 · 결과를 엔진 로그에 한 줄 남긴다.
         ``graceful=False`` 는 곧바로 강제 종료 — 요청이 도는 중인 줄 아는 때(제한시간 초과)에 쓴다: 실측(11-07 b10830)
         생성 도중의 Ctrl+C 는 정리를 시작하지만 5초 안에 끝나지 않았다(쉬는 엔진은 0.5~0.7초).
-        ``graceful_seconds`` 는 Ctrl+C 를 보내고 기다리는 시간의 상한(없으면 GRACEFUL_EXIT_SECONDS) — 앱 종료 때 남은
-        시간만 준다(shutdown)."""
+        ``deadline``(time.monotonic 값)은 이 내림 **전체**의 시한이다 — 앱 종료(shutdown)가 준다. Ctrl+C 대기는 그 안에서
+        강제 종료 몫(SHUTDOWN_FORCE_RESERVE_SECONDS)을 남기고, terminate · kill 뒤의 기다림도 남은 시간까지만 한다
+        (없으면 예전대로 5초 · 3초 · 3초)."""
+
+        def left(cap: float) -> float:
+            return cap if deadline is None else max(0.05, min(cap, deadline - time.monotonic()))
+
         with self._proc_lock:
             self._cancel_idle_timer()
             proc, self._proc = self._proc, None
@@ -428,18 +433,20 @@ class LlamaServerRuntime:
                                     "engine": self._engine_label()}
                 note = {"pid": proc.pid, "gpu": launch["gpu"], "device": launch["device"],
                         "engine": launch.get("engine") or self._engine_label()}
+                graceful_seconds = (None if deadline is None
+                                    else deadline - time.monotonic() - SHUTDOWN_FORCE_RESERVE_SECONDS)
                 method = self._graceful_exit(proc, graceful_seconds) if graceful else "skip"
                 if method != "ctrl_c":
                     # 정상 종료가 안 됐다 — 예전 방식(강제 종료)
                     method += "+terminate"
                     proc.terminate()
                     try:
-                        proc.wait(timeout=3)
+                        proc.wait(timeout=left(3))
                     except subprocess.TimeoutExpired:
                         method += "+kill"
                         proc.kill()
                         try:
-                            proc.wait(timeout=3)
+                            proc.wait(timeout=left(3))
                         except subprocess.TimeoutExpired:
                             method += "(not-exited)"
                 note["method"] = method
@@ -502,9 +509,10 @@ class LlamaServerRuntime:
         """앱 종료 직전(Electron prepare-shutdown) — 다시 올리기(요청 · 예열 · CPU 재시도)를 막고, 도는 요청을
         ``timeout`` 까지 기다린 뒤 내린다. 기다림이 끝나지 않으면 그대로 내린다 — 곧 백엔드가 강제로 꺼지므로 더 미룰 수
         없다(그때는 요청 도중일 수 있다). 결과는 엔진 로그에도 남긴다.
-        요청 대기와 Ctrl+C 대기는 한 시한(SHUTDOWN_BUDGET_SECONDS)을 나눠 쓴다 — 요청을 오래 기다렸으면 Ctrl+C 는 남은
-        시간만 기다린다(셸이 8초에 백엔드를 끊는다)."""
+        요청 대기 · Ctrl+C 대기 · 강제 종료 뒤의 기다림이 모두 한 시한(SHUTDOWN_BUDGET_SECONDS)을 나눠 쓴다 — 요청을 오래
+        기다렸으면 그 뒤는 남은 시간만 기다린다(셸이 8초에 백엔드를 끊는다)."""
         started = time.monotonic()
+        deadline = started + SHUTDOWN_BUDGET_SECONDS
         with self._proc_lock:
             self._shutting_down = True
             self._cancel_idle_timer()
@@ -514,14 +522,13 @@ class LlamaServerRuntime:
             self._lease_timer = self._unload_timer = None
             running = self._proc is not None and self._proc.poll() is None
             busy = self._slot.locked()
-        got = self._slot.acquire(timeout=max(0.0, float(timeout)))
+        got = self._slot.acquire(timeout=max(0.0, min(float(timeout), SHUTDOWN_BUDGET_SECONDS - 1.0)))
         waited = round(time.monotonic() - started, 2)
         try:
             if got:
-                left = SHUTDOWN_BUDGET_SECONDS - (time.monotonic() - started) - SHUTDOWN_FORCE_RESERVE_SECONDS
-                self.stop(reason="app_exit", graceful_seconds=max(0.0, left))
+                self.stop(reason="app_exit", deadline=deadline)
             else:
-                self.stop(reason="app_exit_after_wait_timeout", graceful=False)
+                self.stop(reason="app_exit_after_wait_timeout", graceful=False, deadline=deadline)
         finally:
             if got:
                 self._slot.release()

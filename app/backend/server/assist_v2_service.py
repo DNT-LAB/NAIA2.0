@@ -755,6 +755,10 @@ def _rag_retriever(context: Any, state: dict[str, Any]) -> Any:
                     context.assist_rag_load_error = f"{type(exc).__name__}: {exc}"
                     raise
                 context.assist_rag_pack = pack
+                if getattr(context, "boost_llama_shutting_down", False):
+                    # 앱 종료가 이미 시작됐다 — 임베딩 엔진을 올리지 않는다. 팩을 걸어 둔 **뒤에** 표식을 본다:
+                    # shutdown_boost_runtime 은 표식을 세운 뒤에 팩을 읽으므로 둘 중 한쪽은 반드시 본다.
+                    pack.runtime.block_starts()
         state.update(enabled=True, dimensions=768, records=pack.signature["records"], min_score=MIN_SCORE,
                      load_ms=round((time.perf_counter() - load_started) * 1000, 1))
     except Exception as exc:

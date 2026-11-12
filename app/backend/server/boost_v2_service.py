@@ -325,6 +325,27 @@ def shutdown_boost_runtime(context: Any, timeout: float = 5.0) -> dict[str, Any]
     with _RUNTIME_LOCK:
         context.boost_llama_shutting_down = True
         runtime = getattr(context, "boost_llama_runtime", None)
+    # Assist 검색의 임베딩 엔진은 따로 있는 런타임이다(core/assist_rag.py · CPU) — 같이 막고 내린다. 둘을 나란히 내려
+    # 기다림이 겹쳐 쌓이지 않게 한다. 표식을 먼저 세우고 읽는다: 만드는 쪽(assist_v2_service)은 팩을 걸어 둔 뒤 표식을 본다.
+    pack = getattr(context, "assist_rag_pack", None)
+    embedding = getattr(pack, "runtime", None)
+    side = None
+    if embedding is not None:
+        def _stop_embedding() -> None:
+            try:
+                embedding.shutdown(timeout)
+            except Exception:
+                pass
+        side = threading.Thread(target=_stop_embedding, daemon=True, name="llama-embedding-shutdown")
+        side.start()
+    try:
+        return _shutdown_main_runtime(runtime, timeout)
+    finally:
+        if side is not None:
+            side.join(timeout=8.0)
+
+
+def _shutdown_main_runtime(runtime: Any, timeout: float) -> dict[str, Any] | None:
     if runtime is None:
         return None
     try:

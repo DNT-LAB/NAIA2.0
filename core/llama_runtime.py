@@ -76,6 +76,11 @@ DEFAULT_IDLE_SECONDS = 180.0
 SAMPLING: dict[str, float] = {"temperature": 1.0, "top_p": 0.95, "top_k": 64, "min_p": 0.0}
 # 엔진을 내릴 때 Ctrl+C 뒤 스스로 나가기를 기다리는 시간 — 넘기면 강제 종료(0 이면 곧바로 강제 종료).
 GRACEFUL_EXIT_SECONDS = 5.0
+# 앱 종료 정리(shutdown)가 통틀어 쓸 수 있는 시간 — Electron 은 prepare-shutdown 을 8초만 기다린 뒤 백엔드를 강제로
+# 끈다(main.cjs). 요청 대기 5초 + Ctrl+C 5초 + 강제 종료를 따로 재면 그 8초를 넘겨, 엔진이 자원을 푸는 도중에 끊긴다
+# (Codex 리뷰 11-12). 요청 대기 뒤 남은 시간만 Ctrl+C 에 준다.
+SHUTDOWN_BUDGET_SECONDS = 7.0
+SHUTDOWN_FORCE_RESERVE_SECONDS = 0.5   # 정상 종료가 안 됐을 때 강제 종료에 남겨 두는 몫
 # GPU 로 못 띄웠거나 GPU 에서 죽은 뒤 GPU 를 다시 시도하기까지(초). 실패 시각부터 잰다 — 다시 실패하면 그때부터 또 잰다.
 # 엔진이 내려가 있을 때 다음 올림에서만 시도한다(떠 있는 CPU 엔진을 바꾸지 않는다). Assist 임대(10분)와 같은 길이.
 GPU_RETRY_SECONDS = 600.0
@@ -115,7 +120,7 @@ _CTRL_C_HELPER = (
 )
 
 
-def _send_ctrl_c(pid: int) -> bool:
+def _send_ctrl_c(pid: int, timeout: float = 5.0) -> bool:
     """엔진(pid)에 Ctrl+C 를 보낸다 — 보냈으면 True. llama-server 는 첫 Ctrl+C 에 요청을 끊고 모델 · GPU 자원을 풀고 나간다."""
     if os.name != "nt":
         return False
@@ -123,7 +128,7 @@ def _send_ctrl_c(pid: int) -> bool:
         done = subprocess.run(
             [sys.executable, "-I", "-c", _CTRL_C_HELPER, str(int(pid))],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=5,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=max(0.1, min(5.0, float(timeout))),
         )
         return done.returncode == 0
     except Exception:
@@ -405,10 +410,12 @@ class LlamaServerRuntime:
 
     # ── 수명 ─────────────────────────────────────────────────────────────
 
-    def stop(self, reason: str = "", graceful: bool = True) -> None:
+    def stop(self, reason: str = "", graceful: bool = True, graceful_seconds: float | None = None) -> None:
         """엔진을 내린다. 떠 있던 프로세스가 있으면 이유 · 장치 · 결과를 엔진 로그에 한 줄 남긴다.
         ``graceful=False`` 는 곧바로 강제 종료 — 요청이 도는 중인 줄 아는 때(제한시간 초과)에 쓴다: 실측(11-07 b10830)
-        생성 도중의 Ctrl+C 는 정리를 시작하지만 5초 안에 끝나지 않았다(쉬는 엔진은 0.5~0.7초)."""
+        생성 도중의 Ctrl+C 는 정리를 시작하지만 5초 안에 끝나지 않았다(쉬는 엔진은 0.5~0.7초).
+        ``graceful_seconds`` 는 Ctrl+C 를 보내고 기다리는 시간의 상한(없으면 GRACEFUL_EXIT_SECONDS) — 앱 종료 때 남은
+        시간만 준다(shutdown)."""
         with self._proc_lock:
             self._cancel_idle_timer()
             proc, self._proc = self._proc, None
@@ -421,7 +428,7 @@ class LlamaServerRuntime:
                                     "engine": self._engine_label()}
                 note = {"pid": proc.pid, "gpu": launch["gpu"], "device": launch["device"],
                         "engine": launch.get("engine") or self._engine_label()}
-                method = self._graceful_exit(proc) if graceful else "skip"
+                method = self._graceful_exit(proc, graceful_seconds) if graceful else "skip"
                 if method != "ctrl_c":
                     # 정상 종료가 안 됐다 — 예전 방식(강제 종료)
                     method += "+terminate"
@@ -454,15 +461,18 @@ class LlamaServerRuntime:
                     f"device={note['device']} engine={note['engine']} method={note['method']} "
                     f"exit={note['exit']} seconds={note['seconds']}")
 
-    def _graceful_exit(self, proc: Any) -> str:
+    def _graceful_exit(self, proc: Any, seconds: float | None = None) -> str:
         """Ctrl+C 를 보내고 ``GRACEFUL_EXIT_SECONDS`` 까지 기다린다. 나갔으면 'ctrl_c', 아니면 왜 못 했는지.
         내가 띄운 진짜 프로세스(Popen)에만 보낸다 — 가짜 · 남의 pid 에 신호가 가지 않게."""
-        if GRACEFUL_EXIT_SECONDS <= 0 or os.name != "nt" or not isinstance(proc, subprocess.Popen):
+        limit = GRACEFUL_EXIT_SECONDS if seconds is None else min(GRACEFUL_EXIT_SECONDS, float(seconds))
+        if limit <= 0 or os.name != "nt" or not isinstance(proc, subprocess.Popen):
             return "skip"
-        if not _send_ctrl_c(proc.pid):
+        started = time.monotonic()
+        if not _send_ctrl_c(proc.pid, limit):
             return "ctrl_c_failed"
         try:
-            proc.wait(timeout=GRACEFUL_EXIT_SECONDS)
+            # 도우미가 쓴 시간도 같은 몫에서 뺀다
+            proc.wait(timeout=max(0.05, limit - (time.monotonic() - started)))
             return "ctrl_c"
         except subprocess.TimeoutExpired:
             return "ctrl_c_timeout"
@@ -491,7 +501,9 @@ class LlamaServerRuntime:
     def shutdown(self, timeout: float = 5.0) -> dict[str, Any]:
         """앱 종료 직전(Electron prepare-shutdown) — 다시 올리기(요청 · 예열 · CPU 재시도)를 막고, 도는 요청을
         ``timeout`` 까지 기다린 뒤 내린다. 기다림이 끝나지 않으면 그대로 내린다 — 곧 백엔드가 강제로 꺼지므로 더 미룰 수
-        없다(그때는 요청 도중일 수 있다). 결과는 엔진 로그에도 남긴다."""
+        없다(그때는 요청 도중일 수 있다). 결과는 엔진 로그에도 남긴다.
+        요청 대기와 Ctrl+C 대기는 한 시한(SHUTDOWN_BUDGET_SECONDS)을 나눠 쓴다 — 요청을 오래 기다렸으면 Ctrl+C 는 남은
+        시간만 기다린다(셸이 8초에 백엔드를 끊는다)."""
         started = time.monotonic()
         with self._proc_lock:
             self._shutting_down = True
@@ -506,7 +518,8 @@ class LlamaServerRuntime:
         waited = round(time.monotonic() - started, 2)
         try:
             if got:
-                self.stop(reason="app_exit")
+                left = SHUTDOWN_BUDGET_SECONDS - (time.monotonic() - started) - SHUTDOWN_FORCE_RESERVE_SECONDS
+                self.stop(reason="app_exit", graceful_seconds=max(0.0, left))
             else:
                 self.stop(reason="app_exit_after_wait_timeout", graceful=False)
         finally:
@@ -573,8 +586,18 @@ class LlamaServerRuntime:
             device = self.device or "auto"
         self._log_event(f"gpu retry after={round(waited)}s device={device}")
 
+    def block_starts(self) -> None:
+        """앱 종료가 시작된 뒤에 만들어진 런타임 — 처음부터 엔진을 올리지 않는다(boost_v2_service.get_boost_runtime)."""
+        with self._proc_lock:
+            self._shutting_down = True
+
     def _ensure(self, deadline: float) -> int:
         """엔진을 요구 설정대로 띄워 둔다. GPU 로 시작하지 못하면 이유를 남기고 **CPU 로 한 번 더** 띄운다."""
+        # 종료 중에는 **떠 있는 엔진도** 새 요청에 쓰지 않는다 — shutdown 이 슬롯을 기다리는 사이 줄 서 있던 요청이 슬롯을
+        # 먼저 쥐면 새 추론이 시작되고, 종료는 기다림을 다 쓴 뒤 도는 요청을 강제로 끊었다(Codex 리뷰 11-12).
+        # _launch 의 검사는 새로 올리는 길만 막는다. 슬롯을 쥔 쪽(chat · warm · embed)은 모두 여기를 지난다.
+        if self._shutting_down:
+            raise LlamaRuntimeError("앱 종료 중 — 엔진을 쓰지 않습니다.")
         self._maybe_retry_gpu()
         try:
             return self._launch(deadline)

@@ -56,6 +56,10 @@ def get_boost_runtime(context: Any, settings: dict[str, Any] | None = None) -> A
             runtime = LlamaServerRuntime(engine, model, idle_seconds=0, use_gpu=use_gpu, device=device,
                                          managed_engine=managed, managed_model=spec,
                                          log_path=save_root / "logs" / "boost_llama_server.log")
+            if getattr(context, "boost_llama_shutting_down", False):
+                # 앱 종료가 이미 시작됐다 — 위의 장치 조회가 도는 사이 shutdown_boost_runtime 이 지나갔다(그때는 런타임이
+                # 없어 막을 것이 없었다). 막지 않으면 종료 중에 엔진이 올라온다(Codex 리뷰 11-12).
+                runtime.block_starts()
             context.boost_llama_runtime = runtime
         else:
             runtime.configure(engine, model, use_gpu=use_gpu, device=device,
@@ -316,8 +320,11 @@ def release_boost_runtime(context: Any) -> None:
 
 def shutdown_boost_runtime(context: Any, timeout: float = 5.0) -> dict[str, Any] | None:
     """앱 종료 직전 — 엔진을 다시 못 올리게 하고, 도는 요청을 잠시 기다린 뒤 내린다(core/llama_runtime.shutdown).
-    엔진을 한 번도 안 만들었으면 None."""
-    runtime = getattr(context, "boost_llama_runtime", None)
+    엔진을 한 번도 안 만들었으면 None — 그래도 종료 표식은 남긴다: 지금 만들어지는 중인 런타임(get_boost_runtime 의
+    장치 조회 뒤)이 그 표식을 보고 처음부터 막힌 채 태어난다. 표식과 런타임 읽기는 만드는 쪽과 같은 락 안에서 한다."""
+    with _RUNTIME_LOCK:
+        context.boost_llama_shutting_down = True
+        runtime = getattr(context, "boost_llama_runtime", None)
     if runtime is None:
         return None
     try:

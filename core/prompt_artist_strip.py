@@ -335,7 +335,7 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     """
     text = str(text or "")
     events, keys = _events(text), _known_keys(known)
-    remove, removed, rewritten = set(), [], []
+    remove, removed, rewritten = set(), [], {}
     for i, event in enumerate(events):
         if event.kind != "TAG":
             continue
@@ -349,7 +349,7 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
         if inside is not None:
             # SD 묶음 안의 작가만 걷는다. 남는 것이 없으면 묶음째로.
             if inside:
-                rewritten.append((chunk, inside))
+                rewritten[i] = (chunk, inside)
                 event.text = inside + event.text[len(chunk):]
             else:
                 remove.add(i)
@@ -363,16 +363,35 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     if remove:
         stripped = _remove(text, events, remove)
     else:
-        stripped, at = text, 0
-        for before, after in rewritten:                 # 글에 나온 차례 그대로 - 앞에서부터 하나씩 찾는다
-            found = stripped.find(before, at)
-            if found < 0:
-                stripped = _remove(text, events, remove, force=True)
-                break
-            stripped = stripped[:found] + after + stripped[found + len(before):]
-            at = found + len(after)
+        stripped = _replace_in_place(text, events, rewritten)
+        if stripped is None:
+            stripped = _remove(text, events, remove, force=True)
     people, body = _hoist_people(stripped)
     return {"prompt": _join(", ".join(people), token, body), "removed": removed}
+
+
+def _replace_in_place(text, events, rewritten):
+    """고친 묶음만 원문의 **제자리에서** 갈아 끼운 글. 자리를 못 짚으면 None.
+
+    조각은 원문에 차례대로 놓여 있다 - 앞에서부터 **모든 조각을** 하나씩 짚어 가며 제 조각의 자리만 바꾼다.
+    고친 묶음의 글만 찾으면 앞선 다른 조각 속의 같은 글을 집는다(Codex 리뷰 2026-11-12 4차:
+    `<lora:style (dairi, smile):1>, (dairi, smile)` 에서 LoRA 이름이 바뀌고 정작 묶음의 작가는 남았다).
+    """
+    out, cursor, last = [], 0, 0
+    for i, event in enumerate(events):
+        piece = (rewritten[i][0] if i in rewritten else event.text).strip()
+        if not piece:
+            continue
+        found = text.find(piece, cursor)
+        if found < 0:
+            return None
+        if i in rewritten:
+            out.append(text[last:found])
+            out.append(rewritten[i][1])
+            last = found + len(piece)
+        cursor = found + len(piece)
+    out.append(text[last:])
+    return "".join(out)
 
 
 def _remove(text, events, remove, force=False):

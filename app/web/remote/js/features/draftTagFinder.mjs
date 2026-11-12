@@ -45,6 +45,7 @@ export function initDraftTagFinder({
   let labels = new Map();        // 갈래 id -> 라벨
   let error = '';
   let loading = false;
+  let stale = false;           // 조건이 바뀌었고 새 목록을 기다리는 중 - 옛 줄은 누르지 못한다
   let seq = 0;
   let ctl = null;
   let qTimer = 0;
@@ -138,6 +139,7 @@ export function initDraftTagFinder({
     const snap = getSnapshot();
     lastRev = revOf(snap);
     lastKey = condKey(snap);
+    q = qEl.value.trim();          // 닫기 전에 친 글(디바운스 전)이 칸에 남아 있다 - 칸과 요청을 맞춘다(리뷰 3차 #7)
     void load({ top: true });
     try { qEl.focus({ preventScroll: true }); } catch (_) {}
   }
@@ -196,7 +198,12 @@ export function initDraftTagFinder({
     const nowSnap = getSnapshot();
     const nowRev = revOf(nowSnap);
     const gotRev = got.rev != null ? Number(got.rev) : null;
-    const fresh = gotRev === nowRev || (gotRev === reqRev && reqKey === condKey(nowSnap));
+    // 조건의 지문이 같으면 지금 조건의 목록이다 - rev 는 뽑기 · Extra 로도 오르므로 Auto Gen 중에는 rev 가 끝내 안 맞았다
+    // (리뷰 3차 #5). 옛 백엔드(cond 없음)면 예전처럼 rev 로 가린다.
+    const nowCond = nowSnap?.derived?.cond;
+    const fresh = (got.cond != null && nowCond != null)
+      ? got.cond === nowCond
+      : (gotRev === nowRev || (gotRev === reqRev && reqKey === condKey(nowSnap)));
     if (!fresh) {
       if (attempt >= 3) {
         loading = false;
@@ -216,6 +223,8 @@ export function initDraftTagFinder({
     }
     loading = false;
     error = '';
+    stale = false;
+    listEl.classList.remove('is-stale');
     // 고른 갈래가 새 조건에서 0 이 됐다(탭이 사라진다) - [전체] 로 돌아가 다시 받는다
     if (group && top && Number(got.pool) > 0 && !(got.group_counts || []).some(g => g.id === group)) {
       group = '';
@@ -348,6 +357,8 @@ export function initDraftTagFinder({
   // ---- 칩 넣기 ----
   async function put(zone, it) {
     if (!it || pending.has(it.tag)) return;
+    // 조건이 바뀌었는데 새 목록이 아직 안 왔다 - 옛 줄(옛 '전부' 판정 · 이미 넣은 태그)은 누르지 못한다(리뷰 3차 #6)
+    if (stale) return;
     if (zone === 'include' && it.all) { showToast(ALL_TOAST, 'info'); return; }
     if (!isActive()) { close(); return; }
     pending.add(it.tag);
@@ -432,7 +443,11 @@ export function initDraftTagFinder({
     const changed = open && lastKey !== null && key !== lastKey;
     lastRev = rev;
     lastKey = key;
-    if (changed) void load({ top: true });
+    if (changed) {
+      stale = true;
+      listEl.classList.add('is-stale');
+      void load({ top: true });
+    }
   }
 
   return { show, close, toggle, isOpen: () => open, sync };

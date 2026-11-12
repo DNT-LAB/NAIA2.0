@@ -34185,6 +34185,8 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   border-top: 1px solid rgba(232,232,240,0.08);
   font-size: 11.5px;
 }
+/* 남은 태그 창: 조건이 바뀌고 새 목록을 기다리는 동안 옛 줄은 흐리게 · 누르지 못한다 */
+.is-stale > [data-drf-i] { opacity: 0.45; pointer-events: none; }
 /* 등급 단추 G · S · Q · E(사용자 지시 11-12). 색은 이벤트 맵 등급 단추(.em-rating-btn)와 같다. */
 .dr-rates { flex: none; display: inline-flex; gap: 2px; align-items: center; }
 .dr-rate {

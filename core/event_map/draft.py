@@ -561,6 +561,12 @@ class EventMapDraft:
         idx = self._index()
         return self._condition(state, idx, self.service.permanent_block(idx)).count
 
+    def condition_id(self, state):
+        """조건(포함 · 제외 · 등급 · 분면)의 짧은 지문. 뽑기 · Extra · PE 재조립은 rev 만 올리고 이것은 그대로다 -
+        '남은 태그' 창이 받은 목록이 지금 조건의 것인지 rev 대신 이것으로 가린다(Codex 리뷰 2026-11-12 3차 #5)."""
+        import hashlib
+        return hashlib.sha1(self._condition_key(state).encode("utf-8")).hexdigest()[:16]
+
     def rating_counts(self, state, *, idx=None):
         """등급별 남는 게시물 수 - 등급 조건만 뺀 나머지 조건 안에서. 0 인 축은 켤 수 없다."""
         idx = idx or self._index()
@@ -736,6 +742,7 @@ class EventMapDraft:
             idx = self._index()
         except DraftError:
             idx = None
+        result["cond"] = self.condition_id(state)
         result["ratings_on"] = [r for r in RATINGS if r in (state["ratings"] or RATINGS)]
         result["rating_counts"] = None
         if idx is not None:
@@ -791,7 +798,8 @@ class EventMapDraft:
         block = self.service.permanent_block(idx)
         cond = self._condition(state, idx, block)
         out = {"ok": True, "total": cond.count, "sampled": False, "scanned": cond.count, "sort": sort,
-               "group": group, "items": [], "group_counts": [], "pool": 0, "rev": state.get("rev")}
+               "group": group, "items": [], "group_counts": [], "pool": 0, "rev": state.get("rev"),
+               "cond": self.condition_id(state)}
         if not cond.count:
             return out
         counts = cond.tag_counts(idx)                 # 작은 조건(POOL_LIMIT 이하)은 정확히 센다 · 자동완성과 같은 표

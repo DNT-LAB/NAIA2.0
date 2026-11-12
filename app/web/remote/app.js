@@ -1647,7 +1647,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261112-drfind1')
+import('./js/features/eventMapPanel.mjs?v=20261112-drrev3')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       insertTag: text => insertTagIntoPrompt(text),
@@ -1698,7 +1698,7 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261112-drfind1')
+import('./js/features/draftMode.mjs?v=20261112-drrev3')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -13828,7 +13828,7 @@ function onModuleState(m) {
     try { artistThumbControl?.syncPromptEngineering?.(); } catch (_) {}
     // 메인 칸의 [prefix] [postfix] 창도 같은 값을 비춘다.
     try { mainPeQuick?.sync(); } catch (_) {}
-    try { window.draftMode?.syncPe?.(); } catch (_) {}
+    try { window.draftMode?.syncPe?.(m); } catch (_) {}      // 서버가 보낸 상태 - Draft 는 이것으로만 저장을 확인한다
     try { peQuickSwitch?.sync(); } catch (_) {}
     // 삽입 그룹 판 - 손으로 고친 글 · 프리셋 전환(= 확정)을 맞춘다.
     try { artistInsertTray?.reconcile(); } catch (_) {}

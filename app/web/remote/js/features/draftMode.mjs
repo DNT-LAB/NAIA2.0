@@ -76,10 +76,12 @@ export function initDraftMode({
   /** 판 번호(base_rev)를 싣는 편집은 **한 줄로** 보낸다. 앞 요청이 끝나기 전에 다음 칩을 치면 옛 판 번호가 나가
    *  `stale` 로 거절됐다(실측 11-07: '*1girl' Enter 직후 'smile' Enter -> 빨간 칸). 판 번호는 차례가 왔을 때 읽는다. */
   let editChain = Promise.resolve();
+  let editsInFlight = 0;
   function edit(path, body) {
     // 받은 판을 여기서 바로 싣는다 - 다음 차례가 새 판 번호를 읽게(receive 는 옛 판을 버리므로 두 번 불려도 된다)
     const run = () => request(path, { ...body, base_rev: rev }).then(data => { receive(data); return data; });
-    const next = editChain.then(run, run);
+    editsInFlight += 1;      // 생성은 보낸 편집이 다 끝난 뒤에 나가야 한다(settle 이 기다린다 - 리뷰 2차 #3)
+    const next = editChain.then(run, run).finally(() => { editsInFlight -= 1; });
     editChain = next.catch(() => {});
     return next;
   }
@@ -200,6 +202,7 @@ export function initDraftMode({
     panel.setAttribute('aria-label', `${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} Prompt 편집`);
     panel.innerHTML = `<div class="dr-pe-rh" data-dr-pe-rh title="끌어서 높이 조정 · 두 번 누르면 기본" aria-hidden="true"></div>
       <div class="dr-pe-head"><span class="dr-band-name">${PE_NAME[key]}</span>
+        <button type="button" class="dr-zclear" data-dr-pe-revert title="저장하지 못한 글을 버리고 지금 글로 되돌립니다" hidden>되돌리기</button>
         <button type="button" class="dr-pe-x" data-dr-pe-close title="닫기 (Esc)" aria-label="닫기">&times;</button></div>
       <div class="dr-pe-box"><div class="dr-pe-hl" aria-hidden="true"></div>
         <textarea class="dr-band-text" data-dr-pe="${key}" spellcheck="false"
@@ -1100,6 +1103,7 @@ export function initDraftMode({
   let openPe = null;              // 열린 패널의 키(pre_prompt | post_prompt)
   const peUnsaved = {};           // 저장하지 못한 글이 칸에 남아 있다 - 서버 글로 덮지 않는다
   const peSeenPreset = {};        // 칸을 채울 때의 PE 프리셋 - 저장할 때 그 이름을 도장으로 보낸다
+  const peSent = {};              // 보냈지만 서버가 아직 돌려주지 않은 글(key -> text) · 확인되면 null
   let peSuppressBlur = false;     // 닫으면서 이미 저장했다 - 그 blur 에서 또 저장(실패 토스트 두 번)하지 않게
   let pePlaceRaf = 0;
   const peShownH = {};            // 마지막으로 놓은 (자르기 전) 높이 - 끌기의 시작점
@@ -1171,7 +1175,7 @@ export function initDraftMode({
   /** blur 와 닫기가 함께 쓴다 - 값이 다르면 PE 에 쓰고 다시 조립을 예약한다. */
   function commitPeText(el) {
     const key = el.dataset.drPe;
-    if (el.value === String(getPeField(key) || '')) { peUnsaved[key] = false; return true; }
+    if (el.value === String(getPeField(key) || '')) { peUnsaved[key] = false; paintPeRevert(key); return true; }
     const name = key === 'pre_prompt' ? 'Prefix' : 'Postfix';
     // 보고 친 프리셋이 그사이 바뀌었으면(다른 탭) 보내지 않는다 - 지금 프리셋의 도장으로 보내면 앞 프리셋의 글이
     // 새 프리셋을 덮는다(Codex 리뷰 2026-11-12 #2). 글은 칸에 남긴다 - 사용자가 보고 옮기거나 버린다.
@@ -1179,21 +1183,40 @@ export function initDraftMode({
     try { now = String(getPePreset() || ''); } catch (_) {}
     const seen = peSeenPreset[key];
     if (seen != null && seen !== now) {
-      if (!peUnsaved[key]) showToast(`프리셋이 바뀌어 ${name} 편집을 저장하지 않았습니다 - 글은 칸에 남겨 두었습니다`, 'warning');
+      if (!peUnsaved[key]) showToast(`프리셋이 바뀌어 ${name} 편집을 저장하지 않았습니다 - 글은 칸에 남겨 두었습니다([되돌리기] 로 버릴 수 있습니다)`, 'warning');
       peUnsaved[key] = true;
+      paintPeRevert(key);
       return false;
     }
     try {
-      setPeField(key, el.value, seen);
+      const text = el.value;
+      setPeField(key, text, seen);
+      peSent[key] = text;      // 서버가 이 글을 돌려줄 때까지는 저장된 것으로 치지 않는다
       pendingRebuild = true;
       peUnsaved[key] = false;
+      paintPeRevert(key);
       return true;
     } catch (error) {
       // 못 보낸 글은 칸에 남긴다 - 다시 열거나 PE 상태가 와도 덮지 않는다(리뷰 #4: 끊긴 채 닫았다 열면 글이 사라졌다)
       peUnsaved[key] = true;
+      paintPeRevert(key);
       showToast(`${name} 저장 실패 — ${error.message || ''}`, 'error');
       return false;
     }
+  }
+  /** 저장 못 한 글이 남은 패널에만 [되돌리기] 를 보인다 - 그 글을 버리고 지금 PE 글 · 지금 프리셋에서 다시 시작한다
+   *  (리뷰 2차 #5: 프리셋이 바뀐 뒤에는 남은 글을 버릴 길이 없어 저장도 생성도 계속 막혔다). */
+  function paintPeRevert(key) {
+    const btn = pePanels[key].querySelector('[data-dr-pe-revert]');
+    if (btn) btn.hidden = !peUnsaved[key];
+  }
+  function revertPeText(key) {
+    peUnsaved[key] = false;
+    peSent[key] = null;
+    peTexts[key].value = String(getPeField(key) || '');
+    try { peSeenPreset[key] = String(getPePreset() || ''); } catch (_) { peSeenPreset[key] = null; }
+    paintPreview(key);
+    paintPeRevert(key);
   }
   function openPePanel(key) {
     if (openPe === key) return;
@@ -1247,6 +1270,7 @@ export function initDraftMode({
     ta.addEventListener('input', () => paintPreview(key));
     ta.addEventListener('blur', () => { if (!peSuppressBlur) commitPeText(ta); });
     panel.querySelector('[data-dr-pe-close]').addEventListener('click', () => closePePanel({ focusBand: true }));
+    panel.querySelector('[data-dr-pe-revert]').addEventListener('click', () => { revertPeText(key); try { ta.focus({ preventScroll: true }); } catch (_) {} });
     // 높이 손잡이 - 칸 손잡이(.dr-rh)와 같은 포인터 캡처 방식. postfix 패널은 위로, prefix 패널은 아래로 늘어난다.
     const grip = panel.querySelector('[data-dr-pe-rh]');
     grip.addEventListener('pointerdown', event => {
@@ -1313,44 +1337,66 @@ export function initDraftMode({
     [...board.children].forEach(el => ro.observe(el));
   }
   /** PE 상태가 왔다(app.js 가 부른다) - 띠를 맞추고, 띠에서 고친 뒤면 서버에 다시 조립을 청한다. */
-  function syncPe() {
+  function syncPe(serverState = null) {
+    // serverState = 서버가 보낸 PE 상태(app.js 의 모듈 상태 수신). 없으면 화면 안의 비추기 알림(다른 칸을 친 것 등)이다 -
+    // 그것을 저장 완료로 치면 저장이 닿기 전에 재조립이 나가 옛 글로 조립됐다(리뷰 2차 #1). 재조립은 서버 상태에만 건다.
+    if (serverState) {
+      PE_KEYS.forEach(key => {
+        if (peSent[key] != null && String(serverState[key] ?? '') === peSent[key]) peSent[key] = null;
+      });
+    }
     if (!active()) return;
     paintBands();
-    if (!pendingRebuild) return;
+    if (!serverState || !pendingRebuild) return;
+    if (PE_KEYS.some(key => peSent[key] != null)) return;     // 보낸 글이 아직 안 돌아왔다 - 그 상태가 올 때 조립한다
+    void rebuild();
+  }
+  function rebuild() {
     pendingRebuild = false;
     rebuildFailed = false;
-    const run = edit('/draft/rebuild', {}).then(receive)
-      .catch(error => { rebuildFailed = true; showToast(error.message || 'Draft 다시 조립 실패', 'error'); })
+    const run = edit('/draft/rebuild', {}).then(() => true)
+      .catch(error => { rebuildFailed = true; showToast(error.message || 'Draft 다시 조립 실패', 'error'); return false; })
       .finally(() => { if (rebuilding === run) rebuilding = null; });
     rebuilding = run;
+    return run;
   }
   /** 생성 직전에 부른다: 아직 저장 · 재조립 안 된 편집이 있나(있으면 app.js 가 settle 을 기다린다). */
   function needsSettle() {
     if (!active()) return false;
-    if (pendingRebuild || rebuilding) return true;
-    if (PE_KEYS.some(key => peUnsaved[key] || peTexts[key].value !== String(getPeField(key) || ''))) return true;
+    if (pendingRebuild || rebuilding || rebuildFailed || editsInFlight > 0) return true;
+    if (PE_KEYS.some(key => peUnsaved[key] || peSent[key] != null
+      || peTexts[key].value !== String(getPeField(key) || ''))) return true;
     return extraEl.value !== String(snap?.state?.extra || '');
   }
   /** 저장 · 재조립이 끝날 때까지 기다린다. 못 끝내면 false - 생성은 보내지 않는다. 안 기다리면 판에는 새 글이 보이는데
    *  생성은 옛 글로 나간다(Codex 리뷰 2026-11-12 #1: prefix 를 고치고 곧바로 Generate). */
   async function settle() {
     if (!active()) return true;
-    for (const key of PE_KEYS) {
-      if (!commitPeText(peTexts[key])) {
-        return false;      // 알림은 commitPeText 가 했다
-      }
-    }
-    if (!(await flushExtra())) return false;
-    const until = Date.now() + 5000;
-    while ((pendingRebuild || rebuilding) && Date.now() < until) {
-      if (rebuilding) await rebuilding;
-      else await new Promise(resolve => setTimeout(resolve, 30));   // PE 상태가 돌아와야 재조립을 청한다
-    }
-    if (pendingRebuild || rebuilding || rebuildFailed) {
-      showToast('prefix / postfix 변경을 아직 프롬프트에 반영하지 못했습니다 - 잠시 뒤 다시 눌러 주세요', 'warning');
+    const until = Date.now() + 6000;
+    const late = () => {
+      showToast('방금 고친 내용을 아직 프롬프트에 반영하지 못했습니다 - 잠시 뒤 다시 눌러 주세요', 'warning');
       return false;
+    };
+    // 한 바퀴 = 저장 → 보낸 편집 끝 → 서버가 PE 글을 돌려줌 → 재조립 → **다시 확인**. 기다리는 사이 또 고쳤으면 한 바퀴 더
+    // (리뷰 2차 #4: 기다리는 동안 친 글을 안 보고 옛 조립 글로 보냈다).
+    for (;;) {
+      for (const key of PE_KEYS) {
+        if (!commitPeText(peTexts[key])) return false;      // 알림은 commitPeText 가 했다
+      }
+      if (!(await flushExtra())) return false;
+      // 보낸 편집(칩 · 등급 · Extra · 재조립 - 리뷰 2차 #3)과 서버의 PE 상태(#1)를 **함께** 기다린다. 따로 차례로 기다리면
+      // PE 상태가 오자마자 나가는 재조립이 '안 끝난 편집' 으로 남아 여기서 곧바로 물러났다(실측 11-12).
+      while ((editsInFlight > 0 || PE_KEYS.some(key => peSent[key] != null)) && Date.now() < until) {
+        if (editsInFlight > 0) await editChain;
+        else await new Promise(resolve => setTimeout(resolve, 30));
+      }
+      if (editsInFlight > 0 || PE_KEYS.some(key => peSent[key] != null)) return late();
+      if (rebuilding) await rebuilding;
+      // 실패했던 재조립은 여기서 다시 한다 - 성공해야 풀린다(리뷰 2차 #2: 두 번째 누름이 실패 검사를 건너뛰었다)
+      if ((pendingRebuild || rebuildFailed) && !(await rebuild())) return false;
+      if (!needsSettle()) return true;
+      if (Date.now() >= until) return late();
     }
-    return true;
   }
 
   // ---- 스테이징 ----

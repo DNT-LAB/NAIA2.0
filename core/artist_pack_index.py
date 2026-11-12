@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from core.character_preview_index import _ByteWindow
@@ -149,6 +150,7 @@ class ArtistPackIndex:
         self.reused = False
         self._folded: tuple[dict, dict[str, str]] | None = None
         self._repair_attempted = False
+        self._repair_lock = threading.Lock()
         if self.signature is None:
             return
         if self.cache_path is not None:
@@ -215,20 +217,29 @@ class ArtistPackIndex:
         적어 둔 자리가 **그 작가의 것인지** 확인하고 읽는다 - 남의 값을 가리키면(깨진 색인 · 크기와 시각이 우연히 같은
         다른 파일) 남의 그림이 멀쩡히 나온다(Codex 리뷰 #4). 어긋나면 한 번 다시 훑고 읽는다.
         """
+        table = self.offsets
         try:
-            return self._read(key)
+            return self._read(key, table)
         except _SpanMismatch:
-            if self._repair_attempted:
-                raise KeyError(key) from None
-            self._repair_attempted = True
-            try:
-                self._rescan()
-                return self._read(key)
-            except (OSError, ValueError, KeyError):
-                raise KeyError(key) from None
+            pass
+        # 다시 훑는 것은 한 번, 한 스레드만. 그사이 같은 고장을 만난 다른 요청은 기다렸다가 **새 표로** 다시 읽는다 -
+        # 예전에는 '이미 고쳐 봤다' 는 표만 보고 곧바로 실패해 그 타일이 '데이터 없음' 이 됐다(Codex 리뷰 3차 #5).
+        with self._repair_lock:
+            if self.offsets is table:
+                if self._repair_attempted:
+                    raise KeyError(key)
+                self._repair_attempted = True
+                try:
+                    self._rescan()
+                except (OSError, ValueError):
+                    raise KeyError(key) from None
+        try:
+            return self._read(key, self.offsets)
+        except KeyError:
+            raise KeyError(key) from None
 
-    def _read(self, key: str) -> str:
-        key_start, start, end = self.offsets[key]
+    def _read(self, key: str, table: dict) -> str:
+        key_start, start, end = table[key]
         with self.path.open("rb") as handle:
             stat = os.fstat(handle.fileno())
             if [stat.st_size, stat.st_mtime_ns] != self.signature:

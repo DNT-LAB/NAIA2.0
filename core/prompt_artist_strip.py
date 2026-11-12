@@ -183,7 +183,12 @@ def find_artists(text, *, known=frozenset()) -> list[dict]:
 _LAST_NUMBER = re.compile(rf"^(.*\S)\s*:\s*({_NUMBER})\s*$", re.S)
 
 
-def _split_group(chunk):
+# 묶음 속 묶음을 따라 들어가는 한도. 넘으면 그 안은 한 덩어리로 둔다 - 괄호 3만 겹짜리 글이 겹마다 다시 훑여 20초 뒤
+# RecursionError 로 끝났다(Codex 리뷰 2026-11-12 3차 #3). 사람이 쓰는 묶음은 두세 겹이다.
+_MAX_GROUP_DEPTH = 8
+
+
+def _split_group(chunk, depth=0):
     """SD 묶음 `(a, b:1.2)` · `(a, b)` -> (구성원들, 숫자 글 | None). 묶음이 아니면 None.
 
     `_events` 는 괄호를 한 덩어리로 둔다 - 묶음 안의 작가는 `_classify` 에 안 걸려 [이 아티스트로만 생성] 에 남았다
@@ -191,44 +196,57 @@ def _split_group(chunk):
     다시 묶음일 때(`((a, b):1.2)`)만 묶음이다. 구성원이 하나인 `(name:1.2)` 는 `_events` 가 이미 벗긴다.
     """
     chunk = chunk.strip()
-    if len(chunk) < 2 or chunk[0] != "(" or chunk[-1] != ")":
+    if depth > _MAX_GROUP_DEPTH or len(chunk) < 2 or chunk[0] != "(" or chunk[-1] != ")":
         return None
-    depth = i = 0
+    level = i = 0
     while i < len(chunk):                              # 통째로 한 쌍이어야 한다 - `(a) b (c)` 는 묶음이 아니다
         if chunk[i] == "\\":
             i += 2
             continue
         if chunk[i] == "(":
-            depth += 1
+            level += 1
         elif chunk[i] == ")":
-            depth -= 1
-            if depth == 0 and i != len(chunk) - 1:
+            level -= 1
+            if level == 0 and i != len(chunk) - 1:
                 return None
         i += 1
-    if depth:
+    if level:
         return None
     members = split_top(chunk[1:-1])
     number = None
     last = _LAST_NUMBER.match(members[-1])
     if last:
         members[-1], number = last[1], last[2]
-    if len(members) < 2 and _split_group(members[0]) is None:
+    if len(members) < 2 and _split_group(members[0], depth + 1) is None:
         return None
     return members, number
 
 
 def _member_artist(member, keys):
-    body = member.strip()
-    return _classify(_Event("TAG", body, body=body, raw=body), keys) if body else None
+    """묶음 구성원 하나가 작가면 그 줄(+ `sd_weight`: `(name:1.2)` 꼴이면 그 숫자, 아니면 None).
+
+    맨 위 태그와 같은 식으로 SD 한 개짜리 껍질을 벗긴다 - 안 벗기면 `(artist:a, (artist:b:1.2), smile)` 의 b 가 남는다(3차 #1).
+    """
+    chunk = member.strip()
+    if not chunk:
+        return None
+    sd = _SD.fullmatch(chunk)
+    single = bool(sd) and len(split_top(sd[1])) == 1
+    body = sd[1].strip() if single else chunk
+    row = _classify(_Event("TAG", chunk, body=body, raw=chunk), keys)
+    if row:
+        number = re.search(rf":\s*({_NUMBER})\)$", chunk) if single else None
+        row["sd_weight"] = float(number[1]) if number else None
+    return row
 
 
-def _group_artists(chunk, keys, fixed, inherited):
+def _group_artists(chunk, keys, fixed, inherited, depth=0):
     """묶음 안의 작가들(가중치 포함) - 묶음 속 묶음까지. 묶음이 아니면 빈 목록.
 
     `fixed` = 바깥 NAI 숫자 가중치(`-0.5::( ... ) ::`) - 있으면 그것이 이긴다(부호까지). 없으면 묶음의 숫자, 그것도 없으면
     바깥에서 내려온 값의 1.1 배(SD 의 숫자 없는 괄호).
     """
-    group = _split_group(chunk)
+    group = _split_group(chunk, depth)
     if not group:
         return []
     members, number = group
@@ -237,19 +255,20 @@ def _group_artists(chunk, keys, fixed, inherited):
     for member in members:
         row = _member_artist(member, keys)
         if row:
-            row["weight"] = round(fixed if fixed is not None else own, 2)
+            inner = row.pop("sd_weight")
+            row["weight"] = round(fixed if fixed is not None else (inner if inner is not None else own), 2)
             rows.append(row)
         else:
-            rows.extend(_group_artists(member, keys, fixed, own))
+            rows.extend(_group_artists(member, keys, fixed, own, depth + 1))
     return rows
 
 
-def _strip_group(chunk, keys, removed):
+def _strip_group(chunk, keys, removed, depth=0):
     """묶음에서 작가만 걷은 글 - 묶음 속 묶음까지. 바뀐 것이 없으면 None, 남는 것이 없으면 빈 글.
 
     남는 태그의 가중치는 그대로다(`(artist:a, smile:1.2)` -> `(smile:1.2)`).
     """
-    group = _split_group(chunk)
+    group = _split_group(chunk, depth)
     if not group:
         return None
     members, number = group
@@ -257,10 +276,11 @@ def _strip_group(chunk, keys, removed):
     for member in members:
         row = _member_artist(member, keys)
         if row:
+            row.pop("sd_weight", None)
             removed.append(row)
             changed = True
             continue
-        inner = _strip_group(member, keys, removed)
+        inner = _strip_group(member, keys, removed, depth + 1)
         if inner is None:
             if member.strip():
                 kept.append(member.strip())
@@ -315,7 +335,7 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     """
     text = str(text or "")
     events, keys = _events(text), _known_keys(known)
-    remove, removed, rewritten = set(), [], False
+    remove, removed, rewritten = set(), [], []
     for i, event in enumerate(events):
         if event.kind != "TAG":
             continue
@@ -329,16 +349,29 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
         if inside is not None:
             # SD 묶음 안의 작가만 걷는다. 남는 것이 없으면 묶음째로.
             if inside:
+                rewritten.append((chunk, inside))
                 event.text = inside + event.text[len(chunk):]
-                rewritten = True
             else:
                 remove.add(i)
         elif event.body.lstrip().startswith("#"):
             # 주석 조각(`#랜덤프롬프트`)도 걷는다 - 생성이 어차피 버리는 글이다. 남겨 두면 작가가 빠진 가중치 묶음의
             # 여는 표식이 그 앞에 붙어(`0.75::#랜덤프롬프트`) 주석이 아니게 되고, 그 글이 프롬프트로 나간다(실측).
             remove.add(i)
-    # ⚠️ 묶음 안만 고쳤으면 걷을 조각이 없다 - 그래도 다시 조립해야 고친 글이 나간다(리뷰 2차 #1: 원문이 그대로 나갔다).
-    people, body = _hoist_people(_remove(text, events, remove, force=rewritten))
+    # ⚠️ 묶음 안만 고쳤으면 걷을 조각이 없다 - 그래도 고친 글이 나가야 한다(리뷰 2차 #1: 원문이 그대로 나갔다).
+    #    그때는 **그 묶음만 제자리에서 갈아 끼운다** - 통째로 다시 조립하면 손대지 않은 글의 모양까지 바뀐다
+    #    (3차 #2: `a {red} dress` -> `a{red}dress`). 걷을 조각이 있으면 예전처럼 조립한다(고친 묶음은 조각의 글로 간다).
+    if remove:
+        stripped = _remove(text, events, remove)
+    else:
+        stripped, at = text, 0
+        for before, after in rewritten:                 # 글에 나온 차례 그대로 - 앞에서부터 하나씩 찾는다
+            found = stripped.find(before, at)
+            if found < 0:
+                stripped = _remove(text, events, remove, force=True)
+                break
+            stripped = stripped[:found] + after + stripped[found + len(before):]
+            at = found + len(after)
+    people, body = _hoist_people(stripped)
     return {"prompt": _join(", ".join(people), token, body), "removed": removed}
 
 

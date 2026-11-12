@@ -306,6 +306,7 @@
       "source_files": [
         "core/event_map/draft.py",
         "app/web/remote/js/features/draftMode.mjs",
+        "app/web/remote/js/features/draftTagFinder.mjs",
         "app/backend/server/event_map_routes.py",
         "core/event_map/__init__.py",
         "core/event_map/index.py",

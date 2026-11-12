@@ -2423,12 +2423,21 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (!ok) toast('메인 프롬프트 칸을 찾지 못했습니다.', 'error');
   }
 
+  /** Draft 가 켜져 있으면 E 단추 · Ctrl+E 는 이벤트 맵 대신 Draft 의 '남은 태그' 창을 연다/닫는다
+   *  (사용자 결정 2026-11-12 · draftTagFinder.mjs). 갈랐으면 true. */
+  function routeToDraftFinder() {
+    const draft = window.draftMode;
+    if (!draft?.isActive?.() || typeof draft.toggleTagFinder !== 'function') return false;
+    draft.toggleTagFinder();
+    return true;
+  }
+
   // 프롬프트 옆의 작은 E 단추(index.html 의 #eventMapTab). 없어도 Ctrl+E 는 된다.
   tabBtn = document.getElementById('eventMapTab');
   if (tabBtn) {
     // 단추가 포커스를 가져가면 열린 뒤 검색 칸으로 옮겨야 한다 - 아예 안 가져가게 한다.
     tabBtn.addEventListener('mousedown', event => event.preventDefault());
-    tabBtn.addEventListener('click', toggle);
+    tabBtn.addEventListener('click', () => { if (!routeToDraftFinder()) toggle(); });
   }
 
   // Ctrl+E. 브라우저의 기본 동작(주소창 검색)은 막는다. Esc 는 어디에 포커스가 있든 닫되,
@@ -2451,6 +2460,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       && String(event.key || '').toLowerCase() === 'e';
     if (!hit) return;
     event.preventDefault();
+    if (routeToDraftFinder()) return;
     // Ctrl+E 를 다시 치면 닫는다(Esc 와 같다 - 사용자 지정 2026-09-12 밤). 전에는 검색 칸으로 되돌아갔다.
     if (open) { close(); return; }
     void show();

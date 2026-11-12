@@ -19,6 +19,7 @@
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
+import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drfind1';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
@@ -55,6 +56,7 @@ export function initDraftMode({
   let rebuilding = null;          // 돌고 있는 /draft/rebuild
   let rebuildFailed = false;
   let menuEl = null;
+  let finder = null;              // '남은 태그' 창(draftTagFinder.mjs) - 맨 아래에서 만든다
   const active = () => !!snap?.state?.active;
 
   // ---- 서버 ----
@@ -97,6 +99,7 @@ export function initDraftMode({
     if (now && !was && data.__fromSocket) dropForeignOwners();
     if (typeof data.prompt === 'string' && (now || was)) applyServerPrompt(data.prompt, 'event_map_draft');
     paint();
+    finder?.sync(snap);
     if (now !== was) onActiveChange(now);
   }
   async function load() {
@@ -1377,6 +1380,18 @@ export function initDraftMode({
     }
   }
 
+  // ---- 남은 태그 창(사용자 지시 11-12) ----
+  // E 단추 · Ctrl+E 가 Draft 중에 연다(eventMapPanel.mjs 가 가른다). 칩 넣기는 이 파일의 편집 줄(edit)을 빌려준다 -
+  // 칸 입력과 같은 판 번호 차례 · 같은 receive. 실패는 던진다(창이 서버 메시지를 토스트한다).
+  finder = initDraftTagFinder({
+    esc, fmt, showToast, isActive: active, getSnapshot: () => snap, refreshSnapshot: load,
+    addChip: async (zone, text) => {
+      const data = await edit('/draft/chips', { op: 'add', zone, text });
+      receive(data);      // 소켓 알림을 기다리지 않고 답으로 바로 그린다(칸 입력의 commit 과 같다)
+      return data;
+    },
+  });
+
   paintPill();
   void load();
   return {
@@ -1387,5 +1402,7 @@ export function initDraftMode({
     receive: message => receive({ ...message, __fromSocket: true }),
     reload: load,
     enter, exit, syncPe, sendToStaging, loadFromStaging, armPeek, disarmPeek, needsSettle, settle,
+    toggleTagFinder: () => finder?.toggle(),
+    isTagFinderOpen: () => !!finder?.isOpen(),
   };
 }

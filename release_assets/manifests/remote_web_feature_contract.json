@@ -334,6 +334,7 @@
       "routes": [
         {"method": "GET", "path": "/api/event-map/draft", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-map/draft/suggest", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/event-map/draft/remaining", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-map/draft/enter", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/event-map/draft/exit", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/event-map/draft/check", "smoke": "non_destructive"},

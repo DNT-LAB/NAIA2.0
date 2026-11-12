@@ -771,6 +771,80 @@ class EventMapDraft:
 
     build_row = staticmethod(build_row)
 
+    def remaining_tags(self, state, *, group="", sort="mix", q="", limit=60, offset=0):
+        """지금 조건에 남은 게시물들이 가진 태그 - 이벤트 맵 후보 목록의 Draft 판(사용자 지시 2026-11-12).
+
+        줄 세우기 · 갈래 탭은 이벤트 맵의 것을 그대로 쓴다(`EventMapIndex._rank` · `service._attach_groups`).
+        다른 점: 조건이 핀 교집합이 아니라 칩 비트표라서 텍스트 칩 · 묶음 제외 · 등급 단추가 그대로 먹고,
+        색상 · 인원 태그도 후보다(Draft 는 둘 다 보통 칩으로 센다). 3단 지도는 쓰지 않는다.
+        """
+        from core.event_map.index import RANK_PRIOR, SCAN_CAP, SORT_MODES
+        if sort not in SORT_MODES:
+            raise DraftError("too_many", "정렬을 확인해주세요.")
+        if not isinstance(q, str) or len(q) > 160 or not isinstance(group, str):
+            raise DraftError("too_many", "요청 형식을 확인해주세요.")
+        try:
+            limit, offset = max(1, min(200, int(limit))), max(0, int(offset))
+        except (TypeError, ValueError):
+            raise DraftError("too_many", "요청 형식을 확인해주세요.")
+        idx = self._index()
+        block = self.service.permanent_block(idx)
+        cond = self._condition(state, idx, block)
+        out = {"ok": True, "total": cond.count, "sampled": False, "scanned": cond.count, "sort": sort,
+               "group": group, "items": [], "group_counts": [], "pool": 0, "rev": state.get("rev")}
+        if not cond.count:
+            return out
+        counts = cond.tag_counts(idx)                 # 작은 조건(POOL_LIMIT 이하)은 정확히 센다 · 자동완성과 같은 표
+        base = cond.count
+        if counts is None:
+            # 큰 조건은 이벤트 맵처럼 고르게 건너뛰며 뜬 표본에서 센다(앞에서 자르면 한 분면만 본다). 조건마다 한 번.
+            with cond._lock:
+                sample = getattr(cond, "_remaining_sample", None)
+                if sample is None:
+                    rids = np.flatnonzero(np.unpackbits(cond.packed)[:cond.size]).astype(np.int64)
+                    if rids.size > SCAN_CAP:
+                        rids = rids[np.linspace(0, rids.size - 1, SCAN_CAP).astype(np.int64)]
+                    sample = cond._remaining_sample = (idx._count_tags(rids), int(rids.size))
+            counts, base = sample
+            out.update(sampled=base < cond.count, scanned=base)
+        keep = (counts >= (2 if out["sampled"] else 1)) & idx.usable_arr & (idx.obs_arr > 0)
+        if block is not None:
+            keep &= ~block.tags
+        own = [idx.resolve(c["text"]) for z in ("include", "exclude") for c in state[z] if c["exact"]]
+        keep[[t for t in own if t is not None]] = False       # 이미 퍼펙트 칩으로 넣은 태그는 내지 않는다
+        needle = q.strip().lower()
+        if needle:
+            named = np.zeros(idx.n_tags, dtype=bool)
+            for tid in np.flatnonzero(keep):
+                if needle in idx.by_id[int(tid)].lower():
+                    named[tid] = True
+            if self.kr_lookup is not None and not needle.isascii():
+                for tag in self.kr_lookup(needle, 60) or []:
+                    tid = idx.resolve(tag)
+                    if tid is not None:
+                        named[tid] = True
+            keep &= named
+        out["_pool"] = keep.copy()                      # 갈래 필터 전의 풀 - 탭의 개수용. _attach_groups 가 지운다
+        out["pool"] = int(keep.sum())
+        if group:
+            mask = self.service.group_mask([group])
+            if mask is None:
+                raise DraftError("too_many", "갈래를 확인해주세요.")
+            keep &= mask
+        rows = idx._rank(counts, keep, base, cond.count, out["sampled"], limit, RANK_PRIOR, sort=sort, offset=offset)
+        self.service._attach_groups(rows, out)
+        out.pop("_pool", None)
+        try:
+            descriptions = self.describe([r["tag"] for r in rows]) if self.describe is not None and rows else {}
+        except Exception:
+            descriptions = {}
+        out["items"] = [{"tag": r["tag"], "count": r["observed_estimate"], "seen": r["observed"],
+                         "share": r["share"], "lift": r["lift"], "group": r.get("group"),
+                         "all": (not out["sampled"]) and r["observed"] >= base,
+                         "desc": descriptions.get(r["tag"])} for r in rows]
+        out["more"] = offset + len(rows) < int(keep.sum())
+        return out
+
     def suggest(self, q, zone, *, state=None, counts=True):
         """Global names/counts, or exact pool suggestions on a small condition."""
         state = state if state is not None else new_state()
@@ -1078,6 +1152,11 @@ class DraftSession:
         from core.headless_random_prompt_service import pipeline_swap_lock
         from core.event_map.random_link import link_state, staging_store
         ctx = self.context
+        if action == "remaining":
+            # 읽기만 한다(자동완성과 같은 길) - 잠금을 기다리지 않는다
+            return self.engine.remaining_tags(
+                self.state, group=body.get("group") or "", sort=body.get("sort") or "mix",
+                q=body.get("q") or "", limit=body.get("limit", 60), offset=body.get("offset", 0)), []
         if action in ("suggest", "check"):
             # 읽기만 한다 - 생성 조립 · 랜덤 파이프라인(pipeline_swap_lock) · 칩 편집의 재조립(self.lock)을 기다리지 않는다
             # (사용자 지적 11-07: 자동완성이 느리다). 상태는 통째로 갈아 끼우기만 하므로(제자리 수정 없음) 참조 하나를 읽는다.

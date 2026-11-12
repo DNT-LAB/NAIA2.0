@@ -237,6 +237,13 @@ def register_event_map_routes(
         # counts=0 = 이름만(바로) · 화면은 그 뒤 counts=1 로 같은 20개의 수를 받아 채운다(11-07)
         return await _draft_request("suggest", {"q": q, "zone": zone, "counts": bool(counts)})
 
+    @app.get("/api/event-map/draft/remaining")
+    async def api_event_map_draft_remaining(group: str = "", sort: str = "mix", q: str = "",
+                                            limit: int = 60, offset: int = 0):
+        # 지금 조건에 남은 게시물들이 가진 태그(E 단추의 Draft 판 · 2026-11-12)
+        return await _draft_request("remaining", {"group": group, "sort": sort, "q": q,
+                                                  "limit": limit, "offset": offset})
+
     @app.post("/api/event-map/draft/enter")
     async def api_event_map_draft_enter(req: Request):
         return await _draft_request("enter", await _read_json(req))

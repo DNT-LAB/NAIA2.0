@@ -748,7 +748,16 @@ class EventMapDraft:
         cond = self._condition(state, idx, self.service.permanent_block(idx))
         if not cond.count:
             raise MapQueryError("no_match", _MESSAGES["zero_match"])
-        rid = int((rng or random).choice(cond))
+        chooser = rng or random
+        current = (state.get("drawn") or {}).get("rid")
+        if cond.count > 1 and current is not None and cond.has(current):
+            # 지금 뽑혀 있는 게시물은 다시 뽑지 않는다 - 조건이 좁으면(남은 10건 = 열 번에 한 번) 같은 글이 또 나와
+            # Random 이 '씹힌' 것처럼 보였다(사용자 제보 2026-11-12). 나머지에서 고르게: 끝 자리를 제 자리로 돌려 쓴다.
+            rid = int(cond.nth(chooser.choice(range(cond.count - 1))))
+            if rid == current:
+                rid = int(cond.nth(cond.count - 1))
+        else:
+            rid = int(chooser.choice(cond))
         pinned = [idx.resolve(c["text"]) for c in state["include"] if c["exact"]]
         post = idx.post_tags(rid, pinned=pinned, include_color=True)
         return {"rid": rid, "partition": post["partition"], "post_tags": post["tags"]}

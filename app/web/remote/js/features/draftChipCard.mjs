@@ -28,7 +28,7 @@ export function initDraftChipCard({
   isActive = () => false,
   getSnapshot = () => null,      // draftMode 의 마지막 스냅숏
   addChip = async () => { throw new Error('Draft 가 준비되지 않았습니다'); },     // (zone, text) => Promise<data> · 실패는 던진다
-  removeChip = async () => { throw new Error('Draft 가 준비되지 않았습니다'); },  // (id) => Promise<data> · 실패는 던진다
+  replaceChip = async () => { throw new Error('Draft 가 준비되지 않았습니다'); }, // (id, text) => Promise<data> · 실패는 던진다
   onDone = () => {},             // 넣기 · 바꾸기를 마쳤다 - 칩 메뉴도 닫는다(draftMode 의 closeMenu)
   isMenuTarget = () => false,    // (node) => bool - 칩 메뉴 안인가(바깥 누르기 판정)
 } = {}) {
@@ -291,34 +291,14 @@ export function initDraftChipCard({
     let changed = false;
     try {
       if (replace) {
-        let data;
-        try { data = await addChip(zone, `*${tags[0]}`); }
-        catch (error) {
-          // 새 칩을 먼저 넣으면 잠깐 두 칩이 함께 조건이 된다 - 대안끼리(short hair · long hair)는 그 조합이 0건이라
-          // 거절된다(칸이 꽉 찼을 때도). 그때만 차례를 뒤집는다: 지우고 → 넣고 → 못 넣으면 원래 칩을 되살린다.
-          if (error?.code !== 'zero_match' && error?.code !== 'too_many') {
-            showToast(error?.message || '칩을 바꾸지 못했습니다', 'warning');
-            return;
-          }
-          const back = `${cur.exact ? '*' : ''}${cur.text}`;
-          try { await removeChip(id); }
-          catch (err) { showToast(err?.message || '칩을 바꾸지 못했습니다', 'warning'); return; }
+        // 바꾸기는 서버의 한 요청이다(op replace). 넣고 → 지우는 두 요청으로 하면 사이가 끊길 때 두 칩이 남거나 둘 다
+        // 사라졌고, 기다리는 사이 카드가 바뀌면 남의 칩을 되살리려 했다(Codex 리뷰 2026-11-12 5차). 실패하면 판은 그대로다.
+        try {
+          await replaceChip(id, `*${tags[0]}`);
           changed = true;
-          try { await addChip(zone, `*${tags[0]}`); }
-          catch (err) {
-            try { await addChip(zone, back); }
-            catch (_) { showToast('칩을 바꾸지 못했고 원래 칩도 되살리지 못했습니다 - 다시 넣어 주세요', 'error'); return; }
-            showToast(err?.message || '칩을 바꾸지 못했습니다 - 원래 칩을 되돌렸습니다', 'warning');
-          }
-          return;
+        } catch (error) {
+          showToast(error?.message || '칩을 바꾸지 못했습니다', 'warning');
         }
-        changed = true;
-        if (data?.routed === 'extra') {
-          showToast(`'${tags[0]}' 은(는) 이벤트 맵에 없어 Extra 로 보냈습니다 - 원래 칩은 두었습니다`, 'info');
-          return;
-        }
-        try { await removeChip(id); }
-        catch (error) { showToast(error?.message || '원래 칩을 지우지 못했습니다', 'warning'); }
         return;
       }
       for (const tag of tags) {

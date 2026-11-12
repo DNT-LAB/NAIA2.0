@@ -654,6 +654,35 @@ class EventMapDraft:
                 candidate["extra"] += (", " if candidate["extra"] else "") + result["text"]
                 return _finish(state, candidate)
             _chip(candidate, zone, result["text"], result["exact"])
+        elif op == "replace":
+            # 칩 하나를 다른 태그로 **한 번에** 바꾼다(칩 카드의 대안 · 걸린 것). 넣고 지우는 두 요청으로 하면 사이가 끊길 때
+            # 두 칩이 남거나 둘 다 사라졌다(Codex 리뷰 2026-11-12 5차). 실패하면 상태는 그대로다.
+            found = next(((z, c) for z in ("include", "exclude") for c in candidate[z] if c["id"] == id), None)
+            if found is None:
+                raise DraftError("stale")
+            source, chip = found
+            clean, new_exact, rating = self._parse(text)
+            if rating:
+                raise DraftError("rating_toggle")
+            if not clean or len(clean) > 160:
+                raise DraftError("too_many")
+            idx = self._index()
+            mask = idx.matching_tags(clean, new_exact)
+            if not np.count_nonzero(mask):
+                raise DraftError("zero_match", "이벤트 맵에 없는 태그로는 바꿀 수 없습니다.")
+            block = self.service.permanent_block(idx)
+            if block is not None and np.all(block.tags[mask]):
+                raise DraftError("zero_match")
+            at = candidate[source].index(chip)
+            new_id = _next_id(candidate)       # 지우기 전에 - 옛 칩의 id 를 다시 쓰지 않는다
+            candidate[source].remove(chip)
+            if any(c["text"] == clean and c["exact"] == new_exact
+                   for z in ("include", "exclude") for c in candidate[z]):
+                raise DraftError("duplicate")
+            candidate[source].insert(at, {"id": new_id, "text": clean, "exact": new_exact})   # 제자리에
+            _limits(candidate)
+            if not self.count(candidate):
+                raise DraftError("zero_match")
         elif op == "ratings":
             # text = 켜 둘 등급 글자들("sq"). 빈 state["ratings"] = 넷 다 켬(등급 조건 없음).
             want = set(text) if isinstance(text, str) else None

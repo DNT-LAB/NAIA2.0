@@ -29830,6 +29830,11 @@ body.interactive-mode .opt-toggle.is-disabled { opacity: 0.38; cursor: not-allow
 .em-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 /* Settings > 화면 > 이벤트 맵(E) · Assist(A) 단추 숨기기. `display:inline-flex` 가 [hidden] 을 이기므로 짝 규칙이 필요하다. */
 .em-tab[hidden] { display: none; }
+/* Draft 중(사용자 지시 2026-11-12): E 단추는 '남은 태그' 창을 연다 - 눈에 띄게 밝게 · Assist(A) 단추는 숨긴다(Ctrl+O 는 그대로) */
+body.draft-mode #assistTab { display: none; }
+body.draft-mode #eventMapTab { opacity: 1; background: rgba(124,108,230,0.96); color: #fff; }
+body.draft-mode #eventMapTab:hover, body.draft-mode #eventMapTab:focus-visible,
+body.draft-mode #eventMapTab[aria-pressed="true"] { background: rgba(150,136,255,1); }
 /* A(Assist, Ctrl+O) — E 와 같은 옷·같은 반구, 자리만 E 바로 아래(사용자 지정 2026-09-28). E 는 `top:50%` +
    `translateY(-50%)` 라 아래 가장자리가 `50% + 19px` 이고, 여기에 2px 만 띄운다. */
 #assistTab { top: calc(50% + 21px); transform: none; }

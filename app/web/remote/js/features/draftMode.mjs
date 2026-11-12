@@ -19,8 +19,8 @@
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
-import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drcard1';
-import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard1';
+import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drcard2';
+import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard2';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
@@ -1520,8 +1520,8 @@ export function initDraftMode({
       receive(data);
       return data;
     },
-    removeChip: async id => {
-      const data = await edit('/draft/chips', { op: 'remove', id });
+    replaceChip: async (id, to) => {
+      const data = await edit('/draft/chips', { op: 'replace', id, text: to });
       receive(data);
       return data;
     },

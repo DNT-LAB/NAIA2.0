@@ -1698,7 +1698,7 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261112-drpe2')
+import('./js/features/draftMode.mjs?v=20261112-drpe3')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1710,6 +1710,7 @@ import('./js/features/draftMode.mjs?v=20261112-drpe2')
         if (!slashPeSetField(key, text)) throw new Error('WS 연결이 끊겨 있습니다');
       },
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
+      attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
       isAutocompleteEnabled: () => tagAutocompleteEnabled(),
       // 인페인트 세션이 입력창을 쥐고 있으면 쓰지 않는다 - 세션을 닫을 때 원본(promptBeforeInpaint)이 돌아온다.
       applyServerPrompt: (prompt, source) => { if (!inpaintOwnsPromptBox()) updatePromptOnly({prompt, source, draftSnapshot: true}); },

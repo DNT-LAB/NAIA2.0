@@ -34076,7 +34076,25 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   cursor: pointer;
 }
 .dr-pe-x:hover, .dr-pe-x:focus-visible { outline: none; color: var(--text-primary); border-color: rgba(232,232,240,0.2); background: rgba(255,255,255,0.06); }
-.dr-pe-panel .dr-band-text { flex: 1 1 auto; min-height: 0; height: auto; padding: 2px 12px 8px; color: var(--text-primary); }
+/* 색칠 층(사용자 지시 11-12: PE 칸의 하이라이팅을 그대로). 구조는 .peq-box / .peq-hl 과 같다 - 칸은 글자를 투명하게 두고
+   캐럿만 보이며 색은 뒤의 층이 그린다. ⚠️ 층의 글자 상자는 칸과 한 픽셀도 다르면 안 된다(글꼴 · 굵기 · 줄높이 · 여백 · 줄바꿈). */
+.dr-pe-box { flex: 1 1 auto; min-height: 0; position: relative; display: block; }
+.dr-pe-panel .dr-band-text,
+.dr-pe-hl {
+  position: absolute; inset: 0; box-sizing: border-box; width: 100%; height: 100%; margin: 0;
+  padding: 2px 12px 8px; border: 0;
+  font-family: var(--font-editor); font-size: 11px; font-weight: 400; line-height: 1.6; letter-spacing: normal;
+  white-space: pre-wrap; overflow-wrap: break-word; word-break: normal;
+  overflow-x: hidden; overflow-y: auto;
+}
+.dr-pe-panel .dr-band-text { z-index: 1; min-height: 0; color: var(--text-primary); }
+.dr-pe-hl { display: none; color: var(--text-primary); background: transparent; pointer-events: none; }
+.dr-pe-box.nai-preview .dr-pe-hl,
+.dr-pe-box.is-editing .dr-pe-hl { display: block; }
+.dr-pe-box.nai-preview .dr-band-text,
+.dr-pe-box.is-editing .dr-band-text { color: transparent !important; -webkit-text-fill-color: transparent; }
+.dr-pe-box.nai-preview .dr-band-text { caret-color: transparent; }
+.dr-pe-box.is-editing .dr-band-text { caret-color: var(--text-primary); }
 /* 높이 손잡이 - 칸 손잡이(.dr-rh)처럼 올리면 곧은 줄이 보인다. 둥근 모서리에 닿지 않게 양옆을 비운다. */
 .dr-pe-rh { position: absolute; left: 0; right: 0; height: 8px; z-index: 1; cursor: row-resize; touch-action: none; }
 .dr-pe-panel--post .dr-pe-rh { top: 0; }

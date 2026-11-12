@@ -32,6 +32,7 @@ export function initDraftMode({
   getPeField = () => '',         // (key) => string - PE 칸의 지금 글
   setPeField = () => {},         // (key, text) => void · 못 보내면 던진다
   bindTagAssist = null,          // Extra 칸의 일반 자동완성
+  attachHighlight = null,        // prefix / postfix 패널의 색칠(PE 칸과 같은 하이라이터) - 없어도 칸은 그대로 동작한다
   isAutocompleteEnabled = () => true,
   applyServerPrompt = () => {},  // (prompt, source) => void - 숨긴 #promptEdit 를 서버 확정 글로
   takePendingPrompt = () => null,// () => string|null - 안 보낸 메인 글 편집(있으면 지금 보내고 그 글을 돌려준다)
@@ -192,12 +193,30 @@ export function initDraftMode({
     panel.innerHTML = `<div class="dr-pe-rh" data-dr-pe-rh title="끌어서 높이 조정 · 두 번 누르면 기본" aria-hidden="true"></div>
       <div class="dr-pe-head"><span class="dr-band-name">${PE_NAME[key]}</span>
         <button type="button" class="dr-pe-x" data-dr-pe-close title="닫기 (Esc)" aria-label="닫기">&times;</button></div>
-      <textarea class="dr-band-text" data-dr-pe="${key}" spellcheck="false"
-        aria-label="${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} Prompt"></textarea>`;
+      <div class="dr-pe-box"><div class="dr-pe-hl" aria-hidden="true"></div>
+        <textarea class="dr-band-text" data-dr-pe="${key}" spellcheck="false"
+          aria-label="${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} Prompt"></textarea></div>`;
     host.insertBefore(panel, footer || null);
     pePanels[key] = panel;
     peTexts[key] = panel.querySelector('[data-dr-pe]');
   });
+  // 색칠은 빌려 온다(app.js 의 attachPromptHighlight · palette 'pe'). 하이라이터는 칸에 손을 걸지 않는다 - 여기서 건다.
+  const peHl = {};
+  if (typeof attachHighlight === 'function') {
+    PE_KEYS.forEach(key => {
+      const ta = peTexts[key];
+      Promise.resolve(attachHighlight(ta, pePanels[key].querySelector('.dr-pe-hl')))
+        .then(handle => {
+          if (!handle) return;
+          peHl[key] = handle;
+          ta.addEventListener('scroll', () => { try { handle.syncScroll(); } catch (_) {} }, { passive: true });
+          for (const type of ['focus', 'blur']) ta.addEventListener(type, () => { try { handle.applyState(); } catch (_) {} });
+          handle.applyState();
+          handle.update();
+        })
+        .catch(() => { /* 색이 없을 뿐이다 */ });
+    });
+  }
   const extraEl = board.querySelector('[data-dr-extra]');
   let extraShown = null;   // 칸에 마지막으로 반영한 서버 Extra - 칸의 글이 이것과 다르면 아직 저장 못 한 사용자 글
   const sumEl = board.querySelector('[data-dr-sum]');
@@ -575,6 +594,7 @@ export function initDraftMode({
     const el = previewEls[key];
     el.textContent = line || '비어 있음';
     el.classList.toggle('is-empty', !line);
+    try { peHl[key]?.update(); } catch (_) {}   // 칸의 글이 바뀌는 길(입력 · PE 상태 · 열기)은 모두 여기를 지난다
   }
   function paint() {
     paintPill();

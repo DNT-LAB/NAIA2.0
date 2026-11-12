@@ -183,13 +183,14 @@ def find_artists(text, *, known=frozenset()) -> list[dict]:
 _LAST_NUMBER = re.compile(rf"^(.*\S)\s*:\s*({_NUMBER})\s*$", re.S)
 
 
-def _paren_group(event):
-    """SD 묶음 `(a, b:1.2)` · `(a, b)` -> (구성원들, 숫자 글 | None, 뒤 공백). 묶음이 아니거나 구성원이 하나면 None.
+def _split_group(chunk):
+    """SD 묶음 `(a, b:1.2)` · `(a, b)` -> (구성원들, 숫자 글 | None). 묶음이 아니면 None.
 
     `_events` 는 괄호를 한 덩어리로 둔다 - 묶음 안의 작가는 `_classify` 에 안 걸려 [이 아티스트로만 생성] 에 남았다
-    (Codex 리뷰 2026-11-12 #6: `(artist:a, smile:1.2)`). 구성원이 하나인 `(name:1.2)` 는 `_events` 가 이미 벗긴다.
+    (Codex 리뷰 2026-11-12 #6: `(artist:a, smile:1.2)`). 통째로 한 쌍의 괄호이고 구성원이 둘 이상이거나, 하나뿐인 구성원이
+    다시 묶음일 때(`((a, b):1.2)`)만 묶음이다. 구성원이 하나인 `(name:1.2)` 는 `_events` 가 이미 벗긴다.
     """
-    chunk = event.text.rstrip()
+    chunk = chunk.strip()
     if len(chunk) < 2 or chunk[0] != "(" or chunk[-1] != ")":
         return None
     depth = i = 0
@@ -211,9 +212,9 @@ def _paren_group(event):
     last = _LAST_NUMBER.match(members[-1])
     if last:
         members[-1], number = last[1], last[2]
-    if len(members) < 2:
+    if len(members) < 2 and _split_group(members[0]) is None:
         return None
-    return members, number, event.text[len(chunk):]
+    return members, number
 
 
 def _member_artist(member, keys):
@@ -221,25 +222,68 @@ def _member_artist(member, keys):
     return _classify(_Event("TAG", body, body=body, raw=body), keys) if body else None
 
 
+def _group_artists(chunk, keys, fixed, inherited):
+    """묶음 안의 작가들(가중치 포함) - 묶음 속 묶음까지. 묶음이 아니면 빈 목록.
+
+    `fixed` = 바깥 NAI 숫자 가중치(`-0.5::( ... ) ::`) - 있으면 그것이 이긴다(부호까지). 없으면 묶음의 숫자, 그것도 없으면
+    바깥에서 내려온 값의 1.1 배(SD 의 숫자 없는 괄호).
+    """
+    group = _split_group(chunk)
+    if not group:
+        return []
+    members, number = group
+    own = float(number) if number else inherited * 1.1
+    rows = []
+    for member in members:
+        row = _member_artist(member, keys)
+        if row:
+            row["weight"] = round(fixed if fixed is not None else own, 2)
+            rows.append(row)
+        else:
+            rows.extend(_group_artists(member, keys, fixed, own))
+    return rows
+
+
+def _strip_group(chunk, keys, removed):
+    """묶음에서 작가만 걷은 글 - 묶음 속 묶음까지. 바뀐 것이 없으면 None, 남는 것이 없으면 빈 글.
+
+    남는 태그의 가중치는 그대로다(`(artist:a, smile:1.2)` -> `(smile:1.2)`).
+    """
+    group = _split_group(chunk)
+    if not group:
+        return None
+    members, number = group
+    kept, changed = [], False
+    for member in members:
+        row = _member_artist(member, keys)
+        if row:
+            removed.append(row)
+            changed = True
+            continue
+        inner = _strip_group(member, keys, removed)
+        if inner is None:
+            if member.strip():
+                kept.append(member.strip())
+        else:
+            changed = True
+            if inner:
+                kept.append(inner)
+    if not changed:
+        return None
+    return "(" + ", ".join(kept) + (f":{number}" if number else "") + ")" if kept else ""
+
+
 def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
     """`find_artists` + 그 작가에 걸린 가중치(`weight`). 아티스트 태그 관리 창이 쓴다(2026-11-11).
 
     `0.6::artist:a, b ::` 는 둘 다 0.6 · 겹쳤으면 가장 안쪽 숫자 · SD 꼴 `(name:1.2)` 는 그 숫자.
-    숫자가 없으면 중괄호 · 대괄호 겹수(1.05 배씩)이고, 아무것도 없으면 1.
+    숫자가 없으면 중괄호 · 대괄호 겹수(1.05 배씩)이고, 아무것도 없으면 1. SD 묶음 안의 작가는 `_group_artists`.
     """
     keys, events = _known_keys(known), _events(text)
     opens = {event.group: event.text.strip() for event in events if event.kind == "OPEN"}
     rows = []
     for event in events:
-        row = _classify(event, keys) if event.kind == "TAG" else None
-        if not row:
-            group = _paren_group(event) if event.kind == "TAG" else None
-            for member in (group[0] if group else ()):
-                inner = _member_artist(member, keys)
-                if inner:
-                    # 묶음의 숫자가 곧 그 작가의 가중치. 숫자 없는 `(a, b)` 는 SD 의 1.1 배.
-                    inner["weight"] = round(float(group[1]) if group[1] else 1.1, 2)
-                    rows.append(inner)
+        if event.kind != "TAG":
             continue
         number, factor = None, 1.0
         for gid in event.groups:                      # 바깥 -> 안쪽 차례
@@ -250,6 +294,11 @@ def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
                 factor /= 1.05
             elif (match := re.match(_NUMBER, opener)):
                 number = float(match[0])
+        row = _classify(event, keys)
+        if not row:
+            # 묶음 구성원도 바깥 가중치를 같은 식으로 받는다 - 따로 세면 `-0.5::(artist:a, smile) ::` 가 1.1 이 됐다(리뷰 2차 #7).
+            rows.extend(_group_artists(event.text, keys, number, factor))
+            continue
         sd = re.search(rf":\s*({_NUMBER})\)$", event.text.strip()) if _SD.fullmatch(event.text.strip()) else None
         if sd:
             number = float(sd[1])
@@ -266,7 +315,7 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     """
     text = str(text or "")
     events, keys = _events(text), _known_keys(known)
-    remove, removed = set(), []
+    remove, removed, rewritten = set(), [], False
     for i, event in enumerate(events):
         if event.kind != "TAG":
             continue
@@ -274,27 +323,27 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
         if row:
             remove.add(i)
             removed.append(row)
-        elif (group := _paren_group(event)):
-            # SD 묶음 안의 작가만 걷는다 - 남는 태그의 가중치는 그대로(`(artist:a, smile:1.2)` -> `(smile:1.2)`).
-            members, number, trailing = group
-            inside = [_member_artist(member, keys) for member in members]
-            if any(inside):
-                removed.extend(found for found in inside if found)
-                kept = [member.strip() for member, found in zip(members, inside) if not found and member.strip()]
-                if kept:
-                    event.text = "(" + ", ".join(kept) + (f":{number}" if number else "") + ")" + trailing
-                else:
-                    remove.add(i)
+            continue
+        chunk = event.text.rstrip()
+        inside = _strip_group(chunk, keys, removed)
+        if inside is not None:
+            # SD 묶음 안의 작가만 걷는다. 남는 것이 없으면 묶음째로.
+            if inside:
+                event.text = inside + event.text[len(chunk):]
+                rewritten = True
+            else:
+                remove.add(i)
         elif event.body.lstrip().startswith("#"):
             # 주석 조각(`#랜덤프롬프트`)도 걷는다 - 생성이 어차피 버리는 글이다. 남겨 두면 작가가 빠진 가중치 묶음의
             # 여는 표식이 그 앞에 붙어(`0.75::#랜덤프롬프트`) 주석이 아니게 되고, 그 글이 프롬프트로 나간다(실측).
             remove.add(i)
-    people, body = _hoist_people(_remove(text, events, remove))
+    # ⚠️ 묶음 안만 고쳤으면 걷을 조각이 없다 - 그래도 다시 조립해야 고친 글이 나간다(리뷰 2차 #1: 원문이 그대로 나갔다).
+    people, body = _hoist_people(_remove(text, events, remove, force=rewritten))
     return {"prompt": _join(", ".join(people), token, body), "removed": removed}
 
 
-def _remove(text, events, remove):
-    if not remove:
+def _remove(text, events, remove, force=False):
+    if not remove and not force:
         return text
     kept = [i for i, event in enumerate(events) if event.kind == "TAG" and i not in remove]
     prefixes = {i: [] for i in kept}

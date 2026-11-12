@@ -12521,6 +12521,7 @@ async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
   const now = performance.now();
   if (now - lastHumanGenerateAt < 300) return false;
   lastHumanGenerateAt = now;
+  const stamp = now;                  // 내가 찍은 표 - 기다리는 사이 다른 생성이 표를 갈았는지 본다
   if (random && !(await requestRandomAndWait())) return 'Random 프롬프트를 받지 못했습니다(Prompt Fixed · 프리셋 탭이면 Random 이 잠긴다)';
   // 서식은 Artist Thumbnail 과 같은 함수(모드별 표기가 셋이다). 그 탭이 아직 안 올라왔으면 NAI 꼴로.
   const w = Number.isFinite(Number(weight)) ? Number(weight) : 1;
@@ -12542,7 +12543,10 @@ async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
   if (!prompt) return false;
   const late = blocked();
   if (late) return late;
-  lastHumanGenerateAt = performance.now();      // 실제로 보내는 때 - 메인 Generate 의 연타 문턱과 나눠 쓴다
+  // 기다리는 사이 사람이 다른 생성을 눌렀고 그것이 방금(300ms 안)이면 물러선다 - 표를 그냥 덮으면 두 장이 붙어 나간다(리뷰 2차 #4).
+  const sendAt = performance.now();
+  if (lastHumanGenerateAt !== stamp && sendAt - lastHumanGenerateAt < 300) return false;
+  lastHumanGenerateAt = sendAt;       // 실제로 보내는 때 - 메인 Generate 의 연타 문턱과 나눠 쓴다
   const negative = negEdit ? negEdit.value : '';
   return generateWithInteractiveSnapshot({
     prompt,

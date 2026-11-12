@@ -2,30 +2,35 @@
 
 팩은 `{"작가": ["base64 JPEG", ...], ...}` 한 덩어리다. 통째로 읽으면 1.37GB 팩 하나에 3.7초 · 최대 3.9GB 가
 든다(2026-11-11 실측). 작가 몇 명의 그림만 필요한 자리(아티스트 태그 관리 창)에서는 그럴 까닭이 없다 -
-작가마다 값이 놓인 **바이트 자리**(시작 · 끝)를 한 번 훑어 적어 두고, 그 뒤로는 그 자리만 읽는다
-(색인 만들기 1.5초 · 13명 읽기 10~20ms · 21MB).
+작가마다 값이 놓인 **바이트 자리**를 한 번 훑어 적어 두고, 그 뒤로는 그 자리만 읽는다
+(색인 만들기 0.5초 · 13명 읽기 10~20ms · 21MB).
 
 ⚠️ 줄 번호가 아니라 바이트 자리다. 팩은 줄바꿈 없는 한 줄짜리도 있고(지금 팩 전부), 줄 번호로는 건너뛸 수 없다.
 ⚠️ 색인은 **그 파일**의 것이다(크기 · 수정 시각이 지문). 팩이 갈리면 자리가 전부 달라지므로 지문이 다르면
    버리고 다시 훑는다 - 낡은 팩도 제 색인으로는 바르게 읽힌다.
+⚠️ 자리는 셋이다 - [열쇠의 시작, 값의 시작, 값의 끝). 읽을 때 **열쇠부터 값 앞까지를 그대로 다시 읽어** 그 작가의
+   것인지 확인한다. 값 앞의 몇십 바이트에서 열쇠를 '찾는' 식으로는 긴 이름 속의 `\\"b"` 를 다른 열쇠로 오인하고,
+   열쇠와 값 사이 공백이 길면 못 찾는다(Codex 리뷰 2026-11-12 2차 #3 · #6).
 훑는 방식은 `character_preview_index` 와 같다: base64 본문에는 따옴표가 없어 따옴표에서 따옴표로 건너뛴다.
 """
 from __future__ import annotations
 
 import json
 import os
-import re
 import tempfile
 from pathlib import Path
 
 from core.character_preview_index import _ByteWindow
 
-SCHEMA = 1
+SCHEMA = 2
 _SPACE = b" \t\r\n"
 
 
 def scan_pack(path) -> dict[str, list[int]]:
-    """맨 위 객체의 열쇠 -> [값의 시작, 끝). 본문은 메모리에 올리지 않는다."""
+    """맨 위 객체의 열쇠 -> [열쇠의 시작, 값의 시작, 값의 끝). 본문은 메모리에 올리지 않는다.
+
+    같은 열쇠가 두 번 나오면 뒤의 것이 이긴다(`json.loads` 와 같다).
+    """
     path = Path(path)
     offsets: dict[str, list[int]] = {}
     with path.open("rb") as handle:
@@ -81,6 +86,7 @@ def scan_pack(path) -> dict[str, list[int]]:
         while body[pos] != 125:
             if body[pos] != 34:
                 raise ValueError("Invalid artist pack key")
+            key_start = pos
             end = string_end(pos)
             key = json.loads(bytes(body[pos:end]))
             pos = space(end)
@@ -88,7 +94,7 @@ def scan_pack(path) -> dict[str, list[int]]:
                 raise ValueError("Invalid artist pack key")
             start = space(pos + 1)
             pos = skip(start)
-            offsets[str(key)] = [start, pos]
+            offsets[str(key)] = [key_start, start, pos]
             pos = space(pos)
             if body[pos] == 44:
                 pos = space(pos + 1)
@@ -100,16 +106,20 @@ def scan_pack(path) -> dict[str, list[int]]:
 
 
 def _valid_offsets(offsets, size) -> bool:
-    """적어 둔 자리가 이 파일 안의 것처럼 생겼는가 - 글 열쇠 · 정수 둘 · 0 <= 시작 < 끝 <= 크기 · 앞 것과 안 겹침."""
+    """적어 둔 자리가 이 파일 안의 것처럼 생겼는가 - 글 열쇠 · 정수 셋 · 0 <= 열쇠 < 값 < 끝 <= 크기 · 서로 안 겹침.
+
+    겹침은 **자리 차례로** 본다. 같은 열쇠가 두 번 나온 팩은 사전 차례와 자리 차례가 다르다(뒤의 값이 앞의 자리에 앉는다).
+    """
     if not isinstance(offsets, dict):
         return False
-    previous = 0
+    spans = []
     for key, span in offsets.items():
-        if not (isinstance(key, str) and isinstance(span, list) and len(span) == 2
-                and all(type(x) is int for x in span) and previous <= span[0] < span[1] <= size):
+        if not (isinstance(key, str) and isinstance(span, list) and len(span) == 3
+                and all(type(x) is int for x in span) and 0 <= span[0] < span[1] < span[2] <= size):
             return False
-        previous = span[1]
-    return True
+        spans.append(span)
+    spans.sort()
+    return all(before[2] <= after[0] for before, after in zip(spans, spans[1:]))
 
 
 def _signature(path: Path) -> list[int] | None:
@@ -120,8 +130,16 @@ def _signature(path: Path) -> list[int] | None:
     return [stat.st_size, stat.st_mtime_ns]
 
 
+class _SpanMismatch(KeyError):
+    """적어 둔 자리가 그 작가의 값이 아니다."""
+
+
 class ArtistPackIndex:
-    """팩 하나의 자리 색인. `cache_path` 에 적어 두고, 팩의 지문이 그대로면 다시 훑지 않는다."""
+    """팩 하나의 자리 색인. `cache_path` 에 적어 두고, 팩의 지문이 그대로면 다시 훑지 않는다.
+
+    여러 스레드가 함께 읽는다(그림 요청). 자리 표(`offsets`)는 **통째로 갈아 끼울 뿐 고치지 않는다** - 읽는 쪽은 잡은 표를
+    끝까지 쓴다. 접은 이름 표는 어느 자리 표로 만들었는지를 같이 쥔다.
+    """
 
     def __init__(self, path, cache_path=None):
         self.path = Path(path)
@@ -129,7 +147,7 @@ class ArtistPackIndex:
         self.signature = _signature(self.path)
         self.offsets: dict[str, list[int]] = {}
         self.reused = False
-        self._folded: dict[str, str] | None = None
+        self._folded: tuple[dict, dict[str, str]] | None = None
         self._repair_attempted = False
         if self.signature is None:
             return
@@ -147,11 +165,13 @@ class ArtistPackIndex:
         self._rescan()
 
     def _rescan(self) -> None:
-        self.offsets, self._folded, self.reused = {}, None, False
-        self.offsets = scan_pack(self.path)
+        # 새 표를 다 만든 뒤에 한 번에 갈아 끼운다. 훑는 동안 표를 비워 두면 그사이의 조회가 빈 표로 접은 이름 표를 만들어
+        # 두고, 훑기가 끝난 뒤에도 그 빈 표가 남았다(Codex 리뷰 2차 #5).
+        offsets = scan_pack(self.path)
         if _signature(self.path) != self.signature:
-            self.offsets = {}
             raise ValueError("Artist pack changed while indexing")
+        self.offsets = offsets
+        self.reused = False
         self._save()
 
     def _save(self) -> None:
@@ -178,19 +198,22 @@ class ArtistPackIndex:
     def find(self, name: str) -> str | None:
         """팩에 적힌 그대로의 이름. 못 찾으면 대소문자 · 밑줄 · 공백을 접어 한 번 더 본다."""
         name = str(name or "")
-        if name in self.offsets:
+        offsets = self.offsets
+        if name in offsets:
             return name
-        if self._folded is None:
-            self._folded = {}
-            for key in self.offsets:
-                self._folded.setdefault(_fold(key), key)
-        return self._folded.get(_fold(name))
+        cached = self._folded
+        if cached is None or cached[0] is not offsets:
+            folded: dict[str, str] = {}
+            for key in offsets:
+                folded.setdefault(_fold(key), key)
+            cached = self._folded = (offsets, folded)
+        return cached[1].get(_fold(name))
 
     def read(self, key: str) -> str:
         """그 작가의 첫 그림(base64). 없으면 KeyError.
 
-        자리 바로 앞의 열쇠가 **그 작가인지** 확인하고 읽는다 - 적어 둔 자리가 남의 값을 가리키면(깨진 색인 · 크기와 시각이
-        우연히 같은 다른 파일) 남의 그림이 멀쩡히 나온다(Codex 리뷰 #4). 어긋나면 한 번 다시 훑고 읽는다.
+        적어 둔 자리가 **그 작가의 것인지** 확인하고 읽는다 - 남의 값을 가리키면(깨진 색인 · 크기와 시각이 우연히 같은
+        다른 파일) 남의 그림이 멀쩡히 나온다(Codex 리뷰 #4). 어긋나면 한 번 다시 훑고 읽는다.
         """
         try:
             return self._read(key)
@@ -200,30 +223,34 @@ class ArtistPackIndex:
             self._repair_attempted = True
             try:
                 self._rescan()
-            except (OSError, ValueError):
-                raise KeyError(key) from None
-            if key not in self.offsets:
-                raise KeyError(key) from None
-            try:
                 return self._read(key)
-            except _SpanMismatch:
+            except (OSError, ValueError, KeyError):
                 raise KeyError(key) from None
 
     def _read(self, key: str) -> str:
-        start, end = self.offsets[key]
-        head = min(start, len(key.encode("utf-8")) * 6 + 64)
+        key_start, start, end = self.offsets[key]
         with self.path.open("rb") as handle:
             stat = os.fstat(handle.fileno())
             if [stat.st_size, stat.st_mtime_ns] != self.signature:
                 raise KeyError(key)         # 갈린 팩을 옛 자리로 읽지 않는다
-            if not 0 <= start < end <= stat.st_size:
+            if not 0 <= key_start < start < end <= stat.st_size:
                 raise _SpanMismatch(key)
-            handle.seek(start - head)
-            header = handle.read(head)
+            # 열쇠 앞은 `{` 나 `,` 여야 한다(공백은 건너뛴다) - 문자열 한가운데의 `\"b"` 를 열쇠로 읽지 않는다.
+            before, at = b"", key_start
+            while at > 0 and not before.strip(_SPACE):
+                step = min(at, 64)
+                handle.seek(at - step)
+                before = handle.read(step)
+                at -= step
+            if before.rstrip(_SPACE)[-1:] not in (b"{", b","):
+                raise _SpanMismatch(key)
+            handle.seek(key_start)
+            header = handle.read(start - key_start)
             raw = handle.read(end - start)
-        match = re.search(rb'("(?:[^"\\]|\\.)*")[ \t\r\n]*:[ \t\r\n]*$', header)
+        # 열쇠부터 값 앞까지 = `"작가"` + 공백 + `:` + 공백, 그것뿐이어야 한다.
+        name, colon, rest = header.rstrip(_SPACE).rpartition(b":")
         try:
-            if match is None or json.loads(match[1]) != key:
+            if not colon or rest or json.loads(name.rstrip(_SPACE)) != key:
                 raise _SpanMismatch(key)
             value = json.loads(raw)
         except ValueError:
@@ -232,10 +259,6 @@ class ArtistPackIndex:
         if not isinstance(first, str) or not first:
             raise KeyError(key)
         return first
-
-
-class _SpanMismatch(KeyError):
-    """적어 둔 자리가 그 작가의 값이 아니다."""
 
 
 def _fold(name: str) -> str:

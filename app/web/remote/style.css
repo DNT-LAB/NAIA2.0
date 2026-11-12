@@ -34111,6 +34111,13 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-zh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
 .dr-zt { font-size: 11px; font-weight: 600; }
+/* 칸 머리 오른쪽 끝의 [초기화](사용자 지시 11-12) - 흐린 글 단추 · 올리면 또렷하게 */
+.dr-zclear {
+  flex: none; padding: 1px 6px; border: 1px solid transparent; border-radius: 4px; background: transparent;
+  color: var(--text-dim); font: inherit; font-size: 10.5px; line-height: 1.3; cursor: pointer;
+}
+.dr-zclear:hover, .dr-zclear:focus-visible { outline: none; color: var(--text-primary); border-color: rgba(232,232,240,0.2); background: rgba(255,255,255,0.06); }
+.dr-zclear[hidden] { display: none; }
 .dr-zt--ex { color: #e88a94; }
 .dr-zn { font-size: 10.5px; color: var(--text-dim); }
 .dr-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }

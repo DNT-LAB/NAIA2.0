@@ -151,14 +151,16 @@ export function initDraftMode({
       stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
     <div class="dr-sum" data-dr-sum></div>
     <div class="dr-zone" data-dr-zone="include">
-      <div class="dr-zh"><span class="dr-zt">포함</span></div>
+      <div class="dr-zh"><span class="dr-zt">포함</span><button type="button" class="dr-zclear" data-dr-clear="include"
+        title="포함 칩을 모두 지웁니다" hidden>초기화</button></div>
       <div class="dr-chips" data-dr-chips="include"></div>
       <div class="dr-zone-foot" data-dr-drawn-foot hidden>
         <button type="button" class="dr-drawn-btn" data-dr-drawn-open aria-pressed="false"></button>
       </div>
     </div>
     <div class="dr-zone" data-dr-zone="exclude">
-      <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span></div>
+      <div class="dr-zh"><span class="dr-zt dr-zt--ex">제외</span><button type="button" class="dr-zclear" data-dr-clear="exclude"
+        title="제외 칩을 모두 지웁니다" hidden>초기화</button></div>
       <div class="dr-chips" data-dr-chips="exclude"></div>
     </div>
     <div class="dr-zone dr-zone--extra">
@@ -632,6 +634,14 @@ export function initDraftMode({
     if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); closePePanel(); return; }
     paintZone('include');
     paintZone('exclude');
+    {   // [초기화] 는 지울 것이 있을 때만 보인다
+      const st = snap?.state || {};
+      const has = {
+        include: (st.include || []).length + (st.tags?.persons || []).length > 0,
+        exclude: (st.exclude || []).length + (st.tags?.groups || []).length > 0,
+      };
+      board.querySelectorAll('[data-dr-clear]').forEach(el => { el.hidden = !has[el.dataset.drClear]; });
+    }
     paintDrawn();
     paintSum();
     paintBands();
@@ -1029,6 +1039,8 @@ export function initDraftMode({
     const gray = t.closest('[data-dr-gray]');
     if (gray) { grayMenu(gray); return; }
     if (t.closest('[data-dr-drawn-open]')) { toggleDrawnPanel(); return; }
+    const clear = t.closest('[data-dr-clear]');
+    if (clear) { void chipOp({ op: 'clear', zone: clear.dataset.drClear }); return; }
     const rate = t.closest('[data-dr-rate]');
     if (rate) { toggleRating(rate.dataset.drRate); return; }
     if (t.closest('[data-dr-stage]')) { void sendToStaging(); return; }

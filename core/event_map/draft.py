@@ -663,6 +663,13 @@ class EventMapDraft:
             candidate["ratings"] = [] if want == set(RATINGS) else [r for r in RATINGS if r in want]
             if candidate["ratings"] != state["ratings"] and not self.count(candidate):
                 raise DraftError("zero_match")
+        elif op == "clear" and zone in ("include", "exclude"):
+            # 그 칸을 통째로 비운다(사용자 지시 2026-11-12). 포함 = 칩 + 인원 분면 · 제외 = 칩 + 묶음 제외. 등급 단추는 그대로.
+            candidate[zone] = []
+            if zone == "include":
+                candidate["tags"]["persons"] = []
+            else:
+                candidate["tags"]["groups"] = []
         elif op == "remove" and id == "persons":
             candidate["tags"]["persons"] = []
         elif op == "remove" and id in ["r:" + r for r in candidate["ratings"]]:

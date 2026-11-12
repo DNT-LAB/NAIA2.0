@@ -775,7 +775,11 @@ async def run_generation_queue(context: WebSessionContext, clients: set[WebSocke
             # (_broadcast_generation_error fails the stamped story) instead of leaving the
             # freeze + Auto Gen armed.
             try:
-                if not history_limit_stopped:
+                if cancel_handle.cancelled:
+                    # 중단을 받아 줬는데(accepted) 이 장은 그 사이 끝나 버렸다 — 결과는 살리되 **다음 장은 부르지 않는다**.
+                    # 안 그러면 Stop 을 누르고 '중단을 요청했습니다' 를 본 뒤에도 Auto Gen 이 계속 돈다(Codex 리뷰 11-12).
+                    await _stop_loops_after_late_cancel(context, clients, request)
+                elif not history_limit_stopped:
                     await _maybe_continue_auto_generation(context, clients, request)
             except Exception as exc:
                 await _broadcast_generation_error(context, clients, request, str(exc), exc)
@@ -2097,6 +2101,17 @@ async def _broadcast_generation_cancelled(
     await broadcast_json(clients, context.queue_state_payload())
     if img2img_failed:
         await _broadcast_img2img_generation_state(context, clients)
+
+
+async def _stop_loops_after_late_cancel(context: WebSessionContext, clients: set[WebSocket], request) -> None:
+    """중단이 받아들여졌지만 그 장이 먼저 끝났다 — 스스로 다음 장을 부르는 것(Auto Gen · Storyteller · Automation ·
+    Sequence)만 멈춘다. 끝난 그림은 정상 결과로 남고, 손수 쌓은 Generate 는 그대로 간다(_broadcast_generation_cancelled 와 같다)."""
+    if not _auto_gen_loop_engaged(context, request):
+        return
+    for extra_message in await stop_all_generation_loops(context, clients):
+        await broadcast_json(clients, extra_message)
+    print(f"[CANCEL] late cancel id={request.request_id[:8]} - image kept, loops stopped", flush=True)
+    await broadcast_json(clients, context._toast("이 장은 이미 끝났습니다 - 자동 생성을 멈췄습니다", level="info"))
 
 
 async def _broadcast_waiting_window_failure(

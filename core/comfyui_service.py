@@ -207,20 +207,25 @@ class ComfyUIService:
           본문에 prompt_id 를 실어 그 작업일 때만 멈추게 한다(ComfyUI 0.22 — 예전 판은 본문을 무시하는 전역 중단이라
           확인을 먼저 한다). 중단 표식은 다음 작업이 시작될 때 지워지므로 다음 장으로 번지지 않는다.
         - 지우는 사이 실행이 시작됐을 수 있어 다시 본다(최대 3번).
-        반환: ``"interrupted"`` · ``"deleted"`` · ``"not_found"``(이미 끝났거나 없다) · ``"failed"``(큐를 못 읽음)."""
+        - 보낸 중단 · 삭제가 실패하면(ComfyUI 가 답하지 않음 · 200 아님) 멈췄다고 하지 않는다 — 다시 보고, 끝내 안 되면
+          ``"failed"`` 다(Codex 리뷰 11-12: 503 을 받고도 'interrupted' 라 화면은 멈췄다는데 작업은 돌았다).
+        반환: ``"interrupted"`` · ``"deleted"`` · ``"not_found"``(이미 끝났거나 없다) · ``"failed"``(큐를 못 읽음 ·
+        중단/삭제 요청이 실패함)."""
         outcome = "not_found"
         for _ in range(3):
             running, pending = self._queue_ids()
             if running is None:
                 return "failed" if outcome == "not_found" else outcome
             if prompt_id in running:
-                self._post_json("/interrupt", {"prompt_id": prompt_id})
-                return "interrupted"
-            if prompt_id in pending:
-                self._post_json("/queue", {"delete": [prompt_id]})
-                outcome = "deleted"
+                if self._post_json("/interrupt", {"prompt_id": prompt_id}):
+                    return "interrupted"
+                outcome = "failed"
                 continue
-            return outcome
+            if prompt_id in pending:
+                outcome = "deleted" if self._post_json("/queue", {"delete": [prompt_id]}) else "failed"
+                continue
+            # 이제 큐에 없다 — 요청은 실패했지만 그 사이 스스로 끝났다(멈출 것이 남지 않았다)
+            return "not_found" if outcome == "failed" else outcome
         return outcome
     
     @staticmethod
@@ -408,13 +413,19 @@ class ComfyUIService:
         if outcome == "cancelled":
             cleanup = self.cancel_prompt(prompt_id)
             print(f"[ComfyUI] cancelled prompt_id={prompt_id} cleanup={cleanup}", flush=True)
-            return {'status': 'cancelled', 'message': CANCELLED_MESSAGE, 'prompt_id': prompt_id}
+            message = CANCELLED_MESSAGE
+            if cleanup == "failed":
+                # 기다리기는 그만두지만 ComfyUI 의 작업은 그대로일 수 있다 — 멈췄다고만 하면 다음 장이 그 뒤에 줄을 선다
+                message = f"{CANCELLED_MESSAGE} - ComfyUI 의 작업은 멈추지 못했습니다(ComfyUI 에서 확인해 주세요)"
+            return {'status': 'cancelled', 'message': message, 'prompt_id': prompt_id}
         if outcome == "timeout":
             cleanup = self.cancel_prompt(prompt_id)
             print(f"[ComfyUI] timeout after {timeout:g}s prompt_id={prompt_id} cleanup={cleanup}", flush=True)
             return {
                 'status': 'error',
-                'message': f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 에서 이 작업을 멈추고 큐에서 정리했습니다',
+                'message': (f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 의 작업은 멈추지 못했습니다(ComfyUI 에서 확인해 주세요)'
+                            if cleanup == "failed" else
+                            f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 에서 이 작업을 멈추고 큐에서 정리했습니다'),
                 'no_retry': True,
                 'timeout': True,
                 'prompt_id': prompt_id,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, Request
@@ -66,12 +67,22 @@ def register_state_routes(
         큐에 쌓인 다른 Generate 는 건드리지 않는다. 마무리(status 'cancelled' · 토스트 · 다음 장)는 러너가 WS 로 알린다."""
         from core.local_generation_cancel import cancel_local_generation
 
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        request_id = payload.get("request_id") if isinstance(payload, dict) else None
-        return cancel_local_generation(session_context, request_id=str(request_id or "") or None)
+        # 본문이 **없으면** 지금 도는 장(하위 호환). 본문이 있는데 읽을 수 없거나 request_id 가 글이 아니면 아무것도 멈추지
+        # 않는다 — 깨진 요청이 '지금 도는 장' 으로 읽혀 다음 장을 멈추면 안 된다(Codex 리뷰 11-12).
+        bad = {"ok": True, "accepted": False, "reason": "bad_request", "message": "요청을 읽을 수 없습니다."}
+        raw = await req.body()
+        payload: Any = {}
+        if raw.strip():
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                return bad
+        if not isinstance(payload, dict):
+            return bad
+        request_id = payload.get("request_id")
+        if request_id is not None and not isinstance(request_id, str):
+            return bad
+        return cancel_local_generation(session_context, request_id=(request_id or "").strip() or None)
 
     @app.get("/api/queue/state")
     async def api_queue_state():

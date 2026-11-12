@@ -30,7 +30,8 @@ export function initDraftMode({
   escHtml,
   showToast = () => {},
   getPeField = () => '',         // (key) => string - PE 칸의 지금 글
-  setPeField = () => {},         // (key, text) => void · 못 보내면 던진다
+  setPeField = () => {},         // (key, text, seenPreset) => void · 못 보내면 던진다
+  getPePreset = () => '',        // () => string - 지금 PE 프리셋 이름(보고 친 프리셋의 도장용)
   bindTagAssist = null,          // Extra 칸의 일반 자동완성
   attachHighlight = null,        // prefix / postfix 패널의 색칠(PE 칸과 같은 하이라이터) - 없어도 칸은 그대로 동작한다
   isAutocompleteEnabled = () => true,
@@ -51,6 +52,8 @@ export function initDraftMode({
   let gen = null, rev = -1;
   let busy = 0;
   let pendingRebuild = false;     // 띠에서 PE 를 고쳤다 - PE 상태가 돌아오면 다시 조립
+  let rebuilding = null;          // 돌고 있는 /draft/rebuild
+  let rebuildFailed = false;
   let menuEl = null;
   const active = () => !!snap?.state?.active;
 
@@ -286,6 +289,8 @@ export function initDraftMode({
   let peekTimer = 0;
   let peekArmedAt = 0;
   function armPeek() { if (active()) peekArmedAt = Date.now(); }
+  /** 누른 Random 이 실패 · 끊김으로 끝났다 - 예약을 푼다(리뷰 #7: 남은 예약이 뒤의 다른 뽑기에 떴다). */
+  function disarmPeek() { peekArmedAt = 0; }
   function flashPeek() {
     showPeek();
     if (peekEl.hidden) return;
@@ -612,7 +617,7 @@ export function initDraftMode({
   /** 패널 글을 PE 와 맞춘다 - 포커스 중인 칸은 덮지 않는다(치는 중인 글). 띠의 한 줄 미리보기는 늘 칸의 글을 따른다. */
   function paintBands() {
     bands.forEach(el => {
-      if (el !== document.activeElement) {
+      if (el !== document.activeElement && !peUnsaved[el.dataset.drPe]) {
         const text = String(getPeField(el.dataset.drPe) || '');
         if (el.value !== text) el.value = text;
       }
@@ -631,7 +636,7 @@ export function initDraftMode({
     const on = active();
     board.hidden = !on;
     document.body.classList.toggle('draft-mode', on);
-    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); closePePanel(); return; }
+    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); closePePanel(); disarmPeek(); return; }
     paintZone('include');
     paintZone('exclude');
     {   // [초기화] 는 지울 것이 있을 때만 보인다
@@ -700,10 +705,14 @@ export function initDraftMode({
     }
     return true;
   }
+  let ratingsWant = null;         // 답을 기다리는 동안의 바란 등급 집합
+  let ratingsSeq = 0;
   /** 등급 단추 - 켜 둘 집합을 통째로 보낸다(`op: ratings`). 서버가 한 번 더 막는다(0건 축 · 전부 끔). */
   function toggleRating(r) {
     const der = snap?.derived || {};
-    const on = new Set(der.ratings_on || ['g', 's', 'q', 'e']);
+    // 앞선 누름의 답이 오기 전에 또 누르면 그 **바란 집합**에서 이어 간다 - 스냅숏에서 다시 세면 앞 누름이 되돌아갔다
+    // (리뷰 #3: G · S 를 잇달아 끄면 QE 가 아니라 GQE).
+    const on = new Set(ratingsWant || der.ratings_on || ['g', 's', 'q', 'e']);
     if (on.has(r)) {
       if (on.size === 1) { showToast('등급은 하나 이상 켜져 있어야 합니다', 'warning'); return; }
       on.delete(r);
@@ -714,7 +723,10 @@ export function initDraftMode({
       }
       on.add(r);
     }
-    void chipOp({ op: 'ratings', text: ['g', 's', 'q', 'e'].filter(x => on.has(x)).join('') });
+    ratingsWant = on;
+    const mine = ++ratingsSeq;
+    void chipOp({ op: 'ratings', text: ['g', 's', 'q', 'e'].filter(x => on.has(x)).join('') })
+      .finally(() => { if (mine === ratingsSeq) ratingsWant = null; });
   }
   async function chipOp(body) {
     try { receive(await edit('/draft/chips', body)); }
@@ -1083,6 +1095,8 @@ export function initDraftMode({
   const PE_HEIGHT_KEY = 'naia.draft.pePanelHeights.v1';
   const PE_DEFAULT_H = 138;       // 띠 자리(28) + 글 서너 줄 - 패널이 열린 띠의 자리까지 덮는다
   let openPe = null;              // 열린 패널의 키(pre_prompt | post_prompt)
+  const peUnsaved = {};           // 저장하지 못한 글이 칸에 남아 있다 - 서버 글로 덮지 않는다
+  const peSeenPreset = {};        // 칸을 채울 때의 PE 프리셋 - 저장할 때 그 이름을 도장으로 보낸다
   let peSuppressBlur = false;     // 닫으면서 이미 저장했다 - 그 blur 에서 또 저장(실패 토스트 두 번)하지 않게
   let pePlaceRaf = 0;
   const peShownH = {};            // 마지막으로 놓은 (자르기 전) 높이 - 끌기의 시작점
@@ -1154,12 +1168,28 @@ export function initDraftMode({
   /** blur 와 닫기가 함께 쓴다 - 값이 다르면 PE 에 쓰고 다시 조립을 예약한다. */
   function commitPeText(el) {
     const key = el.dataset.drPe;
-    if (el.value === String(getPeField(key) || '')) return;
+    if (el.value === String(getPeField(key) || '')) { peUnsaved[key] = false; return true; }
+    const name = key === 'pre_prompt' ? 'Prefix' : 'Postfix';
+    // 보고 친 프리셋이 그사이 바뀌었으면(다른 탭) 보내지 않는다 - 지금 프리셋의 도장으로 보내면 앞 프리셋의 글이
+    // 새 프리셋을 덮는다(Codex 리뷰 2026-11-12 #2). 글은 칸에 남긴다 - 사용자가 보고 옮기거나 버린다.
+    let now = '';
+    try { now = String(getPePreset() || ''); } catch (_) {}
+    const seen = peSeenPreset[key];
+    if (seen != null && seen !== now) {
+      if (!peUnsaved[key]) showToast(`프리셋이 바뀌어 ${name} 편집을 저장하지 않았습니다 - 글은 칸에 남겨 두었습니다`, 'warning');
+      peUnsaved[key] = true;
+      return false;
+    }
     try {
-      setPeField(key, el.value);
+      setPeField(key, el.value, seen);
       pendingRebuild = true;
+      peUnsaved[key] = false;
+      return true;
     } catch (error) {
-      showToast(`${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} 저장 실패 — ${error.message || ''}`, 'error');
+      // 못 보낸 글은 칸에 남긴다 - 다시 열거나 PE 상태가 와도 덮지 않는다(리뷰 #4: 끊긴 채 닫았다 열면 글이 사라졌다)
+      peUnsaved[key] = true;
+      showToast(`${name} 저장 실패 — ${error.message || ''}`, 'error');
+      return false;
     }
   }
   function openPePanel(key) {
@@ -1169,7 +1199,10 @@ export function initDraftMode({
     const panel = pePanels[key];
     const ta = peTexts[key];
     const text = String(getPeField(key) || '');
-    if (ta.value !== text) ta.value = text;
+    if (!peUnsaved[key]) {
+      if (ta.value !== text) ta.value = text;
+      try { peSeenPreset[key] = String(getPePreset() || ''); } catch (_) { peSeenPreset[key] = null; }
+    }
     paintPreview(key);
     openPe = key;
     panel.hidden = false;
@@ -1282,12 +1315,45 @@ export function initDraftMode({
     paintBands();
     if (!pendingRebuild) return;
     pendingRebuild = false;
-    void edit('/draft/rebuild', {}).then(receive).catch(error => showToast(error.message || 'Draft 다시 조립 실패', 'error'));
+    rebuildFailed = false;
+    const run = edit('/draft/rebuild', {}).then(receive)
+      .catch(error => { rebuildFailed = true; showToast(error.message || 'Draft 다시 조립 실패', 'error'); })
+      .finally(() => { if (rebuilding === run) rebuilding = null; });
+    rebuilding = run;
+  }
+  /** 생성 직전에 부른다: 아직 저장 · 재조립 안 된 편집이 있나(있으면 app.js 가 settle 을 기다린다). */
+  function needsSettle() {
+    if (!active()) return false;
+    if (pendingRebuild || rebuilding) return true;
+    if (PE_KEYS.some(key => peUnsaved[key] || peTexts[key].value !== String(getPeField(key) || ''))) return true;
+    return extraEl.value !== String(snap?.state?.extra || '');
+  }
+  /** 저장 · 재조립이 끝날 때까지 기다린다. 못 끝내면 false - 생성은 보내지 않는다. 안 기다리면 판에는 새 글이 보이는데
+   *  생성은 옛 글로 나간다(Codex 리뷰 2026-11-12 #1: prefix 를 고치고 곧바로 Generate). */
+  async function settle() {
+    if (!active()) return true;
+    for (const key of PE_KEYS) {
+      if (!commitPeText(peTexts[key])) {
+        return false;      // 알림은 commitPeText 가 했다
+      }
+    }
+    if (!(await flushExtra())) return false;
+    const until = Date.now() + 5000;
+    while ((pendingRebuild || rebuilding) && Date.now() < until) {
+      if (rebuilding) await rebuilding;
+      else await new Promise(resolve => setTimeout(resolve, 30));   // PE 상태가 돌아와야 재조립을 청한다
+    }
+    if (pendingRebuild || rebuilding || rebuildFailed) {
+      showToast('prefix / postfix 변경을 아직 프롬프트에 반영하지 못했습니다 - 잠시 뒤 다시 눌러 주세요', 'warning');
+      return false;
+    }
+    return true;
   }
 
   // ---- 스테이징 ----
   async function sendToStaging() {
-    await flushExtra();
+    // 저장 못 한 Extra 로 스테이징 줄을 만들지 않는다(리뷰 #6: 실패를 무시하고 옛 Extra 로 보낸 뒤 성공이라고 했다)
+    if (!(await flushExtra())) return;
     try {
       const data = await request('/draft/to-staging', {});
       if (data.snapshot) receive(data.snapshot);
@@ -1320,6 +1386,6 @@ export function initDraftMode({
     /** WS `event_map_draft` */
     receive: message => receive({ ...message, __fromSocket: true }),
     reload: load,
-    enter, exit, syncPe, sendToStaging, loadFromStaging, armPeek,
+    enter, exit, syncPe, sendToStaging, loadFromStaging, armPeek, disarmPeek, needsSettle, settle,
   };
 }

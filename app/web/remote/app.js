@@ -1698,7 +1698,7 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261112-drclear1')
+import('./js/features/draftMode.mjs?v=20261112-drrev1')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1706,9 +1706,10 @@ import('./js/features/draftMode.mjs?v=20261112-drclear1')
       escHtml,
       showToast,
       getPeField: key => peFieldText(key),
-      setPeField: (key, text) => {
-        if (!slashPeSetField(key, text)) throw new Error('WS 연결이 끊겨 있습니다');
+      setPeField: (key, text, seenPreset) => {
+        if (!slashPeSetField(key, text, seenPreset)) throw new Error('WS 연결이 끊겨 있습니다');
       },
+      getPePreset: () => slashPeState().preset || '',
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
       attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
       isAutocompleteEnabled: () => tagAutocompleteEnabled(),
@@ -5937,6 +5938,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
         awaitingMyRandom = false;
         pendingRandomRequestId = '';
         settleRandomWaiter(false);      // 끊긴 Random 을 기다리던 쪽([랜덤+생성])도 놓아 준다
+        try { window.draftMode?.disarmPeek?.(); } catch (_) {}
         if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
         if (typeof btnRnd !== 'undefined' && btnRnd) btnRnd.disabled = false;
         if (typeof stopRndTimer === 'function') stopRndTimer();  // Auto Boost 경과시간 라벨 복원(Codex INFO)
@@ -6369,6 +6371,7 @@ function unlockRandomButton({clearRequest = true} = {}) {
 }
 
 function onRandomFailed(m) {
+  try { window.draftMode?.disarmPeek?.(); } catch (_) {}
   settleRandomWaiter(false);
   unlockRandomButton();
   if (m && m.message) showToast(m.message, m.level || 'error', true);
@@ -10433,13 +10436,24 @@ function send(cmd, options = {}) {
       return;
     }
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    const prompt = promptEdit.value;
-    const negative = negEdit.value;
-    void generateWithInteractiveSnapshot({
-      prompt,
-      negative_prompt: negative,
-      overrides: buildWebGenerationOverrides(prompt, negative),
-    }, null, {queue: !!options.queue});
+    const sendGenerate = () => {
+      const prompt = promptEdit.value;
+      const negative = negEdit.value;
+      void generateWithInteractiveSnapshot({
+        prompt,
+        negative_prompt: negative,
+        overrides: buildWebGenerationOverrides(prompt, negative),
+      }, null, {queue: !!options.queue});
+    };
+    // Draft: 방금 고친 prefix / postfix / Extra 가 저장 · 재조립될 때까지 기다린 뒤 보낸다 - 안 기다리면 판에는 새 글이
+    // 보이는데 생성은 옛 글로 나간다(Codex 리뷰 2026-11-12). 못 끝내면 보내지 않는다(알림은 settle 이 한다).
+    if (window.draftMode?.needsSettle?.()) {
+      void window.draftMode.settle().then(ok => {
+        if (ok && ws && ws.readyState === WebSocket.OPEN) sendGenerate();
+      });
+      return;
+    }
+    sendGenerate();
     return;
   }
   if (cmd === 'random') {

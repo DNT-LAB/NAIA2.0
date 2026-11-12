@@ -19,7 +19,8 @@
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
-import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drrev4';
+import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drcard1';
+import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard1';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
@@ -57,6 +58,7 @@ export function initDraftMode({
   let rebuildFailed = false;
   let menuEl = null;
   let finder = null;              // '남은 태그' 창(draftTagFinder.mjs) - 맨 아래에서 만든다
+  let chipCard = null;            // 칩 카드(draftChipCard.mjs) - 칩 메뉴와 함께 뜬다 · 맨 아래에서 만든다
   const active = () => !!snap?.state?.active;
 
   // ---- 서버 ----
@@ -102,6 +104,7 @@ export function initDraftMode({
     if (typeof data.prompt === 'string' && (now || was)) applyServerPrompt(data.prompt, 'event_map_draft');
     paint();
     finder?.sync(snap);
+    chipCard?.sync(snap);
     if (now !== was) onActiveChange(now);
   }
   async function load() {
@@ -998,7 +1001,7 @@ export function initDraftMode({
   }, true);
 
   // ---- 칩 메뉴 ----
-  function closeMenu() { menuEl?.remove(); menuEl = null; }
+  function closeMenu() { menuEl?.remove(); menuEl = null; chipCard?.close(); }
   function openMenu(anchor, items, label) {
     closeMenu();
     menuEl = document.createElement('div');
@@ -1031,6 +1034,7 @@ export function initDraftMode({
       { label: zone === 'include' ? '제외로 옮기기' : '포함으로 옮기기', run: () => chipOp({ op: 'move', id, zone: zone === 'include' ? 'exclude' : 'include' }) },
       { label: '지우기', danger: true, run: () => chipOp({ op: 'remove', id }) },
     ], chip.exact ? '퍼펙트 매칭' : '텍스트 매칭');
+    chipCard?.open(el, chip, zone);   // 메뉴와 함께 태그 카드(openMenu 가 먼저 닫은 뒤에 연다)
   }
   function grayMenu(el) {
     const tag = el.dataset.drGray;
@@ -1074,7 +1078,10 @@ export function initDraftMode({
     if (el.dataset.drGray != null) grayMenu(el); else userChipMenu(el);
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && menuEl) closeMenu(); });
-  document.addEventListener('mousedown', event => { if (menuEl && !menuEl.contains(event.target)) closeMenu(); }, true);
+  // 칩 카드 안을 누르는 것은 '바깥' 이 아니다 - 카드의 칩을 누르기 전에 메뉴(와 카드)가 닫히지 않게
+  document.addEventListener('mousedown', event => {
+    if (menuEl && !menuEl.contains(event.target) && !chipCard?.contains(event.target)) closeMenu();
+  }, true);
 
   // ---- Extra ----
   // 저장했거나 저장할 것이 없으면 true. 실패면 false - [이 결과를 메인 프롬프트로] 는 멈춘다(Codex 리뷰 11-07:
@@ -1367,7 +1374,9 @@ export function initDraftMode({
       peServer[key] = text;
       const queue = peSent[key];
       if (!queue || !queue.length) return;
-      const at = queue.lastIndexOf(text);
+      // 맨 앞의 같은 글까지만 확인한다 - A → B → A 로 보냈을 때 첫 A 의 답을 마지막 A 의 확인으로 치면 중간 글 B 로
+      // 조립된 채 끝난다(Codex 리뷰 2026-11-12 4차 #1).
+      const at = queue.indexOf(text);
       if (at >= 0) queue.splice(0, at + 1);      // 그 글과 그 앞에 보낸 글들까지 확인됐다
       else peEchoes[key] = (peEchoes[key] || 0) + 1;
     });
@@ -1502,6 +1511,22 @@ export function initDraftMode({
       receive(data);      // 소켓 알림을 기다리지 않고 답으로 바로 그린다(칸 입력의 commit 과 같다)
       return data;
     },
+  });
+  // ---- 칩 카드(사용자 결정 11-12) - 칩 메뉴와 함께 뜨는 태그 카드. 넣기 · 지우기는 '남은 태그' 창과 같은 편집 줄을 빌려준다 ----
+  chipCard = initDraftChipCard({
+    esc, fmt, showToast, isActive: active, getSnapshot: () => snap,
+    addChip: async (zone, text) => {
+      const data = await edit('/draft/chips', { op: 'add', zone, text });
+      receive(data);
+      return data;
+    },
+    removeChip: async id => {
+      const data = await edit('/draft/chips', { op: 'remove', id });
+      receive(data);
+      return data;
+    },
+    onDone: () => closeMenu(),
+    isMenuTarget: node => !!(menuEl && node && menuEl.contains(node)),
   });
 
   paintPill();

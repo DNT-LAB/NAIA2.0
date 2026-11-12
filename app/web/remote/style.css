@@ -34499,3 +34499,18 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .drf-tip-desc { margin-top: 3px; font-size: 10px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
 .drf-tip-thumb { flex: 0 0 auto; width: 128px; height: 128px; object-fit: cover; border-radius: 5px;
   border: 1px solid rgba(255,255,255,0.10); background: #0e0e15; }
+/* Draft 칩 카드(draftChipCard.mjs - 사용자 결정 11-12). 포함 · 제외 칩을 누르면 칩 메뉴와 함께 뜬다.
+   모양은 메인 프롬프트 태그 카드(.tag-tooltip 계열) 그대로 - 여기는 Draft 전용 조정만. 자리 · 폭 · 높이는 draftChipCard.mjs 가 준다.
+   카드는 눌러서 쓴다(pointer-events) · 칩 끝의 수 = 넣으면(바꾸면) 남는 게시물 · 0 이면 흐리게 눌러지지 않는다. */
+.tag-tooltip.drc-card { pointer-events: auto; right: auto; z-index: calc(var(--z-drag-panel, 10150) + 400);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5); }
+.tag-tooltip.drc-card[hidden] { display: none; }
+.drc-card .drc-hits { margin-left: 6px; font-family: var(--font-mono); color: var(--text-dim); }
+.drc-card .drc-wait { padding-top: 3px; color: var(--text-dim); font-size: 10px; }
+.drc-card .drc-n { margin-left: 5px; font-size: 0.92em; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.drc-card .tag-tooltip-extra-tag:hover .drc-n { color: inherit; }
+.drc-card .tag-tooltip-extra-tag.is-zero { opacity: 0.38; cursor: default; }
+.drc-card .tag-tooltip-extra-tag.is-zero:hover { background: rgba(255,255,255,0.04); color: var(--text-muted);
+  border-color: rgba(255,255,255,0.08); }
+.drc-card .drc-more { align-self: center; font-family: var(--font-mono); color: var(--text-dim); }
+.drc-card.is-busy .tag-tooltip-extra-tag { cursor: progress; }

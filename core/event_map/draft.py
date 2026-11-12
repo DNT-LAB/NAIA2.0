@@ -778,6 +778,59 @@ class EventMapDraft:
 
     build_row = staticmethod(build_row)
 
+    def chip_counts(self, state, tags, *, zone="include", chip_id=None):
+        """칩 카드(사용자 지시 2026-11-12)의 수: 후보 태그를 넣으면 남는 게시물 수.
+
+        counts[tag]  = 지금 조건에 그 태그를 `zone` 칩(퍼펙트)으로 더하면 남는 수.
+        replace[tag] = 누른 칩(`chip_id`)을 그 태그로 **바꾸면** 남는 수(대안 줄). 칩이 없으면 비어 있다.
+        matched      = 누른 칩이 텍스트 칩일 때 그 글이 걸린 태그들과, 그 칩을 그 태그 하나의 퍼펙트 칩으로 바꾸면 남는 수.
+        맵에 없는 태그는 None(모름 - 0 과 다르다).
+        """
+        if zone not in ("include", "exclude") or not isinstance(tags, list) or len(tags) > 160:
+            raise DraftError("too_many", "요청 형식을 확인해주세요.")
+        if any(not isinstance(t, str) or len(t) > 160 for t in tags) or (chip_id is not None and not isinstance(chip_id, str)):
+            raise DraftError("too_many", "요청 형식을 확인해주세요.")
+        idx = self._index()
+        block = self.service.permanent_block(idx)
+        cond = self._condition(state, idx, block)
+
+        def inside(c, tid):
+            vector = c.tag_counts(idx)
+            if vector is not None:
+                return int(vector[tid])
+            packed = TEXT_CACHE.packed(idx, "*" + idx.by_id[tid])
+            return int(np.bitwise_count(c.packed & packed).sum(dtype=np.int64))
+
+        def left(c, tid, into):
+            n = inside(c, tid)
+            return n if into == "include" else c.count - n
+
+        out = {"ok": True, "total": cond.count, "cond": self.condition_id(state), "rev": state.get("rev"),
+               "zone": zone, "counts": {}, "replace": {}, "matched": []}
+        tids = {}
+        for tag in tags:
+            tid = idx.resolve(tag.strip().lower())
+            tids[tag] = tid
+            out["counts"][tag] = None if tid is None else left(cond, tid, zone)
+        found = next(((z, c) for z in ("include", "exclude") for c in state[z] if c["id"] == chip_id), None)
+        if found is None:
+            return out
+        source, chip = found
+        without = deepcopy(state)
+        without[source] = [c for c in without[source] if c["id"] != chip_id]
+        base = self._condition(without, idx, block, memo=False)
+        out["chip"] = {"id": chip_id, "zone": source, "text": chip["text"], "exact": chip["exact"]}
+        for tag, tid in tids.items():
+            out["replace"][tag] = None if tid is None else left(base, tid, source)
+        if not chip["exact"]:
+            rows = [(left(base, int(tid), source), idx.by_id[int(tid)])
+                    for tid in np.flatnonzero(idx.matching_tags(chip["text"], False))[:400]]
+            # 포함 칩 = 많이 남는 것부터 · 제외 칩 = 많이 빠지는 것(적게 남는 것)부터
+            rows.sort(key=lambda r: (-r[0] if source == "include" else r[0], r[1]))
+            out["matched"] = [{"tag": tag, "count": n} for n, tag in rows[:40]]
+            out["matched_total"] = int(np.count_nonzero(idx.matching_tags(chip["text"], False)))
+        return out
+
     def remaining_tags(self, state, *, group="", sort="mix", q="", limit=60, offset=0):
         """지금 조건에 남은 게시물들이 가진 태그 - 이벤트 맵 후보 목록의 Draft 판(사용자 지시 2026-11-12).
 
@@ -1160,6 +1213,10 @@ class DraftSession:
         from core.headless_random_prompt_service import pipeline_swap_lock
         from core.event_map.random_link import link_state, staging_store
         ctx = self.context
+        if action == "counts":
+            # 읽기만 한다 - 칩 카드의 '넣으면 남는 수'
+            return self.engine.chip_counts(self.state, body.get("tags"), zone=body.get("zone", "include"),
+                                           chip_id=body.get("id")), []
         if action == "remaining":
             # 읽기만 한다(자동완성과 같은 길) - 잠금을 기다리지 않는다
             return self.engine.remaining_tags(

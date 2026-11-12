@@ -672,9 +672,13 @@ def register_prompt_tools_routes(
         )
 
     @app.get("/api/tag/lookup")
-    async def api_tag_lookup(tag: str = ""):
+    async def api_tag_lookup(tag: str = "", recommend: int = 0, prompt_tags: str = ""):
+        # recommend=1 = 메인 프롬프트 카드와 같은 유형별 추천 줄까지(WS `tag_lookup` 의 recommend 와 같다).
+        # prompt_tags = 이미 있는 태그들(쉼표) - 추천에서 뺀다. Draft 의 칩 카드가 쓴다(2026-11-12).
         try:
-            return await run_in_thread(tag_lookup_info, session_context, tag)
+            have = [t.strip() for t in str(prompt_tags or "")[:8000].split(",") if t.strip()][:200]
+            return await run_in_thread(lambda: tag_lookup_info(session_context, tag, recommend=bool(recommend),
+                                                               prompt_tags=have))
         except Exception as exc:
             return JSONResponse({"error": f"Tag lookup failed: {exc}"}, status_code=500)
 

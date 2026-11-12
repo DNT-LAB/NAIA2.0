@@ -244,6 +244,11 @@ def register_event_map_routes(
         return await _draft_request("remaining", {"group": group, "sort": sort, "q": q,
                                                   "limit": limit, "offset": offset})
 
+    @app.post("/api/event-map/draft/counts")
+    async def api_event_map_draft_counts(req: Request):
+        # 칩 카드: 후보 태그를 넣으면(또는 누른 칩을 그것으로 바꾸면) 남는 게시물 수 · 텍스트 칩이 걸린 태그들(2026-11-12)
+        return await _draft_request("counts", await _read_json(req))
+
     @app.post("/api/event-map/draft/enter")
     async def api_event_map_draft_enter(req: Request):
         return await _draft_request("enter", await _read_json(req))

@@ -223,14 +223,16 @@ export function initDraftTagFinder({
     }
     loading = false;
     error = '';
-    stale = false;
-    listEl.classList.remove('is-stale');
     // 고른 갈래가 새 조건에서 0 이 됐다(탭이 사라진다) - [전체] 로 돌아가 다시 받는다
     if (group && top && Number(got.pool) > 0 && !(got.group_counts || []).some(g => g.id === group)) {
       group = '';
       void load({ top: true });
       return;
     }
+    // 옛 줄의 잠금은 **새 목록을 실제로 그릴 때** 푼다 - 위의 갈래 되돌리기 분기에서 먼저 풀면 옛 조건의 줄이 다시 눌린다
+    // (Codex 리뷰 2026-11-12 4차 #2).
+    stale = false;
+    listEl.classList.remove('is-stale');
     data = got;
     (got.group_counts || []).forEach(g => labels.set(g.id, g.label));
     const rows = Array.isArray(got.items) ? got.items : [];

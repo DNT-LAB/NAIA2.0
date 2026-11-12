@@ -812,6 +812,33 @@ def _generation_service(context: WebSessionContext) -> HeadlessGenerationService
     return service
 
 
+_SMALL_BODY_LIMIT = 512 * 1024
+
+
+async def _small_json_body(req: Request, limit: int = _SMALL_BODY_LIMIT) -> dict | None:
+    """프롬프트 한 편을 받는 라우트의 본문 - `limit` 바이트를 넘으면 None(413). 글이 아니거나 깨졌으면 빈 dict.
+
+    `req.json()` 은 본문을 다 받은 뒤에야 길이를 볼 수 있다 - 글을 6만 자로 자르기 전에 100MB 를 통째로 버퍼에 올린다
+    (Codex 리뷰 2026-11-12 #7). 받는 동안 센다(Content-Length 가 없는 조각 전송도 걸린다).
+    """
+    try:
+        if int(req.headers.get("content-length") or 0) > limit:
+            return None
+    except ValueError:
+        pass
+    chunks, total = [], 0
+    async for chunk in req.stream():
+        total += len(chunk)
+        if total > limit:
+            return None
+        chunks.append(chunk)
+    try:
+        payload = json.loads(b"".join(chunks) or b"{}")
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def register_artist_thumbnail_routes(
     app: FastAPI,
     session_context: WebSessionContext,
@@ -929,12 +956,9 @@ def register_artist_thumbnail_routes(
     # 팩을 올리지 않고 자리 색인으로 그 작가의 그림만 읽는다(core/artist_pack_index).
     @app.post("/api/artist-thumb/used")
     async def api_artist_thumb_used(req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
+        payload = await _small_json_body(req)
+        if payload is None:
+            return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
         text = str(payload.get("text") or "")[:60000]
         mode = str(payload.get("mode") or "")
 
@@ -959,12 +983,9 @@ def register_artist_thumbnail_routes(
     # 글만 돌려준다. 프롬프트 칸 · 세션 · 파일은 건드리지 않는다.
     @app.post("/api/artist-thumb/used-solo")
     async def api_artist_thumb_used_solo(req: Request):
-        try:
-            payload = await req.json()
-        except Exception:
-            payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
+        payload = await _small_json_body(req)
+        if payload is None:
+            return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
         text = str(payload.get("text") or "")[:60000]
         token = " ".join(str(payload.get("token") or "").split())[:400]
         if not token:

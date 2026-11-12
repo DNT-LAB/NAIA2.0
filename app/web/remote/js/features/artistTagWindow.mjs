@@ -37,6 +37,7 @@ const ATW_CSS = `
 .atw-weight { color: var(--text-primary); }
 .atw-weight.is-neg { color: #ff8f8f; }
 .atw-tile.is-menu { border-color: var(--accent); }
+.atw-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .atw-menu { position: fixed; z-index: calc(var(--z-drag-panel-zoom, 10195) + 5); width: 250px;
   background: var(--bg-elevated); border: 1px solid var(--border-glow); border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0,0,0,0.6); overflow: hidden; user-select: none; }
@@ -117,7 +118,7 @@ export function createArtistTagWindow({
     const picture = row.image_url
       ? `<img class="atw-img" loading="lazy" alt="" src="${escHtml(row.image_url)}">`
       : '<div class="atw-none">데이터 없음</div>';
-    return `<div class="atw-tile" title="${escHtml(tip)}" data-atw-artist="${escHtml(name)}" data-atw-weight="${escHtml(String(weight))}">${picture}`
+    return `<div class="atw-tile" tabindex="0" title="${escHtml(tip)}" data-atw-artist="${escHtml(name)}" data-atw-weight="${escHtml(String(weight))}">${picture}`
       + `<div class="atw-name">${escHtml(name)}</div><div class="atw-meta">`
       + `<span class="atw-weight${weight < 0 ? ' is-neg' : ''}" title="가중치">${escHtml(String(weight))}</span>`
       + `<span title="게시물 수">${escHtml(posts)}</span></div></div>`;
@@ -218,21 +219,25 @@ export function createArtistTagWindow({
   }
 
   function closeMenu() {
-    if (menuTile) menuTile.classList.remove('is-menu');
+    const tile = menuTile;
+    // 메뉴 안에 초점이 있었으면(키보드로 연 것) 타일로 돌려준다 - 안 그러면 초점이 문서 맨 위로 떨어진다.
+    const hadFocus = Boolean(menuEl && menuEl.contains(doc.activeElement));
+    if (tile) tile.classList.remove('is-menu');
     menuTile = null;
     if (menuEl) menuEl.hidden = true;
+    if (hadFocus && tile?.isConnected) tile.focus();
   }
 
-  function openMenu(tile, x, y) {
+  function openMenu(tile, x, y, {focus = false} = {}) {
     leaveTile();
     closeMenu();
     const box = menuBox();
     menuTile = tile;
     tile.classList.add('is-menu');
     box.querySelector('[data-atw-menu-name]').textContent = tile.dataset.atwArtist || '';
-    // 처음 값은 그 타일의 가중치. 슬라이더 범위 밖(0 이하 · 2 초과)이면 1 에서 시작한다.
+    // 처음 값은 그 타일의 가중치. 슬라이더 범위 밖(음수 · 2 초과)이면 1 에서 시작한다.
     const own = Number(tile.dataset.atwWeight);
-    const start = Number.isFinite(own) && own > WEIGHT_MIN && own <= WEIGHT_MAX ? own : 1;
+    const start = Number.isFinite(own) && own >= WEIGHT_MIN && own <= WEIGHT_MAX ? own : 1;
     box.querySelector('[data-atw-weight]').value = String(start);
     box.querySelector('[data-atw-weight-out]').textContent = weightText(start);
     box.hidden = false;
@@ -240,6 +245,13 @@ export function createArtistTagWindow({
     const rect = box.getBoundingClientRect();
     box.style.left = `${Math.round(Math.max(6, Math.min(x, view.innerWidth - rect.width - 6)))}px`;
     box.style.top = `${Math.round(Math.max(6, Math.min(y, view.innerHeight - rect.height - 6)))}px`;
+    if (focus) box.querySelector('[data-atw-solo]')?.focus();
+  }
+
+  /** 키보드로 열 때의 자리 - 타일 안쪽. */
+  function openMenuAtTile(tile) {
+    const rect = tile.getBoundingClientRect();
+    openMenu(tile, rect.left + Math.min(40, rect.width / 2), rect.top + Math.min(40, rect.height / 2), {focus: true});
   }
 
   async function runSolo(random) {
@@ -263,7 +275,17 @@ export function createArtistTagWindow({
     const tile = event.target?.closest?.('.atw-tile');
     if (!tile || typeof soloGenerate !== 'function') return;
     event.preventDefault();
-    openMenu(tile, event.clientX, event.clientY);
+    // 키보드의 메뉴 키 · Shift+F10 은 좌표 없이(0, 0) 온다.
+    if (!event.clientX && !event.clientY) openMenuAtTile(tile);
+    else openMenu(tile, event.clientX, event.clientY);
+  });
+  // 키보드: 타일에 초점을 두고 Enter · Space = 메뉴(마우스 없이도 쓸 수 있게 - Codex 리뷰 2026-11-12 #9).
+  panel.body.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const tile = event.target?.classList?.contains('atw-tile') ? event.target : null;
+    if (!tile || typeof soloGenerate !== 'function') return;
+    event.preventDefault();
+    openMenuAtTile(tile);
   });
   // 메뉴 밖을 누르거나 · Esc · 스크롤 · 창 이동이면 닫는다.
   doc.addEventListener('pointerdown', event => {

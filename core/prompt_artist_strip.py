@@ -180,6 +180,47 @@ def find_artists(text, *, known=frozenset()) -> list[dict]:
             if (row := _classify(event, keys))]
 
 
+_LAST_NUMBER = re.compile(rf"^(.*\S)\s*:\s*({_NUMBER})\s*$", re.S)
+
+
+def _paren_group(event):
+    """SD 묶음 `(a, b:1.2)` · `(a, b)` -> (구성원들, 숫자 글 | None, 뒤 공백). 묶음이 아니거나 구성원이 하나면 None.
+
+    `_events` 는 괄호를 한 덩어리로 둔다 - 묶음 안의 작가는 `_classify` 에 안 걸려 [이 아티스트로만 생성] 에 남았다
+    (Codex 리뷰 2026-11-12 #6: `(artist:a, smile:1.2)`). 구성원이 하나인 `(name:1.2)` 는 `_events` 가 이미 벗긴다.
+    """
+    chunk = event.text.rstrip()
+    if len(chunk) < 2 or chunk[0] != "(" or chunk[-1] != ")":
+        return None
+    depth = i = 0
+    while i < len(chunk):                              # 통째로 한 쌍이어야 한다 - `(a) b (c)` 는 묶음이 아니다
+        if chunk[i] == "\\":
+            i += 2
+            continue
+        if chunk[i] == "(":
+            depth += 1
+        elif chunk[i] == ")":
+            depth -= 1
+            if depth == 0 and i != len(chunk) - 1:
+                return None
+        i += 1
+    if depth:
+        return None
+    members = split_top(chunk[1:-1])
+    number = None
+    last = _LAST_NUMBER.match(members[-1])
+    if last:
+        members[-1], number = last[1], last[2]
+    if len(members) < 2:
+        return None
+    return members, number, event.text[len(chunk):]
+
+
+def _member_artist(member, keys):
+    body = member.strip()
+    return _classify(_Event("TAG", body, body=body, raw=body), keys) if body else None
+
+
 def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
     """`find_artists` + 그 작가에 걸린 가중치(`weight`). 아티스트 태그 관리 창이 쓴다(2026-11-11).
 
@@ -192,6 +233,13 @@ def find_artists_weighted(text, *, known=frozenset()) -> list[dict]:
     for event in events:
         row = _classify(event, keys) if event.kind == "TAG" else None
         if not row:
+            group = _paren_group(event) if event.kind == "TAG" else None
+            for member in (group[0] if group else ()):
+                inner = _member_artist(member, keys)
+                if inner:
+                    # 묶음의 숫자가 곧 그 작가의 가중치. 숫자 없는 `(a, b)` 는 SD 의 1.1 배.
+                    inner["weight"] = round(float(group[1]) if group[1] else 1.1, 2)
+                    rows.append(inner)
             continue
         number, factor = None, 1.0
         for gid in event.groups:                      # 바깥 -> 안쪽 차례
@@ -226,6 +274,17 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
         if row:
             remove.add(i)
             removed.append(row)
+        elif (group := _paren_group(event)):
+            # SD 묶음 안의 작가만 걷는다 - 남는 태그의 가중치는 그대로(`(artist:a, smile:1.2)` -> `(smile:1.2)`).
+            members, number, trailing = group
+            inside = [_member_artist(member, keys) for member in members]
+            if any(inside):
+                removed.extend(found for found in inside if found)
+                kept = [member.strip() for member, found in zip(members, inside) if not found and member.strip()]
+                if kept:
+                    event.text = "(" + ", ".join(kept) + (f":{number}" if number else "") + ")" + trailing
+                else:
+                    remove.add(i)
         elif event.body.lstrip().startswith("#"):
             # 주석 조각(`#랜덤프롬프트`)도 걷는다 - 생성이 어차피 버리는 글이다. 남겨 두면 작가가 빠진 가중치 묶음의
             # 여는 표식이 그 앞에 붙어(`0.75::#랜덤프롬프트`) 주석이 아니게 되고, 그 글이 프롬프트로 나간다(실측).

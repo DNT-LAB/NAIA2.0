@@ -175,7 +175,7 @@ let _promptDirtyPreset = '';
 let _lastSentPromptValue = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let pendingRandomRequestId = '';
-let randomArrivalWaiter = null;   // 내 Random 응답을 기다리는 약속의 resolve(requestRandomAndWait) - 한 번에 하나
+let randomArrivalWaiter = null;   // 내 Random 응답을 기다리는 쪽 {id, done}(requestRandomAndWait) - 한 번에 하나
 let initialStateRefreshTimer = null;
 let promptHighlightIndexTimer = null;
 let initialHistoryRefreshTimer = null;
@@ -5935,6 +5935,7 @@ const remoteWsClientReady = import('./js/core/remoteWsClient.mjs?v=20260829-mark
         // 영원히 deferral 되고, 늦게 도착한 random 브로드캐스트도 stale id 로 거부된다. 버튼도 재활성화.
         awaitingMyRandom = false;
         pendingRandomRequestId = '';
+        settleRandomWaiter(false);      // 끊긴 Random 을 기다리던 쪽([랜덤+생성])도 놓아 준다
         if (window._randomTimeout) { clearTimeout(window._randomTimeout); window._randomTimeout = null; }
         if (typeof btnRnd !== 'undefined' && btnRnd) btnRnd.disabled = false;
         if (typeof stopRndTimer === 'function') stopRndTimer();  // Auto Boost 경과시간 라벨 복원(Codex INFO)
@@ -6367,6 +6368,7 @@ function unlockRandomButton({clearRequest = true} = {}) {
 }
 
 function onRandomFailed(m) {
+  settleRandomWaiter(false);
   unlockRandomButton();
   if (m && m.message) showToast(m.message, m.level || 'error', true);
 }
@@ -6502,7 +6504,12 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     if (isMyRandom) unlockRandomButton();   // 내가 요청한 random 응답일 때만 버튼 unlock(브로드캐스트로 온 남/재연결분은 패널만 갱신)
     // 내 Random 을 기다리는 쪽(아티스트 태그 관리의 [랜덤+생성])에게 알린다. 약속의 뒷일은 이 핸들러가 끝난 뒤에 돈다 -
     // 그때는 프롬프트 칸에 새 글이 들어가 있다.
-    if (isMyRandom && randomArrivalWaiter) { const done = randomArrivalWaiter; randomArrivalWaiter = null; done(true); }
+    // ⚠️ **그 요청의** 응답일 때만 성공이다. 기다리던 Random 이 실패한 뒤 사람이 누른 다른 Random 의 응답이 오면 실패로 닫는다 -
+    //    안 그러면 남의 프롬프트로 앞의 단독 생성이 나간다(Codex 리뷰 2026-11-12 #2).
+    if (isMyRandom && randomArrivalWaiter) {
+      const arrivedId = randomRequestIdFromMessage(message);
+      settleRandomWaiter(!arrivedId || arrivedId === randomArrivalWaiter.id);
+    }
     if (promptSendTimer) {
       clearTimeout(promptSendTimer);
       promptSendTimer = null;
@@ -12472,15 +12479,25 @@ async function generateViewpointInstant(suffix) {
 
 /** Random 을 보내고 **내 응답이 프롬프트 칸에 들어올 때까지** 기다린다. 못 보냈거나(Prompt Fixed · 프리셋 탭 · 끊김) 안 오면 false.
  *  '랜덤을 누를 때 생성' 은 걸리지 않는다(pressed 를 싣지 않는다) - 부르는 쪽이 제 글로 따로 생성한다. */
-function requestRandomAndWait(timeoutMs = 70000) {
+function settleRandomWaiter(ok) {
+  const waiter = randomArrivalWaiter;
+  if (!waiter) return;
+  randomArrivalWaiter = null;
+  waiter.done(Boolean(ok));
+}
+
+function requestRandomAndWait() {
   return new Promise(resolve => {
     if (randomArrivalWaiter || !requestRandomPrompt()) { resolve(false); return; }
-    const done = ok => { clearTimeout(timer); resolve(ok); };
-    const timer = setTimeout(() => {
-      if (randomArrivalWaiter === done) randomArrivalWaiter = null;
-      resolve(false);
-    }, timeoutMs);
-    randomArrivalWaiter = done;
+    // 기다리는 한도는 Random 단추의 안전 시간과 같은 갈래(이벤트 맵 연동 30초 · Auto Boost 65초)에 여유를 둔 것.
+    const boostArmed = !!(lastPromptEngineeringState && lastPromptEngineeringState.ollama_auto_boost);
+    const timeoutMs = boostArmed ? 70000 : (window.eventMap?.isRandomLinked?.() ? 32000 : 15000);
+    const waiter = {
+      id: pendingRandomRequestId,       // 이 요청의 응답만 성공으로 친다
+      done: ok => { clearTimeout(timer); resolve(ok); },
+    };
+    const timer = setTimeout(() => { if (randomArrivalWaiter === waiter) settleRandomWaiter(false); }, timeoutMs);
+    randomArrivalWaiter = waiter;
   });
 }
 
@@ -12490,10 +12507,17 @@ function requestRandomAndWait(timeoutMs = 70000) {
 async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
   const name = String(artist || '').trim();
   if (!name) return false;
-  if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 보내지 않습니다(한 장으로 끝나지 않는다)';
-  if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 보내지 않습니다';
-  if (interactivePanel?.isActive?.()) return 'Interactive 에서는 쓸 수 없습니다';
-  if (!canQueueGenerate()) return '이 탭에서는 생성을 보내지 않습니다';
+  // 한 장만 나가야 하는 문턱. Random · 글 만들기를 **기다린 뒤에도** 다시 본다 - 그사이 Auto Gen · Interactive 를 켜거나 탭을
+  // 옮기면 연쇄 생성 · 작업판 프롬프트로 나간다(Codex 리뷰 2026-11-12 #3. 즉시 생성에는 기다림이 없어 한 번이면 됐다).
+  const blocked = () => {
+    if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 보내지 않습니다(한 장으로 끝나지 않는다)';
+    if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 보내지 않습니다';
+    if (interactivePanel?.isActive?.()) return 'Interactive 에서는 쓸 수 없습니다';
+    if (!canQueueGenerate()) return '이 탭에서는 생성을 보내지 않습니다';
+    return '';
+  };
+  const early = blocked();
+  if (early) return early;
   const now = performance.now();
   if (now - lastHumanGenerateAt < 300) return false;
   lastHumanGenerateAt = now;
@@ -12516,6 +12540,9 @@ async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
     return `프롬프트를 만들지 못했습니다 - ${error?.message || error}`;
   }
   if (!prompt) return false;
+  const late = blocked();
+  if (late) return late;
+  lastHumanGenerateAt = performance.now();      // 실제로 보내는 때 - 메인 Generate 의 연타 문턱과 나눠 쓴다
   const negative = negEdit ? negEdit.value : '';
   return generateWithInteractiveSnapshot({
     prompt,
@@ -12533,7 +12560,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261111-atw5')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261112-atw6')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,

@@ -2221,9 +2221,11 @@ class ArtistThumbnailService:
             return None
         with self._pack_index_lock:
             index = self._pack_indexes.get(key)
-            if index is not None and index.is_current():
-                return index
+            # 지금 고르는 파일의 색인이어야 한다 - 옛 자리(legacy)의 팩으로 색인한 뒤 새 자리에 팩이 생기면 `_mode_path` 는
+            # 새 파일을 고르는데, 옛 파일이 그대로라는 것만 보면 옛 그림을 계속 낸다(Codex 리뷰 2026-11-12 #5).
             path = self._mode_path(key)
+            if index is not None and index.path == path and index.is_current():
+                return index
             try:
                 index = ArtistPackIndex(path, self.state_root / "pack_index" / f"{path.name}.idx.json")
             except Exception as exc:

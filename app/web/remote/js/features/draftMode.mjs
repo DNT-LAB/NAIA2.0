@@ -6,7 +6,8 @@
  *  · 칩 상태 · 셈 · 뽑기는 **전부 서버**(D19). 여기서는 그리기 · 입력 · 단추뿐이다. 서버가 보내는 스냅숏 하나가 화면 전체다.
  *  · 메인 칸 글은 서버가 파이프라인으로 조립한 최종 글이다. 숨긴 `#promptEdit` 를 그 글로 늘 맞춘다(재검수 C3) -
  *    Generate 는 여전히 그 칸을 보내고, 서버도 Draft 중에는 자기 글을 쓴다(두 겹).
- *  · prefix / postfix 는 판의 위 · 아래 띠에 펼쳐 둔다(D2 · 사용자 "모두 펼쳐둡니다"). 띠의 글은 PE 칸 그 자체다 -
+ *  · prefix / postfix 는 판의 위 · 아래 띠다. 평소엔 한 줄 미리보기 단추이고, 누르면 판 위에 덮이는 편집 패널이 뜬다
+ *    (사용자 승인 11-12 - 패널은 칸을 가릴 뿐 밀지 않는다 · 높이만 조절 · 한 번에 하나). 패널의 글은 PE 칸 그 자체다 -
  *    고치면 PE 에 쓰고, PE 상태가 돌아오면 서버에 다시 조립을 청한다(`/draft/rebuild`).
  *  · 칩 입력: 쉼표 · Enter = 칩으로. 서버가 0건이면 막는다 - 글은 남기고 붉게(D9). 색인 밖 글은 Extra 로 간다(D6).
  *    `*tag` = 퍼펙트(D4). 빈 칸 Backspace = 그 칸 마지막 칩 지우기.
@@ -143,8 +144,10 @@ export function initDraftMode({
   board.className = 'dr-board';
   board.hidden = true;
   board.innerHTML = `
-    <div class="dr-band dr-band--pre"><span class="dr-band-name">prefix</span>
-      <textarea class="dr-band-text" data-dr-pe="pre_prompt" rows="1" spellcheck="false" aria-label="Prefix Prompt"></textarea></div>
+    <button type="button" class="dr-band dr-band--pre" data-dr-band="pre_prompt" aria-expanded="false" title="눌러서 prefix 편집"><span
+      class="dr-band-name">prefix</span><span class="dr-band-preview" data-dr-band-preview></span><span class="dr-band-caret"
+      aria-hidden="true"><svg viewBox="0 0 10 6" width="10" height="6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor"
+      stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>
     <div class="dr-sum" data-dr-sum></div>
     <div class="dr-zone" data-dr-zone="include">
       <div class="dr-zh"><span class="dr-zt">포함</span></div>
@@ -162,10 +165,39 @@ export function initDraftMode({
       <textarea class="dr-extra-text" data-dr-extra rows="2" maxlength="2000" spellcheck="false" aria-label="Extra Prompt"
         placeholder="고정적으로 추가하고 싶은 태그를 자유롭게 작성합니다."></textarea>
     </div>
-    <div class="dr-band dr-band--post"><span class="dr-band-name">postfix</span>
-      <textarea class="dr-band-text" data-dr-pe="post_prompt" rows="1" spellcheck="false" aria-label="Postfix Prompt"></textarea></div>`;
+    <button type="button" class="dr-band dr-band--post" data-dr-band="post_prompt" aria-expanded="false" title="눌러서 postfix 편집"><span
+      class="dr-band-name">postfix</span><span class="dr-band-preview" data-dr-band-preview></span><span class="dr-band-caret"
+      aria-hidden="true"><svg viewBox="0 0 10 6" width="10" height="6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor"
+      stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span></button>`;
   const footer = host.querySelector('.prompt-token-footer');
   host.insertBefore(board, footer || null);
+  // prefix / postfix 편집 패널(사용자 승인 11-12). 판(.dr-board)은 스크롤 상자라 그 안에 두면 스크롤에 딸려 가거나 잘린다 -
+  // host 의 자식으로 두고 띠의 자리를 재서 놓는다. textarea 는 한 번만 만든다(다시 만들면 초점이 날아간다).
+  const PE_KEYS = ['pre_prompt', 'post_prompt'];
+  const PE_NAME = { pre_prompt: 'prefix', post_prompt: 'postfix' };
+  const bandEls = {};
+  const previewEls = {};
+  const pePanels = {};
+  const peTexts = {};
+  PE_KEYS.forEach(key => {
+    bandEls[key] = board.querySelector(`[data-dr-band="${key}"]`);
+    previewEls[key] = bandEls[key].querySelector('[data-dr-band-preview]');
+    const side = key === 'pre_prompt' ? 'pre' : 'post';
+    const panel = document.createElement('div');
+    panel.className = `dr-pe-panel dr-pe-panel--${side}`;
+    panel.hidden = true;
+    panel.dataset.drPePanel = key;
+    panel.setAttribute('role', 'group');
+    panel.setAttribute('aria-label', `${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} Prompt 편집`);
+    panel.innerHTML = `<div class="dr-pe-rh" data-dr-pe-rh title="끌어서 높이 조정 · 두 번 누르면 기본" aria-hidden="true"></div>
+      <div class="dr-pe-head"><span class="dr-band-name">${PE_NAME[key]}</span>
+        <button type="button" class="dr-pe-x" data-dr-pe-close title="닫기 (Esc)" aria-label="닫기">&times;</button></div>
+      <textarea class="dr-band-text" data-dr-pe="${key}" spellcheck="false"
+        aria-label="${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} Prompt"></textarea>`;
+    host.insertBefore(panel, footer || null);
+    pePanels[key] = panel;
+    peTexts[key] = panel.querySelector('[data-dr-pe]');
+  });
   const extraEl = board.querySelector('[data-dr-extra]');
   let extraShown = null;   // 칸에 마지막으로 반영한 서버 Extra - 칸의 글이 이것과 다르면 아직 저장 못 한 사용자 글
   const sumEl = board.querySelector('[data-dr-sum]');
@@ -186,7 +218,7 @@ export function initDraftMode({
   document.body.appendChild(suggestTipEl);
   let suggestExpanded = false;
   try { suggestExpanded = localStorage.getItem(SUGGEST_EXPANDED_KEY) === '1'; } catch (_) {}
-  const bands = [...board.querySelectorAll('[data-dr-pe]')];
+  const bands = PE_KEYS.map(key => peTexts[key]);
   // [이번에 뽑힌 프롬프트 : N] - 포함 칸 오른쪽 아래(사용자 지시 11-07). 새로 뽑힐 때마다 배경이 깜빡인다(Usage 알약처럼).
   const drawnFootEl = board.querySelector('[data-dr-drawn-foot]');
   const drawnBtnEl = board.querySelector('.dr-drawn-btn');
@@ -528,29 +560,34 @@ export function initDraftMode({
       drawnBtnEl.classList.add('is-flash');
     }
   }
+  /** 패널 글을 PE 와 맞춘다 - 포커스 중인 칸은 덮지 않는다(치는 중인 글). 띠의 한 줄 미리보기는 늘 칸의 글을 따른다. */
   function paintBands() {
     bands.forEach(el => {
-      if (el === document.activeElement) return;
-      const text = String(getPeField(el.dataset.drPe) || '');
-      if (el.value !== text) el.value = text;
-      fitBand(el);
+      if (el !== document.activeElement) {
+        const text = String(getPeField(el.dataset.drPe) || '');
+        if (el.value !== text) el.value = text;
+      }
+      paintPreview(el.dataset.drPe);
     });
   }
-  function fitBand(el) {
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, 90)}px`;
+  function paintPreview(key) {
+    const line = String(peTexts[key].value || '').replace(/\s+/g, ' ').trim();
+    const el = previewEls[key];
+    el.textContent = line || '비어 있음';
+    el.classList.toggle('is-empty', !line);
   }
   function paint() {
     paintPill();
     const on = active();
     board.hidden = !on;
     document.body.classList.toggle('draft-mode', on);
-    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); return; }
+    if (!on) { closeMenu(); hideSuggest(); closeDrawnPanel(); hidePeek(); closePePanel(); return; }
     paintZone('include');
     paintZone('exclude');
     paintDrawn();
     paintSum();
     paintBands();
+    schedulePlacePe();   // 칩이 바뀌어 띠가 움직였을 수 있다
     // 저장 못 한 Extra(칸의 글 != 마지막으로 받은 서버 글)는 덮지 않는다 - 저장이 409 로 실패하면 request() 가 오류 응답의
     // 스냅숏을 먼저 그려 친 글이 옛 값으로 사라졌다(Codex 재리뷰 11-07). 저장되면(서버 글 = 칸의 글) 다시 서버를 따른다.
     const extraText = String(snap?.state?.extra || '');
@@ -963,23 +1000,205 @@ export function initDraftMode({
   extraEl.addEventListener('blur', () => { void flushExtra(); });
   extraEl.addEventListener('animationend', () => extraEl.classList.remove('is-flash'));
 
-  // ---- prefix / postfix 띠 ----
-  bands.forEach(el => {
-    el.addEventListener('input', () => fitBand(el));
-    el.addEventListener('keydown', event => {
-      if (event.key === 'Escape') { event.preventDefault(); el.blur(); }
+  // ---- prefix / postfix 띠 · 편집 패널(사용자 승인 11-12) ----
+  // 띠 = 한 줄 미리보기 단추. 누르면 판 위에 덮이는 패널(postfix 는 띠 위로 · prefix 는 띠 아래로). 패널은 칸을 가릴 뿐
+  // 밀지 않는다. 옮길 수 없고 높이만 - 띠에서 먼 가장자리 손잡이. 한 번에 하나. 닫히면 반드시 저장(blur 와 같은 규칙).
+  const PE_HEIGHT_KEY = 'naia.draft.pePanelHeights.v1';
+  const PE_DEFAULT_H = 110;
+  let openPe = null;              // 열린 패널의 키(pre_prompt | post_prompt)
+  let peSuppressBlur = false;     // 닫으면서 이미 저장했다 - 그 blur 에서 또 저장(실패 토스트 두 번)하지 않게
+  let pePlaceRaf = 0;
+  const peShownH = {};            // 마지막으로 놓은 (자르기 전) 높이 - 끌기의 시작점
+  function readPeHeights() {
+    try {
+      const v = JSON.parse(localStorage.getItem(PE_HEIGHT_KEY) || '{}');
+      return v && typeof v === 'object' ? v : {};
+    } catch (_) { return {}; }
+  }
+  function writePeHeights(v) { try { localStorage.setItem(PE_HEIGHT_KEY, JSON.stringify(v)); } catch (_) {} }
+  const peHeights = readPeHeights();
+  function wantPeHeight(key) {
+    const v = Number(peHeights[key]);
+    return Number.isFinite(v) && v > 0 ? v : PE_DEFAULT_H;
+  }
+  /** 머리 줄 + 글 두 줄 - 패널이 보일 때 잰다. */
+  function pePanelMin(key) {
+    const panel = pePanels[key];
+    const ta = peTexts[key];
+    const cs = getComputedStyle(panel);
+    const tcs = getComputedStyle(ta);
+    const box = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0)
+      + (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+    const head = panel.querySelector('.dr-pe-head')?.offsetHeight || 0;
+    const lh = parseFloat(tcs.lineHeight) || 18;
+    return Math.ceil(box + head + lh * 2 + (parseFloat(tcs.paddingTop) || 0) + (parseFloat(tcs.paddingBottom) || 0));
+  }
+  /** 최대 = 두 띠 사이의 판 높이(판이 스크롤되면 보이는 판 높이를 넘지 않게). */
+  function pePanelMax(key, min) {
+    const pre = bandEls.pre_prompt.getBoundingClientRect();
+    const post = bandEls.post_prompt.getBoundingClientRect();
+    const own = bandEls[key].getBoundingClientRect();
+    const room = Math.min(post.top - pre.bottom, board.clientHeight - own.height);
+    return Math.max(min, Math.floor(room));
+  }
+  /** 띠의 자리를 재서 패널을 놓는다. 판의 보이는 영역 밖은 잘라 낸다(띠가 스크롤로 나가도 판 밖으로 삐져나가지 않게). */
+  function placePePanel() {
+    const key = openPe;
+    if (!key) return;
+    const panel = pePanels[key];
+    // 판이 숨겨졌다(Draft 끔 · 화면 전환으로 0 크기) - 닫는다. 휴대폰 키보드의 resize 는 판을 줄일 뿐 0 으로 만들지 않는다.
+    if (board.hidden || !board.clientHeight || !board.clientWidth) { closePePanel(); return; }
+    const hostR = host.getBoundingClientRect();
+    const ox = hostR.left + host.clientLeft - host.scrollLeft;
+    const oy = hostR.top + host.clientTop - host.scrollTop;
+    const boardR = board.getBoundingClientRect();
+    const viewTop = boardR.top + board.clientTop;
+    const viewBottom = viewTop + board.clientHeight;
+    const r = bandEls[key].getBoundingClientRect();
+    const min = pePanelMin(key);
+    const max = pePanelMax(key, min);
+    const h = Math.max(min, Math.min(max, wantPeHeight(key)));
+    peShownH[key] = h;
+    const top = key === 'post_prompt' ? r.top - h : r.bottom;
+    const visTop = Math.max(top, viewTop);
+    const visBottom = Math.min(top + h, viewBottom);
+    const headH = panel.querySelector('.dr-pe-head')?.offsetHeight || 0;
+    panel.style.left = `${Math.round(r.left - ox)}px`;
+    panel.style.width = `${Math.round(r.width)}px`;
+    panel.style.top = `${Math.round(visTop - oy)}px`;
+    panel.style.height = `${Math.max(0, Math.round(visBottom - visTop))}px`;
+    // 머리 줄도 안 들어갈 만큼 잘렸으면 감춰 둔다(열린 채 - 띠가 다시 보이면 돌아온다)
+    panel.style.visibility = visBottom - visTop < headH + 4 ? 'hidden' : '';
+  }
+  function schedulePlacePe() {
+    if (!openPe || pePlaceRaf) return;
+    pePlaceRaf = requestAnimationFrame(() => { pePlaceRaf = 0; placePePanel(); });
+  }
+  /** blur 와 닫기가 함께 쓴다 - 값이 다르면 PE 에 쓰고 다시 조립을 예약한다. */
+  function commitPeText(el) {
+    const key = el.dataset.drPe;
+    if (el.value === String(getPeField(key) || '')) return;
+    try {
+      setPeField(key, el.value);
+      pendingRebuild = true;
+    } catch (error) {
+      showToast(`${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} 저장 실패 — ${error.message || ''}`, 'error');
+    }
+  }
+  function openPePanel(key) {
+    if (openPe === key) return;
+    closePePanel();
+    if (!active() || board.hidden) return;
+    const panel = pePanels[key];
+    const ta = peTexts[key];
+    const text = String(getPeField(key) || '');
+    if (ta.value !== text) ta.value = text;
+    paintPreview(key);
+    openPe = key;
+    panel.hidden = false;
+    bandEls[key].classList.add('is-open');
+    bandEls[key].setAttribute('aria-expanded', 'true');
+    placePePanel();
+    if (openPe !== key) return;   // 놓다가 닫혔다(판이 안 보인다)
+    try {
+      ta.focus({ preventScroll: true });
+      const n = ta.value.length;
+      ta.setSelectionRange(n, n);
+    } catch (_) {}
+  }
+  /** 닫기 - 저장이 반드시 먼저 일어난다(포커스가 칸에 없어도 값이 다르면 저장). */
+  function closePePanel({ focusBand = false } = {}) {
+    const key = openPe;
+    if (!key) return;
+    const panel = pePanels[key];
+    const ta = peTexts[key];
+    openPe = null;
+    if (pePlaceRaf) { cancelAnimationFrame(pePlaceRaf); pePlaceRaf = 0; }
+    commitPeText(ta);
+    if (panel.contains(document.activeElement)) {
+      peSuppressBlur = true;
+      try { document.activeElement.blur(); } finally { peSuppressBlur = false; }
+    }
+    panel.hidden = true;
+    panel.style.visibility = '';
+    bandEls[key].classList.remove('is-open');
+    bandEls[key].setAttribute('aria-expanded', 'false');
+    paintPreview(key);
+    if (focusBand) { try { bandEls[key].focus({ preventScroll: true }); } catch (_) {} }
+  }
+  PE_KEYS.forEach(key => {
+    const band = bandEls[key];
+    const panel = pePanels[key];
+    const ta = peTexts[key];
+    band.addEventListener('click', () => { if (openPe === key) closePePanel(); else openPePanel(key); });
+    ta.addEventListener('input', () => paintPreview(key));
+    ta.addEventListener('blur', () => { if (!peSuppressBlur) commitPeText(ta); });
+    panel.querySelector('[data-dr-pe-close]').addEventListener('click', () => closePePanel({ focusBand: true }));
+    // 높이 손잡이 - 칸 손잡이(.dr-rh)와 같은 포인터 캡처 방식. postfix 패널은 위로, prefix 패널은 아래로 늘어난다.
+    const grip = panel.querySelector('[data-dr-pe-rh]');
+    grip.addEventListener('pointerdown', event => {
+      if (event.button !== 0 || openPe !== key) return;
+      event.preventDefault();
+      const y0 = event.clientY;
+      const h0 = peShownH[key] || wantPeHeight(key);
+      const min = pePanelMin(key);
+      const max = pePanelMax(key, min);
+      const sign = key === 'post_prompt' ? -1 : 1;
+      let last = h0;
+      let moved = false;
+      grip.classList.add('is-drag');
+      try { grip.setPointerCapture(event.pointerId); } catch (_) {}
+      const move = ev => {
+        moved = true;
+        last = Math.max(min, Math.min(max, h0 + sign * (ev.clientY - y0)));
+        peHeights[key] = Math.round(last);
+        placePePanel();
+      };
+      const up = () => {
+        grip.classList.remove('is-drag');
+        grip.removeEventListener('pointermove', move);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        if (!moved) return;
+        const saved = readPeHeights();
+        saved[key] = Math.round(last);
+        writePeHeights(saved);
+      };
+      grip.addEventListener('pointermove', move);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
     });
-    el.addEventListener('blur', () => {
-      const key = el.dataset.drPe;
-      if (el.value === String(getPeField(key) || '')) return;
-      try {
-        setPeField(key, el.value);
-        pendingRebuild = true;
-      } catch (error) {
-        showToast(`${key === 'pre_prompt' ? 'Prefix' : 'Postfix'} 저장 실패 — ${error.message || ''}`, 'error');
-      }
+    grip.addEventListener('dblclick', event => {
+      event.preventDefault();
+      delete peHeights[key];
+      const saved = readPeHeights();
+      delete saved[key];
+      writePeHeights(saved);
+      placePePanel();
     });
   });
+  // 패널 · 띠 바깥을 누르면 닫는다(다른 띠를 누르면 먼저 것이 닫히고 그 띠가 열린다)
+  document.addEventListener('pointerdown', event => {
+    if (!openPe) return;
+    const t = event.target;
+    if (pePanels[openPe].contains(t) || bandEls[openPe].contains(t)) return;
+    closePePanel();
+  }, true);
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !openPe) return;
+    const t = event.target;
+    if (!(pePanels[openPe].contains(t) || bandEls[openPe].contains(t) || t === document.body)) return;
+    event.preventDefault();
+    closePePanel({ focusBand: true });
+  });
+  // 다시 놓기: 판 스크롤 · 창 크기(휴대폰 키보드 포함 - 닫지 않는다) · 판 · 칸 크기 변화
+  board.addEventListener('scroll', schedulePlacePe, { passive: true });
+  window.addEventListener('resize', schedulePlacePe);
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => schedulePlacePe());
+    ro.observe(board);
+    [...board.children].forEach(el => ro.observe(el));
+  }
   /** PE 상태가 왔다(app.js 가 부른다) - 띠를 맞추고, 띠에서 고친 뒤면 서버에 다시 조립을 청한다. */
   function syncPe() {
     if (!active()) return;

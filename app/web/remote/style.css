@@ -33958,20 +33958,61 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-board[hidden] { display: none; }
 .prompt-highlight-wrap.has-activated-summary .dr-board { bottom: 52px; }
+/* prefix / postfix 띠 = 한 줄 미리보기 단추(사용자 승인 11-12). 누르면 판 위에 편집 패널이 덮인다(.dr-pe-panel). */
 .dr-band {
   flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
-  padding: 5px 12px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 12px;
+  border: 1px solid transparent;
+  border-radius: 0;
   background: rgba(255,255,255,0.03);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: background 0.12s, border-color 0.12s;
 }
+.dr-band:hover { background: rgba(255,255,255,0.055); }
+.dr-band:focus-visible { outline: none; border-color: rgba(157,139,255,0.6); }
+.dr-band.is-open { border-color: #9d8bff; background: rgba(157,139,255,0.09); }
 .dr-band--pre { border-radius: 12px 12px 0 0; }
-.dr-band--post { border-top: 1px solid rgba(232,232,240,0.08); }
+.dr-band--post { border-top-color: rgba(232,232,240,0.08); }
+.dr-band--post:focus-visible { border-top-color: rgba(157,139,255,0.6); }
+.dr-band--post.is-open { border-top-color: #9d8bff; }
+.dr-band-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-editor);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.dr-band:hover .dr-band-preview, .dr-band.is-open .dr-band-preview { color: var(--text-primary); }
+.dr-band-preview.is-empty, .dr-band:hover .dr-band-preview.is-empty, .dr-band.is-open .dr-band-preview.is-empty { color: var(--text-dim); opacity: 0.75; }
+.dr-band-caret {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--text-dim);
+  transition: transform 0.12s, color 0.12s;
+}
+.dr-band:hover .dr-band-caret { color: var(--text-primary); }
+.dr-band.is-open .dr-band-caret { color: #b6a9ff; transform: rotate(180deg); }
 .dr-band-name {
   flex: none;
   min-width: 44px;
-  padding-top: 2px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
@@ -33996,6 +34037,53 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-band-text:focus,
 .dr-extra-text:focus { color: var(--text-primary); }
+/* prefix / postfix 편집 패널 - host(.prompt-highlight-wrap)의 자식. 판(z 2) 위에 덮일 뿐 칸을 밀지 않는다.
+   자리 · 높이는 draftMode.mjs 가 띠를 재서 놓는다. 옮길 수 없고 띠에서 먼 가장자리 손잡이로 높이만. */
+.dr-pe-panel {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: rgb(16,18,29);
+  border: 1px solid rgba(157,139,255,0.75);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  font-size: 11.5px;
+  color: var(--text-primary);
+}
+.dr-pe-panel[hidden] { display: none; }
+.dr-pe-panel--post { box-shadow: 0 -10px 28px rgba(0,0,0,0.5); }
+.dr-pe-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 6px 2px 12px; }
+.dr-pe-head .dr-band-name { flex: 1 1 auto; }
+.dr-pe-x {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.dr-pe-x:hover, .dr-pe-x:focus-visible { outline: none; color: var(--text-primary); border-color: rgba(232,232,240,0.2); background: rgba(255,255,255,0.06); }
+.dr-pe-panel .dr-band-text { flex: 1 1 auto; min-height: 0; height: auto; padding: 2px 12px 8px; color: var(--text-primary); }
+/* 높이 손잡이 - 칸 손잡이(.dr-rh)처럼 올리면 곧은 줄이 보인다. 둥근 모서리에 닿지 않게 양옆을 비운다. */
+.dr-pe-rh { position: absolute; left: 0; right: 0; height: 8px; z-index: 1; cursor: row-resize; touch-action: none; }
+.dr-pe-panel--post .dr-pe-rh { top: 0; }
+.dr-pe-panel--pre .dr-pe-rh { bottom: 0; }
+.dr-pe-rh::after { content: ""; position: absolute; left: calc(50% - 22px); width: 44px; height: 3px; border-radius: 2px; background: #9d8bff; opacity: 0.45; transition: opacity 0.12s; pointer-events: none; }
+.dr-pe-panel--post .dr-pe-rh::after { top: 1px; }
+.dr-pe-panel--pre .dr-pe-rh::after { bottom: 1px; }
+.dr-pe-rh:hover::after, .dr-pe-rh.is-drag::after { opacity: 1; }
 .dr-zone {
   flex: none;
   padding: 7px 12px;

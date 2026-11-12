@@ -276,8 +276,21 @@ export function initDraftMode({
     const top = r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(r.bottom + 8, window.innerHeight - h - 8);
     peekEl.style.top = `${Math.max(8, top)}px`;
   }
-  function hidePeek() { peekEl.hidden = true; }
-  drawnBtnEl.addEventListener('mouseenter', showPeek);
+  function hidePeek() { peekEl.hidden = true; clearTimeout(peekTimer); peekTimer = 0; }
+  // DR Random 을 **눌렀을 때** 뽑힌 글을 잠깐(1초) 보여 준다(사용자 지시 11-12). Auto Gen 이 매 장 뽑는 것에는 띄우지 않는다 -
+  // app.js 가 누른 때를 알려 주고(armPeek), 그 뒤 곧 온 새 뽑기에만 띄운다. 마우스가 단추 위면 그대로 둔다.
+  const PEEK_FLASH_MS = 1000;
+  const PEEK_ARM_MS = 35000;      // Random 응답을 기다리는 한도(연결된 Random 의 안전 시간과 같은 자릿수)
+  let peekTimer = 0;
+  let peekArmedAt = 0;
+  function armPeek() { if (active()) peekArmedAt = Date.now(); }
+  function flashPeek() {
+    showPeek();
+    if (peekEl.hidden) return;
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => { peekTimer = 0; if (!drawnBtnEl.matches(':hover')) hidePeek(); }, PEEK_FLASH_MS);
+  }
+  drawnBtnEl.addEventListener('mouseenter', () => { clearTimeout(peekTimer); peekTimer = 0; showPeek(); });
   drawnBtnEl.addEventListener('mouseleave', hidePeek);
   drawnBtnEl.addEventListener('click', hidePeek);
 
@@ -587,6 +600,8 @@ export function initDraftMode({
     if (!peekEl.hidden) showPeek();   // 마우스를 올린 채 새로 뽑혔다 - 미리보기도 새 글로
     if (drawnFlashPending) {
       drawnFlashPending = false;
+      if (peekArmedAt && Date.now() - peekArmedAt < PEEK_ARM_MS) flashPeek();
+      peekArmedAt = 0;
       drawnBtnEl.classList.remove('is-flash');
       void drawnBtnEl.offsetWidth;   // 같은 애니메이션을 다시 처음부터
       drawnBtnEl.classList.add('is-flash');
@@ -1293,6 +1308,6 @@ export function initDraftMode({
     /** WS `event_map_draft` */
     receive: message => receive({ ...message, __fromSocket: true }),
     reload: load,
-    enter, exit, syncPe, sendToStaging, loadFromStaging,
+    enter, exit, syncPe, sendToStaging, loadFromStaging, armPeek,
   };
 }

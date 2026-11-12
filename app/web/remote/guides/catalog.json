@@ -37,7 +37,7 @@
     {
       "id": "conditional-prompt",
       "category": "2. 프롬프트",
-      "title": "조건부 프롬프트",
+      "title": "조건부 프롬프트 (AI 생성)",
       "summary": "조건에 따라 프롬프트를 구성하는 방법을 살펴봅니다.",
       "keywords": "조건 태그 문법",
       "file": "conditional-prompt.html"

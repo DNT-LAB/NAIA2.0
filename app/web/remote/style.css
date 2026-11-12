@@ -33981,7 +33981,8 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 }
 .dr-band:hover { background: rgba(255,255,255,0.055); }
 .dr-band:focus-visible { outline: none; border-color: rgba(157,139,255,0.6); }
-.dr-band.is-open { border-color: #9d8bff; background: rgba(157,139,255,0.09); }
+/* 열린 띠는 감춘다 - 패널이 그 자리까지 덮는다(같은 이름이 두 번 보이지 않게 · 사용자 지시 11-12). 자리는 그대로 둔다. */
+.dr-band.is-open { visibility: hidden; }
 .dr-band--pre { border-radius: 12px 12px 0 0; }
 .dr-band--post { border-top-color: rgba(232,232,240,0.08); }
 .dr-band--post:focus-visible { border-top-color: rgba(157,139,255,0.6); }
@@ -34080,10 +34081,10 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .dr-pe-rh { position: absolute; left: 0; right: 0; height: 8px; z-index: 1; cursor: row-resize; touch-action: none; }
 .dr-pe-panel--post .dr-pe-rh { top: 0; }
 .dr-pe-panel--pre .dr-pe-rh { bottom: 0; }
-.dr-pe-rh::after { content: ""; position: absolute; left: calc(50% - 22px); width: 44px; height: 3px; border-radius: 2px; background: #9d8bff; opacity: 0.45; transition: opacity 0.12s; pointer-events: none; }
-.dr-pe-panel--post .dr-pe-rh::after { top: 1px; }
-.dr-pe-panel--pre .dr-pe-rh::after { bottom: 1px; }
-.dr-pe-rh:hover::after, .dr-pe-rh.is-drag::after { opacity: 1; }
+.dr-pe-rh::after { content: ""; position: absolute; left: calc(50% - 12px); width: 24px; height: 2px; border-radius: 1px; background: #9d8bff; opacity: 0.4; transition: opacity 0.12s; pointer-events: none; }
+.dr-pe-panel--post .dr-pe-rh::after { top: 2px; }
+.dr-pe-panel--pre .dr-pe-rh::after { bottom: 2px; }
+.dr-pe-rh:hover::after, .dr-pe-rh.is-drag::after { opacity: 0.9; }
 .dr-zone {
   flex: none;
   padding: 7px 12px;

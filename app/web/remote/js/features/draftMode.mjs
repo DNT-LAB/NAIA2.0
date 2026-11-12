@@ -1004,7 +1004,7 @@ export function initDraftMode({
   // 띠 = 한 줄 미리보기 단추. 누르면 판 위에 덮이는 패널(postfix 는 띠 위로 · prefix 는 띠 아래로). 패널은 칸을 가릴 뿐
   // 밀지 않는다. 옮길 수 없고 높이만 - 띠에서 먼 가장자리 손잡이. 한 번에 하나. 닫히면 반드시 저장(blur 와 같은 규칙).
   const PE_HEIGHT_KEY = 'naia.draft.pePanelHeights.v1';
-  const PE_DEFAULT_H = 110;
+  const PE_DEFAULT_H = 138;       // 띠 자리(28) + 글 서너 줄 - 패널이 열린 띠의 자리까지 덮는다
   let openPe = null;              // 열린 패널의 키(pre_prompt | post_prompt)
   let peSuppressBlur = false;     // 닫으면서 이미 저장했다 - 그 blur 에서 또 저장(실패 토스트 두 번)하지 않게
   let pePlaceRaf = 0;
@@ -1037,8 +1037,8 @@ export function initDraftMode({
   function pePanelMax(key, min) {
     const pre = bandEls.pre_prompt.getBoundingClientRect();
     const post = bandEls.post_prompt.getBoundingClientRect();
-    const own = bandEls[key].getBoundingClientRect();
-    const room = Math.min(post.top - pre.bottom, board.clientHeight - own.height);
+    // 열린 띠는 감추고 패널이 그 자리까지 덮는다 - 반대쪽 띠만 남긴다
+    const room = Math.min(key === 'post_prompt' ? post.bottom - pre.bottom : post.top - pre.top, board.clientHeight);
     return Math.max(min, Math.floor(room));
   }
   /** 띠의 자리를 재서 패널을 놓는다. 판의 보이는 영역 밖은 잘라 낸다(띠가 스크롤로 나가도 판 밖으로 삐져나가지 않게). */
@@ -1059,7 +1059,7 @@ export function initDraftMode({
     const max = pePanelMax(key, min);
     const h = Math.max(min, Math.min(max, wantPeHeight(key)));
     peShownH[key] = h;
-    const top = key === 'post_prompt' ? r.top - h : r.bottom;
+    const top = key === 'post_prompt' ? r.bottom - h : r.top;
     const visTop = Math.max(top, viewTop);
     const visBottom = Math.min(top + h, viewBottom);
     const headH = panel.querySelector('.dr-pe-head')?.offsetHeight || 0;
@@ -1130,7 +1130,7 @@ export function initDraftMode({
     const band = bandEls[key];
     const panel = pePanels[key];
     const ta = peTexts[key];
-    band.addEventListener('click', () => { if (openPe === key) closePePanel(); else openPePanel(key); });
+    band.addEventListener('click', () => openPePanel(key));   // 열린 띠는 감춰져 있다 - 닫기는 x · Esc · 바깥
     ta.addEventListener('input', () => paintPreview(key));
     ta.addEventListener('blur', () => { if (!peSuppressBlur) commitPeText(ta); });
     panel.querySelector('[data-dr-pe-close]').addEventListener('click', () => closePePanel({ focusBand: true }));

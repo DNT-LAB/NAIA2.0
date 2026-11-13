@@ -287,7 +287,8 @@ export function initDraftTagFinder({
     if (!Number.isFinite(n)) return '<span class="drf-n"></span>';
     return data?.sampled
       ? `<span class="drf-n">≈ ${fmt(n)}</span>`
-      : `<span class="drf-n">${fmt(n)} / ${fmt(Number(data?.total) || 0)}</span>`;
+      // 분모(남은 게시물 수)는 줄마다 같아 빼고 창 머리('N건 안에서')에만 둔다(사용자 지시 11-13)
+      : `<span class="drf-n">${fmt(n)}</span>`;
   }
   function rowHtml(it, i) {
     const gid = it.group || '';

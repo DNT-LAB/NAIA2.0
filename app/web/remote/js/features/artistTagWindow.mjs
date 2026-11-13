@@ -125,6 +125,7 @@ export function createArtistTagWindow({
   const DL_POLL_BUSY_MS = 900, DL_POLL_IDLE_MS = 3000;
   let dlIssued = 0;        // 마지막으로 보낸 상태 요청 번호
   let dlApplied = 0;       // 마지막으로 반영한 응답의 요청 번호
+  let dlSeenDone = '';     // 다시 읽기를 이미 한 '받기 끝남' 상태(팩 · 시각) - 같은 끝남으로 거듭 읽지 않는다
   let dlWatching = '';     // 진행 중으로 본 받기의 팩 - 끝남(active -> 아님)은 이것으로만 안다(done · error 는 지난 값이 남는다)
   let dlStarting = false;  // [받기] 를 누르고 응답을 기다리는 동안 - 연타 막기
   let dlCancelled = '';    // 이 창에서 [취소] 를 누른 받기 - 끝날 때 오류가 아니라 안내로 알린다
@@ -243,6 +244,14 @@ export function createArtistTagWindow({
     } else if (prev) {
       dlWatching = '';
       finishWatched(prev);
+    } else if (dl?.done && !dl.error) {
+      // 진행 중인 모습을 한 번도 못 보고 끝난 받기(시작 응답이 늦어 버려진 경우 등 - Codex 리뷰 2차). 띠에 아직 '안 받음' 인
+      // 팩이 끝났다고 서버가 말하면 한 번 다시 읽는다. 같은 끝남(팩 · 시각)으로는 다시 하지 않는다.
+      const doneKey = `${dl.mode || ''}|${dl.updated_at || ''}`;
+      if (doneKey !== dlSeenDone && packs.some(pk => pk.key === dl.mode && !pk.exists)) {
+        dlSeenDone = doneKey;
+        void load({quiet: true});
+      }
     }
     paintPacks();
     stopDlPoll();

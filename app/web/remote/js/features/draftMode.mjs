@@ -21,7 +21,7 @@
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm4';
 import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard2';
-import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm7';
+import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm8';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
@@ -46,7 +46,7 @@ export function initDraftMode({
   openStaging = () => {},
   onActiveChange = () => {},
   onPermanentExcludeChange = () => {}, // (text) => void - 영구 제외 글이 바뀌었다(Search 칸도 같은 글로)
-  permanentExcludeEditStamp = () => 0, // () => 수 - 사용자가 Search 의 영구 제외 칸을 고친 횟수(늦은 읽기가 덮지 않게)
+  permanentExcludeFieldText = () => null, // () => Search 영구 제외 칸의 지금 글(없으면 null) - 늦은 읽기가 새 글을 덮지 않게
 } = {}) {
   if (!host || !pill) return null;
   // app.js 의 escHtml 은 글만 받는다(숫자 rid 를 넣자 throw -> 그리기 전체가 멈췄다, 11-07 실측) - 늘 글로 바꿔 넘긴다.
@@ -1555,7 +1555,7 @@ export function initDraftMode({
   permBox = initDraftPermExclude({
     esc, fmt, showToast, getSnapshot: () => snap, refreshSnapshot: load,
     onTextChange: text => onPermanentExcludeChange(text),
-    searchEditStamp: () => permanentExcludeEditStamp(),
+    searchFieldText: () => permanentExcludeFieldText(),
   });
 
   paintPill();

@@ -1696,25 +1696,18 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
     });
   })
   .catch(error => console.error('Failed to initialize Staging', error));
-// Search 영구 제외 칸이 바뀐 횟수 - Draft 영구 제외 창이 읽는 사이 고쳤으면 읽은 글로 덮지 않는다(Codex 리뷰 2026-11-13 6차 #2).
-// 세지 않는 것은 이벤트 맵 · Draft 창이 서버 글로 맞춰 넣는 것(syncPermanentExcludeField)뿐이다 - 자동완성처럼 코드가 쏘는
-// input 도 사용자의 편집이라 센다(7차 #1: isTrusted 로 가르면 자동완성 고른 것을 옛 글로 되돌렸다).
-let draftPermSearchEdits = 0;
-let permanentExcludeFieldSyncing = false;
-document.addEventListener('input', event => {
-  if (!permanentExcludeFieldSyncing && event.target && event.target.id === 'searchExcludePermanent') draftPermSearchEdits++;
-}, true);
-/** 서버의 영구 제외 글을 Search 칸에 맞춰 넣는다(칸 높이 · [영구 제외 · n] 단추만 고치는 input - 저장하지 않는다). */
+/** 서버의 영구 제외 글을 Search 칸에 맞춰 넣는다(칸 높이 · [영구 제외 · n] 단추만 고치는 input - 저장하지 않는다).
+ *  Draft 영구 제외 창은 청할 때의 칸 글과 건넬 때의 칸 글을 견줘, 그 사이 어느 길로든 바뀌었으면 건네지 않는다
+ *  (Codex 리뷰 2026-11-13 6~8차 - 사용자 타자 · 자동완성 · 이벤트 맵 창 · Search 서버 상태 갱신을 한 번에 지킨다). */
 function syncPermanentExcludeField(text) {
   const field = document.getElementById('searchExcludePermanent');
   if (!field || field.value === text) return;
   field.value = text;
-  permanentExcludeFieldSyncing = true;
-  try { field.dispatchEvent(new Event('input', { bubbles: true })); } finally { permanentExcludeFieldSyncing = false; }
+  field.dispatchEvent(new Event('input', { bubbles: true }));
 }
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261113-perm7')
+import('./js/features/draftMode.mjs?v=20261113-perm8')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1745,7 +1738,7 @@ import('./js/features/draftMode.mjs?v=20261113-perm7')
       onActiveChange: () => { updateGenerateButtonMode(); window.eventStaging?.paint?.(); },
       // Draft 의 영구 제외 창이 저장했다 - Search 칸도 같은 글로(이벤트 맵 창과 같은 이유: 안 그러면 Search 가 옛 글을 다시 쓴다)
       onPermanentExcludeChange: text => syncPermanentExcludeField(text),
-      permanentExcludeEditStamp: () => draftPermSearchEdits,
+      permanentExcludeFieldText: () => document.getElementById('searchExcludePermanent')?.value ?? null,
     });
   })
   .catch(error => console.error('Failed to initialize Draft Mode', error));

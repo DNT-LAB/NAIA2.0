@@ -24,7 +24,7 @@ export function initDraftPermExclude({
   getSnapshot = () => null,
   refreshSnapshot = async () => {},
   onTextChange = () => {},       // (text) => void - Search 칸도 같은 글로(다음 Search 저장이 옛 글을 다시 쓰지 않게)
-  searchEditStamp = () => 0,     // () => 수 - 사용자가 Search 칸을 고칠 때마다 오른다(읽는 사이 고쳤으면 건네지 않는다)
+  searchFieldText = () => null,  // () => Search 영구 제외 칸의 지금 글(칸이 없으면 null) - 청한 뒤 바뀌었으면 건네지 않는다
 } = {}) {
   const splitTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean);
   const fmtK = n => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
@@ -35,10 +35,13 @@ export function initDraftPermExclude({
   // 마지막으로 Search 칸에 건넨 글. 읽은 글이 이것과 다를 때만 건넨다 - 늘 건네면 늦게 온 읽기 응답이 그 사이 Search 에서
   // 고친 글을 옛 글로 덮었다(Codex 리뷰 2026-11-13 5차 #1). 저장이 실패해 못 건넨 글은 이것과 달라 다음 읽기가 건넨다(3차 #3).
   let told = null;
-  /** stamp = 이 일을 시작할 때의 Search 편집 번호. 그 사이 사용자가 Search 칸을 고쳤으면 건네지 않는다 - 늦게 온 읽기가
-   *  그 편집을 옛 글로 되돌렸다(Codex 리뷰 2026-11-13 6차 #2). 건네지 않은 글은 told 가 아니라 다음 읽기가 다시 본다. */
+  /** stamp = 이 일을 청할 때의 Search 칸 글. 그 뒤 칸이 **어느 길로든** 바뀌었으면(사용자 타자 · 자동완성 · 이벤트 맵 창 ·
+   *  Search 의 서버 상태 갱신) 건네지 않는다 - 늦게 온 읽기가 그 새 글을 옛 글로 되돌렸다(Codex 리뷰 6차 #2 · 7차 #1 · 8차 #1).
+   *  이 창이 앞서 건넨 글(told)로 바뀐 것은 제 것이라 막지 않는다(빠르게 둘을 더하면 둘째가 건네져야 한다).
+   *  건네지 않은 글은 told 가 아니라 다음 읽기가 다시 본다. 칸이 없으면(null) 지킬 것이 없다. */
   function tell(value, stamp) {
-    if (stamp !== searchEditStamp()) return;
+    const now = searchFieldText();
+    if (now != null && now !== stamp && now !== told) return;
     told = value;
     onTextChange(value);
   }
@@ -66,7 +69,7 @@ export function initDraftPermExclude({
 
   let loadError = '';
   function load({ snapshot = false } = {}) {
-    const stamp = searchEditStamp();   // 청한 때의 번호(줄에서 기다리는 동안 고친 것도 지킨다 - 7차 #2)
+    const stamp = searchFieldText();   // 청한 때의 Search 칸 글(줄에서 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
       try {
         take(await call('GET'));
@@ -79,7 +82,7 @@ export function initDraftPermExclude({
   }
   /** makeTerms(서버의 지금 항 목록) -> 새 목록. 못 읽으면 저장하지 않는다(빈 글로 덮지 않게 - #2). */
   function save(makeTerms, done) {
-    const stamp = searchEditStamp();   // 청한 때의 번호(앞 저장이 끝나길 기다리는 동안 고친 Search 칸도 지킨다 - 7차 #2)
+    const stamp = searchFieldText();   // 청한 때의 Search 칸 글(앞 저장이 끝나길 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
       saving++; paint();
       const before = text;
@@ -110,8 +113,14 @@ export function initDraftPermExclude({
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
         // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게) - 읽지도 못했으면 건드리지 않는다
-        if (posted) { try { take(await call('GET')); } catch (_) {} }   // 써졌을 수도 있다 - 서버의 지금 글로
-        if (read && text !== told) tell(text, stamp);
+        // POST 를 보냈으면 써졌을 수도 있다 - 다시 읽어 서버의 지금 글로. 그것도 못 읽으면 지금 아는 글은 저장 **전** 글일 수
+        // 있어 건네지 않는다(8차 #2: 건네면 다음 Search 저장이 방금 써진 항을 지웠다). told 는 그대로라 다음 읽기가 건넨다.
+        let sure = read;
+        if (posted) {
+          sure = false;
+          try { take(await call('GET')); sure = true; } catch (_) {}
+        }
+        if (sure && text !== told) tell(text, stamp);
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }
     }).catch(() => {});

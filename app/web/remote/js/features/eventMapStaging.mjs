@@ -145,8 +145,12 @@ export function initEventMapStaging({ showToast, getPromptText, generateNow, con
     multiple_girls_multiple_boys: ['여다수 남다수', 'x'],
     '1boy_solo': ['남1 단독', 'm'], '1boy': ['남1', 'm'], '2boys': ['남2', 'm'], multiple_boys: ['남다수', 'm'], other: ['기타', 'o'],
   };
+  // 인원 13갈래가 다 켜졌다 = 인원으로 거르지 않는다(Draft 가 보낸 줄은 늘 이렇다 - 인원은 포함 태그가 정한다).
+  // 칩 13개를 늘어놓지 않고 아무것도 그리지 않는다(사용자 지시 2026-11-13).
+  const ALL_PERSONS = Object.keys(PERSON);
   const metaHtml = (s, withFilters = true) => {
-    const ps = s.persons.map(p => { const [label, kind] = PERSON[p] || [p.replaceAll('_', ' '), 'o'];
+    const allPersons = ALL_PERSONS.every(p => s.persons.includes(p));
+    const ps = allPersons ? '' : s.persons.map(p => { const [label, kind] = PERSON[p] || [p.replaceAll('_', ' '), 'o'];
       return `<span class="st-chip st-p-${kind}">${esc(label)}</span>`; }).join('');
     const rs = ['g', 's', 'q', 'e'].filter(r => s.ratings.includes(r))
       .map(r => `<span class="st-chip st-r-${r}">${r.toUpperCase()}</span>`).join('');

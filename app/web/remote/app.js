@@ -1683,7 +1683,7 @@ import('./js/features/eventMapPanel.mjs?v=20261112-drrev4')
   })
   .catch(error => console.error('Failed to initialize Event Map', error));
 // S · 조합 - 스테이징(동결한 이벤트 맵 조합의 랜덤 풀)과 저장된 조합. 왼쪽 가장자리 E · A 아래의 [S] 단추.
-import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
+import('./js/features/eventMapStaging.mjs?v=20261113-persons')
   .then(({initEventMapStaging}) => {
     window.eventStaging = initEventMapStaging({
       showToast,

@@ -49,10 +49,13 @@ export function initDraftPermExclude({
       method, cache: 'no-store', headers: { 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
     });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      throw Object.assign(new Error(data.message || `HTTP ${res.status}`), { code: data.error || '', data });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data || data.ok === false) {
+      const d = data || {};
+      throw Object.assign(new Error(d.message || `HTTP ${res.status}`), { code: d.error || '', data: d });
     }
+    // 본문이 깨졌거나 글이 없는 응답을 '빈 글' 로 받으면 Search 칸을 비웠다(Codex 리뷰 2026-11-13 7차 #3) - 실패로 다룬다
+    if (typeof data.text !== 'string') throw new Error('응답에 영구 제외 글이 없습니다');
     return data;
   }
   function take(data) {
@@ -63,8 +66,8 @@ export function initDraftPermExclude({
 
   let loadError = '';
   function load({ snapshot = false } = {}) {
+    const stamp = searchEditStamp();   // 청한 때의 번호(줄에서 기다리는 동안 고친 것도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
-      const stamp = searchEditStamp();
       try {
         take(await call('GET'));
         if (text !== told) tell(text, stamp);
@@ -76,11 +79,12 @@ export function initDraftPermExclude({
   }
   /** makeTerms(서버의 지금 항 목록) -> 새 목록. 못 읽으면 저장하지 않는다(빈 글로 덮지 않게 - #2). */
   function save(makeTerms, done) {
+    const stamp = searchEditStamp();   // 청한 때의 번호(앞 저장이 끝나길 기다리는 동안 고친 Search 칸도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
       saving++; paint();
       const before = text;
-      const stamp = searchEditStamp();
-      let read = false;   // 이 일에서 서버 글을 받았나 - 못 받았으면 실패 길이 아무것도 건네지 않는다(6차 #1: 빈 글로 Search 칸을 비웠다)
+      let read = false;
+      let posted = false;   // POST 를 보냈나 - 보낸 뒤 실패(응답 유실 등)면 실제로 써졌는지 다시 읽어 본다(7차 #3)   // 이 일에서 서버 글을 받았나 - 못 받았으면 실패 길이 아무것도 건네지 않는다(6차 #1: 빈 글로 Search 칸을 비웠다)
       try {
         take(await call('GET'));
         read = true;
@@ -89,12 +93,13 @@ export function initDraftPermExclude({
           const next = makeTerms(splitTerms(text)).join(', ');
           if (next === text.trim()) break;      // 할 일이 없다(다른 곳에서 먼저 했다)
           try {
+            posted = true;
             take(await call('POST', { text: next, base: text }));
             wrote = true;
             break;
           } catch (error) {
-            if (error.code !== 'conflict') throw error;
-            take(error.data || {});   // 그 사이 바뀐 글 위에 다시 얹는다
+            if (error.code !== 'conflict' || typeof error.data?.text !== 'string') throw error;
+            take(error.data);   // 그 사이 바뀐 글 위에 다시 얹는다
             // 세 번째 충돌이면 포기 - 그래도 그 응답의 새 글은 받아 둔 뒤라 실패 길이 Search 칸에 퍼뜨린다(Codex 4차 #1)
             if (attempt >= 2) throw error;
           }
@@ -105,6 +110,7 @@ export function initDraftPermExclude({
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
         // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게) - 읽지도 못했으면 건드리지 않는다
+        if (posted) { try { take(await call('GET')); } catch (_) {} }   // 써졌을 수도 있다 - 서버의 지금 글로
         if (read && text !== told) tell(text, stamp);
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }

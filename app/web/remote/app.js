@@ -1676,8 +1676,7 @@ import('./js/features/eventMapPanel.mjs?v=20261112-drrev4')
       // 안 그러면 Search 가 다음 저장 때 옛 글을 다시 써 넣는다(칸의 값을 통째로 보낸다). input 이벤트는
       // 칸 높이 · [영구 제외 · n] 단추만 고친다(저장하지 않는다).
       onPermanentExcludeChange: text => {
-        const field = document.getElementById('searchExcludePermanent');
-        if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
+        syncPermanentExcludeField(text);
         if (window.draftMode?.isActive?.()) void window.draftMode.reload();   // Draft 의 남은 게시물 · [제외 : N] 도 새 글로
       },
     });
@@ -1697,15 +1696,25 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
     });
   })
   .catch(error => console.error('Failed to initialize Staging', error));
-// Search 영구 제외 칸을 **사용자가** 고친 횟수 - Draft 영구 제외 창이 읽는 사이 고쳤으면 읽은 글로 덮지 않는다
-// (Codex 리뷰 2026-11-13 6차 #2). 코드가 쏘는 input(isTrusted false - 이벤트 맵 · Draft 창이 맞춰 넣는 것)은 세지 않는다.
+// Search 영구 제외 칸이 바뀐 횟수 - Draft 영구 제외 창이 읽는 사이 고쳤으면 읽은 글로 덮지 않는다(Codex 리뷰 2026-11-13 6차 #2).
+// 세지 않는 것은 이벤트 맵 · Draft 창이 서버 글로 맞춰 넣는 것(syncPermanentExcludeField)뿐이다 - 자동완성처럼 코드가 쏘는
+// input 도 사용자의 편집이라 센다(7차 #1: isTrusted 로 가르면 자동완성 고른 것을 옛 글로 되돌렸다).
 let draftPermSearchEdits = 0;
+let permanentExcludeFieldSyncing = false;
 document.addEventListener('input', event => {
-  if (event.isTrusted && event.target && event.target.id === 'searchExcludePermanent') draftPermSearchEdits++;
+  if (!permanentExcludeFieldSyncing && event.target && event.target.id === 'searchExcludePermanent') draftPermSearchEdits++;
 }, true);
+/** 서버의 영구 제외 글을 Search 칸에 맞춰 넣는다(칸 높이 · [영구 제외 · n] 단추만 고치는 input - 저장하지 않는다). */
+function syncPermanentExcludeField(text) {
+  const field = document.getElementById('searchExcludePermanent');
+  if (!field || field.value === text) return;
+  field.value = text;
+  permanentExcludeFieldSyncing = true;
+  try { field.dispatchEvent(new Event('input', { bubbles: true })); } finally { permanentExcludeFieldSyncing = false; }
+}
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261113-perm6')
+import('./js/features/draftMode.mjs?v=20261113-perm7')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1735,10 +1744,7 @@ import('./js/features/draftMode.mjs?v=20261113-perm6')
       openStaging: () => window.eventStaging?.show?.('stage'),
       onActiveChange: () => { updateGenerateButtonMode(); window.eventStaging?.paint?.(); },
       // Draft 의 영구 제외 창이 저장했다 - Search 칸도 같은 글로(이벤트 맵 창과 같은 이유: 안 그러면 Search 가 옛 글을 다시 쓴다)
-      onPermanentExcludeChange: text => {
-        const field = document.getElementById('searchExcludePermanent');
-        if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
-      },
+      onPermanentExcludeChange: text => syncPermanentExcludeField(text),
       permanentExcludeEditStamp: () => draftPermSearchEdits,
     });
   })

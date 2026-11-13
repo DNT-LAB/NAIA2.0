@@ -1678,6 +1678,7 @@ import('./js/features/eventMapPanel.mjs?v=20261112-drrev4')
       onPermanentExcludeChange: text => {
         const field = document.getElementById('searchExcludePermanent');
         if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
+        if (window.draftMode?.isActive?.()) void window.draftMode.reload();   // Draft 의 남은 게시물 · [제외 : N] 도 새 글로
       },
     });
   })
@@ -1698,7 +1699,7 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
   .catch(error => console.error('Failed to initialize Staging', error));
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261112-drcard2')
+import('./js/features/draftMode.mjs?v=20261113-perm')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1727,6 +1728,11 @@ import('./js/features/draftMode.mjs?v=20261112-drcard2')
       openEventMap: () => { try { void window.eventMap?.show?.(); } catch (_) {} },
       openStaging: () => window.eventStaging?.show?.('stage'),
       onActiveChange: () => { updateGenerateButtonMode(); window.eventStaging?.paint?.(); },
+      // Draft 의 영구 제외 창이 저장했다 - Search 칸도 같은 글로(이벤트 맵 창과 같은 이유: 안 그러면 Search 가 옛 글을 다시 쓴다)
+      onPermanentExcludeChange: text => {
+        const field = document.getElementById('searchExcludePermanent');
+        if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
+      },
     });
   })
   .catch(error => console.error('Failed to initialize Draft Mode', error));

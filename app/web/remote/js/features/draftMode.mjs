@@ -21,6 +21,7 @@
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261112-drcard2';
 import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard2';
+import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다
@@ -44,6 +45,7 @@ export function initDraftMode({
   openEventMap = () => {},
   openStaging = () => {},
   onActiveChange = () => {},
+  onPermanentExcludeChange = () => {}, // (text) => void - 영구 제외 글이 바뀌었다(Search 칸도 같은 글로)
 } = {}) {
   if (!host || !pill) return null;
   // app.js 의 escHtml 은 글만 받는다(숫자 rid 를 넣자 throw -> 그리기 전체가 멈췄다, 11-07 실측) - 늘 글로 바꿔 넘긴다.
@@ -59,6 +61,7 @@ export function initDraftMode({
   let menuEl = null;
   let finder = null;              // '남은 태그' 창(draftTagFinder.mjs) - 맨 아래에서 만든다
   let chipCard = null;            // 칩 카드(draftChipCard.mjs) - 칩 메뉴와 함께 뜬다 · 맨 아래에서 만든다
+  let permBox = null;             // 영구 제외 창(draftPermExclude.mjs) - [제외 : N] 이 연다 · 맨 아래에서 만든다
   const active = () => !!snap?.state?.active;
 
   // ---- 서버 ----
@@ -105,6 +108,8 @@ export function initDraftMode({
     paint();
     finder?.sync(snap);
     chipCard?.sync(snap);
+    permBox?.sync();
+    if (was && !now) permBox?.close();
     if (now !== was) onActiveChange(now);
   }
   async function load() {
@@ -596,7 +601,15 @@ export function initDraftMode({
       return `<button type="button" class="dr-rate${on.has(r) ? ' is-on' : ''}${zero ? ' is-zero' : ''}${out === r ? ' is-out' : ''}"`
         + ` data-dr-rate="${r}" aria-pressed="${on.has(r)}"${zero && !on.has(r) ? ' aria-disabled="true"' : ''} title="${esc(tip)}">${r.toUpperCase()}</button>`;
     }).join('')}</span>`;
-    sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}
+    // [제외 : N] = 영구 제외(Search 의 붉은 줄과 같은 목록) - 남은 게시물은 여기 걸린 게시물을 뺀 수다(사용자 지시 11-13).
+    const perm = der.perm || null;
+    const permTerms = perm?.terms || [];
+    const permTip = permTerms.length
+      ? `영구 제외${Number.isFinite(perm?.dropped) ? ` · 빠진 게시물 ${fmt(perm.dropped)}` : ''} — ${permTerms.join(', ')} (누르면 고칩니다)`
+      : '영구 제외 - 비어 있습니다. 누르면 태그를 더합니다(Search · 이벤트 맵과 같은 목록)';
+    const permBtn = `<button type="button" class="dr-btn dr-perm${permTerms.length ? ' is-on' : ''}" data-dr-perm
+      aria-pressed="${!!permBox?.isOpen()}" title="${esc(permTip)}">제외 : ${permTerms.length}</button>`;
+    sumEl.innerHTML = `<span>남은 게시물</span><span class="dr-big">${remaining == null ? '—' : fmt(remaining)}</span>${rating}${permBtn}
       <span class="dr-gap"></span>
       <button type="button" class="dr-btn dr-btn--icon" data-dr-stage title="스테이징으로 보내기 - 지금 칩 조건을 스테이징 줄 하나로"
         aria-label="스테이징으로 보내기">&rarr;</button>
@@ -1066,6 +1079,7 @@ export function initDraftMode({
     const rate = t.closest('[data-dr-rate]');
     if (rate) { toggleRating(rate.dataset.drRate); return; }
     if (t.closest('[data-dr-stage]')) { void sendToStaging(); return; }
+    if (t.closest('[data-dr-perm]')) { permBox?.toggle(); paintSum(); return; }
     if (t.closest('[data-dr-from]')) { openStaging(); return; }
     const zone = t.closest('[data-dr-zone]');
     if (zone && !t.closest('input, textarea, button')) inputs[zone.dataset.drZone]?.input.focus();
@@ -1527,6 +1541,11 @@ export function initDraftMode({
     },
     onDone: () => closeMenu(),
     isMenuTarget: node => !!(menuEl && node && menuEl.contains(node)),
+  });
+  // ---- 영구 제외 창(사용자 지시 11-13) - 저장되면 스냅숏을 다시 받아 남은 게시물이 곧바로 바뀐다 ----
+  permBox = initDraftPermExclude({
+    esc, fmt, showToast, getSnapshot: () => snap, refreshSnapshot: load,
+    onTextChange: text => onPermanentExcludeChange(text),
   });
 
   paintPill();

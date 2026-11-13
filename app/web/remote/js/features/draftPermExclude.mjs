@@ -1,0 +1,199 @@
+/* Draft - 영구 제외 창(사용자 지시 2026-11-13).
+ *
+ * 남은 게시물 수는 영구 제외(Search 의 붉은 줄 = 이벤트 맵의 영구 제외와 **같은 글**)에 걸린 게시물을 뺀 수다.
+ * 그런데 Draft 화면에는 그 사실이 안 보여서 "왜 전체보다 적지?" 가 나왔다. 등급 단추 옆 [제외 : N] 이 이 창을 연다.
+ *
+ *  · 글의 주인은 서버(search_filter_state.exclude_permanent)다. 읽기 · 저장은 이벤트 맵과 같은 길
+ *    (`/api/event-map/permanent-exclude`)이고, 저장은 언제나 글 전체를 보낸다.
+ *  · 입력 줄 = 이벤트 맵 색인의 태그 자동완성(`/api/event-map/suggest`)에서 고른 것만 더한다(이벤트 맵 창과 같은 규칙).
+ *  · 칩의 × = 그 항을 뺀다. 저장되면 Draft 스냅숏을 다시 받아 남은 게시물 수가 곧바로 바뀐다.
+ *  · 조회 · 저장은 한 줄로 선다 - 늦은 응답이 방금 저장한 글을 덮지 않게(이벤트 맵 리뷰 2026-10-14 · 10-15 교훈).
+ */
+
+import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
+
+const AC_DEBOUNCE_MS = 120;
+
+export function initDraftPermExclude({
+  esc,
+  fmt,
+  showToast = () => {},
+  getSnapshot = () => null,
+  refreshSnapshot = async () => {},
+  onTextChange = () => {},       // (text) => void - Search 칸도 같은 글로(다음 Search 저장이 옛 글을 다시 쓰지 않게)
+} = {}) {
+  const splitTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean);
+  const fmtK = n => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
+
+  let panel = null, headEl = null, chipsEl = null, inputEl = null, acEl = null;
+  let text = '', info = null, saving = 0;
+  let queue = Promise.resolve();
+  let acItems = [], acActive = -1, acSeq = 0, acTimer = null;
+
+  async function call(method, body) {
+    const res = await fetch('/api/event-map/permanent-exclude', {
+      method, cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) throw new Error(data.message || `HTTP ${res.status}`);
+    return data;
+  }
+
+  function load() {
+    queue = queue.then(async () => {
+      try { info = await call('GET'); text = String(info.text || ''); } catch { info = null; }
+      paint();
+    }).catch(() => {});
+    return queue;
+  }
+  function save(makeTerms, done) {
+    queue = queue.then(async () => {
+      const next = makeTerms(splitTerms(text)).join(', ');
+      if (next === text.trim()) return;
+      saving++; paint();
+      try {
+        info = await call('POST', { text: next });
+        text = String(info.text || '');
+        onTextChange(text);
+        showToast(done, 'success');
+        await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로
+      } catch (error) {
+        showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
+      } finally { saving--; paint(); }
+    }).catch(() => {});
+    return queue;
+  }
+
+  function ensure() {
+    if (panel) return panel;
+    panel = createDraggablePanel({
+      document, window, title: '영구 제외', variant: 'emt-chips-window drp', storageKey: 'draft-perm-exclude',
+      width: 340, height: 300, minWidth: 260, minHeight: 170, maxWidth: 700, resizable: true, escHtml: esc,
+      onClose: () => closeAc(),
+    });
+    panel.body.innerHTML = `<div class="emt-chips-head" data-drp-head></div>
+      <div class="drp-in-row"><input class="drp-in" data-drp-in type="text" autocomplete="off" spellcheck="false"
+        aria-label="영구 제외에 더할 태그" placeholder="영구 제외에 더할 태그 - 치면 고를 태그가 뜬다"></div>
+      <div class="emt-chips" data-drp-chips></div>
+      <div class="emt-chips-note">이 태그가 달린 게시물은 Draft 가 세지도 뽑지도 않는다. Search · 이벤트 맵의 영구 제외와 같은 목록이다.</div>`;
+    headEl = panel.body.querySelector('[data-drp-head]');
+    chipsEl = panel.body.querySelector('[data-drp-chips]');
+    inputEl = panel.body.querySelector('[data-drp-in]');
+    chipsEl.addEventListener('click', event => {
+      const x = event.target.closest('[data-drp-x]');
+      if (!x || saving) return;
+      const gone = splitTerms(text)[Number(x.dataset.drpX)];
+      if (gone == null) return;
+      // 차례가 왔을 때의 글에서 글자로 뺀다(그 사이에 목록이 바뀌어도 맞는 항을 뺀다).
+      void save(terms => { const at = terms.indexOf(gone); return at < 0 ? terms : terms.filter((_, i) => i !== at); },
+        `영구 제외에서 뺐습니다 — ${gone}`);
+    });
+    inputEl.addEventListener('input', scheduleAc);
+    inputEl.addEventListener('blur', () => setTimeout(closeAc, 120));
+    inputEl.addEventListener('keydown', event => {
+      if (event.isComposing) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (!acItems.length) return;
+        event.preventDefault();
+        acActive = (acActive + (event.key === 'ArrowDown' ? 1 : -1) + acItems.length) % acItems.length;
+        paintAc();
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (acActive >= 0) choose(acActive);
+      } else if (event.key === 'Escape') {
+        if (acItems.length) { event.stopPropagation(); closeAc(); }
+      }
+    });
+    return panel;
+  }
+
+  function paint() {
+    if (!panel || !panel.isOpen()) return;
+    const terms = splitTerms(text);
+    const hits = new Map((info?.terms || []).map(t => [t.term, t.tags || []]));
+    const perm = getSnapshot()?.derived?.perm;
+    panel.setTitle(`영구 제외 · ${terms.length}`);
+    const parts = [];
+    if (perm && Number.isFinite(perm.dropped)) parts.push(`지금 조건에서 빠진 게시물 ${fmt(perm.dropped)}`);
+    if (info) parts.push(`걸린 태그 ${fmt(info.tag_count || 0)}`);
+    headEl.textContent = saving ? '저장 중…' : parts.join(' · ');
+    chipsEl.innerHTML = terms.length ? terms.map((t, i) => {
+      const tags = hits.get(t);
+      const dead = Array.isArray(tags) && !tags.length;
+      return `<span class="emt-chip${dead ? ' is-dead' : ''}" title="${esc(dead ? '이벤트 맵에서는 걸리는 태그가 없다(Search 전용 문법 · 없는 태그)'
+        : `걸리는 태그: ${(tags || [t]).join(', ')}`)}">${esc(t)}<button type="button" data-drp-x="${i}" aria-label="${esc(t)} 빼기">×</button></span>`;
+    }).join('') : '<div class="st-empty">영구 제외 태그가 없습니다. 입력 줄에서 태그를 쳐서 더한다.</div>';
+    chipsEl.inert = saving > 0;
+  }
+
+  // ---- 자동완성(이벤트 맵 색인의 태그만) ----
+  function closeAc() {
+    clearTimeout(acTimer); ++acSeq;
+    acItems = []; acActive = -1;
+    if (acEl) { acEl.hidden = true; acEl.innerHTML = ''; }
+  }
+  function paintAc() {
+    if (!acEl) {
+      acEl = document.createElement('div');
+      acEl.className = 'emt-ac';
+      acEl.setAttribute('role', 'listbox');
+      document.body.append(acEl);
+      acEl.addEventListener('mousedown', event => event.preventDefault());   // 입력 칸이 초점을 잃지 않게
+      acEl.addEventListener('click', event => {
+        const row = event.target.closest('[data-ac]');
+        if (row) choose(Number(row.dataset.ac));
+      });
+    }
+    if (!acItems.length || !panel?.isOpen()) { acEl.hidden = true; return; }
+    acEl.innerHTML = acItems.map((it, i) => `<div class="emt-ac-row${i === acActive ? ' is-active' : ''}${it.blocked === '영구 제외' ? ' is-off' : ''}" data-ac="${i}" role="option">
+        <span class="emt-ac-tag">${esc(it.tag)}</span><span class="emt-ac-kind">${esc(it.blocked === '영구 제외' ? '이미 제외' : (it.role_label || ''))}</span><span class="emt-ac-n">${fmtK(it.observed)}</span></div>`).join('');
+    acEl.hidden = false;
+    acEl.style.zIndex = String((Number.parseInt(getComputedStyle(panel.el).zIndex, 10) || 1000) + 2);
+    const r = inputEl.getBoundingClientRect();
+    acEl.style.left = `${Math.round(r.left)}px`;
+    acEl.style.top = `${Math.round(r.bottom + 2)}px`;
+    acEl.style.width = `${Math.round(Math.max(260, Math.min(r.width, 380)))}px`;
+  }
+  function scheduleAc() {
+    clearTimeout(acTimer);
+    const q = inputEl.value.trim();
+    if (!q) { closeAc(); return; }
+    acTimer = setTimeout(async () => {
+      const mine = ++acSeq;
+      try {
+        const res = await fetch(`/api/event-map/suggest?${new URLSearchParams({ q, limit: '8' })}`, { cache: 'no-store' });
+        const body = await res.json();
+        if (mine !== acSeq) return;
+        acItems = body.items || [];
+        acActive = acItems.findIndex(it => it.blocked !== '영구 제외');
+      } catch { if (mine === acSeq) { acItems = []; acActive = -1; } }
+      paintAc();
+    }, AC_DEBOUNCE_MS);
+  }
+  function choose(i) {
+    const it = acItems[i];
+    if (!it) return;
+    closeAc();
+    if (it.blocked === '영구 제외') { showToast(`이미 영구 제외에 있습니다 — ${it.tag}`, 'info'); return; }
+    inputEl.value = '';
+    void save(terms => [...terms, it.tag], `영구 제외에 더했습니다 — ${it.tag}`);
+  }
+
+  function open() {
+    ensure();
+    panel.open();
+    paint();
+    void load();     // 항마다 걸리는 태그 · 지금 글을 새로(Search 에서 고쳤을 수 있다)
+    inputEl.value = '';
+    inputEl.focus({ preventScroll: true });
+  }
+  function close() { if (panel?.isOpen()) panel.close(); closeAc(); }
+
+  return {
+    toggle: () => (panel?.isOpen() ? close() : open()),
+    close,
+    isOpen: () => !!panel?.isOpen(),
+    sync: () => paint(),
+  };
+}

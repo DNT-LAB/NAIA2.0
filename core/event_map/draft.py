@@ -164,11 +164,12 @@ TEXT_CACHE = TextPostCache()
 class _Cond:
     """One immutable condition, with thread-safe lazy views and body counts."""
 
-    def __init__(self, packed, size):
+    def __init__(self, packed, size, blocked_out=0):
         packed.flags.writeable = False
         self.packed = packed
         self.size = size
         self.count = int(np.bitwise_count(packed).sum(dtype=np.int64))
+        self.blocked_out = int(blocked_out)   # 영구 제외가 이 조건에서 뺀 게시물 수(화면의 [제외 : N] 말풍선)
         self._lock = threading.RLock()
         self._rids = self._mask = self._cumulative = None
         self._tag_counts = self._gathered = self._reduce_at = self._present = None
@@ -553,9 +554,11 @@ class EventMapDraft:
             mask = np.zeros(size, dtype=bool)
             mask[idx.filter_posts(rids, state["tags"]["groups"])] = True
             packed = np.packbits(mask)
+        blocked_out = 0
         if blocked is not None:
+            blocked_out = int(np.bitwise_count(packed & blocked).sum(dtype=np.int64))
             packed &= ~blocked
-        return _Cond(packed, size)
+        return _Cond(packed, size, blocked_out)
 
     def count(self, state):
         idx = self._index()
@@ -774,8 +777,13 @@ class EventMapDraft:
         result["cond"] = self.condition_id(state)
         result["ratings_on"] = [r for r in RATINGS if r in (state["ratings"] or RATINGS)]
         result["rating_counts"] = None
+        # 영구 제외(Search 의 붉은 줄과 같은 글) - 남은 게시물은 이것을 뺀 수다. 화면이 [제외 : N] 으로 보여 준다(사용자 지시 11-13).
+        perm_text = self.service.permanent_text()
+        result["perm"] = {"terms": [t.strip() for t in perm_text.split(",") if t.strip()], "dropped": None}
         if idx is not None:
-            result["remaining"] = self._condition(state, idx, self.service.permanent_block(idx)).count
+            cond = self._condition(state, idx, self.service.permanent_block(idx, perm_text))
+            result["remaining"] = cond.count
+            result["perm"]["dropped"] = cond.blocked_out
             result["rating_counts"] = self.rating_counts(state, idx=idx)
         for zone in ("include", "exclude"):
             for c in state[zone]:

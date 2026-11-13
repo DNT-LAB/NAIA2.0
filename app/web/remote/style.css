@@ -34208,6 +34208,17 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .dr-rate.is-zero:not(.is-on) { cursor: not-allowed; text-decoration: line-through; }
 .dr-rate.is-out::after { content: ""; position: absolute; left: 3px; right: 3px; bottom: -4px; height: 2px; background: #c9a227; }
 .dr-sum .dr-btn { flex: none; }
+/* [제외 : N] - 영구 제외(사용자 지시 11-13). 걸린 항이 있으면 붉은 글자 · 없으면 흐리게 */
+.dr-perm { font-family: var(--font-mono); padding: 3px 7px; }
+.dr-perm.is-on { color: #e57373; border-color: rgba(229,115,115,0.45); }
+.dr-perm:not(.is-on) { opacity: 0.6; }
+/* 판이 좁으면 맨 앞 '남은 게시물' 글자가 먼저 줄어든다 - 단추([제외 : N] · → · 불러오기)가 잘리지 않게 */
+.dr-sum > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Draft 영구 제외 창 - 칩 · 머리 · 안내는 이벤트 맵 칩 창(.emt-chips*) 옷을 그대로 입는다 */
+.drp-in-row { flex: 0 0 auto; padding: 6px 10px 0; }
+.drp-in { width: 100%; box-sizing: border-box; padding: 4px 8px; border: 1px solid var(--border-dim); border-radius: 5px;
+  background: rgba(10,10,18,0.6); color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; }
+.drp-in:focus { outline: none; border-color: rgba(229,115,115,0.6); }
 .dr-btn--icon { padding: 3px 8px; font-size: 12px; line-height: 1; }
 .dr-big { font-size: 13px; font-weight: 600; color: #9d8bff; font-family: var(--font-mono); }
 .dr-rating { font-family: var(--font-mono); font-size: 10.5px; color: #c9a227; }

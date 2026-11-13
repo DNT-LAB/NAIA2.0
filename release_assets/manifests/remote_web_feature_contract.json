@@ -308,6 +308,7 @@
         "app/web/remote/js/features/draftMode.mjs",
         "app/web/remote/js/features/draftTagFinder.mjs",
         "app/web/remote/js/features/draftChipCard.mjs",
+        "app/web/remote/js/features/draftPermExclude.mjs",
         "app/backend/server/event_map_routes.py",
         "core/event_map/__init__.py",
         "core/event_map/index.py",

@@ -1697,9 +1697,15 @@ import('./js/features/eventMapStaging.mjs?v=20261107-draft1')
     });
   })
   .catch(error => console.error('Failed to initialize Staging', error));
+// Search 영구 제외 칸을 **사용자가** 고친 횟수 - Draft 영구 제외 창이 읽는 사이 고쳤으면 읽은 글로 덮지 않는다
+// (Codex 리뷰 2026-11-13 6차 #2). 코드가 쏘는 input(isTrusted false - 이벤트 맵 · Draft 창이 맞춰 넣는 것)은 세지 않는다.
+let draftPermSearchEdits = 0;
+document.addEventListener('input', event => {
+  if (event.isTrusted && event.target && event.target.id === 'searchExcludePermanent') draftPermSearchEdits++;
+}, true);
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261113-perm5')
+import('./js/features/draftMode.mjs?v=20261113-perm6')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1733,6 +1739,7 @@ import('./js/features/draftMode.mjs?v=20261113-perm5')
         const field = document.getElementById('searchExcludePermanent');
         if (field && field.value !== text) { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); }
       },
+      permanentExcludeEditStamp: () => draftPermSearchEdits,
     });
   })
   .catch(error => console.error('Failed to initialize Draft Mode', error));

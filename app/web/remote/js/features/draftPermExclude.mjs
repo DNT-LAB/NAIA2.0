@@ -24,6 +24,7 @@ export function initDraftPermExclude({
   getSnapshot = () => null,
   refreshSnapshot = async () => {},
   onTextChange = () => {},       // (text) => void - Search 칸도 같은 글로(다음 Search 저장이 옛 글을 다시 쓰지 않게)
+  searchEditStamp = () => 0,     // () => 수 - 사용자가 Search 칸을 고칠 때마다 오른다(읽는 사이 고쳤으면 건네지 않는다)
 } = {}) {
   const splitTerms = text => String(text || '').split(',').map(t => t.trim()).filter(Boolean);
   const fmtK = n => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n || 0));
@@ -34,7 +35,13 @@ export function initDraftPermExclude({
   // 마지막으로 Search 칸에 건넨 글. 읽은 글이 이것과 다를 때만 건넨다 - 늘 건네면 늦게 온 읽기 응답이 그 사이 Search 에서
   // 고친 글을 옛 글로 덮었다(Codex 리뷰 2026-11-13 5차 #1). 저장이 실패해 못 건넨 글은 이것과 달라 다음 읽기가 건넨다(3차 #3).
   let told = null;
-  function tell(value) { told = value; onTextChange(value); }
+  /** stamp = 이 일을 시작할 때의 Search 편집 번호. 그 사이 사용자가 Search 칸을 고쳤으면 건네지 않는다 - 늦게 온 읽기가
+   *  그 편집을 옛 글로 되돌렸다(Codex 리뷰 2026-11-13 6차 #2). 건네지 않은 글은 told 가 아니라 다음 읽기가 다시 본다. */
+  function tell(value, stamp) {
+    if (stamp !== searchEditStamp()) return;
+    told = value;
+    onTextChange(value);
+  }
   let acItems = [], acActive = -1, acSeq = 0, acTimer = null;
 
   async function call(method, body) {
@@ -57,9 +64,10 @@ export function initDraftPermExclude({
   let loadError = '';
   function load({ snapshot = false } = {}) {
     queue = queue.then(async () => {
+      const stamp = searchEditStamp();
       try {
         take(await call('GET'));
-        if (text !== told) tell(text);
+        if (text !== told) tell(text, stamp);
         if (snapshot) await refreshSnapshot();   // 다른 곳에서 바뀌었을 수 있다 - 남은 게시물 · [제외 : N] 도 새로(#4)
       } catch (error) { loadError = error.message || '읽기 실패'; }
       paint();
@@ -71,8 +79,11 @@ export function initDraftPermExclude({
     queue = queue.then(async () => {
       saving++; paint();
       const before = text;
+      const stamp = searchEditStamp();
+      let read = false;   // 이 일에서 서버 글을 받았나 - 못 받았으면 실패 길이 아무것도 건네지 않는다(6차 #1: 빈 글로 Search 칸을 비웠다)
       try {
         take(await call('GET'));
+        read = true;
         let wrote = false;
         for (let attempt = 0; ; attempt++) {
           const next = makeTerms(splitTerms(text)).join(', ');
@@ -89,11 +100,12 @@ export function initDraftPermExclude({
           }
         }
         if (!wrote && text === before) return;
-        tell(text);
+        tell(text, stamp);
         if (wrote) showToast(done, 'success');
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
-        if (text !== told) tell(text);   // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게)
+        // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게) - 읽지도 못했으면 건드리지 않는다
+        if (read && text !== told) tell(text, stamp);
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }
     }).catch(() => {});

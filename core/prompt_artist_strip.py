@@ -333,7 +333,9 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     자리는 맨 앞 인원 수 태그(1girl · 1boy ...) 바로 뒤다(사용자 확인 2026-11-11) - 메인 생성의 최종 포맷과 같은 차례.
     음수 가중치로 넣은 작가도 걷는다. 작가가 아닌 것(`artist collaboration` 등)은 그대로 둔다.
     """
-    text = str(text or "")
+    # 주석 칸은 가린 글로 읽는다 - 주석 속 `}` 가 묶음을 닫았다고 읽어 묶음 안의 태그를 밖으로 꺼냈다(Codex 리뷰 11차 #1).
+    # 주석 조각은 아래에서 통째로 걷으니 가린 글이 결과로 나가지 않는다.
+    text = _mask_comments(str(text or ""))
     events, keys = _events(text), _known_keys(known)
     remove, removed, rewritten = set(), [], {}
     for i, event in enumerate(events):
@@ -400,77 +402,218 @@ def _event_spans(text, events):
     return spans
 
 
-def reweight_artist(text, artist, wrap, *, fresh="", known=frozenset()) -> dict:
+# 고친 자리의 몸통을 잠시 맡아 두는 표 - 다시 짚을 때 이미 고친 태그를 또 집지 않게(사전에 없는 글이라 작가로 안 읽힌다).
+_HELD = "\ue001{}\ue002"
+
+
+def _reweight_one(text, events, spans, i, wrap, one, body, members, opens, closes):
+    """조각 i(작가 태그) 하나의 가중치를 고친 글. 자리를 못 고치면 None. `one` = 가중치 1 을 드러내 적는 껍질."""
+    groups = events[i].groups
+    mine = [g for g in groups if members.get(g) == [i] and g in opens and g in closes]
+    shared = [g for g in groups if g not in mine and g in opens and g in closes]
+    first = min([opens[g] for g in mine] + [i])
+    last = max([closes[g] for g in mine] + [i])
+    start, end = spans[first][0], spans[last][1]
+    before = events[first - 1] if first > 0 else None
+    after = events[last + 1] if last + 1 < len(events) else None
+    # 나눠 쓰는 껍질에서 빼어 옮기는 것은 쉼표로 떼어 낼 수 있을 때만이다 - 못 떼면 제자리에서 고치고, 그러면 그 껍질도
+    # 바깥으로 남는다(옮길 것으로 셈해 놓고 제자리에 두면 가중치 1 이 맨몸으로 남아 바깥 숫자를 물려받았다 · Codex 리뷰 3차 #2).
+    # 쉼표를 지우면 이웃 칸과 이어 붙는다 - 그 칸이 주석이면 주석의 머리가 바뀌거나(`0.7::# ...` 로 살아난다) 닫는 `::` 를
+    # 주석이 삼킨다(Codex 리뷰 5차 #1 #2). 그쪽 쉼표는 쓰지 않는다.
+    side = ("before" if getattr(before, "kind", "") == "SEP" and not _comment_field(events, first - 2, -1)
+            else "after" if getattr(after, "kind", "") == "SEP" and not _comment_field(events, last + 2, 1)
+            else "")
+    movable = shared and not mine and side
+    moved = min(shared, key=lambda g: len(members[g])) if movable else None
+    # 제 껍질을 걷어 낸 뒤에도 남는 바깥 껍질(나눠 쓰는 것 · 다른 칸에서 열린 것) - 그 안에서 가중치 1 을 맨몸으로 두면
+    # 바깥 숫자를 물려받는다(`0.7::b, a ::` 의 a 는 0.7). 그때는 모드의 문법으로 드러내 적는다(1차 #4 · 2차 #1).
+    outer = [g for g in groups if g not in mine and g != moved]
+    shell = wrap if wrap != REWEIGHT_SLOT or not outer else one
+    token = shell.replace(REWEIGHT_SLOT, body)
+    if moved is None:
+        # 쉼표 없이 붙은 이웃이 있으면 쉼표로 가른다 - 숫자 껍질은 태그 머리에서만 열리고, 맨몸은 이웃과 한 태그가 된다
+        # (`artist:bar {artist:foo}` -> `artist:bar 0.5::artist:foo ::` 가 `bar 0.5` 라는 작가로 읽혔다 · 2차 #2 · 3차 #1).
+        if getattr(before, "kind", "") == "TAG":
+            while start > 0 and text[start - 1] in " \t":
+                start -= 1
+            token = ", " + token
+        if getattr(after, "kind", "") in ("TAG", "OPEN"):
+            while end < len(text) and text[end] in " \t":
+                end += 1
+            token = token + ", "
+        return text[:start] + token + text[end:]
+    # 나눠 쓰는 껍질 - 가장 안쪽 것(구성원이 가장 적다)에서 빼어 그 바로 뒤에 둔다.
+    if side == "before":
+        cut_start, cut_end = spans[first - 1][0], end
+    else:
+        cut_start, cut_end = start, spans[last + 1][1]
+        while cut_end < len(text) and text[cut_end] in " \t":
+            cut_end += 1
+    tail = spans[closes[moved]][1]
+    if tail < cut_end:
+        return None
+    # 옮겨 둔 자리 뒤에도 쉼표 없이 이어지는 것이 있으면 가른다(`{a, smile} blue eyes` · 줄바꿈 뒤 `0.75::` - Codex 리뷰 4차 #2).
+    follow = events[closes[moved] + 1] if closes[moved] + 1 < len(events) else None
+    if getattr(follow, "kind", "") in ("TAG", "OPEN"):
+        return text[:cut_start] + text[cut_end:tail] + ", " + token + ", " + text[tail:].lstrip(" \t")
+    return text[:cut_start] + text[cut_end:tail] + ", " + token + text[tail:]
+
+
+def _is_comment(event):
+    """주석 조각(`# ...` 로 시작하는 쉼표 칸)의 것 - 생성이 통째로 버린다. 그 안의 작가는 고치지 않는다(Codex 리뷰 4차 #1)."""
+    return event.raw.lstrip().startswith("#")
+
+
+def _without_comments(text):
+    return ", ".join(field for field in split_top(text) if not field.strip().startswith("#"))
+
+
+def _comment_field(events, index, step):
+    """`index` 에서 `step` 쪽으로 쉼표를 만날 때까지 - 그 칸이 주석 칸인가."""
+    while 0 <= index < len(events) and events[index].kind != "SEP":
+        if events[index].kind == "TAG" and _is_comment(events[index]):
+            return True
+        index += step
+    return False
+
+
+def _other_tags(text, targets_of):
+    """맞춰 볼 것 - (그 작가가 아닌 태그와 그 실제 가중치들, 주석 칸 원문들). 차례 무관. 가중치를 고치기 전과 뒤가 같아야 한다.
+
+    가중치는 `find_artists_weighted` 와 같은 읽기(가장 안쪽 숫자 · 중괄호 겹수). 껍질이 주석에 먹혀 바깥 숫자가 안 닫히면
+    다른 태그의 가중치가 바뀐다 - 그것을 잡는다(Codex 리뷰 5차 #2).
+    """
+    events = _events(_without_comments(text))
+    skip = set(targets_of(events))
+    opens = {event.group: event.text.strip() for event in events if event.kind == "OPEN"}
+    tags = []
+    for i, event in enumerate(events):
+        if event.kind != "TAG" or i in skip:
+            continue
+        number, factor = None, 1.0
+        for gid in event.groups:
+            opener = opens.get(gid, "")
+            if opener.startswith("{"):
+                factor *= 1.05
+            elif opener.startswith("["):
+                factor /= 1.05
+            elif (match := re.match(_NUMBER, opener)):
+                number = float(match[0])
+        tags.append((" ".join(event.body.split()), round(number if number is not None else factor, 2)))
+    comments = [field.strip() for field in split_top(text) if field.strip().startswith("#")]
+    return sorted(tags), sorted(comments)
+
+
+def _people_folded(other):
+    """`_other_tags` 의 결과에서 인원 수 태그를 (소문자 이름, 가중치) 모음으로 접는다 - 넣기 갈래는 인원 수 태그를 앞으로 꺼내며
+    중복을 지우고 소문자로 적는다(`1girl, 1girl` · `1Girl` 을 거절했다 - Codex 리뷰 11차 #2). 가중치가 바뀌면 여전히 잡힌다."""
+    from core.prompt_processor import ALL_PERSON_TAGS
+
+    tags, comments = other
+    rest, people = [], set()
+    for body, weight in tags:
+        name = body.lower()
+        if name in ALL_PERSON_TAGS:
+            people.add((name, weight))
+        else:
+            rest.append((body, weight))
+    return rest, people, comments
+
+
+# 같은 작가를 이보다 많이 쓴 글은 거절한다 - 한 자리마다 글 전체를 다시 짚어 1,000 번이면 12초가 들었다(Codex 리뷰 2차 #4).
+REWEIGHT_MAX_OCCURRENCES = 64
+
+
+def reweight_artist(text, artist, wrap, *, fresh="", one="", known=frozenset()) -> dict:
     """`artist` 의 가중치만 바꾼 글 - 다른 작가 · 태그 · 자리는 그대로다(아티스트 태그 관리 창 2026-11-13).
 
     - 그 작가만 감싼 껍질(`0.72::hassai ::` · `{artist:a}` · `(a:1.2)`)은 껍질째 새 껍질로 갈아 끼운다.
     - 다른 태그와 나눠 쓰는 껍질 안(`0.26::epi zero, e-note ::`)이면 거기서 빼어 그 껍질 바로 뒤에 둔다
       (`0.26::epi zero ::, 0.4::e-note ::`) - 다른 태그의 가중치는 안 바뀐다.
-    - 같은 작가가 여러 번이면 모두 바꾼다. 글에 없으면 `fresh`(서식이 끝난 새 태그)를 인원 수 태그 뒤에 넣는다(`fresh` 가
-      빈 글이면 그대로 둔다). SD 묶음 `(a, b:1.2)` 안에만 있으면 `ReweightError("in_group")`.
+    - 같은 작가가 여러 번이면 모두 바꾼다 - 한 자리씩 고치고 다시 짚는다(한 번에 고치면 이웃한 둘의 쉼표가 겹친다 · 1차 #5).
+      글에 없으면 `fresh`(서식이 끝난 새 태그)를 인원 수 태그 뒤에 넣는다(`fresh` 가 빈 글이면 그대로 둔다).
+    - SD 묶음 `(a, b:1.2)` 안에 하나라도 있으면 `ReweightError("in_group")` - 바깥 것만 바꾸면 반만 바뀐다(1차 #6).
     """
     text = str(text or "")
     wrap = str(wrap or "")
-    if wrap.count(REWEIGHT_SLOT) != 1:
-        raise ValueError("wrap must hold exactly one slot")
-    keys, key = _known_keys(known), _dict_key(artist)
-    events = _events(text)
-    targets = [i for i, event in enumerate(events) if event.kind == "TAG"
-               and (row := _classify(event, keys)) and _dict_key(row["name"]) == key]
-    if not targets:
-        if any(_dict_key(row["name"]) == key for row in find_artists_weighted(text, known=known)):
-            raise ReweightError("in_group")
-        if not str(fresh or "").strip():
-            return {"prompt": text, "changed": 0, "inserted": False}
-        people, body = _hoist_people(text)
-        return {"prompt": _join(", ".join(people), fresh, body), "changed": 0, "inserted": True}
-    spans = _event_spans(text, events)
-    if spans is None:
+    one = str(one or "") or "1::" + REWEIGHT_SLOT + " ::"
+    for shell in (wrap, one):
+        if shell.count(REWEIGHT_SLOT) != 1 or "\ue001" in shell or "\ue002" in shell:
+            raise ValueError("wrap must hold exactly one slot")
+    if any(mark in text for mark in "\ue001\ue002\ue004\ue005"):
         raise ReweightError("unparsed")
-    members, opens, closes = {}, {}, {}
-    for i, event in enumerate(events):
-        if event.kind == "TAG":
-            for gid in event.groups:
-                members.setdefault(gid, []).append(i)
-        elif event.kind == "OPEN":
-            opens[event.group] = i
-        elif event.kind == "CLOSE":
-            closes[event.group] = i
-    edits = []                                        # (시작, 끝, 넣을 글)
-    for i in targets:
-        token = wrap.replace(REWEIGHT_SLOT, " ".join(events[i].body.split()))
-        mine = [g for g in events[i].groups if members.get(g) == [i] and g in opens and g in closes]
-        shared = [g for g in events[i].groups if g not in mine and g in opens and g in closes]
-        first = min([opens[g] for g in mine] + [i])
-        last = max([closes[g] for g in mine] + [i])
-        start, end = spans[first][0], spans[last][1]
-        if mine or not shared:
-            edits.append((start, end, token))
-            continue
-        # 나눠 쓰는 껍질 - 가장 안쪽 것(구성원이 가장 적다)에서 빼어 그 뒤에 둔다.
-        group = min(shared, key=lambda g: len(members[g]))
-        before = events[first - 1] if first > 0 else None
-        after = events[last + 1] if last + 1 < len(events) else None
-        if before is not None and before.kind == "SEP":
-            edits.append((spans[first - 1][0], end, ""))
-        elif after is not None and after.kind == "SEP":
-            cut = spans[last + 1][1]
-            while cut < len(text) and text[cut] in " 	":
-                cut += 1
-            edits.append((start, cut, ""))
-        else:
-            edits.append((start, end, token))
-            continue
-        tail = spans[closes[group]][1]
-        edits.append((tail, tail, ", " + token))
-    edits.sort(key=lambda edit: (edit[0], edit[1]))
-    for (a_start, a_end, _), (b_start, _, _) in zip(edits, edits[1:]):
-        if b_start < a_end:
+    keys, key = _known_keys(known), _dict_key(artist)
+
+    def targets_of(events):
+        return [i for i, event in enumerate(events) if event.kind == "TAG" and not _is_comment(event)
+                and (row := _classify(event, keys)) and _dict_key(row["name"]) == key]
+
+    original = text
+    others = _other_tags(text, targets_of)
+    # 주석 칸은 생성이 통째로 버린다 - 그 안의 `::` · 괄호를 껍질로 읽으면 바깥 껍질의 짝이 주석 속으로 들어가, 작가를 주석
+    # 한가운데로 옮겼다(Codex 리뷰 6차 · 7차는 대상 찾기도: `0.7::a, smile, # 0.6::b ::, blue eyes ::`). 고치는 동안은 자리 표시로 가려 두고 끝에 되돌린다.
+    fields, hidden = split_top(text), []
+    for n, field in enumerate(fields):
+        if field.strip().startswith("#"):
+            lead, trail = field[:len(field) - len(field.lstrip())], field[len(field.rstrip()):]
+            fields[n] = f"{lead}#\ue004{len(hidden)}\ue005{trail}"
+            hidden.append(field.strip())
+    text = ",".join(fields)
+    events = _events(text)
+    targets = targets_of(events)
+    found = sum(1 for row in find_artists_weighted(_without_comments(original), known=known) if _dict_key(row["name"]) == key)
+    if found > len(targets):
+        raise ReweightError("in_group")
+    if not targets:
+        if not str(fresh or "").strip():
+            return {"prompt": original, "changed": 0, "inserted": False}
+        people, body = _hoist_people(original)
+        inserted = _join(", ".join(people), fresh, body)
+        if _people_folded(_other_tags(inserted, targets_of)) != _people_folded(others):
             raise ReweightError("unparsed")
-    out = text
-    for start, end, insert in reversed(edits):
-        out = out[:start] + insert + out[end:]
-    return {"prompt": out, "changed": len(targets), "inserted": False}
+        return {"prompt": inserted, "changed": 0, "inserted": True}
+    if len(targets) > REWEIGHT_MAX_OCCURRENCES:
+        raise ReweightError("too_many")
+    bodies = []
+    for _ in range(len(targets)):
+        events = _events(text)
+        todo = targets_of(events)
+        spans = _event_spans(text, events)
+        if not todo or spans is None:
+            raise ReweightError("unparsed")
+        members, opens, closes = {}, {}, {}
+        for j, event in enumerate(events):
+            if event.kind == "TAG":
+                for gid in event.groups:
+                    members.setdefault(gid, []).append(j)
+            elif event.kind == "OPEN":
+                opens[event.group] = j
+            elif event.kind == "CLOSE":
+                closes[event.group] = j
+        i = todo[0]
+        held = _HELD.format(len(bodies))
+        bodies.append(" ".join(events[i].body.split()))
+        text = _reweight_one(text, events, spans, i, wrap, one, held, members, opens, closes)
+        if text is None:
+            raise ReweightError("unparsed")
+    if targets_of(_events(text)):
+        raise ReweightError("unparsed")
+    for n, body in enumerate(bodies):
+        text = text.replace(_HELD.format(n), body)
+    for n, comment in enumerate(hidden):
+        mark = f"#\ue004{n}\ue005"
+        if text.count(mark) != 1:
+            raise ReweightError("unparsed")
+        text = text.replace(mark, comment)
+    # 결과를 다시 읽어 맞춰 본다(2차 #2 · 3차 #1) - 어긋나면 글을 돌려주지 않는다:
+    #   그 작가가 바꾼 수만큼 · 모두 요청한 가중치로 읽히고, 다른 태그는 하나도 빠지거나 바뀌지 않았다.
+    want = find_artists_weighted(wrap.replace(REWEIGHT_SLOT, "artist:\ue003"))
+    rows = [row for row in find_artists_weighted(_without_comments(text), known=known) if _dict_key(row["name"]) == key]
+    if (len(want) != 1 or len(rows) != len(bodies)
+            or any(abs(row["weight"] - want[0]["weight"]) > 0.005 for row in rows)
+            or _other_tags(text, targets_of) != others):
+        raise ReweightError("unparsed")
+    return {"prompt": text, "changed": len(bodies), "inserted": False}
 
 
 def _replace_in_place(text, events, rewritten):
@@ -560,7 +703,10 @@ def _hoist_people(text):
     """
     from core.prompt_processor import ALL_PERSON_TAGS, PERSON_TAG_SETS
 
-    events = _events(text)
+    # 묶음은 주석을 가린 글로 읽는다 - 주석 속 `}` 가 묶음을 닫았다고 읽어 묶음 안의 1girl 을 밖으로 꺼냈다(Codex 리뷰 10차
+    # #2: `{smile, # artist:wlop}, 1girl, blue eyes}`). 같은 길이로 가려 조각 자리가 원문 자리와 그대로 맞는다.
+    masked = _mask_comments(text)
+    events = _events(masked)
     found = []
     for i, event in enumerate(events):
         if event.kind != "TAG" or event.groups:
@@ -575,7 +721,63 @@ def _hoist_people(text):
     for _, name in sorted(found, key=lambda row: rank.get(row[1], 2)):
         if name not in people:
             people.append(name)
-    return people, _remove(text, events, {i for i, _ in found})
+    # 꺼낸 태그의 자리만 원문에서 뺀다 - `_remove` 로 다시 조립하면 손대지 않은 글의 모양이 바뀐다(Codex 리뷰 8차:
+    # `a {red} dress` -> `a{red}dress`). 이름으로 고르면 묶음 안의 같은 태그까지 잡힌다(9차) - 짚은 조각의 자리로 뺀다.
+    spans = _event_spans(masked, events)
+    if spans is None:
+        return people, _remove_unmasked(text, people)
+    cuts = []
+    for i, _ in found:
+        start, end = spans[i]
+        before = i > 0 and events[i - 1].kind == "SEP"
+        after = i + 1 < len(events) and events[i + 1].kind == "SEP"
+        if (i > 0 and not before) or (i + 1 < len(events) and not after):
+            # 같은 쉼표 칸에 다른 글이 남는다(`1girl {blue eyes}`) - 태그와 그 옆 빈칸만 빼고 쉼표는 둔다(Codex 리뷰 10차 #1).
+            if i + 1 < len(events) and not after:
+                while end < len(text) and text[end] in " \t":
+                    end += 1
+            else:
+                while start > 0 and text[start - 1] in " \t":
+                    start -= 1
+            cuts.append((start, end))
+        elif after:
+            # 앞 쉼표 뒤부터 뒤 쉼표까지 - `a, 1girl, b` -> `a, b`
+            cuts.append((spans[i - 1][1] if before else start, spans[i + 1][1]))
+        else:
+            # 마지막 칸이면 앞 쉼표부터 - `a, 1girl` -> `a`
+            cuts.append((spans[i - 1][0] if before else start, end))
+    merged = []
+    for start, end in sorted(cuts):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    out, cursor = [], 0
+    for start, end in merged:
+        out.append(text[cursor:start])
+        cursor = end
+    out.append(text[cursor:])
+    return people, "".join(out)
+
+
+def _mask_comments(text):
+    """주석 칸(`#` 로 시작하는 맨 위 쉼표 칸) 의 `#` 뒤를 같은 길이의 U+E004 로 가린 글 - 생성이 버리는 글 속 괄호 · `::` 가
+    묶음을 닫거나 열지 않게. 길이가 같아 조각 자리가 원문 자리와 그대로 맞는다. 칸을 다시 이어 원문이 안 되면 그대로 둔다."""
+    fields = split_top(text)
+    if ",".join(fields) != text:
+        return text
+    for n, field in enumerate(fields):
+        body = field.strip()
+        if body.startswith("#"):
+            lead = len(field) - len(field.lstrip())
+            fields[n] = field[:lead] + "#" + "\ue004" * (len(body) - 1) + field[lead + len(body):]
+    return ",".join(fields)
+
+
+def _remove_unmasked(text, people):
+    events = _events(text)
+    return _remove(text, events, {i for i, event in enumerate(events) if event.kind == "TAG" and not event.groups
+                                  and " ".join(event.text.split()).lower() in people})
 
 
 def preset_tags(pre, post, *, known=frozenset()) -> list[str]:

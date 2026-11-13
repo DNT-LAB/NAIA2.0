@@ -1,6 +1,7 @@
 // [자동화 / 고급 기능] > [아티스트 태그 관리](사용자 지시 2026-11-11) - 메인 프롬프트에 쓴 작가를 썸네일 타일로 보여 준다.
 //
-//   - **부른 그때 한 번** 읽는다. 프롬프트를 고쳐도 따라가지 않는다 - 다시 열면 그때의 프롬프트로 다시 읽는다.
+//   - **부른 그때 한 번** 읽는다. 손으로 프롬프트를 고쳐도 따라가지 않는다 - 다시 열면 그때의 프롬프트로 다시 읽는다.
+//     다만 열린 채로 Random 이 돌면(새 글이 칸에 들어오면) 한 번 다시 읽는다(사용자 지시 2026-11-13 · 아래 refresh()).
 //   - 메인 프롬프트만 본다(네거티브 · 캐릭터 프롬프트는 보지 않는다).
 //   - 그림은 서버가 팩을 통째로 올리지 않고 그 작가의 자리만 읽어 낸다(core/artist_pack_index). 처음 여는 팩은
 //     자리 색인을 만드느라 몇 초가 든다 - 그동안 '찾는 중' 을 보여 준다.
@@ -360,9 +361,10 @@ export function createArtistTagWindow({
     family = String(data.family || '');
     missingTiles = rows.filter(row => !row.image_url).length;
     count.textContent = rows.length ? `${rows.length}명` : '';
-    if (!rows.length) { note('메인 프롬프트에 작가 태그가 없습니다.'); return; }
+    // 타일을 갈기 전에 메뉴 · 확대를 걷는다 - 빈 목록일 때도(사라진 타일의 메뉴로 새 글에 옛 작가를 넣던 것 · Codex 리뷰 1차 #7).
     leaveTile();
     closeMenu();
+    if (!rows.length) { note('메인 프롬프트에 작가 태그가 없습니다.'); return; }
     panel.body.innerHTML = `<div class="atw-packs" hidden></div><div class="atw-grid">${rows.map(tileHtml).join('')}</div>`;
     paintPacks();
   }
@@ -422,8 +424,10 @@ export function createArtistTagWindow({
       for (const kind of ['solo', 'update']) {
         const rows = saved && typeof saved[kind] === 'object' ? saved[kind] : {};
         for (const [name, value] of Object.entries(rows || {})) {
-          const n = Number(value);
-          if (name && Number.isFinite(n) && n >= WEIGHT_MIN && n <= WEIGHT_MAX) memory[kind][name] = n;
+          // 숫자로 저장된 것만 - Number(null) · Number('') 은 0 이 되어 가중치 0 에서 시작했다(Codex 리뷰 1차 #8).
+          if (name && typeof value === 'number' && Number.isFinite(value) && value >= WEIGHT_MIN && value <= WEIGHT_MAX) {
+            memory[kind][name] = value;
+          }
         }
       }
     } catch (_) {}

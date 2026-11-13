@@ -1022,17 +1022,21 @@ def register_artist_thumbnail_routes(
         payload = await _small_json_body(req)
         if payload is None:
             return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
-        text = str(payload.get("text") or "")[:60000]
-        artist = " ".join(str(payload.get("artist") or "").split())[:300]
-        wrap = str(payload.get("wrap") or "")[:400]
-        fresh = " ".join(str(payload.get("fresh") or "").split())[:400]
+        text = str(payload.get("text") or "")
+        artist = " ".join(str(payload.get("artist") or "").split())
+        wrap = str(payload.get("wrap") or "")
+        fresh = " ".join(str(payload.get("fresh") or "").split())
+        one = str(payload.get("one") or "")          # 가중치 1 을 드러내 적는 껍질(모드의 문법) - 없으면 NAI 꼴
         if not artist:
             return JSONResponse({"ok": False, "error": "artist is required"}, status_code=400)
+        # 길면 자르지 않고 거절한다 - 잘린 글을 돌려주면 화면이 그것으로 프롬프트 칸 · PE 를 덮는다(Codex 리뷰 1차 #1).
+        if len(text) > 60000 or len(artist) > 300 or len(wrap) > 400 or len(fresh) > 400 or len(one) > 400:
+            return JSONResponse({"ok": False, "error": "too_long"}, status_code=413)
 
         def _run():
             from core.prompt_artist_strip import reweight_artist
 
-            return reweight_artist(text, artist, wrap, fresh=fresh, known=_mix_known_artists(session_context))
+            return reweight_artist(text, artist, wrap, fresh=fresh, one=one, known=_mix_known_artists(session_context))
 
         try:
             result = await run_in_thread(_run)

@@ -12562,16 +12562,21 @@ async function reweightArtistText(text, name, weight, {insert = false} = {}) {
   const slot = '\uE000';
   // Anima 의 `@` 는 몸통의 몫이다(원래 글에 이미 있다) - 껍질에서 뗀다.
   const wrap = artistToolToken(slot, weight, false).replace('@' + slot, slot);
+  // 가중치 1 을 드러내 적어야 할 때(바깥 껍질 안 · 이웃과 붙은 자리)의 껍질 - 모드의 문법으로(Codex 리뷰 2차 #1).
+  // 껍질 모양은 같은 서식 함수에 물어 고른다(SD 계열은 `(x:w)` 꼴이다).
+  const one = artistToolToken(slot, 0.5, false).replace('@' + slot, slot).startsWith('(') ? `(${slot}:1)` : `1::${slot} ::`;
   const response = await fetch('/api/artist-thumb/used-reweight', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({text: String(text || ''), artist: name, wrap, fresh: insert ? artistToolToken(name, weight) : ''}),
+    body: JSON.stringify({text: String(text || ''), artist: name, wrap, one, fresh: insert ? artistToolToken(name, weight) : ''}),
   });
   const data = await response.json().catch(() => null);
   if (!response.ok || !data?.ok) {
     const code = String(data?.error || `HTTP ${response.status}`);
     if (code === 'in_group') throw new Error('괄호 묶음 (a, b:1.2) 안에 든 작가는 가중치를 바꾸지 못합니다');
     if (code === 'unparsed') throw new Error('프롬프트에서 이 작가의 자리를 짚지 못했습니다');
+    if (code === 'too_long') throw new Error('프롬프트가 너무 깁니다');
+    if (code === 'too_many') throw new Error('같은 작가가 너무 많이 들어 있습니다');
     throw new Error(code);
   }
   return data;
@@ -12622,13 +12627,21 @@ async function sendArtistSolo(name, weight, stamp, apply) {
   const sendAt = performance.now();
   if (lastHumanGenerateAt !== stamp && sendAt - lastHumanGenerateAt < 300) return false;
   lastHumanGenerateAt = sendAt;       // 실제로 보내는 때 - 메인 Generate 의 연타 문턱과 나눠 쓴다
-  if (apply) applyPromptText(prompt);
+  return sendArtistToolPrompt(prompt, apply);
+}
+
+/** 아티스트 태그 관리의 한 장을 보내고, **보냈을 때만** 프롬프트 칸을 그 글로 바꾼다(`apply`) - 먼저 바꾸면 WS 가 끊겨
+ *  못 보냈을 때도 칸이 바뀐다(Codex 리뷰 1차 #2). */
+async function sendArtistToolPrompt(prompt, apply) {
   const negative = negEdit ? negEdit.value : '';
-  return generateWithInteractiveSnapshot({
+  const sent = await generateWithInteractiveSnapshot({
     prompt,
     negative_prompt: negative,
     overrides: buildWebGenerationOverrides(prompt, negative),
   }, null, {queue: true});
+  if (!sent) return '생성을 보내지 못했습니다(연결이 끊겼거나 생성 중입니다)';
+  if (apply) applyPromptText(prompt);
+  return sent;
 }
 
 /** 아티스트 태그 관리의 [가중치를 업데이트하여 생성](사용자 지시 2026-11-13 · 목업 승인) - 다른 작가는 두고 이 작가의 가중치만
@@ -12660,13 +12673,7 @@ async function generateArtistReweight({artist, weight = 1, random = false} = {})
     const sendAt = performance.now();
     if (lastHumanGenerateAt !== stamp && sendAt - lastHumanGenerateAt < 300) return false;
     lastHumanGenerateAt = sendAt;
-    applyPromptText(prompt);
-    const negative = negEdit ? negEdit.value : '';
-    return generateWithInteractiveSnapshot({
-      prompt,
-      negative_prompt: negative,
-      overrides: buildWebGenerationOverrides(prompt, negative),
-    }, null, {queue: true});
+    return await sendArtistToolPrompt(prompt, true);
   } finally {
     if (random) artistTagRefreshHold -= 1;
     artistTagWindow?.refresh?.();      // 칸의 가중치가 바뀌었다 - 타일 숫자를 맞춘다
@@ -12681,19 +12688,30 @@ async function peReweightArtist({artist, weight = 1, sources = []} = {}) {
   const fields = (sources || []).filter(v => v === 'prefix' || v === 'postfix');
   if (!name || !fields.length) return false;
   const preset = String(slashPeState().preset || '');
-  const changed = [];
+  // 칸 둘의 새 글을 **먼저 다 만든다** - 하나라도 못 만들면(묶음 안 등) 아무것도 쓰지 않는다. 쓰면서 만들면 prefix 만 바뀐 채
+  // 실패 안내가 뜬다(Codex 리뷰 1차 #3).
+  const plans = [];
   for (const field of fields) {
     const key = field === 'prefix' ? 'pre_prompt' : 'post_prompt';
-    const result = await reweightArtistText(peFieldText(key), name, weight);
-    if (!result?.changed) continue;
-    if (String(slashPeState().preset || '') !== preset) return '프리셋이 바뀌어 PE 를 고치지 않았습니다';
-    if (!slashPeSetField(key, String(result.prompt || ''), preset)) throw new Error('WS 연결이 끊겨 있습니다');
-    changed.push(field);
+    const seen = peFieldText(key);
+    const result = await reweightArtistText(seen, name, weight);
+    if (result?.changed) plans.push({field, key, seen, text: String(result.prompt || '')});
+  }
+  if (!plans.length) return `PE 에서 ${name} 을 찾지 못했습니다`;
+  if (String(slashPeState().preset || '') !== preset) return '프리셋이 바뀌어 PE 를 고치지 않았습니다';
+  // 기다리는 사이 그 칸을 고쳐 저장했으면 덮지 않는다 - 옛 글로 만든 결과가 방금 친 글을 지운다(Codex 리뷰 2차 #3).
+  if (plans.some(plan => peFieldText(plan.key) !== plan.seen)) return '그사이 PE 가 바뀌어 고치지 않았습니다 - 다시 눌러 주세요';
+  if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error('WS 연결이 끊겨 있습니다');
+  const changed = [];
+  for (const plan of plans) {
+    if (!slashPeSetField(plan.key, plan.text, preset)) {
+      if (!changed.length) throw new Error('WS 연결이 끊겨 있습니다');
+      return `${changed.join(' · ')} 만 바꿨습니다 - ${plan.field} 는 연결이 끊겨 못 보냈습니다`;
+    }
+    changed.push(plan.field);
   }
   const shown = String(Math.round(Number(weight) * 100) / 100);
-  return changed.length
-    ? `${changed.join(' · ')} 의 ${name} 가중치를 ${shown} 로 바꿨습니다 - 다음 Random 부터 나갑니다`
-    : `PE 에서 ${name} 을 찾지 못했습니다`;
+  return `${changed.join(' · ')} 의 ${name} 가중치를 ${shown} 로 바꿨습니다 - 다음 Random 부터 나갑니다`;
 }
 
 // [자동화 / 고급 기능] > [아티스트 태그 관리](사용자 지시 2026-11-11) - 메인 프롬프트의 작가를 부른 그때 한 번 타일로 보여 준다.
@@ -12705,7 +12723,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261113-reweight')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261113-reweight3')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,

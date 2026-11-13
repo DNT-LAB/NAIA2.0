@@ -33989,7 +33989,9 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 /* 열린 띠는 감춘다 - 패널이 그 자리까지 덮는다(같은 이름이 두 번 보이지 않게 · 사용자 지시 11-12). 자리는 그대로 둔다. */
 .dr-band.is-open { visibility: hidden; }
 .dr-band--pre { border-radius: 12px 12px 0 0; }
-.dr-band--post { border-top-color: rgba(232,232,240,0.08); }
+.dr-band--post { border-top-color: rgba(232,232,240,0.08); margin-top: auto; }
+/* ↑ margin-top: auto = postfix 띠는 늘 판 바닥에. 포함 · 제외를 둘 다 손잡이로 고정하면 늘어나는 칸이 없어
+   남는 높이가 postfix 아래 빈칸으로 남았다(사용자 제보 11-13). */
 .dr-band--post:focus-visible { border-top-color: rgba(157,139,255,0.6); }
 .dr-band--post.is-open { border-top-color: #9d8bff; }
 .dr-band-preview {

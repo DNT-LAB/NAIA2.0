@@ -384,6 +384,9 @@ export function initDraftMode({
     const y0 = event.clientY;
     const h0 = el.getBoundingClientRect().height;
     const min = zoneMin(name);
+    // 끌기 전에 이미 넘친 만큼(창이 아주 작을 때)은 그대로 두고, 그 이상 판을 넘기지 않는다 - 넘치면 postfix 띠가
+    // 판 아래로 밀려 사라졌다(사용자 제보 11-13). 남는 높이만큼만 늘어난다.
+    const baseOver = Math.max(0, board.scrollHeight - board.clientHeight);
     let last = h0;
     let moved = false;
     h.classList.add('is-drag');
@@ -392,6 +395,11 @@ export function initDraftMode({
       moved = true;
       last = Math.max(min, Math.min(900, h0 + ev.clientY - y0));
       setZoneHeight(name, last);
+      const over = board.scrollHeight - board.clientHeight - baseOver;
+      if (over > 0) {
+        last = Math.max(min, last - over);
+        setZoneHeight(name, last);
+      }
     };
     const up = () => {
       h.classList.remove('is-drag');

@@ -6,7 +6,7 @@
 const WELCOME = { id: 'welcome', category: '', title: '목차', summary: 'NAIA의 설정과 사용 방법', keywords: '홈 안내 사용법 가이드 소개' };
 const FALLBACK_PAGES = [
   { id: 'novelai-token', category: '', title: 'NovelAI 토큰 발급', summary: 'NovelAI 토큰을 발급하고 NAIA에 연결하는 방법을 안내합니다.', keywords: 'API 연결 설정 키 인증', file: 'novelai-token.html', hide_when: 'nai_configured' },
-  { id: 'conditional-prompt', category: '2. 프롬프트', title: '조건부 프롬프트 (AI 생성)', summary: '조건에 따라 프롬프트를 구성하는 방법을 살펴봅니다.', keywords: '조건 태그 문법', file: 'conditional-prompt.html' },
+  { id: 'conditional-prompt', category: '3. 랜덤 프롬프트 후처리', title: '조건부 프롬프트 (AI 생성)', summary: '조건에 따라 프롬프트를 구성하는 방법을 살펴봅니다.', keywords: '조건 태그 문법', file: 'conditional-prompt.html' },
 ];
 let pages = [WELCOME, ...FALLBACK_PAGES];
 const facts = { nai_configured: false };

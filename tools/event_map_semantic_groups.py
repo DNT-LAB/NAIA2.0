@@ -917,3 +917,24 @@ REVIEWED_SUBCATEGORY_CORRECTIONS = {
     'two side up': ('body', '머리카락'),
 }
 APPROVED_AUDIT_OVERRIDES.update(REVIEWED_SUBCATEGORY_CORRECTIONS)
+
+# BEGIN EXPRESSION CORRECTIONS 2026-11-13 (user instruction)
+# The KR table files these under "표현 > 표정" / "신체 > 표정" / "얼굴 > 표정" / "행동 > 표정"; the top label alone sent
+# them to meta / body / action, so the expression tab missed them. "fucked silly" stays in adult on purpose.
+EXPRESSION_CORRECTIONS_20261113 = {
+    'smirk': ('expression', '입·미소'),
+    'pout': ('expression', '입·미소'),
+    'evil smile': ('expression', '입·미소'),
+    'laughing': ('expression', '입·미소'),
+    'licking lips': ('expression', '입·미소'),
+    'smug': ('expression', '감정·반응'),
+    'serious': ('expression', '감정·반응'),
+    'naughty face': ('expression', '감정·반응'),
+    'light frown': ('expression', '감정·반응'),
+    'ahegao': ('expression', '감정·반응'),
+    'crying with eyes open': ('expression', '감정·반응'),
+    'raised eyebrows': ('expression', '눈·시선'),
+    'winking (animated)': ('expression', '눈·시선'),
+    ':s': ('expression', '기호·이모티콘'),
+}
+APPROVED_AUDIT_OVERRIDES.update(EXPRESSION_CORRECTIONS_20261113)

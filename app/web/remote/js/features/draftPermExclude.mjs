@@ -31,6 +31,10 @@ export function initDraftPermExclude({
   let panel = null, headEl = null, chipsEl = null, inputEl = null, acEl = null;
   let text = '', info = null, saving = 0;
   let queue = Promise.resolve();
+  // 마지막으로 Search 칸에 건넨 글. 읽은 글이 이것과 다를 때만 건넨다 - 늘 건네면 늦게 온 읽기 응답이 그 사이 Search 에서
+  // 고친 글을 옛 글로 덮었다(Codex 리뷰 2026-11-13 5차 #1). 저장이 실패해 못 건넨 글은 이것과 달라 다음 읽기가 건넨다(3차 #3).
+  let told = null;
+  function tell(value) { told = value; onTextChange(value); }
   let acItems = [], acActive = -1, acSeq = 0, acTimer = null;
 
   async function call(method, body) {
@@ -55,7 +59,7 @@ export function initDraftPermExclude({
     queue = queue.then(async () => {
       try {
         take(await call('GET'));
-        onTextChange(text);   // 늘 - 앞선 저장 실패로 창만 새 글을 알고 Search 칸은 옛 글일 수 있다(3차 #3) · 같으면 칸이 무시한다
+        if (text !== told) tell(text);
         if (snapshot) await refreshSnapshot();   // 다른 곳에서 바뀌었을 수 있다 - 남은 게시물 · [제외 : N] 도 새로(#4)
       } catch (error) { loadError = error.message || '읽기 실패'; }
       paint();
@@ -85,11 +89,11 @@ export function initDraftPermExclude({
           }
         }
         if (!wrote && text === before) return;
-        onTextChange(text);
+        tell(text);
         if (wrote) showToast(done, 'success');
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
-        if (text !== before) onTextChange(text);   // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게)
+        if (text !== told) tell(text);   // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게)
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }
     }).catch(() => {});

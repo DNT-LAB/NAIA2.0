@@ -66,22 +66,26 @@ export function initDraftPermExclude({
   function save(makeTerms, done) {
     queue = queue.then(async () => {
       saving++; paint();
+      const before = text;
       try {
         take(await call('GET'));
+        let wrote = false;
         for (let attempt = 0; ; attempt++) {
           const next = makeTerms(splitTerms(text)).join(', ');
-          if (next === text.trim()) return;
+          if (next === text.trim()) break;      // 할 일이 없다(다른 곳에서 먼저 했다)
           try {
             take(await call('POST', { text: next, base: text }));
+            wrote = true;
             break;
           } catch (error) {
             if (error.code !== 'conflict' || attempt >= 2) throw error;
             take(error.data || {});   // 그 사이 바뀐 글 위에 다시 얹는다
           }
         }
+        if (!wrote && text === before) return;
         onTextChange(text);
-        showToast(done, 'success');
-        await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로
+        if (wrote) showToast(done, 'success');
+        await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }

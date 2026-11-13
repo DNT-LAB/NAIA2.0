@@ -24,6 +24,9 @@ DEFAULT_ACTIVE_RATINGS = ("g", "s", "q")
 # 클라이언트(기기)가 공유하므로, 모듈 단위 락이면 동시 저장/삭제의 lost-update를 막는다.
 # (읽기 get_filter_presets는 os.replace 원자성으로 안전 → 쓰기만 직렬화하면 됨.)
 _PRESETS_LOCK = threading.Lock()
+# Search 필터 상태 쓰기 잠금(재진입). Draft 영구 제외 창의 '본 글이 지금 글일 때만 저장' 이 Search 저장과
+# 엇갈리지 않게 둘이 같은 잠금을 잡는다(Codex 리뷰 2026-11-13 2차 #1).
+SEARCH_FILTER_LOCK = threading.RLock()
 
 
 def _tag_archive_sort_key(path: Path) -> tuple[int, str]:
@@ -239,6 +242,10 @@ class HeadlessSearchStateService:
         return self.default_search_filter_state()
 
     def save_search_filter_state(self, **updates: Any) -> dict[str, Any]:
+        with SEARCH_FILTER_LOCK:
+            return self._save_search_filter_state(**updates)
+
+    def _save_search_filter_state(self, **updates: Any) -> dict[str, Any]:
         context = self.context
         state = dict(
             getattr(context, "search_filter_state", None)

@@ -52,7 +52,10 @@ export function initDraftTagFinder({
   let lastRev = null, lastKey = null;
   const pending = new Set();     // 넣는 중인 태그 - 연타로 같은 칩을 두 번 보내지 않는다
 
+  // 서버의 조건 지문(derived.cond = 칩 · 등급 · 분면 + 영구 제외)으로 가른다 - 영구 제외만 바뀌어도 다시 받는다
+  // (Codex 리뷰 2026-11-13 2차 #2). 지문이 없는 옛 스냅숏이면 칩 상태로.
   const condKey = snap => {
+    if (snap?.derived?.cond) return String(snap.derived.cond);
     const st = snap?.state || {};
     return JSON.stringify([st.include || [], st.exclude || [], st.ratings ?? null, st.tags || {}]);
   };

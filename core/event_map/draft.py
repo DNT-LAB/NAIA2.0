@@ -564,18 +564,19 @@ class EventMapDraft:
         idx = self._index()
         return self._condition(state, idx, self.service.permanent_block(idx)).count
 
-    def condition_id(self, state):
+    def condition_id(self, state, perm_text=None):
         """조건(포함 · 제외 · 등급 · 분면)의 짧은 지문. 뽑기 · Extra · PE 재조립은 rev 만 올리고 이것은 그대로다 -
         '남은 태그' 창이 받은 목록이 지금 조건의 것인지 rev 대신 이것으로 가린다(Codex 리뷰 2026-11-12 3차 #5)."""
         import hashlib
         # 영구 제외 글도 넣는다 - 걸러지는 게시물이 바뀌면 남은 태그 목록도 다시 받아야 한다(Codex 리뷰 2026-11-13 #3)
-        key = self._condition_key(state) + "\x00" + self.service.permanent_text()
+        text = self.service.permanent_text() if perm_text is None else perm_text
+        key = self._condition_key(state) + "\x00" + text
         return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
-    def rating_counts(self, state, *, idx=None):
+    def rating_counts(self, state, *, idx=None, perm_text=None):
         """등급별 남는 게시물 수 - 등급 조건만 뺀 나머지 조건 안에서. 0 인 축은 켤 수 없다."""
         idx = idx or self._index()
-        block = self.service.permanent_block(idx)
+        block = self.service.permanent_block(idx, perm_text)
         base = self._condition(dict(state, ratings=[]), idx, block)
         out = {}
         for rating in RATINGS:
@@ -776,17 +777,18 @@ class EventMapDraft:
             idx = self._index()
         except DraftError:
             idx = None
-        result["cond"] = self.condition_id(state)
+        # 영구 제외(Search 의 붉은 줄과 같은 글) - 남은 게시물은 이것을 뺀 수다. 화면이 [제외 : N] 으로 보여 준다(사용자 지시 11-13).
+        # 한 번만 읽어 지문 · 수 · 등급 수에 같은 글을 쓴다(읽는 사이에 바뀌면 서로 다른 상태를 말했다 - Codex 2차 #3).
+        perm_text = self.service.permanent_text()
+        result["cond"] = self.condition_id(state, perm_text)
         result["ratings_on"] = [r for r in RATINGS if r in (state["ratings"] or RATINGS)]
         result["rating_counts"] = None
-        # 영구 제외(Search 의 붉은 줄과 같은 글) - 남은 게시물은 이것을 뺀 수다. 화면이 [제외 : N] 으로 보여 준다(사용자 지시 11-13).
-        perm_text = self.service.permanent_text()
         result["perm"] = {"terms": [t.strip() for t in perm_text.split(",") if t.strip()], "dropped": None}
         if idx is not None:
             cond = self._condition(state, idx, self.service.permanent_block(idx, perm_text))
             result["remaining"] = cond.count
             result["perm"]["dropped"] = cond.blocked_out
-            result["rating_counts"] = self.rating_counts(state, idx=idx)
+            result["rating_counts"] = self.rating_counts(state, idx=idx, perm_text=perm_text)
         for zone in ("include", "exclude"):
             for c in state[zone]:
                 row = {"id": c["id"], "count": self._chip_count(idx, c) if idx else 0,
@@ -830,7 +832,8 @@ class EventMapDraft:
         if any(not isinstance(t, str) or len(t) > 160 for t in tags) or (chip_id is not None and not isinstance(chip_id, str)):
             raise DraftError("too_many", "요청 형식을 확인해주세요.")
         idx = self._index()
-        block = self.service.permanent_block(idx)
+        perm_text = self.service.permanent_text()
+        block = self.service.permanent_block(idx, perm_text)
         cond = self._condition(state, idx, block)
 
         def inside(c, tid):
@@ -844,7 +847,7 @@ class EventMapDraft:
             n = inside(c, tid)
             return n if into == "include" else c.count - n
 
-        out = {"ok": True, "total": cond.count, "cond": self.condition_id(state), "rev": state.get("rev"),
+        out = {"ok": True, "total": cond.count, "cond": self.condition_id(state, perm_text), "rev": state.get("rev"),
                "zone": zone, "counts": {}, "replace": {}, "matched": []}
         tids = {}
         for tag in tags:
@@ -887,11 +890,12 @@ class EventMapDraft:
         except (TypeError, ValueError):
             raise DraftError("too_many", "요청 형식을 확인해주세요.")
         idx = self._index()
-        block = self.service.permanent_block(idx)
+        perm_text = self.service.permanent_text()
+        block = self.service.permanent_block(idx, perm_text)
         cond = self._condition(state, idx, block)
         out = {"ok": True, "total": cond.count, "sampled": False, "scanned": cond.count, "sort": sort,
                "group": group, "items": [], "group_counts": [], "pool": 0, "rev": state.get("rev"),
-               "cond": self.condition_id(state)}
+               "cond": self.condition_id(state, perm_text)}
         if not cond.count:
             return out
         counts = cond.tag_counts(idx)                 # 작은 조건(POOL_LIMIT 이하)은 정확히 센다 · 자동완성과 같은 표

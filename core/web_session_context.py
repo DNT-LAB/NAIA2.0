@@ -539,6 +539,19 @@ class WebSessionContext:
     def save_search_filter_state_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._search_state_service().save_search_filter_state_from_payload(payload)
 
+    def save_permanent_exclude_if(self, base: str | None, text: str) -> bool:
+        """영구 제외 글 저장. `base` 를 주면 지금 글이 그것일 때만(앞뒤 공백 무시) 쓰고 True - 아니면 쓰지 않고 False.
+        비교와 저장은 Search 필터 저장과 같은 잠금 안에서 한 덩어리다(Draft 영구 제외 창 · Codex 리뷰 2026-11-13)."""
+        from core.headless_search_state_service import SEARCH_FILTER_LOCK
+        with SEARCH_FILTER_LOCK:
+            if base is not None:
+                current = str(self.normalize_search_filter_state(
+                    getattr(self, "search_filter_state", None)).get("exclude_permanent") or "")
+                if base.strip() != current.strip():
+                    return False
+            self.save_search_filter_state(exclude_permanent=text)
+            return True
+
     def custom_parquet_dir(self) -> Path:
         return self._search_state_service().custom_parquet_dir()
 

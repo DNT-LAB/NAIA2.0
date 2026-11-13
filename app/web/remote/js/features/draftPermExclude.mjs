@@ -8,6 +8,9 @@
  *  · 입력 줄 = 이벤트 맵 색인의 태그 자동완성(`/api/event-map/suggest`)에서 고른 것만 더한다(이벤트 맵 창과 같은 규칙).
  *  · 칩의 × = 그 항을 뺀다. 저장되면 Draft 스냅숏을 다시 받아 남은 게시물 수가 곧바로 바뀐다.
  *  · 조회 · 저장은 한 줄로 선다 - 늦은 응답이 방금 저장한 글을 덮지 않게(이벤트 맵 리뷰 2026-10-14 · 10-15 교훈).
+ *  · 저장은 **서버의 지금 글** 위에 편집(더하기 · 빼기)을 얹는다: 보내기 직전에 다시 읽고, 그 글을 base 로 싣는다.
+ *    그 사이 다른 탭 · Search · 이벤트 맵이 바꿨으면 서버가 409 + 지금 글을 준다 - 그 글 위에 다시 얹어 보낸다
+ *    (Codex 리뷰 2026-11-13 #1 · #2: 창이 들고 있던 옛 글 · 못 읽은 빈 글로 남의 항을 지웠다).
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
@@ -36,25 +39,46 @@ export function initDraftPermExclude({
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(30000),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) throw new Error(data.message || `HTTP ${res.status}`);
+    if (!res.ok || data.ok === false) {
+      throw Object.assign(new Error(data.message || `HTTP ${res.status}`), { code: data.error || '', data });
+    }
     return data;
   }
+  function take(data) {
+    const changed = String(data.text || '') !== text;
+    info = data; text = String(data.text || ''); loadError = '';
+    return changed;
+  }
 
-  function load() {
+  let loadError = '';
+  function load({ snapshot = false } = {}) {
     queue = queue.then(async () => {
-      try { info = await call('GET'); text = String(info.text || ''); } catch { info = null; }
+      try {
+        const changed = take(await call('GET'));
+        if (changed) onTextChange(text);
+        if (snapshot) await refreshSnapshot();   // 다른 곳에서 바뀌었을 수 있다 - 남은 게시물 · [제외 : N] 도 새로(#4)
+      } catch (error) { loadError = error.message || '읽기 실패'; }
       paint();
     }).catch(() => {});
     return queue;
   }
+  /** makeTerms(서버의 지금 항 목록) -> 새 목록. 못 읽으면 저장하지 않는다(빈 글로 덮지 않게 - #2). */
   function save(makeTerms, done) {
     queue = queue.then(async () => {
-      const next = makeTerms(splitTerms(text)).join(', ');
-      if (next === text.trim()) return;
       saving++; paint();
       try {
-        info = await call('POST', { text: next });
-        text = String(info.text || '');
+        take(await call('GET'));
+        for (let attempt = 0; ; attempt++) {
+          const next = makeTerms(splitTerms(text)).join(', ');
+          if (next === text.trim()) return;
+          try {
+            take(await call('POST', { text: next, base: text }));
+            break;
+          } catch (error) {
+            if (error.code !== 'conflict' || attempt >= 2) throw error;
+            take(error.data || {});   // 그 사이 바뀐 글 위에 다시 얹는다
+          }
+        }
         onTextChange(text);
         showToast(done, 'success');
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로
@@ -117,7 +141,7 @@ export function initDraftPermExclude({
     const parts = [];
     if (perm && Number.isFinite(perm.dropped)) parts.push(`지금 조건에서 빠진 게시물 ${fmt(perm.dropped)}`);
     if (info) parts.push(`걸린 태그 ${fmt(info.tag_count || 0)}`);
-    headEl.textContent = saving ? '저장 중…' : parts.join(' · ');
+    headEl.textContent = saving ? '저장 중…' : (loadError ? `목록을 읽지 못했습니다 — ${loadError}` : parts.join(' · '));
     chipsEl.innerHTML = terms.length ? terms.map((t, i) => {
       const tags = hits.get(t);
       const dead = Array.isArray(tags) && !tags.length;
@@ -177,14 +201,16 @@ export function initDraftPermExclude({
     closeAc();
     if (it.blocked === '영구 제외') { showToast(`이미 영구 제외에 있습니다 — ${it.tag}`, 'info'); return; }
     inputEl.value = '';
-    void save(terms => [...terms, it.tag], `영구 제외에 더했습니다 — ${it.tag}`);
+    // 서버의 지금 목록에 이미 있으면(다른 곳에서 먼저 더했다) 그대로 둔다
+    const same = t => t.trim().toLowerCase() === String(it.tag).trim().toLowerCase();
+    void save(terms => (terms.some(same) ? terms : [...terms, it.tag]), `영구 제외에 더했습니다 — ${it.tag}`);
   }
 
   function open() {
     ensure();
     panel.open();
     paint();
-    void load();     // 항마다 걸리는 태그 · 지금 글을 새로(Search 에서 고쳤을 수 있다)
+    void load({ snapshot: true });   // 항마다 걸리는 태그 · 지금 글 · Draft 수를 새로(Search 에서 고쳤을 수 있다)
     inputEl.value = '';
     inputEl.focus({ preventScroll: true });
   }

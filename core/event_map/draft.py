@@ -568,7 +568,9 @@ class EventMapDraft:
         """조건(포함 · 제외 · 등급 · 분면)의 짧은 지문. 뽑기 · Extra · PE 재조립은 rev 만 올리고 이것은 그대로다 -
         '남은 태그' 창이 받은 목록이 지금 조건의 것인지 rev 대신 이것으로 가린다(Codex 리뷰 2026-11-12 3차 #5)."""
         import hashlib
-        return hashlib.sha1(self._condition_key(state).encode("utf-8")).hexdigest()[:16]
+        # 영구 제외 글도 넣는다 - 걸러지는 게시물이 바뀌면 남은 태그 목록도 다시 받아야 한다(Codex 리뷰 2026-11-13 #3)
+        key = self._condition_key(state) + "\x00" + self.service.permanent_text()
+        return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
     def rating_counts(self, state, *, idx=None):
         """등급별 남는 게시물 수 - 등급 조건만 뺀 나머지 조건 안에서. 0 인 축은 켤 수 없다."""

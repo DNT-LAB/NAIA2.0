@@ -344,6 +344,7 @@ def register_event_map_routes(
     # 잠금은 **풀 읽기 · 바꾸기 + 연결 상태 쓰기** 만 감싼다 - 수 세기 · 알림 보내기는 밖에서(재리뷰 2026-10-15: 느린 수
     # 세기나 막힌 소켓이 연결 끄기까지 붙잡았다). 이벤트 맵 갈래 · 끄기는 풀과 상관없어 잠그지 않는다.
     staging_gate = asyncio.Lock()
+    permanent_gate = asyncio.Lock()   # 영구 제외 base 확인과 저장을 한 덩어리로
 
     def _draft_link_response(payload):
         from core.event_map.draft import active, session
@@ -755,10 +756,18 @@ def register_event_map_routes(
         except Exception:
             payload = None
         text = payload.get("text") if isinstance(payload, dict) else None
-        if not isinstance(text, str) or len(text) > 8192:
+        base = payload.get("base") if isinstance(payload, dict) else None
+        if not isinstance(text, str) or len(text) > 8192 or (base is not None and not isinstance(base, str)):
             return JSONResponse({"ok": False, "message": "Invalid text"}, status_code=400)
-        await run_in_thread(session_context.save_search_filter_state, exclude_permanent=text)
         service = ensure_event_map_service(session_context)
+        async with permanent_gate:
+            # base = 보낸 쪽이 고치기 전에 본 글. 그 사이에 다른 창(다른 탭 · Search · 이벤트 맵)이 바꿨으면 덮지 않고
+            # 지금 글을 돌려준다 - 보낸 쪽이 그 글 위에 자기 편집을 다시 얹는다(Codex 리뷰 2026-11-13 #1).
+            if base is not None and base.strip() != service.permanent_text().strip():
+                state = await run_in_thread(service.permanent_state)
+                return JSONResponse({**state, "ok": False, "error": "conflict", "message": "다른 곳에서 영구 제외가 바뀌었습니다"},
+                                    status_code=409, headers=_no_store())
+            await run_in_thread(session_context.save_search_filter_state, exclude_permanent=text)
         state = await run_in_thread(service.permanent_state)
         return JSONResponse(state, headers=_no_store())
 

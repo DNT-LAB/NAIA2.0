@@ -961,19 +961,27 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
         text = str(payload.get("text") or "")[:60000]
         mode = str(payload.get("mode") or "")
+        # PE 의 prefix · postfix 글 - 타일마다 그 작가가 어느 칸에서 왔는지(`sources`) 적는다(사용자 지시 2026-11-13).
+        fields = {"prefix": str(payload.get("pre") or "")[:60000], "postfix": str(payload.get("post") or "")[:60000]}
 
         def _run():
+            from core.artist_mix_preset import _dict_key
             from core.prompt_artist_strip import find_artists_weighted
 
+            known = _mix_known_artists(session_context)
             # 같은 작가를 두 번 썼으면 처음 것 하나만(가중치도 그것).
             first: dict[str, tuple[str, float]] = {}
-            for row in find_artists_weighted(text, known=_mix_known_artists(session_context)):
+            for row in find_artists_weighted(text, known=known):
                 name = " ".join(str(row["name"]).split())
                 if row.get("reason") != "anchor" and name:
                     first.setdefault(name.casefold(), (name, row["weight"]))
+            owners = {label: {_dict_key(row["name"]) for row in find_artists_weighted(body, known=known)}
+                      for label, body in fields.items() if body.strip()}
             service = artist_thumbnail_service(session_context)
             tiles = service.used_artist_tiles([n for n, _ in first.values()], mode)
-            artists = [{**tile, "weight": weight} for tile, (_, weight) in zip(tiles, first.values())]
+            artists = [{**tile, "weight": weight,
+                        "sources": [label for label, names in owners.items() if _dict_key(name) in names]}
+                       for tile, (name, weight) in zip(tiles, first.values())]
             # 이 계열의 팩과 받았는지 - 창이 '데이터 없음' 이 있을 때 안 받은 팩의 [받기] 를 띄운다(사용자 지시 2026-11-13).
             return artists, service.used_pack_offers(mode)
 
@@ -1005,6 +1013,35 @@ def register_artist_thumbnail_routes(
             return {"ok": True, "prompt": result["prompt"], "removed": len(result["removed"])}
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Artist solo failed: {exc}"}, status_code=500)
+
+    # [가중치를 업데이트하여 생성] · [이 가중치로 PE 업데이트] 가 쓸 글 - 고른 작가의 가중치만 바꾼다(사용자 지시 2026-11-13).
+    # `wrap` = 화면이 모드에 맞게 만든 껍질(자리 표시 U+E000 하나) · `fresh` = 글에 없을 때 넣을 새 태그(빈 글이면 안 넣는다).
+    # 글만 돌려준다. 프롬프트 칸 · PE · 파일은 건드리지 않는다.
+    @app.post("/api/artist-thumb/used-reweight")
+    async def api_artist_thumb_used_reweight(req: Request):
+        payload = await _small_json_body(req)
+        if payload is None:
+            return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
+        text = str(payload.get("text") or "")[:60000]
+        artist = " ".join(str(payload.get("artist") or "").split())[:300]
+        wrap = str(payload.get("wrap") or "")[:400]
+        fresh = " ".join(str(payload.get("fresh") or "").split())[:400]
+        if not artist:
+            return JSONResponse({"ok": False, "error": "artist is required"}, status_code=400)
+
+        def _run():
+            from core.prompt_artist_strip import reweight_artist
+
+            return reweight_artist(text, artist, wrap, fresh=fresh, known=_mix_known_artists(session_context))
+
+        try:
+            result = await run_in_thread(_run)
+        except ValueError as exc:
+            code = getattr(exc, "code", "") or "bad_request"
+            return JSONResponse({"ok": False, "error": code}, status_code=409 if code != "bad_request" else 400)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Artist reweight failed: {exc}"}, status_code=500)
+        return {"ok": True, **result}
 
     @app.get("/api/artist-thumb/used-image")
     async def api_artist_thumb_used_image(mode: str = "", artist: str = ""):

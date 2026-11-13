@@ -11,8 +11,13 @@
 //     · 목업 승인). 받기는 Artist Thumbnail 탭과 같은 서버 다운로드(한 번에 한 팩 - 서버가 정한다)를 쓴다. 받는 동안 그 줄에
 //     진행 · [취소], 다른 줄은 '대기'. 다 받으면 타일을 다시 읽는다. 어느 작가가 어느 팩에 드는지는 짐작하지 않는다.
 //   - 타일 우클릭 = [이 아티스트로만 생성](사용자 지시 2026-11-11 - 이 창을 만든 까닭): [현재 프롬프트로] · [랜덤+생성] + 가중치.
-//     다른 작가를 전부 걷고 이 작가만 넣은 글로 한 장 생성한다. 글을 만들고 보내는 것은 app.js(soloGenerate) - 프롬프트 칸은
-//     바꾸지 않는다(랜덤+생성은 Random 을 누른 것과 같아 칸이 새 글로 바뀐다).
+//     다른 작가를 전부 걷고 이 작가만 넣은 글로 한 장 생성한다. 글을 만들고 보내는 것은 app.js(soloGenerate) - [현재 프롬프트로]
+//     는 프롬프트 칸을 바꾸지 않고, [랜덤+생성] 은 칸을 **보낸 글**(이 작가만 든 글)로 바꾼다(사용자 지시 2026-11-13).
+//   - 둘째 칸 [가중치를 업데이트하여 생성](사용자 지시 2026-11-13 · 목업 승인): 다른 작가는 두고 이 작가의 가중치만 바꿔 한 장.
+//     두 단추 다 프롬프트 칸도 그 글로 바꾼다(app.js reweightGenerate). 이 작가가 PE 의 prefix · postfix 에서 왔으면(`sources`)
+//     [이 가중치로 prefix 업데이트] - PE 칸의 그 작가 가중치만 고친다(생성 없음 · 다음 Random 부터).
+//   - 슬라이더 값은 작가마다 · 칸마다 기억한다(storage). 다음에 메뉴를 열면 프롬프트의 값이 아니라 기억한 값에서 시작한다.
+//   - 창이 열린 채로 Random 이 돌면 한 번 다시 읽는다(app.js 가 refresh() 를 부른다).
 // 껍데기는 다른 떠 있는 창과 같다(em-overlay em-window). 옷은 이 파일이 직접 넣는다(style.css 를 건드리지 않는다).
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
@@ -56,12 +61,20 @@ const ATW_CSS = `
 .atw-weight.is-neg { color: #ff8f8f; }
 .atw-tile.is-menu { border-color: var(--accent); }
 .atw-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.atw-menu { position: fixed; z-index: calc(var(--z-drag-panel-zoom, 10195) + 5); width: 250px;
+.atw-menu { position: fixed; z-index: calc(var(--z-drag-panel-zoom, 10195) + 5); width: 270px;
   background: var(--bg-elevated); border: 1px solid var(--border-glow); border-radius: 10px;
   box-shadow: 0 14px 40px rgba(0,0,0,0.6); overflow: hidden; user-select: none; }
 .atw-menu[hidden] { display: none !important; }
-.atw-menu-head { padding: 8px 12px; font-size: 13px; font-weight: 600; color: var(--text-primary);
-  border-bottom: 1px solid var(--border-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atw-menu-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; font-size: 13px; font-weight: 600;
+  color: var(--text-primary); border-bottom: 1px solid var(--border-dim); }
+.atw-menu-head > span:first-child { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atw-menu-src { flex: 0 0 auto; padding: 1px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 11px;
+  font-weight: 400; color: var(--text-muted); background: var(--bg-hover); }
+.atw-menu-gap { border-top: 1px solid var(--border-dim); margin-top: 2px; }
+.atw-menu-pe { display: block; width: calc(100% - 24px); margin: 0 12px 10px; padding: 6px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--accent); background: transparent; color: var(--text-primary); font-family: inherit; font-size: 12px; }
+.atw-menu-pe:hover, .atw-menu-pe:focus-visible { background: var(--bg-hover); outline: none; }
+.atw-menu-pe[hidden] { display: none; }
 .atw-menu-sec { padding: 8px 12px 2px; font-size: 11px; color: var(--text-dim); }
 .atw-menu-item { display: block; width: 100%; padding: 7px 12px; border: 0; background: transparent; cursor: pointer;
   text-align: left; font-size: 13px; color: var(--text-primary); font-family: inherit; }
@@ -108,6 +121,14 @@ export function createArtistTagWindow({
   // [이 아티스트로만 생성] - {artist, weight, random} 으로 한 장 생성한다(app.js). 보냈으면 true, 못 보냈으면 까닭(글) 또는 false.
   // 없으면 우클릭 메뉴를 띄우지 않는다.
   soloGenerate = null,
+  // [가중치를 업데이트하여 생성] - {artist, weight, random}. 반환은 soloGenerate 와 같다. 없으면 그 칸을 숨긴다.
+  reweightGenerate = null,
+  // [이 가중치로 PE 업데이트] - {artist, weight, sources}. 알릴 글 또는 false.
+  peReweight = null,
+  // 지금 PE 의 prefix · postfix 글 - 타일마다 그 작가가 어느 칸에서 왔는지 서버가 짚는다.
+  getPeFields = () => ({pre: '', post: ''}),
+  // 슬라이더 값을 기억할 곳(localStorage). 없으면 이번 실행에만 기억한다.
+  storage = null,
   notify = () => {},
 }) {
   ensureStyle(doc);
@@ -153,7 +174,9 @@ export function createArtistTagWindow({
     const picture = row.image_url
       ? `<img class="atw-img" loading="lazy" alt="" src="${escHtml(row.image_url)}">`
       : '<div class="atw-none">데이터 없음</div>';
-    return `<div class="atw-tile" tabindex="0" title="${escHtml(tip)}" data-atw-artist="${escHtml(name)}" data-atw-weight="${escHtml(String(weight))}">${picture}`
+    const sources = Array.isArray(row.sources) ? row.sources.filter(v => v === 'prefix' || v === 'postfix') : [];
+    return `<div class="atw-tile" tabindex="0" title="${escHtml(tip)}" data-atw-artist="${escHtml(name)}" data-atw-weight="${escHtml(String(weight))}"`
+      + ` data-atw-sources="${escHtml(sources.join(','))}">${picture}`
       + `<div class="atw-name">${escHtml(name)}</div><div class="atw-meta">`
       + `<span class="atw-weight${weight < 0 ? ' is-neg' : ''}" title="가중치">${escHtml(String(weight))}</span>`
       + `<span title="게시물 수">${escHtml(posts)}</span></div></div>`;
@@ -301,6 +324,15 @@ export function createArtistTagWindow({
     if (event.target?.closest?.('[data-atw-pack-cancel]')) void cancelPack();
   });
 
+  function peBody() {
+    try {
+      const fields = getPeFields() || {};
+      return {pre: String(fields.pre || ''), post: String(fields.post || '')};
+    } catch (_) {
+      return {pre: '', post: ''};
+    }
+  }
+
   async function load({quiet = false} = {}) {
     const mine = ++serial;
     if (!quiet) {
@@ -312,7 +344,7 @@ export function createArtistTagWindow({
       const response = await fetchFn('/api/artist-thumb/used', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({text: String(getPrompt() || ''), mode: String(getThumbMode() || '')}),
+        body: JSON.stringify({text: String(getPrompt() || ''), mode: String(getThumbMode() || ''), ...peBody()}),
       });
       data = await response.json();
       if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
@@ -368,13 +400,62 @@ export function createArtistTagWindow({
   panel.body.addEventListener('scroll', leaveTile, true);
   panel.el.addEventListener('dragpanel-move', leaveTile);
 
-  // ── 우클릭 = 이 아티스트로만 생성 ────────────────────────────────────
+  // ── 우클릭 = 이 아티스트로만 생성 · 가중치를 업데이트하여 생성 ─────────────
   const WEIGHT_MIN = 0, WEIGHT_MAX = 2, WEIGHT_STEP = 0.01;    // 범위는 Artist Thumbnail 의 슬라이더와 같다. 눈금은 0.01 - 0.05 면 타일의 0.83 이 0.85 로 바뀐 채 시작한다
   let menuEl = null;
   let menuTile = null;
   let menuBusy = false;
 
   const weightText = value => String(Math.round(Number(value) * 100) / 100);
+
+  // 슬라이더 기억 - {solo: {작가: 값}, update: {작가: 값}}. 칸마다 따로다(혼자일 때의 세기와 여럿 사이의 세기는 뜻이 다르다).
+  const MEMORY_KEY = 'naia.artistTagWindow.weights';
+  const MEMORY_MAX = 400;          // 칸마다 이만큼만 - 넘으면 오래 안 고친 작가부터 잊는다
+  let memory = null;
+  const memoryKey = name => String(name || '').trim().toLowerCase();
+
+  function readMemory() {
+    if (memory) return memory;
+    memory = {solo: {}, update: {}};
+    try {
+      const saved = JSON.parse(storage?.getItem?.(MEMORY_KEY) || 'null');
+      for (const kind of ['solo', 'update']) {
+        const rows = saved && typeof saved[kind] === 'object' ? saved[kind] : {};
+        for (const [name, value] of Object.entries(rows || {})) {
+          const n = Number(value);
+          if (name && Number.isFinite(n) && n >= WEIGHT_MIN && n <= WEIGHT_MAX) memory[kind][name] = n;
+        }
+      }
+    } catch (_) {}
+    return memory;
+  }
+
+  function remembered(kind, name) {
+    const value = readMemory()[kind][memoryKey(name)];
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function remember(kind, name, value) {
+    const key = memoryKey(name);
+    const n = Math.round(Number(value) * 100) / 100;
+    if (!key || !Number.isFinite(n)) return;
+    const rows = readMemory()[kind];
+    delete rows[key];                  // 맨 뒤로 - 가장 최근에 고친 작가
+    rows[key] = n;
+    const keys = Object.keys(rows);
+    for (const old of keys.slice(0, Math.max(0, keys.length - MEMORY_MAX))) delete rows[old];
+    try { storage?.setItem?.(MEMORY_KEY, JSON.stringify(memory)); } catch (_) {}
+  }
+
+  const sliderHtml = kind => `<label class="atw-menu-weight"><span>가중치</span>
+        <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" data-atw-weight="${kind}" aria-label="가중치">
+        <b data-atw-weight-out="${kind}"></b></label>`;
+  const slider = kind => menuEl.querySelector(`[data-atw-weight="${kind}"]`);
+
+  function setSlider(kind, value) {
+    slider(kind).value = String(value);
+    menuEl.querySelector(`[data-atw-weight-out="${kind}"]`).textContent = weightText(value);
+  }
 
   function menuBox() {
     if (menuEl) return menuEl;
@@ -383,22 +464,32 @@ export function createArtistTagWindow({
     menuEl.hidden = true;
     menuEl.setAttribute('role', 'menu');
     menuEl.innerHTML = `
-      <div class="atw-menu-head" data-atw-menu-name></div>
+      <div class="atw-menu-head"><span data-atw-menu-name></span><span class="atw-menu-src" data-atw-menu-src></span></div>
       <div class="atw-menu-sec">이 아티스트로만 생성</div>
       <button type="button" class="atw-menu-item" role="menuitem" data-atw-solo="current">현재 프롬프트로</button>
       <button type="button" class="atw-menu-item" role="menuitem" data-atw-solo="random">랜덤+생성</button>
-      <label class="atw-menu-weight"><span>가중치</span>
-        <input type="range" min="${WEIGHT_MIN}" max="${WEIGHT_MAX}" step="${WEIGHT_STEP}" data-atw-weight aria-label="가중치">
-        <b data-atw-weight-out></b></label>`;
+      ${sliderHtml('solo')}
+      <div data-atw-update-sec>
+        <div class="atw-menu-gap"></div>
+        <div class="atw-menu-sec">가중치를 업데이트하여 생성</div>
+        <button type="button" class="atw-menu-item" role="menuitem" data-atw-update="current">현재 프롬프트로</button>
+        <button type="button" class="atw-menu-item" role="menuitem" data-atw-update="random">랜덤+생성</button>
+        ${sliderHtml('update')}
+        <button type="button" class="atw-menu-pe" role="menuitem" data-atw-pe hidden></button>
+      </div>`;
     doc.body.appendChild(menuEl);
     menuEl.addEventListener('input', event => {
-      if (event.target?.matches?.('[data-atw-weight]')) {
-        menuEl.querySelector('[data-atw-weight-out]').textContent = weightText(event.target.value);
-      }
+      const kind = event.target?.dataset?.atwWeight;
+      if (!kind || !menuTile) return;
+      menuEl.querySelector(`[data-atw-weight-out="${kind}"]`).textContent = weightText(event.target.value);
+      remember(kind, menuTile.dataset.atwArtist, event.target.value);
     });
     menuEl.addEventListener('click', event => {
-      const item = event.target?.closest?.('[data-atw-solo]');
-      if (item) void runSolo(item.dataset.atwSolo === 'random');
+      const solo = event.target?.closest?.('[data-atw-solo]');
+      if (solo) { void runSolo(solo.dataset.atwSolo === 'random'); return; }
+      const update = event.target?.closest?.('[data-atw-update]');
+      if (update) { void runUpdate(update.dataset.atwUpdate === 'random'); return; }
+      if (event.target?.closest?.('[data-atw-pe]')) void runPe();
     });
     menuEl.addEventListener('contextmenu', event => event.preventDefault());
     return menuEl;
@@ -420,12 +511,19 @@ export function createArtistTagWindow({
     const box = menuBox();
     menuTile = tile;
     tile.classList.add('is-menu');
-    box.querySelector('[data-atw-menu-name]').textContent = tile.dataset.atwArtist || '';
-    // 처음 값은 그 타일의 가중치. 슬라이더 범위 밖(음수 · 2 초과)이면 1 에서 시작한다.
+    const name = tile.dataset.atwArtist || '';
+    const sources = tileSources(tile);
+    box.querySelector('[data-atw-menu-name]').textContent = name;
+    box.querySelector('[data-atw-menu-src]').textContent = sources[0] || '랜덤 글';
+    // 처음 값은 기억한 값, 없으면 그 타일의 가중치. 슬라이더 범위 밖(음수 · 2 초과)이면 1 에서 시작한다.
     const own = Number(tile.dataset.atwWeight);
     const start = Number.isFinite(own) && own >= WEIGHT_MIN && own <= WEIGHT_MAX ? own : 1;
-    box.querySelector('[data-atw-weight]').value = String(start);
-    box.querySelector('[data-atw-weight-out]').textContent = weightText(start);
+    setSlider('solo', remembered('solo', name) ?? start);
+    setSlider('update', remembered('update', name) ?? start);
+    box.querySelector('[data-atw-update-sec]').hidden = typeof reweightGenerate !== 'function';
+    const pe = box.querySelector('[data-atw-pe]');
+    pe.hidden = !sources.length || typeof peReweight !== 'function';
+    pe.textContent = `이 가중치로 ${sources.join(' · ')} 업데이트`;
     box.hidden = false;
     const view = win || doc.defaultView;
     const rect = box.getBoundingClientRect();
@@ -440,22 +538,32 @@ export function createArtistTagWindow({
     openMenu(tile, rect.left + Math.min(40, rect.width / 2), rect.top + Math.min(40, rect.height / 2), {focus: true});
   }
 
-  async function runSolo(random) {
+  function tileSources(tile) {
+    return String(tile?.dataset?.atwSources || '').split(',').filter(v => v === 'prefix' || v === 'postfix');
+  }
+
+  /** 메뉴의 단추 하나를 돌린다 - 메뉴를 닫고, 그동안 다른 단추를 막는다(연타가 두 장이 되지 않게 · 랜덤+생성은 Random 응답을 기다린다). */
+  async function runMenu(kind, action, failText) {
     if (!menuTile || menuBusy) return;
     const artist = menuTile.dataset.atwArtist || '';
-    const weight = Number(menuEl.querySelector('[data-atw-weight]').value);
+    const weight = Number(slider(kind).value);
+    const sources = tileSources(menuTile);
     closeMenu();
     if (!artist) return;
-    menuBusy = true;                      // 연타가 두 장이 되지 않게(랜덤+생성은 Random 응답을 기다린다)
+    menuBusy = true;
     try {
-      const sent = await soloGenerate({artist, weight, random});
+      const sent = await action({artist, weight, sources});
       if (typeof sent === 'string' && sent) notify(sent, 'info');
     } catch (error) {
-      notify(`생성을 보내지 못했습니다 - ${error?.message || error}`, 'error');
+      notify(`${failText} - ${error?.message || error}`, 'error');
     } finally {
       menuBusy = false;
     }
   }
+
+  const runSolo = random => runMenu('solo', ({artist, weight}) => soloGenerate({artist, weight, random}), '생성을 보내지 못했습니다');
+  const runUpdate = random => runMenu('update', ({artist, weight}) => reweightGenerate({artist, weight, random}), '생성을 보내지 못했습니다');
+  const runPe = () => runMenu('update', args => peReweight(args), 'PE 를 고치지 못했습니다');
 
   panel.body.addEventListener('contextmenu', event => {
     const tile = event.target?.closest?.('.atw-tile');
@@ -498,6 +606,8 @@ export function createArtistTagWindow({
     close: () => panel.close(),
     toggle: () => panel.toggle(),
     isOpen: () => panel.isOpen(),
+    /** 열려 있으면 지금 프롬프트로 한 번 다시 읽는다(Random 이 돌았을 때 - app.js). 닫혀 있으면 아무 일도 없다. */
+    refresh: () => { if (panel.isOpen()) void load({quiet: true}); },
     el: panel.el,
   };
 }

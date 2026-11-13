@@ -175,6 +175,7 @@ let _promptDirtyPreset = '';
 let _lastSentPromptValue = null;
 let awaitingMyRandom = false;  // 내가 Random 클릭했는지 추적
 let pendingRandomRequestId = '';
+let artistTagRefreshHold = 0;     // 아티스트 태그 관리 창이 제 [랜덤+생성] 을 돌리는 중 - Random 도착 때 다시 읽지 않고 끝나서 한 번 읽는다
 let randomArrivalWaiter = null;   // 내 Random 응답을 기다리는 쪽 {id, done}(requestRandomAndWait) - 한 번에 하나
 let initialStateRefreshTimer = null;
 let promptHighlightIndexTimer = null;
@@ -6546,6 +6547,9 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
     // 저장은 원본으로, 표시는 블록 조립값으로 — 둘을 갈라 둔다.
     if (!draftEcho && !(interactivePanel?.isActive?.() && promptBeforeInteractive !== null)) {
       promptEdit.value = prompt;
+      // 아티스트 태그 관리 창이 열려 있으면 새 글로 한 번 다시 읽는다(사용자 지시 2026-11-13). 창이 제 [랜덤+생성] 을 돌리는
+      // 중이면 미룬다 - 그 길이 칸을 다시 바꾼 뒤에 읽는다(안 그러면 곧 사라질 글의 작가가 잠깐 뜬다).
+      if (!artistTagRefreshHold) artistTagWindow?.refresh?.();
     }
     syncingPrompt = false;
     applyGeneratedResolutionUpdate(message);
@@ -12534,29 +12538,70 @@ function requestRandomAndWait() {
 /** 아티스트 태그 관리 창의 [이 아티스트로만 생성](사용자 지시 2026-11-11) - 지금 프롬프트에서 다른 작가를 전부 걷고 이 작가만
  *  넣은 글로 **한 장만** 생성한다. 구도 / 시점 제어의 즉시 생성(generateViewpointInstant)과 같은 길 · 같은 문턱이다 -
  *  프롬프트 칸에는 쓰지 않는다. `random` 이면 먼저 Random 을 받아(칸이 새 글로 바뀐다) 그 글로 만든다. */
+/** 아티스트 태그 관리의 한 장 생성이 지금 나가면 안 되는 까닭(없으면 빈 글). Random · 글 만들기를 **기다린 뒤에도** 다시 본다 -
+ *  그사이 Auto Gen · Interactive 를 켜거나 탭을 옮기면 연쇄 생성 · 작업판 프롬프트로 나간다(Codex 리뷰 2026-11-12 #3). */
+function artistToolGenerateBlocked() {
+  if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 보내지 않습니다(한 장으로 끝나지 않는다)';
+  if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 보내지 않습니다';
+  if (interactivePanel?.isActive?.()) return 'Interactive 에서는 쓸 수 없습니다';
+  if (!canQueueGenerate()) return '이 탭에서는 생성을 보내지 않습니다';
+  return '';
+}
+
+/** 작가 태그 하나 - 서식은 Artist Thumbnail 과 같은 함수(모드별 표기가 셋이다). 그 탭이 아직 안 올라왔으면 NAI 꼴로. */
+function artistToolToken(name, weight, withPrefix = true) {
+  const w = Number.isFinite(Number(weight)) ? Number(weight) : 1;
+  return artistThumbControl?.formatArtistToken?.(name, w, withPrefix)
+    || (w === 1 ? `${withPrefix ? 'artist:' : ''}${name}` : `${String(Math.round(w * 100) / 100)}::${withPrefix ? 'artist:' : ''}${name} ::`);
+}
+
+/** 이 작가의 가중치만 바꾼 글(서버 `/api/artist-thumb/used-reweight`). 껍질은 모드에 맞게 여기서 만들고, 몸통(`hassai` ·
+ *  `artist:x` · `@x`)은 서버가 원래 글의 것을 그대로 넣는다 - `artist:` 를 뗀 prefix 칸에 `artist:` 가 붙지 않게.
+ *  `insert` 면 글에 없을 때 새 태그를 인원 수 태그 뒤에 넣는다. 돌려주는 것 {prompt, changed, inserted}. 실패는 던진다. */
+async function reweightArtistText(text, name, weight, {insert = false} = {}) {
+  const slot = '\uE000';
+  // Anima 의 `@` 는 몸통의 몫이다(원래 글에 이미 있다) - 껍질에서 뗀다.
+  const wrap = artistToolToken(slot, weight, false).replace('@' + slot, slot);
+  const response = await fetch('/api/artist-thumb/used-reweight', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text: String(text || ''), artist: name, wrap, fresh: insert ? artistToolToken(name, weight) : ''}),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok || !data?.ok) {
+    const code = String(data?.error || `HTTP ${response.status}`);
+    if (code === 'in_group') throw new Error('괄호 묶음 (a, b:1.2) 안에 든 작가는 가중치를 바꾸지 못합니다');
+    if (code === 'unparsed') throw new Error('프롬프트에서 이 작가의 자리를 짚지 못했습니다');
+    throw new Error(code);
+  }
+  return data;
+}
+
 async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
   const name = String(artist || '').trim();
   if (!name) return false;
-  // 한 장만 나가야 하는 문턱. Random · 글 만들기를 **기다린 뒤에도** 다시 본다 - 그사이 Auto Gen · Interactive 를 켜거나 탭을
-  // 옮기면 연쇄 생성 · 작업판 프롬프트로 나간다(Codex 리뷰 2026-11-12 #3. 즉시 생성에는 기다림이 없어 한 번이면 됐다).
-  const blocked = () => {
-    if (getOptionChecked('auto_generate')) return 'Auto Gen 이 켜져 있으면 보내지 않습니다(한 장으로 끝나지 않는다)';
-    if (automationRuntime && automationRuntime.is_running) return '자동화가 도는 중에는 보내지 않습니다';
-    if (interactivePanel?.isActive?.()) return 'Interactive 에서는 쓸 수 없습니다';
-    if (!canQueueGenerate()) return '이 탭에서는 생성을 보내지 않습니다';
-    return '';
-  };
+  const blocked = artistToolGenerateBlocked;
   const early = blocked();
   if (early) return early;
   const now = performance.now();
   if (now - lastHumanGenerateAt < 300) return false;
   lastHumanGenerateAt = now;
   const stamp = now;                  // 내가 찍은 표 - 기다리는 사이 다른 생성이 표를 갈았는지 본다
-  if (random && !(await requestRandomAndWait())) return 'Random 프롬프트를 받지 못했습니다(Prompt Fixed · 프리셋 탭이면 Random 이 잠긴다)';
-  // 서식은 Artist Thumbnail 과 같은 함수(모드별 표기가 셋이다). 그 탭이 아직 안 올라왔으면 NAI 꼴로.
-  const w = Number.isFinite(Number(weight)) ? Number(weight) : 1;
-  const token = artistThumbControl?.formatArtistToken?.(name, w, true)
-    || (w === 1 ? `artist:${name}` : `${String(Math.round(w * 100) / 100)}::artist:${name} ::`);
+  if (!random) return sendArtistSolo(name, weight, stamp, false);
+  artistTagRefreshHold += 1;
+  try {
+    if (!(await requestRandomAndWait())) return 'Random 프롬프트를 받지 못했습니다(Prompt Fixed · 프리셋 탭이면 Random 이 잠긴다)';
+    return await sendArtistSolo(name, weight, stamp, true);
+  } finally {
+    artistTagRefreshHold -= 1;
+    artistTagWindow?.refresh?.();      // Random 뒤 한 번 - 칸을 바꿨으면 그 글로
+  }
+}
+
+/** [이 아티스트로만 생성] 의 뒤쪽 - 글을 만들어 보낸다. `apply` 면 프롬프트 칸도 그 글로 바꾼다([랜덤+생성] · 사용자 지시 2026-11-13). */
+async function sendArtistSolo(name, weight, stamp, apply) {
+  const blocked = artistToolGenerateBlocked;
+  const token = artistToolToken(name, weight);
   let prompt = '';
   try {
     const response = await fetch('/api/artist-thumb/used-solo', {
@@ -12577,12 +12622,78 @@ async function generateArtistSolo({artist, weight = 1, random = false} = {}) {
   const sendAt = performance.now();
   if (lastHumanGenerateAt !== stamp && sendAt - lastHumanGenerateAt < 300) return false;
   lastHumanGenerateAt = sendAt;       // 실제로 보내는 때 - 메인 Generate 의 연타 문턱과 나눠 쓴다
+  if (apply) applyPromptText(prompt);
   const negative = negEdit ? negEdit.value : '';
   return generateWithInteractiveSnapshot({
     prompt,
     negative_prompt: negative,
     overrides: buildWebGenerationOverrides(prompt, negative),
   }, null, {queue: true});
+}
+
+/** 아티스트 태그 관리의 [가중치를 업데이트하여 생성](사용자 지시 2026-11-13 · 목업 승인) - 다른 작가는 두고 이 작가의 가중치만
+ *  바꾼 글로 **한 장만** 생성하고, 프롬프트 칸도 그 글로 바꾼다. `random` 이면 먼저 Random 을 받아 그 글에서 바꾼다 - 새 글에
+ *  이 작가가 없으면(랜덤 글에서 왔던 작가) 인원 수 태그 뒤에 넣는다. 문턱 · 연타 표는 [이 아티스트로만 생성] 과 같다. */
+async function generateArtistReweight({artist, weight = 1, random = false} = {}) {
+  const name = String(artist || '').trim();
+  if (!name) return false;
+  const blocked = artistToolGenerateBlocked;
+  const early = blocked();
+  if (early) return early;
+  const now = performance.now();
+  if (now - lastHumanGenerateAt < 300) return false;
+  lastHumanGenerateAt = now;
+  const stamp = now;
+  if (random) artistTagRefreshHold += 1;
+  try {
+    if (random && !(await requestRandomAndWait())) return 'Random 프롬프트를 받지 못했습니다(Prompt Fixed · 프리셋 탭이면 Random 이 잠긴다)';
+    let result = null;
+    try {
+      result = await reweightArtistText(promptEdit ? promptEdit.value : '', name, weight, {insert: true});
+    } catch (error) {
+      return `프롬프트를 만들지 못했습니다 - ${error?.message || error}`;
+    }
+    const prompt = String(result?.prompt || '');
+    if (!prompt) return false;
+    const late = blocked();
+    if (late) return late;
+    const sendAt = performance.now();
+    if (lastHumanGenerateAt !== stamp && sendAt - lastHumanGenerateAt < 300) return false;
+    lastHumanGenerateAt = sendAt;
+    applyPromptText(prompt);
+    const negative = negEdit ? negEdit.value : '';
+    return generateWithInteractiveSnapshot({
+      prompt,
+      negative_prompt: negative,
+      overrides: buildWebGenerationOverrides(prompt, negative),
+    }, null, {queue: true});
+  } finally {
+    if (random) artistTagRefreshHold -= 1;
+    artistTagWindow?.refresh?.();      // 칸의 가중치가 바뀌었다 - 타일 숫자를 맞춘다
+  }
+}
+
+/** [이 가중치로 prefix / postfix 업데이트] - PE 칸에서 이 작가의 가중치만 고친다. 생성은 하지 않는다 - 메인 칸은 이미 조립된
+ *  글이라 다음 Random 부터 나간다. 쓰기는 PE 빠른 창과 같은 문(slashPeSetField)이고, 읽은 때의 프리셋 도장을 찍는다 -
+ *  기다리는 사이 프리셋이 바뀌었으면 서버가 버린다(다른 프리셋에 쓰지 않는다). */
+async function peReweightArtist({artist, weight = 1, sources = []} = {}) {
+  const name = String(artist || '').trim();
+  const fields = (sources || []).filter(v => v === 'prefix' || v === 'postfix');
+  if (!name || !fields.length) return false;
+  const preset = String(slashPeState().preset || '');
+  const changed = [];
+  for (const field of fields) {
+    const key = field === 'prefix' ? 'pre_prompt' : 'post_prompt';
+    const result = await reweightArtistText(peFieldText(key), name, weight);
+    if (!result?.changed) continue;
+    if (String(slashPeState().preset || '') !== preset) return '프리셋이 바뀌어 PE 를 고치지 않았습니다';
+    if (!slashPeSetField(key, String(result.prompt || ''), preset)) throw new Error('WS 연결이 끊겨 있습니다');
+    changed.push(field);
+  }
+  const shown = String(Math.round(Number(weight) * 100) / 100);
+  return changed.length
+    ? `${changed.join(' · ')} 의 ${name} 가중치를 ${shown} 로 바꿨습니다 - 다음 Random 부터 나갑니다`
+    : `PE 에서 ${name} 을 찾지 못했습니다`;
 }
 
 // [자동화 / 고급 기능] > [아티스트 태그 관리](사용자 지시 2026-11-11) - 메인 프롬프트의 작가를 부른 그때 한 번 타일로 보여 준다.
@@ -12594,7 +12705,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261113-packs4')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261113-reweight')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,
@@ -12604,6 +12715,10 @@ function openArtistTagTool() {
         showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
         hideZoom: () => remoteController?.hideZoom?.(),
         soloGenerate: generateArtistSolo,
+        reweightGenerate: generateArtistReweight,
+        peReweight: peReweightArtist,
+        getPeFields: () => ({pre: peFieldText('pre_prompt'), post: peFieldText('post_prompt')}),
+        storage: (() => { try { return window.localStorage; } catch (_) { return null; } })(),
         notify: (msg, type) => showToast(msg, type),
         escHtml,
         onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },

@@ -370,6 +370,109 @@ def solo_artist(text, token, *, known=frozenset()) -> dict:
     return {"prompt": _join(", ".join(people), token, body), "removed": removed}
 
 
+# [가중치를 업데이트하여 생성] 이 주는 껍질의 자리 표시 - 화면이 모드에 맞는 껍질(`0.5::\ue000 ::` · `(\ue000:0.5)`)을 만들어
+# 주고, 여기서 원래 몸통(`hassai` · `artist:omone` · `@name`)을 그 자리에 넣는다. 몸통을 화면이 다시 지으면 `artist:` 를 뗀
+# prefix 칸에 `artist:` 가 붙는다.
+REWEIGHT_SLOT = "\ue000"
+
+
+class ReweightError(ValueError):
+    """가중치를 바꿀 자리를 못 짚었다. `code` = in_group(SD 묶음 안) · unparsed(글을 다시 짚지 못함)."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _event_spans(text, events):
+    """조각마다 원문의 (시작, 끝). 조각은 원문에 차례대로 놓여 있다(`_replace_in_place` 와 같은 짚기). 못 짚으면 None."""
+    spans, cursor = [], 0
+    for event in events:
+        piece = event.text.strip()
+        if not piece:
+            spans.append((cursor, cursor))
+            continue
+        found = text.find(piece, cursor)
+        if found < 0:
+            return None
+        spans.append((found, found + len(piece)))
+        cursor = found + len(piece)
+    return spans
+
+
+def reweight_artist(text, artist, wrap, *, fresh="", known=frozenset()) -> dict:
+    """`artist` 의 가중치만 바꾼 글 - 다른 작가 · 태그 · 자리는 그대로다(아티스트 태그 관리 창 2026-11-13).
+
+    - 그 작가만 감싼 껍질(`0.72::hassai ::` · `{artist:a}` · `(a:1.2)`)은 껍질째 새 껍질로 갈아 끼운다.
+    - 다른 태그와 나눠 쓰는 껍질 안(`0.26::epi zero, e-note ::`)이면 거기서 빼어 그 껍질 바로 뒤에 둔다
+      (`0.26::epi zero ::, 0.4::e-note ::`) - 다른 태그의 가중치는 안 바뀐다.
+    - 같은 작가가 여러 번이면 모두 바꾼다. 글에 없으면 `fresh`(서식이 끝난 새 태그)를 인원 수 태그 뒤에 넣는다(`fresh` 가
+      빈 글이면 그대로 둔다). SD 묶음 `(a, b:1.2)` 안에만 있으면 `ReweightError("in_group")`.
+    """
+    text = str(text or "")
+    wrap = str(wrap or "")
+    if wrap.count(REWEIGHT_SLOT) != 1:
+        raise ValueError("wrap must hold exactly one slot")
+    keys, key = _known_keys(known), _dict_key(artist)
+    events = _events(text)
+    targets = [i for i, event in enumerate(events) if event.kind == "TAG"
+               and (row := _classify(event, keys)) and _dict_key(row["name"]) == key]
+    if not targets:
+        if any(_dict_key(row["name"]) == key for row in find_artists_weighted(text, known=known)):
+            raise ReweightError("in_group")
+        if not str(fresh or "").strip():
+            return {"prompt": text, "changed": 0, "inserted": False}
+        people, body = _hoist_people(text)
+        return {"prompt": _join(", ".join(people), fresh, body), "changed": 0, "inserted": True}
+    spans = _event_spans(text, events)
+    if spans is None:
+        raise ReweightError("unparsed")
+    members, opens, closes = {}, {}, {}
+    for i, event in enumerate(events):
+        if event.kind == "TAG":
+            for gid in event.groups:
+                members.setdefault(gid, []).append(i)
+        elif event.kind == "OPEN":
+            opens[event.group] = i
+        elif event.kind == "CLOSE":
+            closes[event.group] = i
+    edits = []                                        # (시작, 끝, 넣을 글)
+    for i in targets:
+        token = wrap.replace(REWEIGHT_SLOT, " ".join(events[i].body.split()))
+        mine = [g for g in events[i].groups if members.get(g) == [i] and g in opens and g in closes]
+        shared = [g for g in events[i].groups if g not in mine and g in opens and g in closes]
+        first = min([opens[g] for g in mine] + [i])
+        last = max([closes[g] for g in mine] + [i])
+        start, end = spans[first][0], spans[last][1]
+        if mine or not shared:
+            edits.append((start, end, token))
+            continue
+        # 나눠 쓰는 껍질 - 가장 안쪽 것(구성원이 가장 적다)에서 빼어 그 뒤에 둔다.
+        group = min(shared, key=lambda g: len(members[g]))
+        before = events[first - 1] if first > 0 else None
+        after = events[last + 1] if last + 1 < len(events) else None
+        if before is not None and before.kind == "SEP":
+            edits.append((spans[first - 1][0], end, ""))
+        elif after is not None and after.kind == "SEP":
+            cut = spans[last + 1][1]
+            while cut < len(text) and text[cut] in " 	":
+                cut += 1
+            edits.append((start, cut, ""))
+        else:
+            edits.append((start, end, token))
+            continue
+        tail = spans[closes[group]][1]
+        edits.append((tail, tail, ", " + token))
+    edits.sort(key=lambda edit: (edit[0], edit[1]))
+    for (a_start, a_end, _), (b_start, _, _) in zip(edits, edits[1:]):
+        if b_start < a_end:
+            raise ReweightError("unparsed")
+    out = text
+    for start, end, insert in reversed(edits):
+        out = out[:start] + insert + out[end:]
+    return {"prompt": out, "changed": len(targets), "inserted": False}
+
+
 def _replace_in_place(text, events, rewritten):
     """고친 묶음만 원문의 **제자리에서** 갈아 끼운 글. 자리를 못 짚으면 None.
 

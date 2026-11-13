@@ -971,11 +971,15 @@ def register_artist_thumbnail_routes(
                 name = " ".join(str(row["name"]).split())
                 if row.get("reason") != "anchor" and name:
                     first.setdefault(name.casefold(), (name, row["weight"]))
-            tiles = artist_thumbnail_service(session_context).used_artist_tiles([n for n, _ in first.values()], mode)
-            return [{**tile, "weight": weight} for tile, (_, weight) in zip(tiles, first.values())]
+            service = artist_thumbnail_service(session_context)
+            tiles = service.used_artist_tiles([n for n, _ in first.values()], mode)
+            artists = [{**tile, "weight": weight} for tile, (_, weight) in zip(tiles, first.values())]
+            # 이 계열의 팩과 받았는지 - 창이 '데이터 없음' 이 있을 때 안 받은 팩의 [받기] 를 띄운다(사용자 지시 2026-11-13).
+            return artists, service.used_pack_offers(mode)
 
         try:
-            return {"ok": True, "artists": await run_in_thread(_run)}
+            artists, offers = await run_in_thread(_run)
+            return {"ok": True, "artists": artists, "family": offers["family"], "packs": offers["packs"]}
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Artist tags failed: {exc}"}, status_code=500)
 

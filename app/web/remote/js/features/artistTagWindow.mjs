@@ -7,6 +7,9 @@
 //   - 작가의 그림은 여러 팩에 나뉘어 있다. 받은 팩 어디에도 없으면 그 타일은 '데이터 없음'.
 //   - 타일에 마우스를 올리면 창 옆에 크게 뜬다 - Artist Thumbnail 리모컨의 확대 상자를 그대로 쓴다
 //     (remoteController.showZoomBeside · 사용자 지시 2026-11-11 "기존 Artist Thumbnail 의 기능을 점검"). 폭만 넓힌다(is-wide).
+//   - '데이터 없음' 타일이 있으면 위에 [받기] 띠: 이 계열(NAID5 · ANIMA …)에서 아직 안 받은 팩마다 [받기](사용자 지시 2026-11-13
+//     · 목업 승인). 받기는 Artist Thumbnail 탭과 같은 서버 다운로드(한 번에 한 팩 - 서버가 정한다)를 쓴다. 받는 동안 그 줄에
+//     진행 · [취소], 다른 줄은 '대기'. 다 받으면 타일을 다시 읽는다. 어느 작가가 어느 팩에 드는지는 짐작하지 않는다.
 //   - 타일 우클릭 = [이 아티스트로만 생성](사용자 지시 2026-11-11 - 이 창을 만든 까닭): [현재 프롬프트로] · [랜덤+생성] + 가중치.
 //     다른 작가를 전부 걷고 이 작가만 넣은 글로 한 장 생성한다. 글을 만들고 보내는 것은 app.js(soloGenerate) - 프롬프트 칸은
 //     바꾸지 않는다(랜덤+생성은 Random 을 누른 것과 같아 칸이 새 글로 바뀐다).
@@ -26,6 +29,21 @@ const ATW_CSS = `
   display: grid; grid-template-columns: repeat(auto-fill, minmax(max(120px, calc(25% - 6px)), 1fr)); gap: 8px; align-content: start;
   /* 줄 높이를 내용에 맞춘다 - 안 하면 타일(overflow hidden)이 창 높이에 맞춰 눌려 이름 줄이 잘린다(실측 150 -> 77px). */
   grid-auto-rows: max-content; }
+.atw-packs { flex: 0 0 auto; margin: 10px 10px 0; padding: 8px 10px; border: 1px solid rgba(240,198,116,0.45);
+  border-radius: 6px; background: var(--bg-surface); font-size: 12px; }
+.atw-packs-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 4px; color: #f0c674; }
+.atw-packs-busy { color: var(--text-dim); white-space: nowrap; }
+.atw-pack { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px;
+  padding: 5px 0; border-top: 1px solid var(--border-dim); }
+.atw-pack-name { min-width: 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.atw-pack-size { font-family: var(--font-mono); color: var(--text-dim); }
+.atw-pack button { min-width: 56px; padding: 3px 10px; border: 1px solid var(--border-dim); border-radius: 5px; cursor: pointer;
+  background: transparent; color: var(--text-primary); font-family: inherit; font-size: 12px; }
+.atw-pack button:hover:not(:disabled) { border-color: var(--accent); }
+.atw-pack button:disabled { cursor: default; color: var(--text-dim); }
+.atw-pack-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--border-dim); overflow: hidden; }
+.atw-pack-bar i { display: block; height: 100%; background: var(--accent); }
+.atw-pack-msg { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
 .atw-tile { min-width: 0; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; background: var(--bg-surface); }
 .atw-img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: cover; background: #0c0c12; }
 .atw-none { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 3 / 4;
@@ -94,13 +112,22 @@ export function createArtistTagWindow({
 }) {
   ensureStyle(doc);
   let serial = 0;      // 늦게 온 응답이 새 목록을 덮지 않게
+  // [받기] 띠. 받기 상태는 서버 하나(Artist Thumbnail 탭과 같은 것)라 이 창이 시작하지 않은 받기도 여기 보인다.
+  let packs = [];          // 이 계열의 팩 {key, label, exists, needs_update, expected_size_mb}
+  let family = '';
+  let missingTiles = 0;    // '데이터 없음' 타일 수 - 0 이면 띠를 띄우지 않는다
+  let dl = null;           // 서버의 받기 상태(GET /api/artist-thumb/download)
+  let dlTimer = null;
+  let dlWatching = '';     // 진행 중으로 본 받기의 팩 - 끝남(active -> 아님)은 이것으로만 안다(done · error 는 지난 값이 남는다)
+  let dlStarting = false;  // [받기] 를 누르고 응답을 기다리는 동안 - 연타 막기
+  let dlCancelled = '';    // 이 창에서 [취소] 를 누른 받기 - 끝날 때 오류가 아니라 안내로 알린다
   const panel = createDraggablePanel({
     document: doc, window: win, id: 'artistTagWindow', title: '아티스트 태그 관리',
     variant: 'em-overlay em-window atw-window', storageKey: 'artist-tag-manager',
     width: 560, height: 520, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
     escHtml,
-    onOpen: () => { load(); onVisibilityChange(); },
-    onClose: () => { serial += 1; leaveTile(); closeMenu(); onVisibilityChange(); },
+    onOpen: () => { load(); void refreshDownload(); onVisibilityChange(); },
+    onClose: () => { serial += 1; stopDlPoll(); leaveTile(); closeMenu(); onVisibilityChange(); },
   });
   const count = doc.createElement('span');
   count.className = 'atw-count';
@@ -124,10 +151,132 @@ export function createArtistTagWindow({
       + `<span title="게시물 수">${escHtml(posts)}</span></div></div>`;
   }
 
-  async function load() {
+  // ── 받지 않은 팩 [받기] ─────────────────────────────────────────────
+  const fmtGb = mb => `${(Math.round((Number(mb) || 0) / 1024 * 100) / 100).toFixed(2)} GB`;
+
+  function packsHtml() {
+    const missing = packs.filter(p => !p.exists);
+    if (!missingTiles || !missing.length) return '';
+    const active = Boolean(dl?.active);
+    const busyMode = active ? String(dl.mode || '') : '';
+    const foreign = busyMode && !missing.some(p => p.key === busyMode);
+    const head = `<div class="atw-packs-head"><span>그림 없는 작가 ${missingTiles}명 · 받지 않은 ${escHtml(family || '')} 팩 ${missing.length}개</span>`
+      + (foreign ? `<span class="atw-packs-busy">${escHtml(busyMode)} 받는 중 ${Math.round(Number(dl.percent) || 0)}%</span>` : '')
+      + '</div>';
+    const rows = missing.map(p => {
+      const size = Number(p.expected_size_mb) > 0 ? fmtGb(p.expected_size_mb) : '';
+      if (active && busyMode === p.key) {
+        const pct = Math.max(0, Math.min(100, Number(dl.percent) || 0));
+        const total = Number(dl.total_mb) > 0 ? ` · ${fmtGb(dl.downloaded_mb)} / ${fmtGb(dl.total_mb)}` : '';
+        return `<div class="atw-pack"><span class="atw-pack-name" title="${escHtml(p.label)}">${escHtml(p.label)}</span>`
+          + `<span class="atw-pack-size">${escHtml(size)}</span><button type="button" data-atw-pack-cancel>취소</button>`
+          + `<div class="atw-pack-bar"><i style="width:${pct}%"></i></div>`
+          + `<div class="atw-pack-msg">${Math.round(pct)}%${escHtml(total)} · ${escHtml(dl.message || '')}</div></div>`;
+      }
+      const wait = active || dlStarting;
+      return `<div class="atw-pack"><span class="atw-pack-name" title="${escHtml(p.label)}">${escHtml(p.label)}</span>`
+        + `<span class="atw-pack-size">${escHtml(size)}</span>`
+        + `<button type="button" data-atw-pack="${escHtml(p.key)}"${wait ? ' disabled' : ''}>${wait ? '대기' : '받기'}</button></div>`;
+    }).join('');
+    return head + rows;
+  }
+
+  function paintPacks() {
+    const band = panel.body.querySelector('.atw-packs');
+    if (!band) return;
+    const html = packsHtml();
+    band.hidden = !html;
+    band.innerHTML = html;
+  }
+
+  function stopDlPoll() { if (dlTimer) { clearInterval(dlTimer); dlTimer = null; } }
+
+  function startDlPoll() {
+    if (dlTimer || !panel.isOpen()) return;
+    dlTimer = (win || globalThis).setInterval(() => { void refreshDownload(); }, 900);
+  }
+
+  /** 서버의 받기 상태를 읽는다. 지켜보던 받기가 끝났으면 알리고 타일을 다시 읽는다. */
+  async function refreshDownload() {
+    let state = null;
+    try {
+      const response = await fetchFn('/api/artist-thumb/download');
+      state = await response.json();
+      if (!response.ok || state?.error && state.active === undefined) throw new Error(state?.error || `HTTP ${response.status}`);
+    } catch (_) {
+      return;           // 다음 차례에 다시 - 상태를 못 읽었다고 받기가 멈춘 것은 아니다
+    }
+    if (!panel.isOpen()) { stopDlPoll(); return; }
+    applyDownload(state);
+  }
+
+  function applyDownload(state) {
+    dl = state && typeof state === 'object' ? state : null;
+    if (dl?.active) {
+      dlWatching = String(dl.mode || '');
+      startDlPoll();
+    } else {
+      stopDlPoll();
+      if (dlWatching) {
+        const mode = dlWatching;
+        dlWatching = '';
+        if (dl?.error && dlCancelled === mode) notify(`${mode} 받기를 취소했습니다`, 'info');
+        else if (dl?.error) notify(`${mode} 받기 - ${dl.error}`, 'error');
+        else notify(`${mode} 팩을 받았습니다`, 'info');
+        dlCancelled = '';
+        void load({quiet: true});      // 새 팩으로 타일 · 띠를 다시
+      }
+    }
+    paintPacks();
+  }
+
+  async function startPack(key) {
+    if (!key || dlStarting || dl?.active) return;
+    dlStarting = true;
+    paintPacks();
+    try {
+      const response = await fetchFn('/api/artist-thumb/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: key}),
+      });
+      const state = await response.json();
+      if (!response.ok || state?.error && state.active === undefined) throw new Error(state?.error || `HTTP ${response.status}`);
+      // 다른 받기가 돌고 있었으면 서버는 그 상태를 돌려준다(오류 아님) - 그 진행에 붙는다.
+      if (state?.active && String(state.mode || '') !== key) notify(`${state.mode} 를 받는 중입니다 - 끝난 뒤에 받으세요`, 'info');
+      if (!state?.active && state?.done) { dlStarting = false; void load({quiet: true}); }
+      dlStarting = false;
+      applyDownload(state);
+    } catch (error) {
+      dlStarting = false;
+      notify(`받기를 시작하지 못했습니다 - ${error?.message || error}`, 'error');
+      paintPacks();
+    }
+  }
+
+  async function cancelPack() {
+    dlCancelled = dlWatching;
+    try {
+      const response = await fetchFn('/api/artist-thumb/download/cancel', {method: 'POST'});
+      const state = await response.json();
+      if (response.ok && state && state.active !== undefined) applyDownload(state);
+    } catch (error) {
+      notify(`취소하지 못했습니다 - ${error?.message || error}`, 'error');
+    }
+  }
+
+  panel.body.addEventListener('click', event => {
+    const start = event.target?.closest?.('[data-atw-pack]');
+    if (start) { void startPack(start.dataset.atwPack || ''); return; }
+    if (event.target?.closest?.('[data-atw-pack-cancel]')) void cancelPack();
+  });
+
+  async function load({quiet = false} = {}) {
     const mine = ++serial;
-    count.textContent = '';
-    note('작가를 찾는 중… 처음 여는 팩은 몇 초 걸립니다.');
+    if (!quiet) {
+      count.textContent = '';
+      note('작가를 찾는 중… 처음 여는 팩은 몇 초 걸립니다.');
+    }
     let data = null;
     try {
       const response = await fetchFn('/api/artist-thumb/used', {
@@ -139,14 +288,21 @@ export function createArtistTagWindow({
       if (!response.ok || !data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
     } catch (error) {
       if (mine !== serial) return;
+      if (quiet) { notify(`작가 목록을 다시 읽지 못했습니다 - ${error?.message || error}`, 'error'); return; }
       note(`작가 목록을 읽지 못했습니다 - ${error?.message || error}`, true);
       return;
     }
     if (mine !== serial) return;
     const rows = Array.isArray(data.artists) ? data.artists : [];
+    packs = Array.isArray(data.packs) ? data.packs : [];
+    family = String(data.family || '');
+    missingTiles = rows.filter(row => !row.image_url).length;
     count.textContent = rows.length ? `${rows.length}명` : '';
     if (!rows.length) { note('메인 프롬프트에 작가 태그가 없습니다.'); return; }
-    panel.body.innerHTML = `<div class="atw-grid">${rows.map(tileHtml).join('')}</div>`;
+    leaveTile();
+    closeMenu();
+    panel.body.innerHTML = `<div class="atw-packs" hidden></div><div class="atw-grid">${rows.map(tileHtml).join('')}</div>`;
+    paintPacks();
   }
 
   // ── 올리면 창 옆에 크게 ──────────────────────────────────────────────

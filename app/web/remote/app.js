@@ -1647,9 +1647,11 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261112-drrev4')
+import('./js/features/eventMapPanel.mjs?v=20261113-classic')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
+      // 색인을 받고 나면 Draft 의 '색인 없음' 을 새로 묻는다(알약 툴팁 · 켜기).
+      onMapReady: () => { if (window.draftMode?.isAvailable?.() === false) void window.draftMode.reload(); },
       insertTag: text => insertTagIntoPrompt(text),
       insertAtCursor: text => insertTagAtLastPromptCursor(text),
       showToast,
@@ -1707,7 +1709,7 @@ function syncPermanentExcludeField(text) {
 }
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261113-noxh')
+import('./js/features/draftMode.mjs?v=20261113-avail')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -12592,7 +12594,7 @@ function openArtistTagTool() {
     return;
   }
   if (artistTagWindowLoading) return;
-  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261112-atw6')
+  artistTagWindowLoading = import('./js/features/artistTagWindow.mjs?v=20261113-packs2')
     .then(({createArtistTagWindow}) => {
       artistTagWindow = createArtistTagWindow({
         document,

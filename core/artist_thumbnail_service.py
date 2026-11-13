@@ -2199,19 +2199,48 @@ class ArtistThumbnailService:
     def _pack_family(mode: str) -> str:
         return str(mode or "").strip().split("-")[0]
 
-    def _used_pack_order(self, mode: str = "") -> list[str]:
-        """찾아볼 팩의 차례 - 고른 모드의 팩이 먼저, 그다음 같은 계열(NAID5 · ANIMA ...)의 나머지. 받은 것만."""
+    def _used_mode_key(self, mode: str = "") -> str:
         mode_key = str(mode or "").strip()
         if not mode_key:
             api = str(self._mode_getter() or "NAI").upper()
             mode_key = {"COMFYUI": "ANIMA", "WEBUI": "NoobNAI"}.get(api, "NAID5-CURATED")
+        return mode_key
+
+    def _used_pack_roster(self, mode: str = "") -> list[str]:
+        """이 계열의 팩 전부를 찾는 차례대로 - 고른 모드의 팩이 먼저, 그다음 같은 계열(NAID5 · ANIMA ...)의 나머지.
+        받았든 안 받았든. 찾을 때는 받은 것만(`_used_pack_order`), 아티스트 태그 관리 창은 안 받은 것을 권한다."""
+        mode_key = self._used_mode_key(mode)
         if self.is_virtual_mode(mode_key):
-            first = self.virtual_members(mode_key)
+            first = self.virtual_members(mode_key, existing_only=False)
         else:
             first = [mode_key] if mode_key in self.ARTIST_THUMB_MODES else []
         family = self._pack_family(mode_key)
         rest = [key for key in self.ARTIST_THUMB_MODES if self._pack_family(key) == family and key not in first]
-        return [key for key in first + rest if self._file_state(self.ARTIST_THUMB_MODES[key])["exists"]]
+        return first + rest
+
+    def _used_pack_order(self, mode: str = "") -> list[str]:
+        """찾아볼 팩의 차례(`_used_pack_roster`) 중 받은 것만."""
+        return [key for key in self._used_pack_roster(mode) if self._file_state(self.ARTIST_THUMB_MODES[key])["exists"]]
+
+    def used_pack_offers(self, mode: str = "") -> dict:
+        """아티스트 태그 관리 창의 [받기] 띠(사용자 지시 2026-11-13) - 이 계열의 팩과 받았는지.
+
+        어느 작가가 어느 팩에 드는지는 짐작하지 않는다 - 이름의 숫자가 게시물 수 구간인 것은 NAID5 일부뿐이다
+        (Curated · STYLISH · ANIMA 는 다르다). 받기는 실제 팩 키로 `start_download` 를 부른다(한 번에 하나).
+        """
+        mode_key = self._used_mode_key(mode)
+        packs = []
+        for key in self._used_pack_roster(mode_key):
+            info = self.ARTIST_THUMB_MODES[key]
+            state = self._file_state(info)
+            packs.append({
+                "key": key,
+                "label": str(info.get("label") or key),
+                "exists": bool(state["exists"]),
+                "needs_update": bool(state["needs_update"]),
+                "expected_size_mb": state["expected_size_mb"],
+            })
+        return {"family": self._pack_family(mode_key), "packs": packs}
 
     def _pack_index(self, key: str):
         """팩의 자리 색인. 팩이 없거나 못 읽으면 None. 팩이 갈렸으면(크기 · 시각) 다시 훑는다."""

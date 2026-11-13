@@ -129,6 +129,12 @@ export function initDraftMode({
   // ---- 켜기 · 끄기 ----
   async function enter() {
     if (active()) return;
+    // '색인 없음' 은 앱을 켤 때 받아 둔 값일 수 있다 - 그사이 이벤트 맵에서 색인을 받았으면 낡았다(v2.0.70 테스트 제보 11-13).
+    // 거절하기 전에 서버에 한 번 더 묻는다. run 으로 감싸 그동안 알약 연타를 막는다.
+    if (snap && snap.available === false) {
+      try { await run(load, { quiet: true }); } catch (_) { /* load 가 스스로 삼킨다 */ }
+      if (active()) return;
+    }
     if (snap && snap.available === false) {
       showToast('이벤트 맵 색인이 없습니다 — 이벤트 맵(Ctrl+E)에서 먼저 받으세요', 'warning');
       openEventMap();

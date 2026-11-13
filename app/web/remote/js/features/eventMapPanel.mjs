@@ -79,7 +79,9 @@ function loadPrefs() {
 function savePrefs(persons, ratings, sort) {
   try { localStorage.setItem(PREF_KEY, JSON.stringify({ persons: [...persons], ratings: [...ratings], sort })); } catch { /* 저장 못 해도 동작한다 */ }
 }
-// 화면 버전 · 3단 지도에서 마지막으로 본 갈래 · 그룹. 처음 여는 사람은 3단 지도(목업 승인 2026-10-14).
+// 화면 버전 · 3단 지도에서 마지막으로 본 갈래 · 그룹. 실행할 때는 늘 '기존' 화면(사용자 지시 2026-11-13 - 3단 지도는 회수 중).
+// 저장된 mode 는 읽지 않는다: 3단 지도 안에서 움직이기만 해도 'tree' 가 적혀 사용자의 선택과 구별되지 않는다.
+// 토글은 남는다 - 이번 실행 동안만 3단 지도로 바꿔 볼 수 있다.
 const VIEW_KEY = 'naia_event_map_view_v1';
 function loadViewPrefs() {
   try {
@@ -100,7 +102,8 @@ const SORT_MODES = [
 export function initEventMap({ insertTag, insertAtCursor = null, showToast, getPromptText, generateNow, onRandomLinkChange,
                                openPeSlash = null, setPeOption = null, onPermanentExcludeChange = null,
                                onStage = null, onOpenSaved = null, onLibraryChange = null, isStaged = null, stagedKind = null,
-                               getStagedCount = null, getStagedTotal = null, onOpenStaging = null } = {}) {
+                               getStagedCount = null, getStagedTotal = null, onOpenStaging = null,
+                               onMapReady = null } = {}) {
   let randomLink = { enabled: false, revision: -1 }, linkPending = 0;
   // 랜덤 연결은 한 갈래뿐이다(서버 상태 하나): event = 이 창의 지금 조합, staging = S 창의 스테이징 풀
   // (사용자 지시 2026-10-14 - 한쪽을 켜면 다른 쪽이 꺼진다). 이 창의 체크박스 · 핀 동기화는 event 갈래일 때만.
@@ -221,7 +224,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   let active = -1;
   // 3단 지도. 골격(/tree)은 열 때마다 새로 받는다(색인이 바뀌면 절의 태그 수가 바뀐다).
   const viewPrefs = loadViewPrefs();
-  let viewMode = viewPrefs.mode === 'classic' ? 'classic' : 'tree';
+  let viewMode = 'classic';
   let treeMap = null, treeError = '';
   let treeSel = { d1: String(viewPrefs.d1 || ''), d2: String(viewPrefs.d2 || ''), d3: '' };
   const treeLastD2 = new Map();   // 갈래 -> 마지막으로 본 그룹(이번 실행 동안)
@@ -990,6 +993,8 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     await loadState();
   }
   function stopDlPoll() { if (dlTimer) { clearInterval(dlTimer); dlTimer = null; } }
+  /** 색인이 준비됐다 - Draft 처럼 '색인 없음' 을 들고 있는 화면이 다시 묻게 한다(v2.0.70 테스트 제보 11-13). */
+  function notifyMapReady() { try { onMapReady?.(); } catch (_) { /* 알림 실패가 창을 막지 않는다 */ } }
   /** 받는 동안만 돈다. 다 받으면 스스로 멈추고 패널을 되살린다(닫았다 열 필요 없다). */
   function startDlPoll() {
     if (dlTimer) return;
@@ -998,6 +1003,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
       await loadState();
       if (mapState?.state === 'ready') {
         stopDlPoll();
+        notifyMapReady();
         render();
         if (isTree() || pins.length) void explore();
         focusInput();
@@ -2368,6 +2374,7 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     await loadState();
     if (mapState?.state !== 'ready') { await autoDownload(); startDlPoll(); }
     render();
+    if (mapState?.state === 'ready') notifyMapReady();
     if (mapState?.state === 'ready' && (pins.length || isTree())) void explore();
     position();
     focusInput();                   // 그려진 뒤 한 번 더(그 사이 누가 가져갔어도)

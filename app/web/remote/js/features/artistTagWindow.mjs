@@ -118,6 +118,13 @@ export function createArtistTagWindow({
   let missingTiles = 0;    // '데이터 없음' 타일 수 - 0 이면 띠를 띄우지 않는다
   let dl = null;           // 서버의 받기 상태(GET /api/artist-thumb/download)
   let dlTimer = null;
+  // 창이 열린 동안 받기 상태를 늘 묻는다 - 받는 중 0.9초 · 쉬는 중 3초. 실패해도 다음 차례에 다시 묻고, Artist Thumbnail
+  // 탭에서 시작한 받기도 이렇게 알아챈다(Codex 리뷰 1차 #2 · #3).
+  // 요청마다 번호를 매겨 먼저 보낸 요청의 늦은 답이 나중 답을 덮지 못하게 한다 - 창을 열 때의 GET 이 [받기] POST 보다
+  // 늦게 와서 '안 받는 중' 으로 감시를 끝내던 것(Codex 리뷰 1차 #1).
+  const DL_POLL_BUSY_MS = 900, DL_POLL_IDLE_MS = 3000;
+  let dlIssued = 0;        // 마지막으로 보낸 상태 요청 번호
+  let dlApplied = 0;       // 마지막으로 반영한 응답의 요청 번호
   let dlWatching = '';     // 진행 중으로 본 받기의 팩 - 끝남(active -> 아님)은 이것으로만 안다(done · error 는 지난 값이 남는다)
   let dlStarting = false;  // [받기] 를 누르고 응답을 기다리는 동안 - 연타 막기
   let dlCancelled = '';    // 이 창에서 [취소] 를 누른 받기 - 끝날 때 오류가 아니라 안내로 알린다
@@ -126,7 +133,7 @@ export function createArtistTagWindow({
     variant: 'em-overlay em-window atw-window', storageKey: 'artist-tag-manager',
     width: 560, height: 520, minWidth: 260, maxWidth: 960, minHeight: 200, resizable: true,
     escHtml,
-    onOpen: () => { load(); void refreshDownload(); onVisibilityChange(); },
+    onOpen: () => { load(); stopDlPoll(); void refreshDownload(); onVisibilityChange(); },
     onClose: () => { serial += 1; stopDlPoll(); leaveTile(); closeMenu(); onVisibilityChange(); },
   });
   const count = doc.createElement('span');
@@ -189,51 +196,64 @@ export function createArtistTagWindow({
     band.innerHTML = html;
   }
 
-  function stopDlPoll() { if (dlTimer) { clearInterval(dlTimer); dlTimer = null; } }
+  const timers = win || globalThis;
 
-  function startDlPoll() {
+  function stopDlPoll() { if (dlTimer) { timers.clearTimeout(dlTimer); dlTimer = null; } }
+
+  /** 다음 상태 묻기를 하나만 예약한다(이미 있으면 그대로). 창이 닫혀 있으면 묻지 않는다. */
+  function scheduleDlPoll() {
     if (dlTimer || !panel.isOpen()) return;
-    dlTimer = (win || globalThis).setInterval(() => { void refreshDownload(); }, 900);
+    dlTimer = timers.setTimeout(() => { dlTimer = null; void refreshDownload(); },
+      dl?.active || dlStarting ? DL_POLL_BUSY_MS : DL_POLL_IDLE_MS);
   }
 
   /** 서버의 받기 상태를 읽는다. 지켜보던 받기가 끝났으면 알리고 타일을 다시 읽는다. */
   async function refreshDownload() {
+    const issue = ++dlIssued;
     let state = null;
     try {
       const response = await fetchFn('/api/artist-thumb/download');
       state = await response.json();
       if (!response.ok || state?.error && state.active === undefined) throw new Error(state?.error || `HTTP ${response.status}`);
     } catch (_) {
-      return;           // 다음 차례에 다시 - 상태를 못 읽었다고 받기가 멈춘 것은 아니다
+      scheduleDlPoll();      // 다음 차례에 다시 - 상태를 못 읽었다고 받기가 멈춘 것은 아니다
+      return;
     }
     if (!panel.isOpen()) { stopDlPoll(); return; }
-    applyDownload(state);
+    applyDownload(state, issue);
   }
 
-  function applyDownload(state) {
+  function finishWatched(mode) {
+    if (dl?.error && dlCancelled === mode) notify(`${mode} 받기를 취소했습니다`, 'info');
+    else if (dl?.error) notify(`${mode} 받기 - ${dl.error}`, 'error');
+    else if (dl?.done) notify(`${mode} 팩을 받았습니다`, 'info');
+    dlCancelled = '';
+    void load({quiet: true});      // 새 팩으로 타일 · 띠를 다시(끝남 판정이 애매해도 다시 읽는 것은 해가 없다)
+  }
+
+  function applyDownload(state, issue) {
+    if (issue < dlApplied) { scheduleDlPoll(); return; }    // 먼저 보낸 요청의 늦은 답 - 버린다
+    dlApplied = issue;
+    const prev = dlWatching;
     dl = state && typeof state === 'object' ? state : null;
     if (dl?.active) {
       dlWatching = String(dl.mode || '');
-      startDlPoll();
-    } else {
-      stopDlPoll();
-      if (dlWatching) {
-        const mode = dlWatching;
-        dlWatching = '';
-        if (dl?.error && dlCancelled === mode) notify(`${mode} 받기를 취소했습니다`, 'info');
-        else if (dl?.error) notify(`${mode} 받기 - ${dl.error}`, 'error');
-        else notify(`${mode} 팩을 받았습니다`, 'info');
-        dlCancelled = '';
-        void load({quiet: true});      // 새 팩으로 타일 · 띠를 다시
-      }
+      // 보던 받기가 끝나고 그사이 다른 받기가 시작됐다(폴링 사이) - 앞의 것으로 타일을 다시 읽는다.
+      if (prev && prev !== dlWatching) { dlCancelled = ''; void load({quiet: true}); }
+    } else if (prev) {
+      dlWatching = '';
+      finishWatched(prev);
     }
     paintPacks();
+    stopDlPoll();
+    scheduleDlPoll();
   }
 
   async function startPack(key) {
     if (!key || dlStarting || dl?.active) return;
     dlStarting = true;
     paintPacks();
+    const issue = ++dlIssued;
     try {
       const response = await fetchFn('/api/artist-thumb/download', {
         method: 'POST',
@@ -246,7 +266,7 @@ export function createArtistTagWindow({
       if (state?.active && String(state.mode || '') !== key) notify(`${state.mode} 를 받는 중입니다 - 끝난 뒤에 받으세요`, 'info');
       if (!state?.active && state?.done) { dlStarting = false; void load({quiet: true}); }
       dlStarting = false;
-      applyDownload(state);
+      applyDownload(state, issue);
     } catch (error) {
       dlStarting = false;
       notify(`받기를 시작하지 못했습니다 - ${error?.message || error}`, 'error');
@@ -256,10 +276,11 @@ export function createArtistTagWindow({
 
   async function cancelPack() {
     dlCancelled = dlWatching;
+    const issue = ++dlIssued;
     try {
       const response = await fetchFn('/api/artist-thumb/download/cancel', {method: 'POST'});
       const state = await response.json();
-      if (response.ok && state && state.active !== undefined) applyDownload(state);
+      if (response.ok && state && state.active !== undefined) applyDownload(state, issue);
     } catch (error) {
       notify(`취소하지 못했습니다 - ${error?.message || error}`, 'error');
     }

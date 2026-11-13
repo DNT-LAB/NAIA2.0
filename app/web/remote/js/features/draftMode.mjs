@@ -19,9 +19,9 @@
  */
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
-import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm2';
+import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm3';
 import { initDraftChipCard } from './draftChipCard.mjs?v=20261112-drcard2';
-import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm2';
+import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm3';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
 const SUGGEST_DEBOUNCE_MS = 60;   // 이름만 받는 첫 요청은 수 ms(11-07) - 수는 따로 늦게 받는다

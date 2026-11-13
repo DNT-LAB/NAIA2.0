@@ -668,7 +668,7 @@ class EventMapService:
         """영구 제외 글 + 색인에서 걸리는 태그(화면이 '걸린 태그 n개' 를 보여 준다). 색인이 없어도 글은 준다."""
         text = self.permanent_text()
         try:
-            block = self.permanent_block()
+            block = self.permanent_block(None, text)   # 같은 글로(두 번 읽으면 글과 태그 수가 다른 상태를 말했다 - Codex 3차 #4)
         except MapQueryError:
             block = None
         names = list(block.names) if block else []

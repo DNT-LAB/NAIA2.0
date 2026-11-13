@@ -214,8 +214,11 @@ export function initDraftTagFinder({
         paint({ top });
         return;
       }
-      if (gotRev != null && nowRev != null && gotRev > nowRev) {
-        // 서버가 앞섰다(이 탭이 아직 새 스냅숏을 못 받았다) - 받아 오면 sync 가 다시 부른다(그때 이 차례는 seq 로 끝난다)
+      if (gotRev != null && nowRev != null && (gotRev > nowRev
+          || (gotRev === nowRev && got.cond != null && nowCond != null))) {
+        // 서버가 앞섰다(이 탭이 아직 새 스냅숏을 못 받았다) - 받아 오면 sync 가 다시 부른다(그때 이 차례는 seq 로 끝난다).
+        // 같은 rev 인데 지문만 다르다 = 영구 제외가 다른 곳(Search 등)에서 바뀌었다 - rev 는 안 오르니 스냅숏을 받아 온다
+        // (Codex 리뷰 2026-11-13 3차 #2).
         try { await refreshSnapshot(); } catch (_) {}
       } else {
         await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));

@@ -54,8 +54,8 @@ export function initDraftPermExclude({
   function load({ snapshot = false } = {}) {
     queue = queue.then(async () => {
       try {
-        const changed = take(await call('GET'));
-        if (changed) onTextChange(text);
+        take(await call('GET'));
+        onTextChange(text);   // 늘 - 앞선 저장 실패로 창만 새 글을 알고 Search 칸은 옛 글일 수 있다(3차 #3) · 같으면 칸이 무시한다
         if (snapshot) await refreshSnapshot();   // 다른 곳에서 바뀌었을 수 있다 - 남은 게시물 · [제외 : N] 도 새로(#4)
       } catch (error) { loadError = error.message || '읽기 실패'; }
       paint();
@@ -87,6 +87,7 @@ export function initDraftPermExclude({
         if (wrote) showToast(done, 'success');
         await refreshSnapshot();   // 남은 게시물 · [제외 : N] 을 새 글로(쓰지 않았어도 받은 글이 새것이면 - 2차 #4)
       } catch (error) {
+        if (text !== before) onTextChange(text);   // 저장은 못 했어도 읽은 서버 글은 Search 칸에(다음 Search 저장이 옛 글로 덮지 않게)
         showToast(`영구 제외 저장 실패 — ${error.message}`, 'error');
       } finally { saving--; paint(); }
     }).catch(() => {});

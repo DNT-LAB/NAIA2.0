@@ -96,8 +96,12 @@ def restore_search(context: Any, section: Any, pool_path: Path,
         # ⚠️ 기존 할당이 남으면 reconstruct가 즉시 반환하여 새 풀에 옛 필터가 적용된다.
         reset_filter()
         # saver는 None 버킷을 '변경 없음'으로 해석한다. 완전 복원에서는 이전 버킷을 먼저 비운다.
-        context.search_filter_state = {}
-        context.save_search_filter_state(**state)
+        # 비우기와 저장은 Search 필터 쓰기 잠금 안에서 한 번에 - 그 틈에 Draft 영구 제외 창의 비교 저장이 끼지 않게
+        # (Codex 리뷰 2026-11-13 3차 #1). 저장 본문은 다른 잠금을 잡지 않으므로 순서 역전이 없다.
+        from core.headless_search_state_service import SEARCH_FILTER_LOCK
+        with SEARCH_FILTER_LOCK:
+            context.search_filter_state = {}
+            context.save_search_filter_state(**state)
         context.search_query_ratings = set(state["search_ratings"])
     # reconstruct는 자체 잠금을 먼저 잡으므로 풀 잠금 밖에서 호출해 잠금 순서 역전을 피한다.
     rebuild_filter()

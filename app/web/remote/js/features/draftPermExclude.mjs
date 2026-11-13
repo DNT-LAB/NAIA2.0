@@ -35,14 +35,19 @@ export function initDraftPermExclude({
   // 마지막으로 Search 칸에 건넨 글. 읽은 글이 이것과 다를 때만 건넨다 - 늘 건네면 늦게 온 읽기 응답이 그 사이 Search 에서
   // 고친 글을 옛 글로 덮었다(Codex 리뷰 2026-11-13 5차 #1). 저장이 실패해 못 건넨 글은 이것과 달라 다음 읽기가 건넨다(3차 #3).
   let told = null;
+  let tellSeq = 0;   // 건넬 때마다 오른다 - '제 것' 예외가 청한 뒤에 건넨 글에만 걸리게(9차)
   /** stamp = 이 일을 청할 때의 Search 칸 글. 그 뒤 칸이 **어느 길로든** 바뀌었으면(사용자 타자 · 자동완성 · 이벤트 맵 창 ·
    *  Search 의 서버 상태 갱신) 건네지 않는다 - 늦게 온 읽기가 그 새 글을 옛 글로 되돌렸다(Codex 리뷰 6차 #2 · 7차 #1 · 8차 #1).
-   *  이 창이 앞서 건넨 글(told)로 바뀐 것은 제 것이라 막지 않는다(빠르게 둘을 더하면 둘째가 건네져야 한다).
-   *  건네지 않은 글은 told 가 아니라 다음 읽기가 다시 본다. 칸이 없으면(null) 지킬 것이 없다. */
+   *  청한 **뒤에** 이 창이 건넨 글(told)로 바뀐 것은 제 것이라 막지 않는다(빠르게 둘을 더하면 둘째가 건네져야 한다).
+   *  청하기 전의 told 는 예외가 아니다 - 다른 길이 칸을 그 옛 글로 되돌린 것을 제 것으로 오인해 지운 태그를 되살렸다
+   *  (Codex 리뷰 9차 ABA). 건네지 않은 글은 told 가 아니라 다음 읽기가 다시 본다. 칸이 없으면(null) 지킬 것이 없다. */
+  function stampNow() { return { text: searchFieldText(), seq: tellSeq }; }
   function tell(value, stamp) {
     const now = searchFieldText();
-    if (now != null && now !== stamp && now !== told) return;
+    const mine = tellSeq > stamp.seq && now === told;
+    if (now != null && now !== stamp.text && !mine) return;
     told = value;
+    tellSeq++;
     onTextChange(value);
   }
   let acItems = [], acActive = -1, acSeq = 0, acTimer = null;
@@ -69,7 +74,7 @@ export function initDraftPermExclude({
 
   let loadError = '';
   function load({ snapshot = false } = {}) {
-    const stamp = searchFieldText();   // 청한 때의 Search 칸 글(줄에서 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
+    const stamp = stampNow();   // 청한 때의 Search 칸 글(줄에서 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
       try {
         take(await call('GET'));
@@ -82,7 +87,7 @@ export function initDraftPermExclude({
   }
   /** makeTerms(서버의 지금 항 목록) -> 새 목록. 못 읽으면 저장하지 않는다(빈 글로 덮지 않게 - #2). */
   function save(makeTerms, done) {
-    const stamp = searchFieldText();   // 청한 때의 Search 칸 글(앞 저장이 끝나길 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
+    const stamp = stampNow();   // 청한 때의 Search 칸 글(앞 저장이 끝나길 기다리는 동안 바뀐 것도 지킨다 - 7차 #2)
     queue = queue.then(async () => {
       saving++; paint();
       const before = text;

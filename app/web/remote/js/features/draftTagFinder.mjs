@@ -164,6 +164,7 @@ export function initDraftTagFinder({
 
   // ---- 서버 ----
   /** 목록 받기. top = 첫 쪽부터(스크롤 맨 위) · 아니면 더 보기(이어 붙이기). attempt = 옛 조건 응답을 버리고 다시 청한 횟수. */
+  let carry = 0;   // 스냅숏을 받아 오는 동안 sync 가 부르는 목록 요청이 이을 재시도 횟수
   async function load({ top = true, attempt = 0 } = {}) {
     if (!open) return;
     const mine = ++seq;
@@ -219,7 +220,11 @@ export function initDraftTagFinder({
         // 서버가 앞섰다(이 탭이 아직 새 스냅숏을 못 받았다) - 받아 오면 sync 가 다시 부른다(그때 이 차례는 seq 로 끝난다).
         // 같은 rev 인데 지문만 다르다 = 영구 제외가 다른 곳(Search 등)에서 바뀌었다 - rev 는 안 오르니 스냅숏을 받아 온다
         // (Codex 리뷰 2026-11-13 3차 #2).
+        // 받아 온 스냅숏으로 sync 가 목록을 다시 청하면 그 요청은 이 횟수를 잇는다(0 부터 다시 세면 영구 제외가 계속
+        // 바뀌는 동안 끝없이 돌았다 - Codex 리뷰 2026-11-13 4차 #2)
+        carry = attempt + 1;
         try { await refreshSnapshot(); } catch (_) {}
+        carry = 0;
       } else {
         await new Promise(resolve => setTimeout(resolve, 150 * (attempt + 1)));
       }
@@ -454,7 +459,7 @@ export function initDraftTagFinder({
     if (changed) {
       stale = true;
       listEl.classList.add('is-stale');
-      void load({ top: true });
+      void load({ top: true, attempt: carry });
     }
   }
 

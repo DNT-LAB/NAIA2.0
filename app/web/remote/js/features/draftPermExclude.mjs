@@ -78,8 +78,10 @@ export function initDraftPermExclude({
             wrote = true;
             break;
           } catch (error) {
-            if (error.code !== 'conflict' || attempt >= 2) throw error;
+            if (error.code !== 'conflict') throw error;
             take(error.data || {});   // 그 사이 바뀐 글 위에 다시 얹는다
+            // 세 번째 충돌이면 포기 - 그래도 그 응답의 새 글은 받아 둔 뒤라 실패 길이 Search 칸에 퍼뜨린다(Codex 4차 #1)
+            if (attempt >= 2) throw error;
           }
         }
         if (!wrote && text === before) return;

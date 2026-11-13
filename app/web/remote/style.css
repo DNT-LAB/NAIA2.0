@@ -34354,7 +34354,6 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
 .dr-rh:hover::after, .dr-rh.is-drag::after { opacity: 1; }
 .dr-rh--include { color: rgba(224,85,97,0.9); }
 .dr-rh--exclude { color: rgba(90,169,230,0.9); }
-.dr-rh--extra { color: rgba(232,232,240,0.4); }
 /* 끈 칸 = 고정 높이(넘치면 칸 안에서 스크롤) · 끌지 않은 칸은 원래 flex 로 남은 높이를 나눈다 */
 .dr-zone.is-sized { flex: 0 0 auto; min-height: 0; overflow-y: auto; }
 .dr-zone--extra.is-sized { display: flex; flex-direction: column; overflow: hidden; }

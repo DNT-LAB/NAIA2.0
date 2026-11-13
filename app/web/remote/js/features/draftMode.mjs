@@ -317,7 +317,9 @@ export function initDraftMode({
   drawnBtnEl.addEventListener('click', hidePeek);
 
   // ---- 칸 높이 손잡이(사용자 지시 11-07) ----
-  // 칸 위 색 줄이 곧 손잡이다: 제외 위 줄 = 포함 높이 · Extra 위 줄 = 제외 높이 · postfix 위 줄 = Extra 높이.
+  // 칸 위 색 줄이 곧 손잡이다: 제외 위 줄 = 포함 높이 · Extra 위 줄 = 제외 높이.
+  // postfix 위 손잡이(Extra 높이)는 뺐다 - postfix 를 판 바닥에 붙인 뒤로 그 줄이 빈자리 위에 홀로 떠 쓸모없어 보였다
+  // (사용자 지시 11-13). Extra 는 늘 기본 높이 - 예전에 끌어 둔 Extra 높이는 읽지 않고 지운다.
   // 끈 칸만 고정 높이가 되고 나머지는 남은 높이를 나눠 갖는다. 최소 = 칩 두 줄(Extra 는 글 두 줄). 두 번 누르면 기본으로.
   // 높이는 이 브라우저에만 기억한다(화면 취향 - 서버에 두지 않는다. PC · 휴대폰이 서로 덮지 않게).
   const ZONE_KEY = 'naia.draft.zoneHeights.v1';
@@ -327,7 +329,7 @@ export function initDraftMode({
     extra: board.querySelector('.dr-zone--extra'),
   };
   // 손잡이는 칸 **사이**의 높이 0 짜리 형제다 - 칸 안에 두면 고정 높이 칸의 넘침(스크롤)에 잘린다.
-  const handleBefore = { include: zoneEls.exclude, exclude: zoneEls.extra, extra: board.querySelector('.dr-band--post') };
+  const handleBefore = { include: zoneEls.exclude, exclude: zoneEls.extra };
   function readZoneHeights() {
     try {
       const v = JSON.parse(localStorage.getItem(ZONE_KEY) || '{}');
@@ -371,7 +373,8 @@ export function initDraftMode({
   });
   {
     const saved = readZoneHeights();
-    Object.keys(zoneEls).forEach(name => {
+    if ('extra' in saved) { delete saved.extra; writeZoneHeights(saved); }   // 손잡이가 없으니 되돌릴 길도 없다 - 기본으로
+    Object.keys(handleBefore).forEach(name => {
       const v = Number(saved[name]);
       if (Number.isFinite(v) && v > 0) setZoneHeight(name, v);
     });

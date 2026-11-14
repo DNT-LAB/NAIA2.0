@@ -41,12 +41,20 @@ const PREVIEW_CSS = `
 .artist-link-preview .alpv-foot { display: flex; justify-content: space-between; gap: 6px; padding: 3px 7px; color: #b8b19a; }
 .artist-link-preview .alpv-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist-link-preview .alpv-meta { flex: none; font-variant-numeric: tabular-nums; }
-.artist-link-preview .alpv-x { position: absolute; top: 5px; right: 22px; width: 22px; height: 22px; padding: 0; border: 0;
+.artist-link-preview .alpv-x { position: absolute; top: 5px; right: 26px; width: 22px; height: 22px; padding: 0; border: 0;
   border-radius: 6px; background: rgba(20,22,26,0.72); color: #f3eedb; font-size: 12px; line-height: 22px; cursor: pointer; }
 .artist-link-preview .alpv-x:hover { background: rgba(20,22,26,0.95); }
-.artist-link-preview .alpv-grip { position: absolute; top: 0; right: 0; width: 18px; height: 18px; cursor: nesw-resize;
-  touch-action: none; clip-path: polygon(0 0, 100% 0, 100% 100%);
+/* 누르는 자리 = 네모 전체(22px). 빗금 삼각형은 그림만이다 - 손잡이에 clip-path 를 걸면 누르는 자리도 반쪽이 되어 대각선
+   아래를 누르면 판 바닥이 눌리고 글자 선택이 패널 단추까지 번졌다(사용자 제보 2026-11-14). */
+.artist-link-preview .alpv-grip { position: absolute; top: 0; right: 0; width: 22px; height: 22px; cursor: nesw-resize;
+  touch-action: none; }
+.artist-link-preview .alpv-grip::before { content: ''; position: absolute; top: 0; right: 0; width: 18px; height: 18px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
   background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(243,238,219,0.75) 3px 4.5px); }
+/* 판 · 패널은 글자를 고르는 곳이 아니다 - 끌다 번진 선택이 단추 글자를 칠하지 않게. 끄는 동안은 문서 전체를 막는다. */
+.artist-link-preview, .artist-link-panel { -webkit-user-select: none; user-select: none; }
+html.alpv-resizing, html.alpv-resizing * { -webkit-user-select: none !important; user-select: none !important;
+  cursor: nesw-resize !important; }
 .artist-link-panel .alp-who[data-alp-preview] { cursor: pointer; border-radius: 999px; }
 .artist-link-panel .alp-who[data-alp-preview]:hover { background: rgba(255,240,170,0.10); }
 .artist-link-panel .alp-who.is-preview { background: rgba(255,240,170,0.18); }
@@ -156,7 +164,7 @@ export function installArtistLinkPanel({
     <div class="alpv-pic"></div>
     <div class="alpv-foot"><span class="alpv-name"></span><span class="alpv-meta"></span></div>
     <button type="button" class="alpv-x" aria-label="미리보기 닫기" title="닫기">✕</button>
-    <div class="alpv-grip" title="끌어서 크기 조절" aria-hidden="true"></div>`;
+    <div class="alpv-grip" aria-hidden="true"></div>`;
   modeMenu.after(previewEl);
   let observedTray = null;
 
@@ -619,6 +627,9 @@ export function installArtistLinkPanel({
     if (event.button !== 0) return;
     event.preventDefault();
     grip.setPointerCapture?.(event.pointerId);
+    // 끄는 동안 글자 선택을 막는다 - 이미 걸린 선택도 지운다(사용자 제보 2026-11-14: 패널 단추 글자가 파랗게 칠해졌다).
+    window.getSelection?.()?.removeAllRanges?.();
+    document.documentElement.classList.add('alpv-resizing');
     const startX = event.clientX, startY = event.clientY, startW = previewEl.offsetWidth;
     // 왼쪽 아래에 붙은 판이라 오른쪽 · 위로 끌면 커진다. 더 크게 움직인 쪽을 따른다.
     const move = ev => {
@@ -628,6 +639,7 @@ export function installArtistLinkPanel({
       placePreview();
     };
     const up = () => {
+      document.documentElement.classList.remove('alpv-resizing');
       grip.removeEventListener('pointermove', move);
       grip.removeEventListener('pointerup', up);
       grip.removeEventListener('pointercancel', up);

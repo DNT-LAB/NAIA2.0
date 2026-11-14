@@ -419,9 +419,12 @@ class HeadlessSessionStateService:
         #
         # ⚠️ **세션이 있을 때만** 싣는다. 웹 스모크 계약은 초기 메시지 **타입을 순서대로**
         #    세므로, 조건 없이 한 줄 더하면 그 뒤가 전부 밀려 계약이 깨진다(실측).
+        # ⚠️ 캔버스가 아닌 일반 img2img 세션도 싣는다. 안 실으면 새로고침 뒤 화면은 세션이
+        #    없다고 알고 재개 dock 도 못 띄우는데, 서버는 그 세션으로 새 인페인트를 거절해
+        #    NAIA 를 껐다 켜야만 풀렸다(사용자 제보 2026-11-14).
         try:
             session = getattr(context, "img2img_session", None)
-            if isinstance(session, dict) and session.get("canvas_supported"):
+            if isinstance(session, dict) and session.get("active"):
                 messages.append(context.module_state_payload("img2img", client_host))
         except Exception:   # noqa: BLE001 - 복구용 한 줄 때문에 접속이 막히면 안 된다
             pass

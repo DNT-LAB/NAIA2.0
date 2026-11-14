@@ -13398,6 +13398,7 @@ function openModule(moduleId, options = {}) {
   // chunk 는 1차 모듈과 공존 — 닫지 않고 새 anchor 로 재정렬만
   closeAuxiliaryPopups(null, { keepChunk: moduleId !== 'chunk' });
   currentModuleId = moduleId;
+  refreshImg2ImgResumeDock();
   modulePopup.classList.toggle('module-popup-e621', moduleId === 'e621_event');
   modulePopup.classList.toggle('module-popup-img2img', moduleId === 'img2img');
   modulePopup.classList.toggle('module-popup-conditional', moduleId === 'conditional_prompt');
@@ -13462,6 +13463,7 @@ function closeModule(options = {}) {
   modulePopup.classList.remove('module-popup-inpaint');
   closeAuxiliaryPopups(null, { keepChunk: options.keepChunk !== false });
   currentModuleId = null;
+  refreshImg2ImgResumeDock();
   if (chunkPanelControl) chunkPanelControl.clearTriggerInfo();
   updateModuleHeaderAction(null);
   updateModuleBtnState();
@@ -15328,7 +15330,13 @@ function updateImg2ImgResumeButton(state) {
   //    **뷰어 아래 가운데** - 캔버스 도크와 같은 자리다. 게다가 누르면 옛 img2img 팝업이
   //    열려 인페인트 경로가 둘로 갈린다.
   const canvasPath = !!state?.canvas_supported;
-  if (dock) dock.hidden = canvasPath || !(retryable && hasSubmission);
+  // ⚠️ 제출 전이어도 **팝업이 닫혀 있으면** 띄운다. 예전에는 생성을 한 번 보낸 뒤에만 떠서,
+  //    마스크를 그리거나 값을 바꾼 뒤 팝업 X 로 닫으면 세션은 서버에 살아 있는데 다시 열
+  //    길도 닫을 길도 화면에 없었다 - 새 인페인트는 "먼저 [세션 닫기]" 로 거절돼 NAIA 를
+  //    껐다 켜야 풀렸다(사용자 제보 2026-11-14: 4.5 인페인트 → 마스크 → 우상단 X).
+  const surfaceOpen = currentModuleId === 'img2img'
+    || (isDetachedModule && detachedModuleId === 'img2img');
+  if (dock) dock.hidden = canvasPath || !((retryable && hasSubmission) || (!!state?.active && !surfaceOpen));
   const label = mode === 'inpaint' ? 'Inpaint' : 'Img2Img';
   const ico = document.createElement('span');
   ico.className = 'img2img-resume-ico';
@@ -15338,13 +15346,20 @@ function updateImg2ImgResumeButton(state) {
     status === 'queued' || status === 'running' ? `${label} 생성 중…`
     : status === 'completed_with_errors' ? `${label} 일부 실패 · 재시도`
     : status === 'error' ? `${label} 실패 · 재시도`
-    : `${label} 재시도`;
+    : hasSubmission ? `${label} 재시도`
+    : `${label} 이어서`;
   button.replaceChildren(ico, txt);
   button.dataset.status = status;
   button.title = status === 'running' || status === 'queued'
     ? '현재 생성 세션과 마스크를 다시 열기 (생성 완료 후 재시도 가능)'
     : '현재 소스와 마스크를 유지한 채 다시 열기';
   if (!state?.active) lastAutoHiddenImg2ImgSubmission = '';
+}
+
+/** 팝업이 열리고 닫힐 때 재개 dock 을 캐시된 세션으로 다시 판정한다. */
+function refreshImg2ImgResumeDock() {
+  const cached = moduleStateCache.get('img2img');
+  if (cached) updateImg2ImgResumeButton(cached);
 }
 
 function onImg2ImgGenerationState(message) {

@@ -473,6 +473,7 @@
         {"method": "GET", "path": "/api/artist-thumb/random-tools", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/artist-thumb/link-panel", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/link-panel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/artist-thumb/link-pending-weight", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/random-sources", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/artist-thumb/random-sources", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/artist-thumb/insert-tracker", "smoke": "non_destructive"},

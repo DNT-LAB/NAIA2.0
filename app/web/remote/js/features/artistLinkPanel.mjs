@@ -4,6 +4,10 @@
  * [메인 랜덤 버튼 연결] 이 켜져 있으면 결과 화면 왼쪽 아래(시드 고정 알약 오른쪽)에 **늘** 뜬다.
  * 다루는 작가 = **보이는 그림에 붙은 작가**(히스토리 `linked_artist`). Auto Gen 은 다음 컷을 미리 만들므로
  * '마지막으로 뽑힌 작가' 를 쓰면 엉뚱한 작가를 숨긴다.
+ * 예외 = **'다음' 작가**(사용자 지정 2026-11-14): 사람이 누른 Random 이 붙인 작가는 그림이 나오기 전부터 보인다(`setPending`).
+ * 보이는 그림이 실제로 바뀌면(새 결과 · 다른 히스토리 그림) 풀리고(`noteDisplayChanged`), 글에서 그 작가가 사라져도 풀린다
+ * (`checkPrompt`). Auto Gen 은 예전대로 - 화면(app.js)이 Auto Gen 의 글로는 '다음' 작가를 세우지 않는다.
+ * '다음' 작가의 [× 가중치] 는 랜덤 가중치와 함께 **지금 프롬프트의 그 작가 가중치**도 바꾼다(`onPendingWeight` · 생성 없음).
  *
  *   [그림 · 이름 × 가중치] [고정] [기억] [제외] [삽입 ▴] [그룹 ▴] [추가 ▴]
  *   좁으면(옆 [… 연동됨] 알약까지 한 줄에 안 들어가면) 두 줄 - 위 = 이름 · 가중치(알약은 그 오른쪽), 아래 = 단추들.
@@ -46,6 +50,8 @@ const PREVIEW_CSS = `
 .artist-link-panel .alp-who[data-alp-preview] { cursor: pointer; border-radius: 999px; }
 .artist-link-panel .alp-who[data-alp-preview]:hover { background: rgba(255,240,170,0.10); }
 .artist-link-panel .alp-who.is-preview { background: rgba(255,240,170,0.18); }
+.artist-link-panel .alp-next { flex: none; align-self: center; padding: 0 5px; border: 1px dashed rgba(255,240,170,0.55);
+  border-radius: 999px; color: #f3e6a6; font-size: 10px; line-height: 15px; white-space: nowrap; }
 `;
 
 function ensurePreviewStyle(document) {
@@ -63,6 +69,7 @@ export function installArtistLinkPanel({
   onBanChanged = null,             // (artist, banned) => [숨김] - 아티스트 창의 [제외 작가] 수 · 카드가 따라온다
   onInsert = null,                 // ({artist, weight}) => PE Prefix 맨 앞에 넣는다(있으면 가중치만)
   getThumbMode = null,             // () => 아티스트 창의 팩 계열(미리보기 그림을 찾을 팩 차례)
+  onPendingWeight = null,          // ({artist, weight, isCurrent}) => '다음' 작가의 가중치를 지금 프롬프트에서도 바꾼다(실패 = 안내 글)
   storage = (() => { try { return window.localStorage; } catch (_) { return null; } })(),
 }) {
   const el = document.getElementById('artistLinkPanel');
@@ -72,13 +79,23 @@ export function installArtistLinkPanel({
     {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])));
 
   let tools = null;          // 서버의 랜덤 도구(main_link · link_pin · pin_hold · focus …)
-  let artist = '';           // 보이는 그림의 작가
+  let artist = '';           // 다루는 작가 = '다음' 작가가 있으면 그것, 없으면 보이는 그림의 작가
   let weight = null;
+  let visibleArtist = '';    // 보이는 그림의 작가(`setAsset`)
+  let visibleWeight = null;
+  let pending = null;        // '다음' 작가 {artist, weight} - 이번 Random 에 붙었고 그 그림은 아직 없다(사용자 지정 2026-11-14)
+  let pendingGen = 0;        // '다음' 작가가 바뀔 때마다 오른다 - 늦게 끝난 가중치 고치기가 다른 Random 의 글에 걸리지 않게
+  let shownPending = false;
+  // 보이는 그림이 바뀌었다 - '다음' 작가는 **그 그림의 정보가 올 때**(다음 setAsset) 내린다. 바로 내리면 그사이 옛 그림의
+  // 작가가 잠깐 뜬다. 그사이 새 Random 이 오면 그것이 새 '다음' 작가다(늦게 온 옛 그림의 정보가 그것을 지우지 않는다).
+  let pendingEnds = false;
   let info = null;           // GET /api/artist-thumb/link-panel 답(그림 · 숨김 · 임시 · 그룹)
   let infoSeq = 0;
   let busy = false;
   // 보이는 그림이 막 바뀌었고 그 그림의 작가를 아직 모른다 - 그동안 단추는 옛 그림의 작가를 다루므로 막는다(Codex 리뷰 P1).
   let stale = false;
+  // '다음' 작가는 보이는 그림의 조회를 기다리지 않는다 - 그 작가는 이미 안다.
+  const locked = () => stale && !pending;
   let assetGen = 0;                // 보이는 그림이 바뀔 때마다 오른다 - 기다린 클릭이 다른 그림에 걸리지 않게
   let refreshTimer = null;
 
@@ -308,6 +325,7 @@ export function installArtistLinkPanel({
       return;
     }
     if (!artist) {
+      shownPending = false;
       el.innerHTML = '<span class="alp-empty" title="이 그림은 메인 Random 이 작가를 붙이지 않았습니다">붙은 작가 없음</span>';
       closeMenu();
       closeInsert();
@@ -327,8 +345,10 @@ export function installArtistLinkPanel({
     const count = info?.artist === artist && Number.isFinite(info.count) ? info.count : null;
     const whoTitle = count === null ? artist : `${artist} · 게시물 ${count.toLocaleString('en-US')}`;
     const exclusive = Boolean(tools?.main_exclusive);
+    shownPending = Boolean(pending);
     el.innerHTML = `
-      <span class="alp-row alp-row-who">
+      <span class="alp-row alp-row-who">${pending ? `
+      <span class="alp-next" title="이번 Random 에 붙은 작가 - 그림이 나오면 그 그림의 작가로 바뀝니다">다음</span>` : ''}
       <span class="alp-who${preview.on ? ' is-preview' : ''}" data-alp-preview role="button" tabindex="0"
         aria-pressed="${preview.on}" title="${esc(`${whoTitle}\n눌러서 썸네일 미리보기 ${preview.on ? '끄기' : '켜기'}`)}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
@@ -550,6 +570,7 @@ export function installArtistLinkPanel({
     const n = Math.min(WEIGHT_MAX, Math.max(WEIGHT_MIN, Math.round(Number(value) / WEIGHT_STEP) * WEIGHT_STEP));
     if (!Number.isFinite(n)) return;
     weight = Math.round(n * 100) / 100;
+    if (pending && pending.artist === artist) pending.weight = weight;
     weightRange.value = String(weight);
     paintWeight();
     if (weightTimer) clearTimeout(weightTimer);
@@ -559,10 +580,16 @@ export function installArtistLinkPanel({
   // 바꾼 값을 랜덤 작가 가중치로 보낸다(고정은 건드리지 않는다). 다른 조작이 도는 중이면 끝난 뒤에.
   async function commitWeight(target) {
     const ticket = weightTicket;
+    // '다음' 작가면 지금 프롬프트의 그 작가 가중치도 바꾼다 - 이 값 · 이 '다음' 작가일 때만(기다리는 사이 Random 이 오면 버린다).
+    const pend = pending && pending.artist === target ? {gen: pendingGen, weight} : null;
     while (busy) await new Promise(resolve => setTimeout(resolve, 80));
     if (ticket !== weightTicket) return;                // 기다리는 사이 연결이 꺼졌다 - 보내지 않는다
     if (!artist || artist !== target) return;          // 기다리는 사이 그림이 바뀌었다 - 옛 손잡이 값은 버린다
     await op('weight');
+    if (!pend || pend.gen !== pendingGen || typeof onPendingWeight !== 'function') return;
+    const isCurrent = () => pend.gen === pendingGen;
+    const problem = await onPendingWeight({artist: target, weight: pend.weight, isCurrent});
+    if (typeof problem === 'string' && problem && isCurrent()) showToast?.(problem, 'info');
   }
 
   // 패널은 결과 뷰어(`.viewer`, draggable) 안에 산다 - 슬라이더 · 단추를 끌면 뷰어 끌기(→ 메타데이터 뷰어)가 시작된다.
@@ -629,7 +656,7 @@ export function installArtistLinkPanel({
       return;
     }
     const button = event.target.closest('[data-alp]');
-    if (!button || stale) return;
+    if (!button || locked()) return;
     const action = button.dataset.alp;
     if (action === 'weight') {
       if (weightPop.hidden) openWeight(); else closeWeight();
@@ -637,7 +664,7 @@ export function installArtistLinkPanel({
     }
     const gen = assetGen;
     await closeWeight();
-    if (stale || gen !== assetGen) return;             // 저장을 기다리는 사이 그림이 바뀌었다 - 새 그림의 작가에 걸지 않는다
+    if (locked() || gen !== assetGen) return;          // 저장을 기다리는 사이 그림이 바뀌었다 - 새 그림의 작가에 걸지 않는다
     if (action === 'group') {
       if (menu.hidden) openMenu(); else closeMenu();
       return;
@@ -653,7 +680,7 @@ export function installArtistLinkPanel({
       if (data?.slot) {
         showToast?.(data.slot.has ? `${data.slot.name} 에 기억했습니다(${data.slot.count}명).` : `${data.slot.name} 에서 뺐습니다.`, 'info');
         // 기억했으면 [고정] 을 푼다(사용자 지정 2026-11-04 · [삽입] 과 같은 규칙).
-        if (data.slot.has && gen === assetGen && !stale && pinnedHere()) await op('unpin');
+        if (data.slot.has && gen === assetGen && !locked() && pinnedHere()) await op('unpin');
       }
       return;
     }
@@ -674,7 +701,7 @@ export function installArtistLinkPanel({
   });
 
   menu.addEventListener('click', async event => {
-    if (stale) return;
+    if (locked()) return;
     const slotOpen = event.target.closest('[data-alp-slot-open]');
     if (slotOpen) {
       closeMenu();
@@ -693,7 +720,7 @@ export function installArtistLinkPanel({
     const form = event.target.closest('[data-alp-new]');
     if (!form) return;
     event.preventDefault();
-    if (stale) return;
+    if (locked()) return;
     const input = form.querySelector('input');
     const name = String(input?.value || '').trim();
     if (!name) { input?.focus(); return; }
@@ -711,13 +738,13 @@ export function installArtistLinkPanel({
 
   insertMenu.addEventListener('click', async event => {
     const item = event.target.closest('[data-alp-insert]');
-    if (!item || stale) return;
+    if (!item || locked()) return;
     const gen = assetGen;
     closeInsert();
     if (gen !== assetGen) return;
     const inserted = await onInsert?.({artist, weight: weightNumber(), slot: item.dataset.alpInsert === 'post' ? 'post' : 'pre'});
     // 넣었으면 [고정] 을 푼다(사용자 지정 2026-11-04) - 글에 들어간 작가를 랜덤 연결이 또 붙이지 않게.
-    if (inserted && gen === assetGen && !stale && pinnedHere()) await op('unpin');
+    if (inserted && gen === assetGen && !locked() && pinnedHere()) await op('unpin');
   });
 
   document.addEventListener('pointerdown', event => {
@@ -760,29 +787,77 @@ export function installArtistLinkPanel({
   // 앱을 켠 직후 - 연결 상태를 안다(가벼운 조회 · 잠깐 뒤에).
   setTimeout(() => { if (!tools) void loadInfo(); }, 1500);
 
+  const paintStale = () => el.classList.toggle('is-stale', locked());
+  const readLinked = linked => {
+    const name = linked && typeof linked === 'object' ? String(linked.artist || '').trim() : '';
+    const w = name && Number.isFinite(Number(linked.weight)) ? Number(linked.weight) : null;
+    return {name, w};
+  };
+  // 다루는 작가를 다시 정한다('다음' 작가 > 보이는 그림의 작가). 바뀌었으면 예전 setAsset 이 하던 일을 한다.
+  function settle() {
+    const nextArtist = pending ? pending.artist : visibleArtist;
+    const nextWeight = pending ? pending.weight : visibleWeight;
+    paintStale();
+    if (nextArtist === artist && nextWeight === weight) {
+      if (shownPending !== Boolean(pending)) render();   // 같은 작가여도 '다음' 표식은 바뀐다
+      return;
+    }
+    assetGen += 1;
+    closeWeight();                                     // 손잡이로 바꾼 값은 옛 작가에 먼저 보낸다
+    artist = nextArtist;
+    weight = nextWeight;
+    info = null;
+    closeMenu();
+    render();
+    scheduleRefresh(0);
+  }
+  function dropPending() {
+    pendingEnds = false;
+    if (!pending) return;
+    pendingGen += 1;
+    pending = null;
+    settle();
+  }
+  const promptHas = (text, name) => String(text || '').replace(/\\/g, '').toLowerCase()
+    .includes(String(name || '').replace(/\\/g, '').toLowerCase());
+
   return {
-    /** 결과 화면에 보이는 그림이 바뀌었다 - 그 그림의 `linked_artist` 를 다룬다. */
+    /** 결과 화면에 보이는 그림의 정보가 왔다 - 그 그림의 `linked_artist`. '다음' 작가가 있으면 그것이 앞선다. */
     setAsset(asset) {
-      const linked = asset && typeof asset === 'object' ? asset.linked_artist : null;
-      const next = String(linked?.artist || '').trim();
-      const nextWeight = linked && Number.isFinite(Number(linked.weight)) ? Number(linked.weight) : null;
-      if (stale) { stale = false; el.classList.remove('is-stale'); }
-      if (next === artist && nextWeight === weight) return;
-      assetGen += 1;
-      closeWeight();                                   // 손잡이로 바꾼 값은 옛 그림의 작가에 먼저 고정한다
-      artist = next;
-      weight = nextWeight;
-      info = null;
-      closeMenu();
-      render();
-      scheduleRefresh(0);
+      const {name, w} = readLinked(asset && typeof asset === 'object' ? asset.linked_artist : null);
+      if (stale) stale = false;
+      visibleArtist = name;
+      visibleWeight = w;
+      if (pendingEnds) {                               // 바뀐 그림의 정보다 - '다음' 작가는 끝났다
+        pendingEnds = false;
+        pendingGen += 1;
+        pending = null;
+      }
+      settle();
     },
     /** 보이는 그림이 바뀌기 시작했다(그 그림의 작가는 곧 `setAsset` 으로 온다) - 그때까지 단추를 막는다. */
     markStale() {
-      assetGen += 1;
+      if (!pending) assetGen += 1;                     // '다음' 작가를 다루는 동안은 다루는 작가가 그대로다
       stale = true;
-      el.classList.add('is-stale');
-      closeMenu();
+      paintStale();
+      if (!pending) closeMenu();
+    },
+    /** 사람이 누른 Random 이 붙인 작가(`prompt_generated` 의 `linked_artist` · 없으면 null) - 그림이 나오기 전에 보인다. */
+    setPending(linked) {
+      const {name, w} = readLinked(linked);
+      pendingGen += 1;
+      pendingEnds = false;
+      pending = name ? {artist: name, weight: w} : null;
+      settle();
+    },
+    /** 보이는 그림이 실제로 바뀌었다(새 결과 · 다른 히스토리 그림) - '다음' 작가는 그 그림의 정보가 오면 끝난다.
+     *  조회 · 재조회(저장 · 지우기 뒤의 다시 읽기)와는 다르다 - 그것들은 이것을 부르지 않는다. */
+    noteDisplayChanged() {
+      if (pending) pendingEnds = true;
+    },
+    /** 프롬프트 글이 바뀌었다 - '다음' 작가가 글에 없으면(손으로 지움 · 다른 글로 바뀜) 푼다. */
+    checkPrompt(text) {
+      if (pending && !promptHas(text, pending.artist)) dropPending();
     },
     /** 서버 알림(`artist_random_tools`) - 아티스트 창 · 다른 탭이 바꾼 고정 · 숨김도 따라간다. */
     receiveTools(next) {

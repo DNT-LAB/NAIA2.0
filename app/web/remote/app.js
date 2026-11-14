@@ -903,6 +903,7 @@ let thumbTabControl = null;
 let artistThumbControl = null;
 // 결과 화면 작가 패널(사용자 지정 2026-11-03) - [메인 랜덤 버튼 연결] 중 보이는 그림의 작가를 고정 · 임시 · 숨김 · 그룹.
 let artistLinkPanel = null;
+let artistLinkPendingEarly = null;   // 패널 모듈이 오기 전에 받은 '다음' 작가 - 패널이 서면 넘긴다
 let artistInsertTray = null;      // 작가 패널 위의 삽입 그룹 판(js/features/artistInsertTray.mjs)
 let characterViewerControl = null;
 let studioTabControl = null;
@@ -1027,7 +1028,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261114-preview1')
+import('./js/features/artistLinkPanel.mjs?v=20261114-pending1')
   .then(async ({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
@@ -1039,8 +1040,12 @@ import('./js/features/artistLinkPanel.mjs?v=20261114-preview1')
       onInsert: request => artistInsertTray?.insert(request),
       // 이름을 누르면 뜨는 썸네일 미리보기 - 아티스트 태그 관리와 같은 팩 차례로 그림을 찾는다(사용자 지정 2026-11-14).
       getThumbMode: () => document.getElementById('artistThumbMode')?.value || '',
+      // '다음' 작가의 [× 가중치] - 지금 프롬프트의 그 작가 가중치도 바꾼다(생성 없음 · 사용자 지정 2026-11-14).
+      onPendingWeight: pendingLinkArtistReweight,
     });
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
+    if (artistLinkPendingEarly) artistLinkPanel?.setPending(artistLinkPendingEarly);
+    artistLinkPendingEarly = null;
     // 삽입 그룹 판은 패널 바로 위에 붙는다 - 패널이 생긴 뒤에 깐다. 글은 `/pe` 편집창과 같은 길로 고친다.
     const {installArtistInsertTray} = await import('./js/features/artistInsertTray.mjs?v=20261104-rv3');
     const peKey = slot => (slot === 'post' ? 'post_prompt' : 'pre_prompt');
@@ -5255,6 +5260,7 @@ function handleWsBlob(data) {
   preview.dataset.path = '';
   preview.classList.add('show');
   emptyMsg.style.display = 'none';
+  noteResultDisplayChanged();
   scheduleResultUnsavedActionRefresh(180);
   const pendingPresetRequestId = String(presetGenerationPending?.requestId || '');
   const imagePresetRequestId = String(
@@ -6094,6 +6100,7 @@ async function updateResultEnhanceForSavedPath(relPath = '') {
 }
 
 function onResultHistorySelectionChanged(relPath = '') {
+  noteResultDisplayChanged();
   updateResultEnhanceForSavedPath(relPath);
   scheduleResultUnsavedActionRefresh();
   void syncSequenceFromHistory(relPath);
@@ -6152,6 +6159,90 @@ function setResultUnsavedActionBusy(busy) {
   resultUnsavedActionBusy = !!busy;
   if (resultUnsavedSaveBtn) resultUnsavedSaveBtn.disabled = resultUnsavedActionBusy;
   if (resultUnsavedDeleteBtn) resultUnsavedDeleteBtn.disabled = resultUnsavedActionBusy;
+}
+
+// ── 결과 화면 작가 패널의 '다음' 작가(사용자 지정 2026-11-14) ───────────────────────────────────────
+//  사람이 누른 Random 이 붙인 작가를 그림이 나오기 전부터 패널에 보인다 - 보이는 그림이 실제로 바뀌면(새 결과 · 다른 히스토리
+//  그림) 끝난다. **Auto Gen 은 예전대로**(보이는 그림의 작가만): 다음 컷을 미리 만들어 글과 그림이 엇갈린다(사용자 지정).
+function setPendingLinkArtist(linked) {
+  if (!artistLinkPanel) {
+    artistLinkPendingEarly = linked || null;
+    return;
+  }
+  artistLinkPanel.setPending(linked || null);
+}
+
+function noteResultDisplayChanged() {
+  artistLinkPendingEarly = null;
+  artistLinkPanel?.noteDisplayChanged?.();
+}
+
+/** 프롬프트 칸에 서버 글이 실제로 들어갔다(`updatePromptOnly`) - 출처를 보고 '다음' 작가를 세우거나 내린다. */
+function notePromptLinkArtist(source, message) {
+  if (source === 'random' || source === 'bootstrap_random') {
+    // Auto Gen 이 켜져 있으면 이 Random 뒤로 컷이 이어진다 - 예전 사양(보이는 그림의 작가)대로 둔다.
+    setPendingLinkArtist(getOptionChecked('auto_generate') ? null : (message?.linked_artist || null));
+    return;
+  }
+  if (source === 'auto_generate' || source === 'storyteller' || source === 'automation') {
+    setPendingLinkArtist(null);
+    return;
+  }
+  checkPendingLinkArtist();
+}
+
+/** 글이 바뀌었다(손 편집 · 남이 꽂은 글 · 다른 탭) - 그 작가가 글에서 사라졌으면 '다음' 작가를 내린다. */
+function checkPendingLinkArtist() {
+  artistLinkPanel?.checkPrompt?.(promptEdit ? promptEdit.value : '');
+}
+
+/** 작가 태그 껍질 둘(서버 `reweight_artist` 의 wrap · one) - 모드의 서식 함수에 물어 만든다. */
+function artistReweightShells(weight) {
+  const slot = '\uE000';
+  // Anima 의 `@` 는 몸통의 몫이다(원래 글에 이미 있다) - 껍질에서 뗀다.
+  const wrap = artistToolToken(slot, weight, false).replace('@' + slot, slot);
+  // 가중치 1 을 드러내 적어야 할 때(바깥 껍질 안 · 이웃과 붙은 자리)의 껍질 - 모드의 문법으로(Codex 리뷰 2차 #1).
+  // 껍질 모양은 같은 서식 함수에 물어 고른다(SD 계열은 `(x:w)` 꼴이다).
+  const one = artistToolToken(slot, 0.5, false).replace('@' + slot, slot).startsWith('(') ? `(${slot}:1)` : `1::${slot} ::`;
+  return {wrap, one};
+}
+
+/** '다음' 작가의 [× 가중치] - 지금 프롬프트에서 그 작가의 가중치만 바꾼다(서버가 글과 그 Random 의 기록을 함께 고치고 모든 탭에
+ *  알린다 · 생성은 없다). 돌려주는 것 = 안내 글(못 고쳤을 때) · 고쳤거나 할 일이 없으면 ''. */
+async function pendingLinkArtistReweight({artist, weight, isCurrent} = {}) {
+  const name = String(artist || '').trim();
+  if (!name || !promptEdit) return '';
+  if (window.draftMode?.isActive?.()) return 'Draft 중에는 프롬프트 칸을 고치지 않습니다 - 랜덤 가중치만 바꿨습니다';
+  if (inpaintOwnsPromptBox() || (interactivePanel?.isActive?.() && promptBeforeInteractive !== null)) {
+    return '프롬프트 칸을 다른 창이 쓰는 중이라 랜덤 가중치만 바꿨습니다';
+  }
+  const seen = promptEdit.value;
+  let data = null;
+  try {
+    const response = await fetch('/api/artist-thumb/link-pending-weight', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({artist: name, weight, seen, ...artistReweightShells(weight)}),
+    });
+    data = await response.json().catch(() => null);
+    if (!response.ok || !data?.ok) {
+      const code = String(data?.error || `HTTP ${response.status}`);
+      if (code === 'gone') return '';                  // 그사이 다른 Random 이 왔다 - 그 글의 일이 아니다
+      if (code === 'edited') return '그사이 프롬프트가 바뀌어 칸은 고치지 않았습니다 - 랜덤 가중치만 바꿨습니다';
+      if (code === 'draft') return 'Draft 중에는 프롬프트 칸을 고치지 않습니다 - 랜덤 가중치만 바꿨습니다';
+      if (code === 'in_group') return '괄호 묶음 (a, b:1.2) 안에 든 작가라 칸의 가중치는 바꾸지 못했습니다';
+      if (code === 'unparsed') return '프롬프트에서 이 작가의 자리를 짚지 못했습니다';
+      return `프롬프트의 가중치를 바꾸지 못했습니다 - ${code}`;
+    }
+  } catch (error) {
+    return `프롬프트의 가중치를 바꾸지 못했습니다 - ${error?.message || error}`;
+  }
+  // 이 탭은 바로 보인다(같은 글이 모든 탭에 prompt_sync 로도 온다). 그사이 사람이 쳤으면 그 글을 지킨다.
+  if (data.changed && (typeof isCurrent !== 'function' || isCurrent()) && promptEdit.value === seen) {
+    _applyPromptSync({prompt: String(data.prompt || '')});
+    if (!artistTagRefreshHold) artistTagWindow?.refresh?.();
+  }
+  return '';
 }
 
 function renderResultUnsavedActions(asset = null) {
@@ -6572,6 +6663,8 @@ function updatePromptOnly(messageOrPrompt, sourceArg) {
       // 아티스트 태그 관리 창이 열려 있으면 새 글로 한 번 다시 읽는다(사용자 지시 2026-11-13). 창이 제 [랜덤+생성] 을 돌리는
       // 중이면 미룬다 - 그 길이 칸을 다시 바꾼 뒤에 읽는다(안 그러면 곧 사라질 글의 작가가 잠깐 뜬다).
       if (!artistTagRefreshHold) artistTagWindow?.refresh?.();
+      // 결과 화면 작가 패널의 '다음' 작가 - 칸에 실제로 들어간 글로만 세운다(Draft 메아리 · Interactive 소유 칸은 아니다).
+      notePromptLinkArtist(source, message);
     }
     syncingPrompt = false;
     applyGeneratedResolutionUpdate(message);
@@ -8017,6 +8110,7 @@ function _applyPromptSync(m) {
   if (negativeReplaced) negEdit.value = m.negative_prompt;
   syncNegativeMirror();
   syncingPrompt = false;
+  checkPendingLinkArtist();
   updateMetaChips(m);
   applyPromptTokenPayload(m);
   updatePromptHighlight();
@@ -8199,6 +8293,7 @@ function applyPromptText(prompt) {
   syncingPrompt = true;
   promptEdit.value = String(prompt || '');
   syncingPrompt = false;
+  checkPendingLinkArtist();
   _localPromptDirty = false;
   // 남이 정해 준 프롬프트를 그대로 꽂는 자리다 - 사용자 편집 표식을 내린다.
   // 안 내리면 치던 중에 이 함수가 불렸을 때, 다음 프리셋 전환이 **이 값**을
@@ -10862,6 +10957,8 @@ function applyOptionState(key, value, options = {}) {
   }
   control.setAttribute('aria-pressed', next ? 'true' : 'false');
 
+  // Auto Gen 이 켜졌다 - 작가 패널은 예전 사양(보이는 그림의 작가)으로 돌아간다(사용자 지정 2026-11-14).
+  if (key === 'auto_generate' && next) setPendingLinkArtist(null);
   if (key === 'auto_generate' && !next) {
     clearPresetAutoGenTimer();
     cancelInteractiveAutoGen();   // 딜레이 대기 중이었으면 그것도 접는다
@@ -12583,12 +12680,7 @@ function artistToolToken(name, weight, withPrefix = true) {
  *  `artist:x` · `@x`)은 서버가 원래 글의 것을 그대로 넣는다 - `artist:` 를 뗀 prefix 칸에 `artist:` 가 붙지 않게.
  *  `insert` 면 글에 없을 때 새 태그를 인원 수 태그 뒤에 넣는다. 돌려주는 것 {prompt, changed, inserted}. 실패는 던진다. */
 async function reweightArtistText(text, name, weight, {insert = false} = {}) {
-  const slot = '\uE000';
-  // Anima 의 `@` 는 몸통의 몫이다(원래 글에 이미 있다) - 껍질에서 뗀다.
-  const wrap = artistToolToken(slot, weight, false).replace('@' + slot, slot);
-  // 가중치 1 을 드러내 적어야 할 때(바깥 껍질 안 · 이웃과 붙은 자리)의 껍질 - 모드의 문법으로(Codex 리뷰 2차 #1).
-  // 껍질 모양은 같은 서식 함수에 물어 고른다(SD 계열은 `(x:w)` 꼴이다).
-  const one = artistToolToken(slot, 0.5, false).replace('@' + slot, slot).startsWith('(') ? `(${slot}:1)` : `1::${slot} ::`;
+  const {wrap, one} = artistReweightShells(weight);
   const response = await fetch('/api/artist-thumb/used-reweight', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -16507,7 +16599,7 @@ negEdit.addEventListener('blur', () => {
   deferredPromptSync = null;
 });
 promptEdit.addEventListener('compositionend', () => { onPromptAuthoredEdit(); });
-promptEdit.addEventListener('input', () => { onPromptAuthoredEdit(); });
+promptEdit.addEventListener('input', () => { onPromptAuthoredEdit(); checkPendingLinkArtist(); });
 applyPromptHighlightState();
 updatePromptTokenEstimate();
 

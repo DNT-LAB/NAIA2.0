@@ -86,6 +86,12 @@ class HeadlessRandomPromptResult:
             payload["resolution"] = f"{width} x {height}"
         context_metadata = getattr(self.context, "metadata", None) if self.context is not None else None
         if isinstance(context_metadata, dict):
+            # [메인 랜덤 버튼 연결] 이 이 글에 붙인 작가 - 출처(탭 · 관심 · 그룹 · 고정)와 상관없이 싣는다. 결과 화면 작가 패널이
+            # 그림이 나오기 전에 '다음' 작가로 보인다(사용자 지정 2026-11-14). `random_artist`(탭에서 뽑았을 때만 ·
+            # 아티스트 창 격자 넘기기)와는 따로다 - 그것을 넓히면 관심 · 그룹 · 고정에서도 격자가 넘어간다.
+            linked = context_metadata.get("linked_artist")
+            if isinstance(linked, dict) and str(linked.get("artist") or "").strip():
+                payload["linked_artist"] = {"artist": str(linked["artist"]).strip(), "weight": linked.get("weight")}
             from core.headless_prompt_engineering_service import HeadlessPromptEngineeringService
 
             payload["debug_snapshot"] = HeadlessPromptEngineeringService._debug_snapshot_from_metadata(context_metadata)

@@ -771,6 +771,53 @@ def _apply_insert_tracker_op(context, payload):
     raise ValueError("Unknown insert tracker op")
 
 
+def _link_pending_weight(context: WebSessionContext, payload: dict) -> dict:
+    """결과 화면 작가 패널의 '다음' 작가(이번 Random 에 붙었고 아직 그림이 없다)의 가중치를 지금 프롬프트에서 바꾼다
+    (사용자 지정 2026-11-14). 생성은 하지 않는다.
+
+    글과 그 prompt run 의 기록(`final_prompt` · `linked_artist` 가중치)을 **함께** 고친다 - 글만 고치면 다음 생성 요청이
+    run 과 어긋나(`HeadlessGenerationService._prompt_run_id_for_command`) 그 그림에 작가 기록이 안 남는다.
+    그사이 글을 손으로 고쳤으면(`seen` 불일치) · 다른 Random 이 와서 붙은 작가가 바뀌었으면 · Draft 가 글을 쥐었으면 고치지 않는다.
+    """
+    from core.event_map.draft import active as draft_active
+    from core.headless_random_prompt_service import pipeline_swap_lock
+    from core.prompt_artist_strip import ReweightError, reweight_artist
+
+    artist = " ".join(str(payload.get("artist") or "").split())
+    seen = str(payload.get("seen") or "")
+    wrap = str(payload.get("wrap") or "")
+    one = str(payload.get("one") or "")
+    try:
+        weight = round(float(payload.get("weight")), 2)
+    except (TypeError, ValueError):
+        raise ReweightError("bad_request") from None
+    if not artist or not wrap or weight != weight:
+        raise ReweightError("bad_request")
+    known = _mix_known_artists(context)
+    with pipeline_swap_lock(context):
+        if draft_active(context):
+            raise ReweightError("draft")
+        ctx = getattr(context, "current_prompt_context", None)
+        meta = getattr(ctx, "metadata", None) if ctx is not None else None
+        linked = meta.get("linked_artist") if isinstance(meta, dict) else None
+        if not isinstance(linked, dict) or str(linked.get("artist") or "").strip().casefold() != artist.casefold():
+            raise ReweightError("gone")
+        current = str(context.prompt_text or "")
+        if current != seen:
+            raise ReweightError("edited")
+        result = reweight_artist(current, artist, wrap, one=one, known=known)
+        prompt = str(result.get("prompt") or "")
+        if not result.get("changed") or not prompt or prompt == current:   # 껍질을 갈아 끼워도 같은 글일 수 있다
+            return {"prompt": current, "changed": False}
+        run_holds = str(getattr(ctx, "final_prompt", "") or "").strip() == current.strip()
+        context.prompt_text = prompt
+        if run_holds:
+            ctx.final_prompt = prompt
+        meta["linked_artist"] = {**linked, "weight": weight}
+        context.save_remote_ui_state()
+    return {"prompt": prompt, "changed": True}
+
+
 async def _broadcast_random_tools(context: WebSessionContext, clients: set[Any], run_in_thread) -> None:
     """랜덤 도구가 바뀌었다 - 결과 화면 작가 패널 · 아티스트 창(다른 탭 포함)이 같은 값을 보게 한다."""
     try:
@@ -1045,6 +1092,32 @@ def register_artist_thumbnail_routes(
             return JSONResponse({"ok": False, "error": code}, status_code=409 if code != "bad_request" else 400)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Artist reweight failed: {exc}"}, status_code=500)
+        return {"ok": True, **result}
+
+    @app.post("/api/artist-thumb/link-pending-weight")
+    async def api_artist_thumb_link_pending_weight(req: Request):
+        # 결과 화면 작가 패널 - '다음' 작가의 [× 가중치] 가 지금 프롬프트의 그 작가 가중치도 고친다(`_link_pending_weight`).
+        payload = await _small_json_body(req)
+        if payload is None:
+            return JSONResponse({"ok": False, "error": "request body is too large"}, status_code=413)
+        if len(str(payload.get("seen") or "")) > 60000 or len(str(payload.get("wrap") or "")) > 400 \
+                or len(str(payload.get("one") or "")) > 400 or len(str(payload.get("artist") or "")) > 300:
+            return JSONResponse({"ok": False, "error": "too_long"}, status_code=413)
+        try:
+            result = await run_in_thread(_link_pending_weight, session_context, payload)
+        except ValueError as exc:
+            code = getattr(exc, "code", "") or "bad_request"
+            return JSONResponse({"ok": False, "error": code}, status_code=400 if code == "bad_request" else 409)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"Artist pending weight failed: {exc}"}, status_code=500)
+        if result.get("changed"):
+            try:
+                from app.backend.server.websocket_broadcast import broadcast_json
+
+                # 열린 탭들도 새 글을 받는다(force 없음 - 치는 중인 탭은 기존 규칙대로 제 글을 지킨다).
+                await broadcast_json(clients, {"type": "prompt_sync", "prompt": result["prompt"]})
+            except Exception:  # noqa: BLE001 - 알림이 본 요청을 실패시키지 않는다
+                pass
         return {"ok": True, **result}
 
     @app.get("/api/artist-thumb/used-image")

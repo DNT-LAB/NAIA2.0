@@ -1027,7 +1027,7 @@ const thumbTabReady = import('./js/features/thumbTab.mjs?v=20260829-mark0')
   .catch(error => {
     console.error('Failed to initialize Thumb tab module', error);
   });
-import('./js/features/artistLinkPanel.mjs?v=20261106-mode1')
+import('./js/features/artistLinkPanel.mjs?v=20261114-preview1')
   .then(async ({installArtistLinkPanel}) => {
     artistLinkPanel = installArtistLinkPanel({
       document, fetch: window.fetch.bind(window), showToast, escHtml,
@@ -1037,6 +1037,8 @@ import('./js/features/artistLinkPanel.mjs?v=20261106-mode1')
       onBanChanged: (artist, banned) => artistThumbControl?.artistBanChanged?.(artist, banned),
       // [삽입 ▴] - Prefix 맨 앞 / Postfix 맨 뒤에 넣고 삽입 그룹 판이 추적한다.
       onInsert: request => artistInsertTray?.insert(request),
+      // 이름을 누르면 뜨는 썸네일 미리보기 - 아티스트 태그 관리와 같은 팩 차례로 그림을 찾는다(사용자 지정 2026-11-14).
+      getThumbMode: () => document.getElementById('artistThumbMode')?.value || '',
     });
     artistLinkPanel?.setAsset(resultUnsavedActionAsset);
     // 삽입 그룹 판은 패널 바로 위에 붙는다 - 패널이 생긴 뒤에 깐다. 글은 `/pe` 편집창과 같은 길로 고친다.

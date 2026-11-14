@@ -8,6 +8,9 @@
  *   [그림 · 이름 × 가중치] [고정] [기억] [제외] [삽입 ▴] [그룹 ▴] [추가 ▴]
  *   좁으면(옆 [… 연동됨] 알약까지 한 줄에 안 들어가면) 두 줄 - 위 = 이름 · 가중치(알약은 그 오른쪽), 아래 = 단추들.
  *
+ * - [그림 · 이름] = 누르면 썸네일 미리보기 판을 켜고 끈다(사용자 지정 2026-11-14). 패널 위 왼쪽 끝에 뜨고, 그림은 아티스트
+ *   태그 관리와 같은 길(`/api/artist-thumb/used` -> 팩 바이트 색인 -> `/used-image`)로 받는다. 우상단 = [✕] · 모서리 빗금
+ *   손잡이(끌어서 크기). 켜짐 · 폭은 이 브라우저에 기억한다(`naia.artistLinkPanel.preview`).
  * - [× 가중치] = 누르면 위에 손잡이(휠 0.01씩). 바꾸면 **랜덤 작가 가중치**(아티스트 창 손잡이)에 바로 반영한다 -
  *   고정하지 않는다(사용자 지정 2026-11-03 · 처음엔 '그 값으로 고정' 이었다). 고정 중이면 고정 작가도 그 값을 쓴다.
  * - [고정] = 다음 Random 도 이 작가 · 이 가중치. [생성 버튼 → 랜덤 아티스트](상위 정책)를 서버가 **빌려** 끄고,
@@ -23,12 +26,44 @@
  * - [그룹] = 관심 작가 + 저장된 그룹. 누르면 넣고 빼기.
  * ⚠️ 상태는 서버가 주인이다 - 조작 응답과 `artist_random_tools` 알림으로만 그린다(다른 탭 · 아티스트 창과 같은 값).
  */
+// 미리보기 판 모양 - 이 모듈이 싣는다(style.css 는 바이트로만 고치는 파일이라 새 규칙을 여기 둔다).
+const PREVIEW_CSS = `
+.artist-link-preview { position: absolute; z-index: 6; box-sizing: border-box; overflow: hidden; border-radius: 8px;
+  border: 1px solid rgba(255,240,170,0.35); background: #14161a; color: #e7e2cf; font-size: 11px; }
+.artist-link-preview[hidden] { display: none; }
+.artist-link-preview .alpv-pic { display: flex; align-items: center; justify-content: center; min-height: 72px; background: #1b1d22; }
+.artist-link-preview .alpv-pic img { display: block; width: 100%; height: auto; object-fit: contain; }
+.artist-link-preview .alpv-none { padding: 22px 8px; color: #8d887a; text-align: center; }
+.artist-link-preview .alpv-foot { display: flex; justify-content: space-between; gap: 6px; padding: 3px 7px; color: #b8b19a; }
+.artist-link-preview .alpv-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artist-link-preview .alpv-meta { flex: none; font-variant-numeric: tabular-nums; }
+.artist-link-preview .alpv-x { position: absolute; top: 5px; right: 22px; width: 22px; height: 22px; padding: 0; border: 0;
+  border-radius: 6px; background: rgba(20,22,26,0.72); color: #f3eedb; font-size: 12px; line-height: 22px; cursor: pointer; }
+.artist-link-preview .alpv-x:hover { background: rgba(20,22,26,0.95); }
+.artist-link-preview .alpv-grip { position: absolute; top: 0; right: 0; width: 18px; height: 18px; cursor: nesw-resize;
+  touch-action: none; clip-path: polygon(0 0, 100% 0, 100% 100%);
+  background: repeating-linear-gradient(45deg, transparent 0 3px, rgba(243,238,219,0.75) 3px 4.5px); }
+.artist-link-panel .alp-who[data-alp-preview] { cursor: pointer; border-radius: 999px; }
+.artist-link-panel .alp-who[data-alp-preview]:hover { background: rgba(255,240,170,0.10); }
+.artist-link-panel .alp-who.is-preview { background: rgba(255,240,170,0.18); }
+`;
+
+function ensurePreviewStyle(document) {
+  if (document.getElementById('artistLinkPreviewStyle')) return;
+  const style = document.createElement('style');
+  style.id = 'artistLinkPreviewStyle';
+  style.textContent = PREVIEW_CSS;
+  document.head.appendChild(style);
+}
+
 export function installArtistLinkPanel({
   document, fetch = window.fetch.bind(window), showToast, escHtml,
   openGroupWindow = null,          // (groupId) => 그 그룹을 아티스트 그룹 창으로 연다
   onGroupsChanged = null,          // () => 패널이 그룹을 바꿨다 - 열린 그룹 창이 새로 읽는다
   onBanChanged = null,             // (artist, banned) => [숨김] - 아티스트 창의 [제외 작가] 수 · 카드가 따라온다
   onInsert = null,                 // ({artist, weight}) => PE Prefix 맨 앞에 넣는다(있으면 가중치만)
+  getThumbMode = null,             // () => 아티스트 창의 팩 계열(미리보기 그림을 찾을 팩 차례)
+  storage = (() => { try { return window.localStorage; } catch (_) { return null; } })(),
 }) {
   const el = document.getElementById('artistLinkPanel');
   const seedPill = document.getElementById('seedLockPill');
@@ -80,6 +115,34 @@ export function installArtistLinkPanel({
   modeMenu.hidden = true;
   modeMenu.setAttribute('role', 'menu');
   insertMenu.after(modeMenu);
+  // ── 썸네일 미리보기(사용자 지정 2026-11-14) ─────────────────────────────
+  //  이름을 누르면 켜고 끈다. 보이는 그림의 작가가 바뀌면 판도 따라간다. 붙은 작가가 없으면 숨는다.
+  const PREVIEW_KEY = 'naia.artistLinkPanel.preview';
+  const PREVIEW_MIN = 120, PREVIEW_MAX = 330, PREVIEW_DEFAULT = 220;
+  const preview = (() => {
+    try {
+      const saved = JSON.parse(storage?.getItem(PREVIEW_KEY) || 'null');
+      const width = Number(saved?.width);
+      return {on: saved?.on === true,
+        width: Number.isFinite(width) ? Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, Math.round(width))) : PREVIEW_DEFAULT};
+    } catch (_) {
+      return {on: false, width: PREVIEW_DEFAULT};
+    }
+  })();
+  const savePreview = () => { try { storage?.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch (_) { /* 기억은 장식 */ } };
+  const thumbs = new Map();        // `팩 계열\n이름` -> 'loading' | {image_url, count, name} | {none: true}
+  ensurePreviewStyle(document);
+  const previewEl = document.createElement('div');
+  previewEl.className = 'artist-link-preview';
+  previewEl.hidden = true;
+  previewEl.innerHTML = `
+    <div class="alpv-pic"></div>
+    <div class="alpv-foot"><span class="alpv-name"></span><span class="alpv-meta"></span></div>
+    <button type="button" class="alpv-x" aria-label="미리보기 닫기" title="닫기">✕</button>
+    <div class="alpv-grip" title="끌어서 크기 조절" aria-hidden="true"></div>`;
+  modeMenu.after(previewEl);
+  let observedTray = null;
+
   const linkPill = document.getElementById('artistLinkPill');
   const weightRange = weightPop.querySelector('input');
   let weightTimer = null;
@@ -139,6 +202,100 @@ export function installArtistLinkPanel({
       const chip = el.querySelector('[data-alp="weight"]');
       weightPop.style.left = `${el.offsetLeft + (chip ? chip.offsetLeft : 0)}px`;
     }
+    placePreview();
+  }
+
+  const thumbKey = name => `${String(getThumbMode?.() || '')}\n${name}`;
+  const shortCount = value => {
+    const n = Number(value) || 0;
+    if (n <= 0) return '';
+    if (n < 1000) return String(n);
+    const k = n / 1000;
+    return `${k >= 10 ? Math.round(k) : Math.round(k * 10) / 10}k`;
+  };
+
+  /** 이 작가의 그림 - 아티스트 태그 관리와 같은 길(팩 차례대로 색인을 보고 처음 찾은 팩의 그림 주소). */
+  async function loadThumb(name) {
+    const key = thumbKey(name);
+    if (thumbs.has(key)) return;
+    thumbs.set(key, 'loading');
+    let row = null;
+    try {
+      // 이름의 괄호는 SD 묶음으로 읽히지 않게 이스케이프한다(메인 Random 이 붙이는 토큰과 같은 글).
+      const text = `artist:${name.replace(/([()])/g, '\\$1')}`;
+      const res = await fetch('/api/artist-thumb/used', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text, mode: String(getThumbMode?.() || '')}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      const rows = Array.isArray(data.artists) ? data.artists : [];
+      row = rows.find(r => String(r?.name || '').toLowerCase() === name.toLowerCase()) || rows[0] || null;
+      thumbs.set(key, row?.image_url ? row : {none: true, count: row?.count});
+    } catch (_) {
+      thumbs.delete(key);                              // 다음에 켤 때 다시 묻는다
+      thumbs.set(`${key}\nerror`, true);
+    }
+    if (thumbs.size > 200) thumbs.delete(thumbs.keys().next().value);
+    if (artist === name) renderPreview();
+  }
+
+  function renderPreview() {
+    const show = preview.on && !el.hidden && Boolean(artist);
+    el.querySelector('.alp-who')?.classList.toggle('is-preview', preview.on);
+    if (previewEl.hidden !== !show) previewEl.hidden = !show;
+    if (!show) return;
+    const key = thumbKey(artist);
+    const row = thumbs.get(key);
+    const failed = !row && thumbs.has(`${key}\nerror`);
+    if (!row && !failed) void loadThumb(artist);
+    const pic = previewEl.querySelector('.alpv-pic');
+    const want = row && row !== 'loading' && !row.none ? row.image_url : '';
+    const img = pic.querySelector('img');
+    if (want) {
+      if (!img || img.getAttribute('src') !== want) {
+        pic.innerHTML = `<img alt="" src="${esc(want)}">`;
+        pic.querySelector('img').addEventListener('load', placePreview);
+      }
+    } else {
+      pic.innerHTML = `<div class="alpv-none">${failed ? '그림을 읽지 못했습니다' : row?.none ? '데이터 없음' : '불러오는 중…'}</div>`;
+    }
+    const count = row && row !== 'loading' && Number.isFinite(Number(row.count)) && Number(row.count) > 0
+      ? row.count : (info?.artist === artist ? info.count : null);
+    previewEl.querySelector('.alpv-name').textContent = artist;
+    previewEl.querySelector('.alpv-meta').textContent = [weightLabel(), shortCount(count)].filter(Boolean).join(' · ');
+    previewEl.title = row?.none ? `${artist} · 받은 팩에 이 작가의 그림이 없습니다` : '';
+    placePreview();
+  }
+
+  /** 패널 위 · 시드 알약 왼쪽 끝에 맞춘다. 삽입 그룹 판이 떠 있으면 그 위로. 높이는 뷰어 안에 들어가게 줄인다. */
+  function placePreview() {
+    if (previewEl.hidden) return;
+    const host = el.offsetParent;
+    if (!host) return;
+    const tray = el.parentElement?.querySelector('.artist-insert-tray');
+    if (tray && tray !== observedTray && typeof ResizeObserver === 'function') {
+      observedTray = tray;
+      new ResizeObserver(() => placePreview()).observe(tray);   // 판이 뜨고 지면 비켜 선다
+    }
+    let top = el.offsetTop;
+    if (tray && !tray.hidden && tray.offsetHeight > 0) top = Math.min(top, tray.offsetTop);
+    const left = seedPill && seedPill.offsetParent ? seedPill.offsetLeft : el.offsetLeft;
+    previewEl.style.left = `${left}px`;
+    previewEl.style.bottom = `${Math.max(0, host.clientHeight - top + 6)}px`;
+    previewEl.style.width = `${Math.max(PREVIEW_MIN, Math.min(preview.width, host.clientWidth - left - 8))}px`;
+    const foot = previewEl.querySelector('.alpv-foot')?.offsetHeight || 20;
+    const img = previewEl.querySelector('.alpv-pic img');
+    if (img) img.style.maxHeight = `${Math.max(60, top - 14 - foot)}px`;
+  }
+
+  function setPreview(on) {
+    preview.on = Boolean(on);
+    if (preview.on) {                                  // 켤 때마다 지난 실패는 다시 묻는다
+      for (const key of [...thumbs.keys()]) if (key.endsWith('\nerror')) thumbs.delete(key);
+    }
+    savePreview();
+    renderPreview();
   }
 
   function render() {
@@ -147,6 +304,7 @@ export function installArtistLinkPanel({
     if (!show) {
       closeMenu(); closeInsert(); closeMode(); closeWeight({commit: false});
       el.parentElement?.style.setProperty('--alp-row-lift', '0px');
+      renderPreview();
       return;
     }
     if (!artist) {
@@ -156,6 +314,7 @@ export function installArtistLinkPanel({
       closeMode();
       closeWeight();
       place();
+      renderPreview();
       return;
     }
     const w = weightLabel();
@@ -170,7 +329,8 @@ export function installArtistLinkPanel({
     const exclusive = Boolean(tools?.main_exclusive);
     el.innerHTML = `
       <span class="alp-row alp-row-who">
-      <span class="alp-who" title="${esc(whoTitle)}">
+      <span class="alp-who${preview.on ? ' is-preview' : ''}" data-alp-preview role="button" tabindex="0"
+        aria-pressed="${preview.on}" title="${esc(`${whoTitle}\n눌러서 썸네일 미리보기 ${preview.on ? '끄기' : '켜기'}`)}">
         ${image ? `<img class="alp-thumb" src="${esc(image)}" alt="" loading="lazy">`
     : `<span class="alp-thumb alp-thumb-blank" aria-hidden="true">${esc(artist.slice(0, 1).toUpperCase())}</span>`}
         <span class="alp-name">${esc(artist)}</span>
@@ -193,6 +353,7 @@ export function installArtistLinkPanel({
     : '다른 작가 앞에 추가 - 붙인 작가를 PE 프리픽스 맨 앞에 더합니다(기본)'}">${exclusive ? '숨김' : '추가'} ▴</button>
       </span>`;
     place();
+    renderPreview();
   }
 
   // ── 다른 작가 방식 메뉴 ────────────────────────────────────────────────
@@ -350,6 +511,7 @@ export function installArtistLinkPanel({
     if (chip) chip.textContent = `× ${w}`;
     weightPop.querySelector('.alp-weight-who').textContent = artist;
     weightPop.querySelector('.alp-weight-value').textContent = weightNumber().toFixed(2);
+    renderPreview();
   }
 
   function openWeight() {
@@ -417,7 +579,37 @@ export function installArtistLinkPanel({
     window.addEventListener('pointerup', restore, true);
     window.addEventListener('pointercancel', restore, true);
   };
-  for (const node of [el, menu, weightPop, insertMenu, modeMenu]) node.addEventListener('pointerdown', holdAncestorDrag);
+  for (const node of [el, menu, weightPop, insertMenu, modeMenu, previewEl]) node.addEventListener('pointerdown', holdAncestorDrag);
+
+  // 미리보기 판 - [✕] · 모서리 손잡이. 판 위의 클릭은 뷰어로 보내지 않는다(그림 넘기기 · 열기가 걸리지 않게).
+  previewEl.addEventListener('click', event => {
+    event.stopPropagation();
+    if (event.target.closest('.alpv-x')) setPreview(false);
+  });
+  previewEl.addEventListener('dblclick', event => event.stopPropagation());
+  const grip = previewEl.querySelector('.alpv-grip');
+  grip.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    grip.setPointerCapture?.(event.pointerId);
+    const startX = event.clientX, startY = event.clientY, startW = previewEl.offsetWidth;
+    // 왼쪽 아래에 붙은 판이라 오른쪽 · 위로 끌면 커진다. 더 크게 움직인 쪽을 따른다.
+    const move = ev => {
+      const dx = ev.clientX - startX, dy = startY - ev.clientY;
+      const d = Math.abs(dx) >= Math.abs(dy) ? dx : dy;
+      preview.width = Math.round(Math.min(PREVIEW_MAX, Math.max(PREVIEW_MIN, startW + d)));
+      placePreview();
+    };
+    const up = () => {
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      savePreview();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
 
   weightRange.addEventListener('input', () => setWeight(weightRange.value));
   weightPop.addEventListener('wheel', event => {
@@ -425,7 +617,17 @@ export function installArtistLinkPanel({
     setWeight(weightNumber() + (event.deltaY < 0 ? WEIGHT_STEP : -WEIGHT_STEP));
   }, {passive: false});
 
+  el.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && event.target.closest?.('[data-alp-preview]')) {
+      event.preventDefault();
+      setPreview(!preview.on);
+    }
+  });
   el.addEventListener('click', async event => {
+    if (event.target.closest('[data-alp-preview]')) {   // 미리보기는 서버 상태가 아니다 - 그림이 바뀌는 중에도 켜고 끈다
+      setPreview(!preview.on);
+      return;
+    }
     const button = event.target.closest('[data-alp]');
     if (!button || stale) return;
     const action = button.dataset.alp;

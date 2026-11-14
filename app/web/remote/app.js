@@ -1791,7 +1791,7 @@ let wireFlowControl = null;
 const WIRE_FLOW_DEV = (() => {
   try { return window.localStorage?.getItem('naia.wireFlow.dev') === '1'; } catch { return false; }
 })();
-const wireFlowReady = !WIRE_FLOW_DEV ? Promise.resolve() : import('./js/features/wireFlowWindow.mjs?v=20261101-wf8')
+const wireFlowReady = !WIRE_FLOW_DEV ? Promise.resolve() : import('./js/features/wireFlowWindow.mjs?v=20261101-wf10')
   .then(({installWireFlow}) => {
     wireFlowControl = installWireFlow({
       document,

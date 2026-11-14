@@ -585,7 +585,9 @@ class ArtistThumbnailService:
     #  가중치는 출처와 상관없이 손잡이 · [랜덤 가중치](사용자 지정 - 그룹에 적힌 가중치는 안 쓴다).
     RANDOM_SOURCE_KINDS = ("tab", "favorites", "group")
     # main_exclusive = [다른 작가 숨김](결과 화면 작가 패널 · 사용자 지정 2026-11-06) - 붙인 작가 말고 다른 작가를 걷는다.
-    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin", "main_exclusive")
+    # link_paused = [일시중단]([… 연동됨] 메뉴 · 사용자 지정 2026-11-14) - 연결은 켠 채 메인 Random 이 작가를 안 붙인다.
+    #  다른 토글처럼 이번 실행에만 산다(사용자 결정). 연결을 끄면 같이 풀린다.
+    RANDOM_TOOL_TOGGLES = ("gen_pick", "random_weight", "main_link", "pin_hold", "link_pin", "main_exclusive", "link_paused")
     RANDOM_TOOL_DEFAULTS = {
         "gen_pick": False,
         "random_weight": False,
@@ -593,6 +595,7 @@ class ArtistThumbnailService:
         "pin_hold": False,
         "link_pin": False,
         "main_exclusive": False,
+        "link_paused": False,
         "weight_start": 0.85,
         "weight_end": 1.15,
         "weight_step": 0.05,
@@ -620,6 +623,7 @@ class ArtistThumbnailService:
             "pin_hold": bool(source.get("pin_hold", False)),
             "link_pin": bool(source.get("link_pin", False)),
             "main_exclusive": bool(source.get("main_exclusive", False)),
+            "link_paused": bool(source.get("link_paused", False)),
             "weight_start": number("weight_start", 0.0, 5.0),
             "weight_end": number("weight_end", 0.0, 5.0),
             "weight_step": number("weight_step", 0.01, 5.0),
@@ -899,8 +903,8 @@ class ArtistThumbnailService:
         # 고정 표(런타임)와 작가 · 가중치(파일)를 한 시점에서 읽는다 - 저장은 표를 먼저 바꾸고 파일을 쓴다(Codex 리뷰).
         with self._options_lock:
             tools = self.random_tools()
-        if not tools.get("main_link"):
-            return None
+        if not tools.get("main_link") or tools.get("link_paused"):
+            return None                            # 꺼짐 · [일시중단] - 이번 Random 에는 작가를 안 붙인다
         if tools.get("link_pin"):
             weight = tools["weight"]                # 고정 = 이 작가 · 이 가중치(패널 손잡이로 고친 값)
             artist = str(tools.get("pin_artist") or "").strip()   # 격자에서 다른 작가를 골라도 고정은 그대로
@@ -1048,7 +1052,8 @@ class ArtistThumbnailService:
                     incoming.pop("pin_hold", None)        # 두 표는 고정 길(`link_pin` 메서드)만 다룬다
                     incoming.pop("link_pin", None)
                     if "main_link" in incoming and not incoming["main_link"]:
-                        # 연결을 끄면 패널이 사라진다 - 보이지 않는 곳에 고정 · 빌린 정책을 남기지 않는다
+                        # 연결을 끄면 패널이 사라진다 - 보이지 않는 곳에 고정 · 빌린 정책 · 일시중단을 남기지 않는다
+                        incoming["link_paused"] = False
                         if previous.get("link_pin"):
                             incoming["link_pin"] = False
                         if previous.get("pin_hold"):

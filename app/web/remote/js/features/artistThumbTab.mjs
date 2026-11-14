@@ -226,6 +226,7 @@ export function createArtistThumbController({
   // 아티스트 탭 구간(게시물 많은 순 목록의 % · 100칸) · 이번 세션 중복 스킵(사용자 지정 2026-11-04).
   let linkRange = [0, 100];
   let linkSkip = false;
+  let linkPaused = false;   // [일시중단](이번 실행에만 · 서버 `link_paused`) - 연결은 켠 채 작가를 안 붙인다(사용자 지정 2026-11-14)
   let linkSearch = false;          // 아티스트 탭 풀이 [검색] 결과다 - 알약 이름이 '검색 결과'
   let rangeHeld = false;           // 슬라이더를 쥐고 있다 - 그동안 메뉴를 다시 그리지 않는다(끌기가 끊긴다)
   let rangeSeq = 0;
@@ -2204,6 +2205,7 @@ export function createArtistThumbController({
       linkRange = Number.isFinite(lo) && Number.isFinite(hi) && lo >= 0 && hi <= 100 && lo < hi ? [lo, hi] : [0, 100];
     }
     if ('skip_seen' in raw) linkSkip = Boolean(raw.skip_seen);
+    if ('link_paused' in raw) linkPaused = Boolean(raw.link_paused);
     if (raw.pool && typeof raw.pool === 'object') linkSearch = Boolean(raw.pool.search);
   }
 
@@ -2230,9 +2232,9 @@ export function createArtistThumbController({
   function paintLinkPill() {
     if (!linkPillEl) return;
     const name = linkSourceName();
-    const label = `${name} 연동됨 ▴`;
+    const label = linkPaused ? `${name} 일시중단 ▴` : `${name} 연동됨 ▴`;
     if (linkPillEl.textContent !== label) linkPillEl.textContent = label;
-    linkPillEl.title = linkSource.kind === 'tab'
+    linkPillEl.title = linkPaused ? '메인 Random 이 잠시 작가를 붙이지 않습니다. 누르면 재개 · 종료를 고릅니다.' : linkSource.kind === 'tab'
       ? '메인 Random 이 아티스트 창 목록에서 작가를 뽑아 붙이고 있습니다. 누르면 뽑는 곳을 고릅니다.'
       : `메인 Random 이 '${name}' 에서 작가를 뽑아 붙이고 있습니다(비었으면 아티스트 탭에서). 누르면 뽑는 곳을 고릅니다.`;
     linkPillEl.setAttribute('aria-haspopup', 'menu');
@@ -2382,6 +2384,25 @@ export function createArtistThumbController({
     open.dataset.alsOpen = '1';
     open.textContent = '아티스트 창 열기 ↗';
     nodes.push(open);
+    // [일시중단 | 종료](사용자 지정 2026-11-14) - 일시중단 = 연결은 두고 작가만 안 붙임(결과 화면 패널이 '중단됨 (재개)') ·
+    // 종료 = 아티스트 창의 [메인 랜덤 버튼 연결] 을 끄는 것과 같다.
+    const ctrl = document.createElement('div');
+    ctrl.className = 'als-ctrl';
+    const pause = document.createElement('button');
+    pause.type = 'button';
+    pause.className = `alp-btn${linkPaused ? ' is-on' : ''}`;
+    pause.dataset.alsPause = '1';
+    pause.setAttribute('aria-pressed', String(linkPaused));
+    pause.title = linkPaused ? '다시 작가를 받아 옵니다' : '연결은 그대로 두고 메인 Random 이 작가를 잠시 안 붙입니다';
+    pause.textContent = '일시중단';
+    const stop = document.createElement('button');
+    stop.type = 'button';
+    stop.className = 'alp-btn';
+    stop.dataset.alsStop = '1';
+    stop.title = '메인 랜덤 버튼 연결을 끕니다(아티스트 창의 토글과 같습니다)';
+    stop.textContent = '종료';
+    ctrl.append(pause, stop);
+    nodes.push(ctrl);
     sourceMenuEl.replaceChildren(...nodes);
   }
 
@@ -2529,12 +2550,49 @@ export function createArtistThumbController({
     if (Number.isFinite(weight) && !mixOn) setArtistWeight(weight);
   }
 
+  /** [일시중단] 켜고 끄기 - 서버가 모든 탭 · 결과 화면 패널에 알린다(`artist_random_tools`). */
+  async function setLinkPaused(on) {
+    try {
+      const data = await postJson('/api/artist-thumb/options', {random_tools: {link_paused: Boolean(on)}});
+      linkPaused = Boolean(data?.random_tools?.link_paused ?? on);
+      if (!sourceMenuEl.hidden) renderSourceMenu();
+      paintLinkPill();
+      showToast?.(linkPaused ? '랜덤 아티스트를 잠시 받지 않습니다.' : '랜덤 아티스트를 다시 받습니다.', 'info');
+    } catch (error) {
+      showToast?.(error.message || '일시중단을 바꾸지 못했습니다.', 'error');
+    }
+  }
+
+  /** [종료] = 아티스트 창의 [메인 랜덤 버튼 연결] 끄기와 같다 - 이 창의 토글 · 저장 기준도 같이 맞춘다. */
+  async function stopMainLink() {
+    if (randomToolsLoaded) {
+      randomTools.main_link = false;
+      paintRandomTools();
+      scheduleSaveRandomTools({now: true});
+    } else {
+      try {
+        await postJson('/api/artist-thumb/options', {random_tools: {main_link: false}});
+      } catch (error) {
+        showToast?.(error.message || '연결을 끄지 못했습니다.', 'error');
+        return;
+      }
+    }
+    linkHint = false;
+    linkPaused = false;
+    syncLinkPill();
+  }
+
   /** 서버가 알린 랜덤 도구(`artist_random_tools` - 결과 화면 작가 패널 [고정] · 다른 탭). 이 창의 토글과 저장 기준을
    *  서버 값으로 맞춘다. ⚠️ 아직 안 보낸 칸(0.4초 대기 중)은 이 창 값을 지키고, 저장 기준만 서버 값으로 바꿔 다음 저장에
    *  그대로 실리게 한다. 붙일 작가가 바뀌었으면 이 창도 그 작가를 고른다 - 안 그러면 다음 저장이 옛 작가로 되돌린다. */
   function receiveRandomTools(tools) {
     if (!tools || typeof tools !== 'object') return;
     linkHint = Boolean(tools.main_link);
+    if ('link_paused' in tools && Boolean(tools.link_paused) !== linkPaused) {
+      linkPaused = Boolean(tools.link_paused);
+      if (!sourceMenuEl.hidden) renderSourceMenu();
+      paintLinkPill();
+    }
     if (!randomToolsLoaded) {
       if (tools.source) { takeLinkSource(tools.source); takeLinkOptions(tools); }
       if (linkSource.kind === 'group' && !linkSourceRows.some(r => r.id === linkSource.id)) void loadLinkSources();
@@ -2573,6 +2631,8 @@ export function createArtistThumbController({
       if (sourceMenuEl.hidden) openSourceMenu(); else closeSourceMenu();
     });
     sourceMenuEl.addEventListener('click', event => {
+      if (event.target.closest('[data-als-pause]')) { void setLinkPaused(!linkPaused); return; }
+      if (event.target.closest('[data-als-stop]')) { closeSourceMenu(); void stopMainLink(); return; }
       const item = event.target.closest('.alp-menu-item');
       if (!item) return;
       if (item.dataset.alsOpen) { closeSourceMenu(); openArtistWindowFromPill(); return; }

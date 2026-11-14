@@ -58,6 +58,12 @@ html.alpv-resizing, html.alpv-resizing * { -webkit-user-select: none !important;
 .artist-link-panel .alp-who[data-alp-preview] { cursor: pointer; border-radius: 999px; }
 .artist-link-panel .alp-who[data-alp-preview]:hover { background: rgba(255,240,170,0.10); }
 .artist-link-panel .alp-who.is-preview { background: rgba(255,240,170,0.18); }
+.artist-link-panel .alp-paused { height: 22px; padding: 0 10px; border-radius: 999px; border: 1px solid rgba(255,240,170,0.6);
+  background: rgba(90,74,30,0.9); color: #ffe7a3; font: inherit; font-size: 11.5px; cursor: pointer; }
+.artist-link-panel .alp-paused:hover { background: rgba(120,98,40,0.95); }
+.artist-link-menu .als-ctrl { display: flex; gap: 6px; padding: 4px 4px 2px; }
+.artist-link-menu .als-ctrl .alp-btn { flex: 1; height: 26px; border-radius: 6px; border: 1px solid rgba(255,240,170,0.28); }
+.artist-link-menu .als-ctrl .alp-btn.is-on { background: rgba(255,240,170,0.85); color: #3a3000; border-color: transparent; }
 .artist-link-panel .alp-next { flex: none; align-self: center; padding: 0 5px; border: 1px dashed rgba(255,240,170,0.55);
   border-radius: 999px; color: #f3e6a6; font-size: 10px; line-height: 15px; white-space: nowrap; }
 `;
@@ -329,6 +335,15 @@ export function installArtistLinkPanel({
     if (!show) {
       closeMenu(); closeInsert(); closeMode(); closeWeight({commit: false});
       el.parentElement?.style.setProperty('--alp-row-lift', '0px');
+      renderPreview();
+      return;
+    }
+    if (tools?.link_paused) {
+      // [일시중단](사용자 지정 2026-11-14) - 그림과 상관없이 이것 하나만. 누르면 다시 받는다.
+      shownPending = false;
+      el.innerHTML = '<button type="button" class="alp-paused" data-alp-resume title="랜덤 아티스트를 다시 받습니다">중단됨 (재개)</button>';
+      closeMenu(); closeInsert(); closeMode(); closeWeight();
+      place();
       renderPreview();
       return;
     }
@@ -663,6 +678,23 @@ export function installArtistLinkPanel({
     }
   });
   el.addEventListener('click', async event => {
+    if (event.target.closest('[data-alp-resume]')) {
+      try {
+        const res = await fetch('/api/artist-thumb/options', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({random_tools: {link_paused: false}}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+        if (data.random_tools) tools = data.random_tools;
+        render();
+        if (artist) scheduleRefresh(0);
+        showToast?.('랜덤 아티스트를 다시 받습니다.', 'info');
+      } catch (error) {
+        showToast?.(`재개하지 못했습니다: ${error.message || error}`, 'error');
+      }
+      return;
+    }
     if (event.target.closest('[data-alp-preview]')) {   // 미리보기는 서버 상태가 아니다 - 그림이 바뀌는 중에도 켜고 끈다
       setPreview(!preview.on);
       return;

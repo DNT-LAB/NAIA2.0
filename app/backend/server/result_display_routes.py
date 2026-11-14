@@ -2093,6 +2093,9 @@ def register_result_display_routes(
                         from core.headless_img2img_service import HeadlessImg2ImgService
 
                         service = HeadlessImg2ImgService(session_context)
+                        # 연 뒤 여기 오기 전에 닫혔으면 빈 세션에 값을 적지 않는다(Codex 조사 2026-11-14 F3).
+                        if not session_context.img2img_session.get("active"):
+                            return service.module_state()
                         # ⚠️ **크기를 바꾸기 전에** 적는다. `set_param` 이 돌려주는
                         #    상태는 그 시점에 만들어지므로, 뒤에 적으면 화면까지
                         #    안 실려 저장 버튼이 안 뜬다(실측으로 잡았다).

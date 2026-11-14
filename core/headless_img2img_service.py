@@ -11,6 +11,7 @@ import copy
 import io
 import json
 import math
+import threading
 from typing import Any
 
 from core.headless_image_utils import image_to_png_bytes
@@ -41,6 +42,13 @@ def _session_position_mode(characters: list[dict[str, Any]] | None) -> str:
         if isinstance(character, dict) and character.get("position"):
             return "custom"
     return "auto"
+
+
+# 세션을 **갈아 끼우는** 짧은 자리(닫기 · 열기의 마지막 확인과 설치 · 상태와 순번 읽기)를 묶는다.
+# ⚠️ 닫기는 이벤트 루프에서, 열기는 워커에서 돈다 - 묶지 않으면 열기가 '그사이 닫혔나' 를 본 직후 닫기가
+#    끼어들어, 닫혔다고 알린 세션이 서버에 다시 선다. 상태와 순번을 따로 읽으면 옛 세션에 닫은 뒤의 순번이
+#    붙어 화면의 옛것 거르개를 통과한다(Codex 리뷰 2026-11-14). 안에서는 무거운 일을 하지 않는다.
+_SESSION_SWAP_LOCK = threading.RLock()
 
 
 class HeadlessImg2ImgService:
@@ -386,8 +394,40 @@ class HeadlessImg2ImgService:
 
     def open_session_from_bytes(self, *args, **kwargs):
         from core.headless_random_prompt_service import pipeline_swap_lock
+        # ⚠️ 닫기 횟수는 **잠금을 기다리기 전에** 적는다. 열기는 그림을 풀고 줄이느라 수백 ms 가
+        #    걸리고 잠금도 기다린다 - 그사이 [세션 닫기] 가 오면 늦게 끝난 열기가 방금 닫은 세션을
+        #    다시 살렸다(Codex 조사 2026-11-14 F3). 닫기가 이긴다.
+        kwargs["_closes_at_entry"] = self.close_count()
         with pipeline_swap_lock(self.context):
             return self._draft_locked_open_session_from_bytes(*args, **kwargs)
+
+    # ------------------------------------------------------------------
+    # 세션 순번 - 늦게 도착한 옛 상태를 화면이 버리게 한다
+    # ------------------------------------------------------------------
+
+    def close_count(self) -> int:
+        return int(getattr(self.context, "_img2img_close_count", 0) or 0)
+
+    def session_revision(self) -> int:
+        return int(getattr(self.context, "_img2img_session_revision", 0) or 0)
+
+    def _session_snapshot(self) -> tuple[dict[str, Any], int]:
+        """세션과 그 순번을 **한 번에** 읽는다(닫기 · 설치와 엇갈리지 않게)."""
+        with _SESSION_SWAP_LOCK:
+            session = self.context.img2img_session
+            return (session if isinstance(session, dict) else {}), self.session_revision()
+
+    def _bump_session_revision(self) -> int:
+        """열기 · 닫기마다 순번을 올린다. 화면은 이보다 낮은 순번의 img2img 상태를 버린다.
+
+        ⚠️ 시각(ms)을 바닥으로 쓴다. 0 부터 세면 백엔드를 다시 켰을 때 순번이 되감겨, 옛
+           순번을 들고 있는 화면이 새 서버의 상태를 전부 '옛것' 으로 버린다.
+        """
+        import time
+
+        revision = max(self.session_revision() + 1, time.time_ns() // 1_000_000)
+        self.context._img2img_session_revision = revision
+        return revision
 
     def _draft_locked_open_session_from_bytes(
         self,
@@ -398,6 +438,7 @@ class HeadlessImg2ImgService:
         generation_params: dict[str, Any] | None = None,
         prompt_context: dict[str, Any] | None = None,
         resize_1mp: bool = True,
+        _closes_at_entry: int | None = None,
     ) -> dict[str, Any]:
         context = self.context
         if not image_bytes:
@@ -564,12 +605,16 @@ class HeadlessImg2ImgService:
         # ⚠️ **넣기 직전에 한 번 더 본다.** 위의 검사와 여기 사이에 그림을 풀고 줄이느라
         #    수백 ms 가 걸리고(워커 스레드), 그동안 이벤트 루프에서 레이어 업로드 · 마스크가
         #    들어올 수 있다 - 그대로 덮으면 방금 성공한 작업이 사라진다(Codex 재리뷰 2026-10-03).
-        current = context.img2img_session or {}
-        if current.get("active") and self._session_has_user_work(current):
-            raise ValueError(
-                "편집 중인 인페인트 세션이 있습니다. 먼저 [세션 닫기] 를 누른 뒤 다시 여세요."
-            )
-        context.img2img_session = new_session
+        with _SESSION_SWAP_LOCK:
+            current = context.img2img_session or {}
+            if current.get("active") and self._session_has_user_work(current):
+                raise ValueError(
+                    "편집 중인 인페인트 세션이 있습니다. 먼저 [세션 닫기] 를 누른 뒤 다시 여세요."
+                )
+            if _closes_at_entry is not None and self.close_count() != _closes_at_entry:
+                raise ValueError("여는 사이에 세션이 닫혀 열지 않았습니다. 다시 여세요.")
+            context.img2img_session = new_session
+            self._bump_session_revision()
         return self.module_state()
 
     @staticmethod
@@ -639,12 +684,14 @@ class HeadlessImg2ImgService:
 
     def module_state(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
         context = self.context
-        state = context.img2img_session if isinstance(context.img2img_session, dict) else {}
+        state, revision = self._session_snapshot()
         if not state.get("active"):
             # ⚠️ 세션이 끝난 상태도 금액을 싣는다. 끝나면 Generate 는 다시 일반 생성으로 나가는데(레퍼런스 인셋이 켜져
             #    있으면 그 캔버스로), 여기서 안 실으면 세션 때의 금액이 화면에 남는다 - 유료 인셋을 켠 채 무료 세션을
             #    열었다 닫으면 0 이 남았다(Codex 리뷰 2026-10-10).
-            payload = context._module_state_payload("img2img", {"active": False, **self._anlas_cost_fields()})
+            payload = context._module_state_payload("img2img", {
+                "active": False, "session_revision": revision, **self._anlas_cost_fields(),
+            })
             if extra:
                 payload.update(extra)
             return payload
@@ -664,6 +711,7 @@ class HeadlessImg2ImgService:
         generation_busy = generation_status in {"submitting", "queued", "running"}
         payload = context._module_state_payload("img2img", {
             "active": True,
+            "session_revision": revision,
             "window_id": int(state.get("window_id", 0) or 0),
             "mode": mode,
             # ⚠️ 캔버스 상태를 여기 안 실으면 화면이 캔버스를 볼 방법이 없다.
@@ -1170,12 +1218,13 @@ class HeadlessImg2ImgService:
 
     def generation_event_payload(self) -> dict[str, Any]:
         """Small cross-client lifecycle event; deliberately excludes image/mask bytes."""
-        state = self.context.img2img_session if isinstance(self.context.img2img_session, dict) else {}
+        state, revision = self._session_snapshot()
         if not state.get("active"):
             return {
                 "type": "img2img_generation_state",
                 "module_id": "img2img",
                 "active": False,
+                "session_revision": revision,
                 "generation_status": "inactive",
                 "can_retry": False,
                 "can_generate": False,
@@ -1188,6 +1237,7 @@ class HeadlessImg2ImgService:
             "type": "img2img_generation_state",
             "module_id": "img2img",
             "active": True,
+            "session_revision": revision,
             "window_id": int(state.get("window_id", 0) or 0),
             "mode": mode,
             # 화면이 옛 재개 dock 을 띄울지 정하는 데 쓴다 - V5 캔버스에는 이미
@@ -1357,7 +1407,10 @@ class HeadlessImg2ImgService:
     def set_param(self, key: str, value: Any) -> dict[str, Any] | None:
         context = self.context
         if key == "close":
-            context.img2img_session = {}
+            with _SESSION_SWAP_LOCK:
+                context.img2img_session = {}
+                context._img2img_close_count = self.close_count() + 1
+                self._bump_session_revision()
             # 닫은 세션의 레이어 그림을 붙잡고 있지 않는다.
             self._prune_layer_cache()
             return self.module_state()

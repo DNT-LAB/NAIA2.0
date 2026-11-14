@@ -948,8 +948,14 @@ export function createImg2ImgPanel({
   function close() {
     flushPendingModuleEdit('img2img');
     closeMaskEditor();
-    setModuleParam('img2img', 'close', 'true');
+    // ⚠️ 못 보냈으면 '닫았습니다' 라고 하지 않는다. 연결이 끊긴 사이에 누르면 서버 세션은 그대로인데
+    //    성공 토스트가 떠서, 화면이 닫힌 줄 알고 다시 열 길을 치웠다(Codex 조사 2026-11-14 F4).
+    if (!setModuleParam('img2img', 'close', 'true')) {
+      showToast('서버에 연결되어 있지 않아 세션을 닫지 못했습니다. 다시 연결된 뒤 눌러 주세요.', 'error');
+      return false;
+    }
     showToast('Img2Img 세션을 닫았습니다', 'success');
+    return true;
   }
 
   function maskBrush(value) {

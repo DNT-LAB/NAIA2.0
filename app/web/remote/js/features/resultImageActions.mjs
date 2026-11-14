@@ -20,6 +20,8 @@ export function createResultImageActions({
   onCanvasSession = () => {},
   // 세션을 요청했지만 아직 계열을 모른다 - 상태가 도착하면 화면이 고른다.
   onCanvasSessionPending = () => {},
+  // 서버가 돌려준 모듈 상태를 화면에 넣는다(WS 방송을 못 받아도 화면이 세션을 안다).
+  applyModuleState = () => {},
   onLoadPrompt = () => {},
   applyMetadataSettings = () => {},
   switchRightTab = () => {},
@@ -177,6 +179,11 @@ export function createResultImageActions({
         throw new Error(data.error || `HTTP ${response.status}`);
       }
       const data = await response.json().catch(() => ({}));
+      if (isDesktopImg2ImgAction(action) && data && data.state && data.state.module_id === 'img2img') {
+        // ⚠️ WS 방송에만 기대지 않는다 - 그 사이 소켓이 끊겼으면 화면은 세션이 열린 줄 모른다
+        //    (Codex 조사 2026-11-14 F5). 늦게 온 옛 응답은 순번(`session_revision`)으로 버려진다.
+        applyModuleState(data.state);
+      }
       if (isDesktopImg2ImgAction(action)) {
         // NAI 인페인트는 팝업을 열지 않는다 - Result 안 가상 캔버스에서 바로 고친다
         // (사용자 지정 2026-08-26 V5 · 2026-11-05 모든 모델로 통합). 백엔드가 세션을 열면서 정하므로

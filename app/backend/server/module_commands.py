@@ -75,7 +75,9 @@ def _is_inpaint_canvas_edit(command: dict[str, Any]) -> bool:
     if str(command.get("module_id") or "") != "img2img":
         return False
     key = str(command.get("key") or "")
-    return key.startswith("layer_") or key in _INPAINT_CANVAS_KEYS
+    # ⚠️ 닫기도 모두에게 보낸다. 누른 창에만 알리면 다른 탭 · 휴대폰은 닫힌 세션을 열린 것으로
+    #    알고 생성을 계속 막는다 - 열기는 처음부터 모두에게 보냈다(Codex 조사 2026-11-14 F2).
+    return key.startswith("layer_") or key in _INPAINT_CANVAS_KEYS or key == "close"
 
 
 def _truthy(value: Any) -> bool:

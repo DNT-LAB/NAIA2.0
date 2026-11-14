@@ -575,6 +575,12 @@ let searchPanelControl = null;
 let chunkPanelControl = null;
 let sequencePresetControl = null;
 let inpaintCanvasControl = null;
+// 캔버스 모듈을 끝내 못 불러왔다. 그러면 캔버스 세션도 재개 dock 으로 열고 닫는다 - 안 그러면
+// 세션은 잠금을 걸고 있는데 화면에 아무 길이 없다(Codex 조사 2026-11-14 F1).
+let inpaintCanvasFailed = false;
+// 지금까지 받은 img2img 상태의 가장 높은 순번(서버 `session_revision`). 이보다 낮은 상태는 닫기 · 새 열기
+// 전에 만들어진 옛것이다 - 늦게 도착해도 버린다(Codex 조사 2026-11-14 F3).
+let img2imgRevisionSeen = 0;
 // 인페인트 진입점이 세션을 요청해 두고 상태를 기다리는 중인가. 상태가 오면 계열에 따라
 // 캔버스를 드러내거나 옛 팝업을 연다(위 onModuleState 참조).
 let pendingImg2ImgSurface = false;
@@ -1907,7 +1913,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261105-ipm2')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261114-i2iclose')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1933,6 +1939,13 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
       openImg2ImgSessionSurface,
       onCanvasSession: () => inpaintCanvasControl?.revealForSession?.(),
       onCanvasSessionPending: () => armImg2ImgSurface(),
+      // ⚠️ 같은 세션을 WS 로 이미 받았으면 넣지 않는다. 순번은 열기 · 닫기에만 오르므로, 그 뒤에 받은 마스크 ·
+      //    프롬프트 편집이 늦게 온 이 첫 응답에 덮여 되돌아간다(Codex 리뷰 2026-11-14).
+      applyModuleState: state => {
+        const cached = moduleStateCache.get('img2img');
+        if (cached && Number(cached.session_revision) >= Number(state?.session_revision)) return;
+        onModuleState(state);
+      },
       onLoadPrompt,
       applyMetadataSettings,
       switchRightTab,
@@ -3646,7 +3659,7 @@ const inpaintPromptSwapReady = import('./js/features/inpaintPromptSwap.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize inpaint prompt swap', error);
   });
-const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261105-ips2')
+const img2imgPanelReady = import('./js/features/img2imgPanel.mjs?v=20261114-i2iclose')
   .then(({createImg2ImgPanel}) => {
     img2imgPanel = createImg2ImgPanel({
       document,
@@ -3984,9 +3997,16 @@ const inpaintCanvasReady = import('./js/features/inpaintCanvasPanel.mjs?v=202611
       // 최소 높이를 보장하고, 닫히면 원래 높이로 돌려준다.
     });
     watchInpaintDockLift();
+    // ⚠️ 접속 전에 이 모듈을 기다리지 않는다. 새로고침 · 재접속 때 세션 상태가 먼저 오면 위 상태 처리가
+    //    `inpaintCanvasControl?.` 에서 조용히 넘어가, 세션은 잠금을 걸었는데 캔버스는 안 그려졌다
+    //    (Codex 조사 2026-11-14 F1). 받아 둔 상태를 한 번 더 넣는다.
+    const cachedImg2Img = moduleStateCache.get('img2img');
+    if (cachedImg2Img) inpaintCanvasControl.handleModuleState?.(cachedImg2Img);
   })
   .catch(error => {
     console.error('Failed to initialize inpaint canvas panel', error);
+    inpaintCanvasFailed = true;
+    refreshImg2ImgResumeDock();
   });
 const inpaintSequenceReady = import('./js/features/inpaintSequencePanel.mjs?v=20261107-acsearch1')
   .then(({createInpaintSequencePanel}) => {
@@ -8943,7 +8963,9 @@ function requestResultInpaint() {
   //    사라지지만, 여는 입구와 닫는 입구를 하나로 두는 쪽을 택했다.
   if (virtualCharacterSession()) {
     closeInpaintSettings();
-    inpaintCanvasControl?.requestClose?.();
+    // 캔버스 모듈이 없으면 requestClose 가 없다 - 그래도 닫혀야 한다.
+    if (inpaintCanvasControl?.requestClose) inpaintCanvasControl.requestClose();
+    else img2imgClose();
     return;
   }
   const shown = !!(preview && preview.classList.contains('show'));
@@ -13878,6 +13900,7 @@ function guideModelReselect() {
 function onModuleState(m) {
   if (seamObserver) seamObserver.watch('module_state', m && m.module_id);
   if (isModuleStateGuarded(m.module_id)) return;
+  if (m.module_id === 'img2img' && isStaleImg2ImgState(m)) return;
   if (m.module_id === 'prompt_engineering') {
     _presetStampStale = false;      // 새 프리셋 이름이 왔다
     // Draft 의 저장 확인은 **서버가 보낸 그대로**의 글로 한다 - 아래 reconcileIncoming 이 '더 새 로컬 글' 로 바꾼 뒤의
@@ -14019,7 +14042,7 @@ function onModuleState(m) {
       pendingImg2ImgSurface = false;
       pendingImg2ImgSurfaceFromWindow = -1;
       clearTimeout(pendingImg2ImgSurfaceTimer);
-      if (m.canvas_supported) inpaintCanvasControl?.revealForSession?.();
+      if (m.canvas_supported && !inpaintCanvasFailed) inpaintCanvasControl?.revealForSession?.();
       else openImg2ImgSessionSurface();
     }
     inpaintCanvasControl?.handleModuleState?.(m);
@@ -15329,7 +15352,7 @@ function updateImg2ImgResumeButton(state) {
   //    해당 연결을 단선"). 캔버스 도크에 편집/결과 보기/세션 닫기가 이미 있고, 이 알약은
   //    **뷰어 아래 가운데** - 캔버스 도크와 같은 자리다. 게다가 누르면 옛 img2img 팝업이
   //    열려 인페인트 경로가 둘로 갈린다.
-  const canvasPath = !!state?.canvas_supported;
+  const canvasPath = !!state?.canvas_supported && !inpaintCanvasFailed;
   // ⚠️ 제출 전이어도 **팝업이 닫혀 있으면** 띄운다. 예전에는 생성을 한 번 보낸 뒤에만 떠서,
   //    마스크를 그리거나 값을 바꾼 뒤 팝업 X 로 닫으면 세션은 서버에 살아 있는데 다시 열
   //    길도 닫을 길도 화면에 없었다 - 새 인페인트는 "먼저 [세션 닫기]" 로 거절돼 NAIA 를
@@ -15362,8 +15385,18 @@ function refreshImg2ImgResumeDock() {
   if (cached) updateImg2ImgResumeButton(cached);
 }
 
+/** 이미 받은 것보다 낮은 순번의 img2img 상태인가. 옛 서버(순번 없음)의 상태는 늘 받는다. */
+function isStaleImg2ImgState(message) {
+  const revision = Number(message?.session_revision);
+  if (!Number.isFinite(revision) || revision <= 0) return false;
+  if (revision < img2imgRevisionSeen) return true;
+  img2imgRevisionSeen = revision;
+  return false;
+}
+
 function onImg2ImgGenerationState(message) {
   if (!message) return;
+  if (isStaleImg2ImgState(message)) return;
   const cached = moduleStateCache.get('img2img');
   const sameSession = cached
     && (!message.window_id || Number(cached.window_id) === Number(message.window_id));
@@ -15400,7 +15433,7 @@ function resumeImg2ImgSession() {
   // V5 는 팝업이 아니라 Result 안 캔버스다 - 여기로 들어오는 길이 남아 있더라도
   // 옛 팝업을 열지 않는다.
   const cached = moduleStateCache.get('img2img');
-  if (cached?.canvas_supported) { inpaintCanvasControl?.revealForSession?.(); return; }
+  if (cached?.canvas_supported && inpaintCanvasControl) { inpaintCanvasControl.revealForSession?.(); return; }
   openModule('img2img', {forceOpen: true});
 }
 
@@ -15410,7 +15443,7 @@ function dismissImg2ImgResume() {
   const dock = document.getElementById('img2imgResumeDock');
   if (dock) dock.hidden = true;
   lastAutoHiddenImg2ImgSubmission = '';
-  img2imgClose();
+  if (!img2imgClose()) refreshImg2ImgResumeDock();
 }
 
 function img2imgSlider(key, value) {
@@ -15446,7 +15479,7 @@ function img2imgGenerate() {
 }
 
 function img2imgClose() {
-  if (img2imgPanel) img2imgPanel.close();
+  return img2imgPanel ? img2imgPanel.close() !== false : false;
 }
 
 function img2imgOpenMaskEditor() {

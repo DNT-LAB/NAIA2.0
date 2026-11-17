@@ -1,0 +1,166 @@
+{
+  "schema": "naia.outfit_vocab_overrides.v1",
+  "hand_modifiers": [
+    "buttons",
+    "cleavage",
+    "collarbone",
+    "double-breasted",
+    "eyewear on head",
+    "halloween costume",
+    "halterneck",
+    "high collar",
+    "hood down",
+    "hood up",
+    "jewelry",
+    "lapels",
+    "meme attire",
+    "plunging neckline",
+    "pocket",
+    "sleeveless",
+    "turtleneck",
+    "v-neck",
+    "zipper"
+  ],
+  "patterns": [
+    "animal",
+    "argyle",
+    "camouflage",
+    "checkered",
+    "cow",
+    "floral",
+    "heart",
+    "horizontal-striped",
+    "houndstooth",
+    "leopard",
+    "plaid",
+    "polka",
+    "print",
+    "star",
+    "striped",
+    "tiger",
+    "vertical-striped"
+  ],
+  "tags": {
+    "buttons": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "cleavage": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "collarbone": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "double-breasted": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "eyewear on head": {
+      "class": "state",
+      "why": "state_regex"
+    },
+    "halloween costume": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "halterneck": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "high collar": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "hood down": {
+      "class": "state",
+      "why": "state_regex"
+    },
+    "hood up": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "jewelry": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "lapels": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "meme attire": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "plunging neckline": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "pocket": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "sleeveless": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "turtleneck": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "v-neck": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "zipper": {
+      "class": "modifier",
+      "why": "hand"
+    },
+    "witch": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "nurse": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "butler": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "miko": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "nun": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "cheerleader": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "waitress": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "santa": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    },
+    "police": {
+      "class": "garment",
+      "slot": "OUTFIT",
+      "why": "role"
+    }
+  }
+}

@@ -42,282 +42,106 @@ PARAMS = dict(MIN_SUP=MIN_SUP, FLOOR=FLOOR, EARLY_SHARE=EARLY_SHARE,
               VARIANT_DIFFERENCE=2, SCAN=SCAN, CHAR_GATE=CHAR_GATE, CP_GATE=CP_GATE,
               FILL_SHARE=FILL_SHARE, FILL_LIFT=1.0, SIDE_SHARE=SIDE_SHARE,
               SIDE_MAX=4, SIDE_SCAN=50000, SCAN_SEED=1, GATE_SEED=3, SIDE_SEED=5)
-_anc = {}
-par = defaultdict(set)
+from presets_engine import PresetEngine, git_head
+
+SLOTS, CAP, KIND, STS = {}, {}, {}, {}
+ix = None
+_engine = PresetEngine(namespace=globals())
+
+def anc(*args, **kwargs):
+    return PresetEngine.anc(_engine, *args, **kwargs)
+
+anc._engine_wrapper = True
 
 
-def anc(t):
-    if t not in _anc:
-        seen, stack = set(), [t]
-        while stack:
-            for p in par.get(stack.pop(), ()):
-                if p not in seen:
-                    seen.add(p)
-                    stack.append(p)
-        _anc[t] = seen
-    return _anc[t]
+def kind(*args, **kwargs):
+    return PresetEngine.kind(_engine, *args, **kwargs)
+
+kind._engine_wrapper = True
 
 
-def kind(t):
-    return KIND.get(t.split(' ')[-1], t.split(' ')[-1])
+def nm(*args, **kwargs):
+    return PresetEngine.nm(_engine, *args, **kwargs)
+
+nm._engine_wrapper = True
 
 
-def nm(t):
-    return '-' if t < 0 else NAMES.get(int(t), str(t))
+def top_share(*args, **kwargs):
+    return PresetEngine.top_share(_engine, *args, **kwargs)
+
+top_share._engine_wrapper = True
 
 
-def top_share(rids, arr, exact=False):
-    if not rids.size:
-        return 0.0, -1
-    take = rids if exact or rids.size <= SCAN else np.random.default_rng(3).choice(rids, SCAN, replace=False)
-    a = arr[take]
-    n = a.size
-    a = a[a >= 0]
-    if not a.size:
-        return 0.0, -1
-    u, c = np.unique(a, return_counts=True)
-    k = c.argmax()
-    return float(c[k] / n), int(u[k])
+def gate_ok(*args, **kwargs):
+    return PresetEngine.gate_ok(_engine, *args, **kwargs)
+
+gate_ok._engine_wrapper = True
 
 
-def gate_ok(rids):
-    return top_share(rids, prim)[0] <= CHAR_GATE and top_share(rids, primcp)[0] <= CP_GATE
+def layer_setup(*args, **kwargs):
+    return PresetEngine.layer_setup(_engine, *args, **kwargs)
+
+layer_setup._engine_wrapper = True
 
 
-def layer_setup(pool, layer):
-    lut = np.zeros(256, bool); lut[[pid[f'{r}_{p}'] for r in layer for p in POOLS[pool]]] = True
-    N = int(NLIVE[lut].sum()); full = np.zeros(ix.n_tags, np.int64); full[vid] = M[:, lut].sum(1)
-    floor_scale = N / max(1, int(NLIVE[[pid[f'{r}_{p}'] for r in 'gsq' for p in POOLS[pool]]].sum()))   # v3 하한은 gsq 기준
-    return dict(lut=lut, N=N, full=full, pbase=full / max(N, 1), floor=max(30, int(FLOOR[pool] * floor_scale)), pool=pool, layer=layer)
+def count(*args, **kwargs):
+    return PresetEngine.count(_engine, *args, **kwargs)
 
-def count(take):
-    st = ix.offsets[take].astype(np.int64); en = ix.offsets[take + 1].astype(np.int64); ln = en - st
-    idx = np.repeat(st - np.concatenate(([0], np.cumsum(ln)[:-1])), ln) + np.arange(int(ln.sum()))
-    b = ix.body[idx]; b = b[vocab[b]]
-    return np.bincount(b, minlength=ix.n_tags)
-
-def try_add(S, name, blocked):
-    if name in blocked or any(o.endswith(' ' + name) for o in S):
-        return None
-    a = anc(name)
-    # 같은 옷의 세부형(끝 낱말 같음)만 바꾼다. 부분품(side-tie bikini bottom → bikini)은 전체를 지우지 않고 곁에 둔다
-    # (같은 칸이면 상위 태그를 접는다: underwear → panties · hat → nurse cap · school uniform → serafuku)
-    repl = [o for o in S if (o in a or name.endswith(' ' + o))
-            and (kind(o) == kind(name) or SLOTS.get(o, 'OUTFIT') == SLOTS.get(name, 'OUTFIT'))]
-    S2 = [o for o in S if o not in repl] + [name]
-    if any(kind(o) == kind(name) for o in S2[:-1]):
-        return None
-    used = Counter(SLOTS.get(o, 'OUTFIT') for o in S2)
-    if any(used[s] > CAP[s] for s in used):
-        return None
-    return S2
-
-def expand(st, state, K, fill_slots=None):
-    S, rids, sc, blocked = state
-    take = rids if rids.size <= SCAN else np.random.default_rng(1).choice(rids, SCAN, replace=False)
-    take = np.sort(take)
-    share = count(take) / take.size
-    with np.errstate(divide='ignore', invalid='ignore'):
-        lift = np.where(st['pbase'] > 0, share / st['pbase'], 0)
-    if fill_slots is None:
-        ms = EARLY_SHARE if len(S) <= 2 else MIN_SHARE
-        ok = (share >= ms) & (lift >= LIFT_FLOOR) & (st['full'] >= st['floor'])
-        score = np.where(ok, share * np.log(np.minimum(np.maximum(lift, 1.0), LIFT_CAP)), 0)
-    else:
-        ok = (share >= FILL_SHARE) & (lift >= 1.0) & (st['full'] >= st['floor'])
-        score = np.where(ok, share, 0)
-    if st.get('no_outfit'):
-        score = np.where(OUTFIT_MASK, 0, score)
-    out = []
-    for t in np.argsort(-score)[:300]:
-        if score[t] <= 0 or len(out) >= K:
-            break
-        name = ix.by_id[int(t)]
-        if fill_slots is not None and SLOTS.get(name, 'OUTFIT') not in fill_slots:
-            continue
-        S2 = try_add(S, name, blocked)
-        if S2 is None:
-            continue
-        new = _intersect_sorted(rids, ix.posting(int(t)))
-        if new.size < st['floor_sup'] or not gate_ok(new):
-            continue
-        out.append((S2, new, sc + float(score[t]), blocked | anc(name) | {name}))
-    return out
-
-def seed_rids(st, seed):
-    sid = ix.resolve(seed)
-    if sid is None:
-        return None
-    r = ix.posting(sid); r = r[r < NP]; r = r[st['lut'][ix.part_arr[r]]]
-    return r[live[r] & ~DROP[r]]
-
-def assemble(st, seed, beam=BEAM, k_out=3):
-    rids = seed_rids(st, seed)
-    if rids is None or rids.size < MIN_SUP[st['pool']]:
-        return None, 'few'
-    if top_share(rids, prim)[0] > CHAR_GATE:
-        return None, 'character_bound'
-    if top_share(rids, primcp)[0] > CP_GATE:
-        return None, 'copyright_bound'
-    st['floor_sup'] = max(MIN_SUP[st['pool']], int(rids.size * KEEP))
-    states = [([seed], rids, 0.0, anc(seed) | {seed})]; finals = []
-    for _ in range(MAX_SIZE - 1):
-        nxt = {}
-        for s in states:
-            ex = expand(st, s, beam)
-            if not ex:
-                finals.append(s)
-            for e in ex:
-                key = frozenset(e[0])
-                if key not in nxt or nxt[key][2] < e[2]:
-                    nxt[key] = e
-        states = sorted(nxt.values(), key=lambda e: -e[2])[:beam]
-        if not states:
-            break
-    finals += states
-    finals.sort(key=lambda e: -e[2])
-    chosen = []
-    for f in finals:
-        if all(len(set(f[0]) ^ set(c[0])) >= 2 for c in chosen):
-            chosen.append(f)
-        if len(chosen) >= k_out:
-            break
-    return [fill(st, c) for c in chosen], 'ok'
-
-def fill(st, state):
-    S, rids, sc, blocked = state; added = []
-    for need in (('TOP', 'BODY', 'OUTFIT'), ('BOTTOM', 'BODY'), ('FEET',)):
-        if len(S) >= MAX_SIZE + 1 or any(SLOTS.get(o, 'OUTFIT') in need for o in S):
-            continue
-        ex = expand(st, (S, rids, sc, blocked), 1, fill_slots=set(need) - {'OUTFIT'})
-        if ex:
-            S, rids, sc, blocked = ex[0]; added.append(S[-1])
-    return S, [t for t in added if t in S], sc
-
-def exact(pool, tags):
-    r = None
-    for t in tags:
-        p = ix.posting(ix.resolve(t)); p = p[p < NP]
-        r = p if r is None else _intersect_sorted(r, p)
-    plut = np.zeros(256, bool); plut[[pid[f'{x}_{p}'] for x in 'gsqe' for p in POOLS[pool]]] = True
-    r = r[plut[ix.part_arr[r]]]
-    r = r[live[r] & ~DROP[r]]
-    part = ix.part_arr[r]
-    per = {x: int(np.isin(part, [pid[f'{x}_{p}'] for p in POOLS[pool]]).sum()) for x in 'gsqe'}
-    return r, per
+count._engine_wrapper = True
 
 
+def try_add(*args, **kwargs):
+    return PresetEngine.try_add(_engine, *args, **kwargs)
 
-def join_check(db):
-    """Compare map tag names with the source general-tag blob, not local ids."""
-    from core.event_map.policy import normalize
-    names = {i: normalize(n) for i, n in db.execute('SELECT id,name FROM tags')}
-    population = np.flatnonzero(live)
-    if population.size < 200:
-        raise ValueError('join check requires 200 live records')
-    covers = []
-    for rid in np.random.default_rng(1).choice(population, 200, replace=False):
-        row = db.execute('SELECT general FROM records WHERE id=?', (int(rid),)).fetchone()
-        expected = {ix.by_id[int(t)] for t in ix.body[ix.offsets[rid]:ix.offsets[rid + 1]]}
-        actual = {names.get(int(t), '') for t in np.frombuffer(row[0], '<u4')} if row and row[0] else set()
-        covers.append(len(expected & actual) / max(1, len(expected)))
-    result = {'sampled': 200, 'mean_cover': float(np.mean(covers))}
-    log('join_check ' + json.dumps(result, sort_keys=True))
-    if result['mean_cover'] < 0.99:
-        raise ValueError('map/corpus join coverage below 0.99')
-    return result
+try_add._engine_wrapper = True
 
 
-def initialize(args):
-    global ix, pid, NP, live, DROP, NLIVE, M, vid, vocab, SLOTS, CAP, KIND, ORDER
-    global prim, primcp, NAMES, LIFT_FLOOR, OUTFIT_MASK, MODMASK, VOCAB, STS
-    VOCAB = json.loads(args.vocab.read_text(encoding='utf-8'))
-    if VOCAB['schema'] != 'naia.outfit_vocab.v1':
-        raise ValueError('unsupported vocabulary schema')
-    log('class_counts ' + json.dumps(check_counts(VOCAB['tags']), sort_keys=True))
-    CAP, KIND = VOCAB['slots'], VOCAB['kind_alias']
-    order = VOCAB.get('slot_order', ['HEAD', 'NECK', 'OUTFIT', 'BODY', 'TOP', 'UNDER',
-                                     'WAIST', 'BOTTOM', 'ARMS', 'LEGS', 'FEET'])
-    ORDER = {s: i for i, s in enumerate(order)}
-    SLOTS = {n: row['slot'] for n, row in VOCAB['tags'].items() if row['class'] == 'garment'}
-    ix = EventMapIndex(args.map)
-    pid = {n: i for i, n in enumerate(ix.partitions)}
-    NP = len(ix.part_arr)
-    live = ix.offsets[1:NP + 1] > ix.offsets[:NP]
-    db = sqlite3.connect(Path(args.corpus).resolve().as_uri() + '?mode=ro', uri=True)
-    try:
-        checked = join_check(db)
-        NAMES = dict(db.execute('SELECT id,name FROM tags'))
-        prim, primcp = np.full(NP, -2, np.int32), np.full(NP, -2, np.int32)
-        glut = np.zeros(256, bool)
-        glut[[pid[f'{r}_{p}'] for r in 'gsqe' for pp in POOLS.values() for p in pp]] = True
-        rr = np.flatnonzero(glut[ix.part_arr] & live)
-        for k in range(0, rr.size, 50000):
-            lo, hi = int(rr[k]), int(rr[min(k + 50000, rr.size) - 1])
-            for i, c, y in db.execute(
-                    'SELECT id,character,copyright FROM records WHERE id BETWEEN ? AND ?', (lo, hi)):
-                if i < NP:
-                    prim[i] = int(np.frombuffer(c, '<u4')[0]) if c else -1
-                    primcp[i] = int(np.frombuffer(y, '<u4')[0]) if y else -1
-        for tid, name in NAMES.items():
-            if name == 'original':
-                primcp[primcp == tid] = -1
-        if np.any(prim[rr] == -2) or np.any(primcp[rr] == -2):
-            raise ValueError('missing corpus records in selected pools')
-    finally:
-        db.close()
-    par.clear()
-    _anc.clear()
-    im = pd.read_parquet(args.implications)
-    for a, c in im.loc[im.status == 'active', ['antecedent_name', 'consequent_name']].itertuples(index=False):
-        par[a.replace('_', ' ')].add(c.replace('_', ' '))
-    vocab = np.zeros(ix.n_tags, bool)
-    MODMASK = np.zeros(ix.n_tags, bool)
-    for i, n in ix.by_id.items():
-        vocab[i] = n in SLOTS
-        MODMASK[i] = VOCAB['tags'].get(n, {}).get('class') == 'modifier'
-    vid = np.flatnonzero(vocab)
-    excl = np.zeros(NP, bool)
-    for tag in XDRESS:
-        tid = ix.resolve(tag)
-        if tid is not None:
-            p = ix.posting(tid)
-            excl[p[p < NP]] = True
-    mlut = np.zeros(256, bool)
-    mlut[[pid[f'{r}_{p}'] for r in 'gsqe' for p in POOLS['male']]] = True
-    DROP = excl & mlut[ix.part_arr]
-    eligible = live & ~DROP
-    NLIVE = np.bincount(ix.part_arr[eligible], minlength=256)
-    M = np.zeros((vid.size, 256), np.int64)
-    for k, tid in enumerate(vid):
-        p = ix.posting(int(tid))
-        p = p[p < NP]
-        p = p[eligible[p]]
-        M[k] = np.bincount(ix.part_arr[p], minlength=256)
-    LIFT_FLOOR = np.full(ix.n_tags, MIN_LIFT)
-    OUTFIT_MASK = np.zeros(ix.n_tags, bool)
-    for tid in vid:
-        slot = SLOTS[ix.by_id[int(tid)]]
-        if slot in BASE_SLOTS:
-            LIFT_FLOOR[tid] = BASE_LIFT
-        OUTFIT_MASK[tid] = slot == 'OUTFIT'
-    STS = {(p, layer): layer_setup(p, layer) for p in POOLS for layer in LAYERS}
-    log('male crossdressing posts dropped: %d' % np.count_nonzero(DROP & live))
-    return checked
+def expand(*args, **kwargs):
+    return PresetEngine.expand(_engine, *args, **kwargs)
+
+expand._engine_wrapper = True
 
 
-def side_info(rids, tags):
-    if not rids.size:
-        return []
-    take = rids if rids.size <= 50000 else np.sort(np.random.default_rng(5).choice(rids, 50000, replace=False))
-    starts = ix.offsets[take].astype(np.int64)
-    lengths = ix.offsets[take + 1].astype(np.int64) - starts
-    indices = np.repeat(starts - np.concatenate(([0], np.cumsum(lengths)[:-1])), lengths) + np.arange(int(lengths.sum()))
-    body = ix.body[indices]
-    mc = np.bincount(body[MODMASK[body]], minlength=ix.n_tags) / take.size
-    implied = set().union(*(anc(t) for t in tags))
-    top = [t for t in np.argsort(-mc)[:12] if mc[t] >= SIDE_SHARE and ix.by_id[int(t)] not in implied][:4]
-    return [[ix.by_id[int(t)], float(mc[t])] for t in top]
+def seed_rids(*args, **kwargs):
+    return PresetEngine.seed_rids(_engine, *args, **kwargs)
+
+seed_rids._engine_wrapper = True
+
+
+def assemble(*args, **kwargs):
+    return PresetEngine.assemble(_engine, *args, **kwargs)
+
+assemble._engine_wrapper = True
+
+
+def fill(*args, **kwargs):
+    return PresetEngine.fill(_engine, *args, **kwargs)
+
+fill._engine_wrapper = True
+
+
+def exact(*args, **kwargs):
+    return PresetEngine.exact(_engine, *args, **kwargs)
+
+exact._engine_wrapper = True
+
+
+def join_check(*args, **kwargs):
+    return PresetEngine.join_check(_engine, *args, **kwargs)
+
+join_check._engine_wrapper = True
+
+
+def initialize(*args, **kwargs):
+    return PresetEngine.initialize(_engine, *args, **kwargs)
+
+initialize._engine_wrapper = True
+
+
+def side_info(*args, **kwargs):
+    return PresetEngine.side_info(_engine, *args, **kwargs)
+
+side_info._engine_wrapper = True
 
 
 def run_seed(job):
@@ -540,18 +364,14 @@ def build_pack(args, checked):
         pools[pool] = {'partitions': [f'{r}_{p}' for r in 'gsqe' for p in POOLS[pool]],
                        'live_by_rating': {r: int(sum(NLIVE[pid[f'{r}_{p}']] for p in POOLS[pool])) for r in 'gsqe'}}
     pools['male']['dropped_crossdressing'] = int(np.count_nonzero(DROP & live))
-    try:
-        git_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, stderr=subprocess.DEVNULL,
-                                           text=True).strip()
-    except (OSError, subprocess.CalledProcessError):
-        git_head = 'unknown'
+    head = git_head()
     inputs = {k: fingerprint(p) for k, p in {'map': args.map, 'corpus': args.corpus,
               'implications': args.implications, 'vocab': args.vocab}.items()}
     inputs['curation'] = fingerprint(args.curation) if args.curation.exists() else None
     return {'schema': 'naia.outfit_presets.v1',
             'note': '의상 세트 프리셋 - tools/build_outfit_presets.py 가 굽는다. 손으로 고치지 말 것',
             'build': {'built_at': datetime.now(timezone.utc).isoformat(), 'builder': 'build_outfit_presets.py',
-                      'git_head': git_head, 'params': dict(PARAMS, seeds=sorted(only)),
+                      'git_head': head, 'params': dict(PARAMS, seeds=sorted(only)),
                       'inputs': inputs, 'join_check': checked, 'pools': pools, 'counts': counts},
             'slots': CAP, 'tag_slot': {t: SLOTS[t] for r in records for t in r['tags']},
             'seed_status': statuses, 'sets': records}
@@ -596,7 +416,7 @@ def main(argv=None):
         log('counts ' + json.dumps(pack['build']['counts'], sort_keys=True))
         log('pack_bytes %d' % len(payload))
     finally:
-        if 'ix' in globals():
+        if ix is not None:
             ix.close()
 
 

@@ -1,0 +1,10 @@
+{
+  "schema": "naia.preset_vocab_overrides.v1",
+  "exclude": {
+    "hetero": "pool_genre",
+    "yuri": "pool_genre",
+    "yaoi": "pool_genre",
+    "bara": "pool_genre"
+  },
+  "family": {}
+}

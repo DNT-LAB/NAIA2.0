@@ -17,7 +17,9 @@ CORPUS = r'C:\VNR\DEV\NAIA-TagSearch-Full-20260912\tag_corpus.full.175.sqlite3'
 DATA = ROOT / 'tools/presets_data'
 # 2026-11-17 첫 빌드 실측. 시제품 v5(4981 · 436 · 1639)와의 차이는 하이픈 색 고침(-framed · -tinted eyewear → color)과
 # 역할 태그 오버라이드 몫이다. 이 값은 이후의 뜻하지 않은 어휘 흔들림을 잡는 가드다.
-EXPECTED = {'garment': 4973, 'modifier': 427, 'color': 1664, 'state': 283, 'noslot': 445}
+# 11-17 둘째 실측: 상태 같은 garment 12개(bikini top only · panty peek · undone necktie · goggles around neck 등)를
+# 오버라이드로 state 로 옮겼다(사용자 "의상 프리셋의 이벤트/상태는 따로 분류").
+EXPECTED = {'garment': 4961, 'modifier': 427, 'color': 1664, 'state': 295, 'noslot': 445}
 
 
 def log(message):

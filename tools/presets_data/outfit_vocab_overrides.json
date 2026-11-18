@@ -161,6 +161,54 @@
       "class": "garment",
       "slot": "OUTFIT",
       "why": "role"
+    },
+    "bikini top only": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "bikini bottom only": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "male underwear peek": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "panty peek": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "single bare shoulder": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "untucked shirt": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "panties under pantyhose": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "naked sweater": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "undone necktie": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "bandana around neck": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "goggles around neck": {
+      "class": "state",
+      "why": "state_hand"
+    },
+    "headphones around neck": {
+      "class": "state",
+      "why": "state_hand"
     }
   }
 }

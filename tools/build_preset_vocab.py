@@ -16,7 +16,8 @@ TARGET_PARTS = SINGLE_PARTS + ['1girl_1boy', '2girls', '2boys']
 # 2026-11-17 첫 빌드 실측. 시제품(1399 · 780 · 667 · 484 · 217)보다 적은 것은 빈도 하한 200 을 대상 풀(한 사람 넷 + 1girl_1boy ·
 # 2girls · 2boys)에서만 세기 때문이다(시제품은 모든 분면). 이후의 뜻하지 않은 어휘 흔들림을 잡는 가드.
 # outfit_state 479 = 467 + 의상 어휘에서 state 로 옮긴 12개(11-17).
-EXPECTED = {'event': 1314, 'link': 692, 'scene': 588, 'outfit_state': 479, 'expression': 204}
+# 11-18 Fable 리뷰 반영: 성인 '행위·체위' · event_core 를 받아 event +18 · link +26, 옷이 아닌 상태 11개를 event 로.
+EXPECTED = {'event': 1343, 'link': 718, 'scene': 588, 'outfit_state': 468, 'expression': 204}
 GENERIC_GARMENTS = set('clothes clothing outfit uniform underwear swimsuit legwear headwear eyewear footwear handwear neckwear'.split()) | {'bikini bottom', 'bikini top'}
 PRE = sorted(['partially unbuttoned', 'partially unzipped', 'partially removed', 'unworn', 'naked', 'no', 'open', 'unbuttoned', 'untied', 'unzipped', 'undone', 'torn', 'wet', 'adjusting', 'tugging', 'removing', 'taking off', 'putting on', 'pulling', 'lifting', 'lifting own', 'holding', 'holding unworn', 'holding removed', 'unfastened', 'loose', 'see-through', 'wardrobe', 'grabbing', 'biting'], key=len, reverse=True)
 SUF = sorted(['partially removed', 'removed', 'lift', 'lift up', 'pull', 'pulled down', 'aside', 'down', 'off', 'grab', 'tug', 'on head', 'around neck', 'around waist', 'only', 'malfunction', 'hold', 'slip', 'in mouth', 'over shoulder', 'partially unbuttoned', 'partially unzipped'], key=len, reverse=True)
@@ -31,6 +32,9 @@ TYPE_RULES = [
     ('worn_elsewhere', r' (on head|around neck|around waist|over shoulder)$'),
 ]
 TYPES = [t for t, _ in TYPE_RULES] + ['reveal', 'other']
+# 2단 지도에서 아직 소분류가 안 정해진 표식. 화면 칸 이름으로 새지 않게 '기타 소분류' 로 모은다(Fable 리뷰 11-18).
+PLACEHOLDER_SUBS = {'__pending__', '__unclassified__'}
+OTHER_SUB = '기타 소분류'
 
 
 def garment_names(vocabulary):
@@ -54,15 +58,28 @@ def state_type(name, sub=None):
     return 'reveal' if sub == '착의·노출 상태' else 'other'
 
 
+def is_adult_event(group, role, sub):
+    """성인 행위: role adult_act · event_core 이거나 소분류가 '행위·체위' 인 것(role 이 adult_body · unreviewed 여도).
+
+    11-17 첫 판은 adult_act 만 받아 breast press · standing sex · licking penis 등이 빠졌다(Fable 리뷰 11-18).
+    """
+    return group == 'adult' and (role in {'adult_act', 'event_core'} or sub == '행위·체위')
+
+
 def classify(name, lane, color, role, group, sub, outfit, garments, overrides):
     if name in overrides.get('exclude', {}):
         return None
+    if sub in PLACEHOLDER_SUBS:
+        sub = OTHER_SUB
     override = overrides.get('family', {}).get(name)
     if override is not None:
         base = classify(name, lane, color, role, group, sub, outfit, garments,
                         {'exclude': overrides.get('exclude', {}), 'family': {}})
         row = dict(base or {}, **override)
-        if row.get('family') == 'outfit_state':
+        if row.get('family') != 'outfit_state':
+            for key in ('kind', 'type', 'garment'):
+                row.pop(key, None)
+        else:
             row.setdefault('kind', 'event' if role in {'event_core', 'adult_act'} or group == 'action' else 'state')
             row.setdefault('type', state_type(name, sub))
             row.setdefault('garment', garment_of(name, garments))
@@ -78,7 +95,7 @@ def classify(name, lane, color, role, group, sub, outfit, garments, overrides):
                    type=state_type(name, sub), garment=garment)
     elif group == 'expression':
         row = dict(family='expression', slot=sub)
-    elif group == 'action' or (group == 'adult' and role == 'adult_act'):
+    elif group == 'action' or is_adult_event(group, role, sub):
         row = dict(family='event', slot=f'{group}:{sub}')
     elif group == 'scene':
         row = dict(family='scene', slot=sub)

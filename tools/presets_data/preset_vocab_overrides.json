@@ -6,5 +6,61 @@
     "yaoi": "pool_genre",
     "bara": "pool_genre"
   },
-  "family": {}
+  "family": {
+    "book on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "bucket on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "food on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "fruit on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "skull on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "paper on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "object on head": {
+      "family": "event",
+      "slot": "action:기타 소분류",
+      "why": "not_clothing"
+    },
+    "holding hair brush": {
+      "family": "event",
+      "slot": "action:사물 사용",
+      "why": "not_clothing"
+    },
+    "holding hair dryer": {
+      "family": "event",
+      "slot": "action:사물 사용",
+      "why": "not_clothing"
+    },
+    "holding bell": {
+      "family": "event",
+      "slot": "action:사물 사용",
+      "why": "not_clothing"
+    },
+    "holding ring": {
+      "family": "event",
+      "slot": "action:사물 사용",
+      "why": "not_clothing"
+    }
+  }
 }

@@ -19,6 +19,9 @@ SIDE = {'event': {'props': 'object', 'place': 'scene', 'face': 'expression'},
         'link': {'pose': 'event', 'face': 'expression', 'place': 'scene', 'props': 'object'},
         'expression': {'pose': 'event'}, 'scene': {'props': 'object'}}
 GENRES = {'hetero', 'yuri', 'yaoi', 'bara'}
+# 한 사람 풀(event)은 link 태그도 쓴다: 여럿 비중 0.6 이상이어도 sleeping · licking · cum 처럼 혼자 쓰는 것이 많다
+# (Fable 리뷰 11-18). 두 사람 풀(link)은 link 태그만.
+ENGINE_FAMILIES = {'event': {'event', 'link'}, 'link': {'link'}, 'expression': {'expression'}, 'scene': {'scene'}}
 
 
 def load_vocab(path):
@@ -44,7 +47,7 @@ def initialize(args):
 def install(source, family, vocabulary, subcategories):
     engine = source.fork()
     tags = vocabulary['tags']
-    slots = {n: row['slot'] for n, row in tags.items() if row['family'] == family}
+    slots = {n: row['slot'] for n, row in tags.items() if row['family'] in ENGINE_FAMILIES[family]}
     # 곁 정보도 어휘표 규칙 0 을 따른다: guarded lane · 색 전용 태그(red flower 등)는 싣지 않는다(11-17 감사에서 444건).
     usable = {n for t, n in engine.ix.by_id.items()
               if engine.ix.lane.get(t) != 'guarded' and not engine.ix.color[t]}
@@ -150,7 +153,7 @@ def validate_pack(pack, vocabulary, ancestors=lambda _: set(), subcategories=Non
         used = Counter()
         for tag in tags:
             entry = vocabulary['tags'].get(tag, {})
-            require(entry.get('family') == fam, 'tag family')
+            require(entry.get('family') in ENGINE_FAMILIES[fam], 'tag family')
             require(tag in pack['tag_slot'] and pack['tag_slot'][tag] == entry.get('slot'), 'slot mismatch')
             used[entry['slot']] += 1
         require(all(n <= pack['slots'].get(s, 0) <= 2 for s, n in used.items()), 'slot cap')
@@ -160,6 +163,8 @@ def validate_pack(pack, vocabulary, ancestors=lambda _: set(), subcategories=Non
         for field in ('rank', 'support_by_layer', 'top_character', 'top_copyright', 'side', 'score'):
             require(set(rec[field]) == set(layers), 'layer keys: ' + field)
         implied = set(tags).union(*(ancestors(t) for t in tags))
+        # 함의 조상과 자손은 칸이 달라도 한 세트에 두지 않는다(kiss + french kiss · bdsm + bondage - Fable 리뷰 11-18).
+        require(not any(b in ancestors(a) for a in tags for b in tags if a != b), 'implied pair')
         for layer in layers:
             require(rec['support_by_layer'][layer] == sum(per[r] for r in layer), 'layer support')
             require(rec['support_by_layer'][layer] >= MIN_SUP[pool], 'minimum support')
@@ -229,7 +234,9 @@ def build_pack(args, family, engines, checked, vocabulary):
     params = {k: PARAMS[k] for k in ('EARLY_SHARE', 'MIN_SHARE', 'MIN_LIFT', 'LIFT_CAP', 'KEEP', 'BEAM', 'K',
               'VARIANTS', 'VARIANT_DIFFERENCE', 'SCAN', 'CHAR_GATE', 'CP_GATE', 'SCAN_SEED', 'GATE_SEED', 'SIDE_SEED')}
     params.update(MIN_SUP={p: MIN_SUP[p] for p in pools}, FLOOR={p: FLOOR[p] for p in pools},
-                  FLOOR_BASIS='gsq', MAX_SIZE=5 if family == 'expression' else 6, KEEP_SEED=True,
+                  FLOOR_BASIS='gsqe', MAX_SIZE=5 if family == 'expression' else 6, KEEP_SEED=True,
+                  GATE='inclusion', COLLAPSE='implication_any_slot', SUFFIX_COLLAPSE=False,
+                  ENGINE_FAMILIES={f: sorted(ENGINE_FAMILIES[f]) for f in engines},
                   SIDE_SHARE=0.15, SIDE_LIFT=2.0, SIDE_MAX=4, SIDE_SCAN=50000, seeds=sorted(only))
     return dict(schema=f'naia.{family}_presets.v1', note='tools/build_family_presets.py 가 굽는다. 손으로 고치지 말 것',
         build=dict(built_at=datetime.now(timezone.utc).isoformat(), builder='build_family_presets.py', git_head=git_head(),

@@ -1,7 +1,7 @@
 """Bake outfit sets from a vocabulary; no tree or classifier dependency.
 
 The search functions are ported from prototype v5. Threads share the one pair
-of primary-character/copyright arrays; no cache or temporary files are needed.
+of per-record character/copyright lists (CSR); no cache or temporary files are needed.
 """
 import argparse
 from collections import Counter, defaultdict
@@ -41,7 +41,8 @@ PARAMS = dict(MIN_SUP=MIN_SUP, FLOOR=FLOOR, EARLY_SHARE=EARLY_SHARE,
               KEEP=KEEP, BEAM=BEAM, K=CANDIDATE_K, VARIANTS={'gsqe': 3, 'other': 1},
               VARIANT_DIFFERENCE=2, SCAN=SCAN, CHAR_GATE=CHAR_GATE, CP_GATE=CP_GATE,
               FILL_SHARE=FILL_SHARE, FILL_LIFT=1.0, SIDE_SHARE=SIDE_SHARE,
-              SIDE_MAX=4, SIDE_SCAN=50000, SCAN_SEED=1, GATE_SEED=3, SIDE_SEED=5)
+              SIDE_MAX=4, SIDE_SCAN=50000, SCAN_SEED=1, GATE_SEED=3, SIDE_SEED=5,
+              GATE='inclusion')   # 11-18: 캐릭터 · 작품 쏠림은 게시물에 붙은 것 전부로 센다(Fable 리뷰)
 from presets_engine import PresetEngine, git_head
 
 SLOTS, CAP, KIND, STS = {}, {}, {}, {}
@@ -196,7 +197,10 @@ def calibration():
 
     checks = {}
     hakama = first('male', 'free', 'hakama', 'gsqe')
-    checks['hakama'] = {'kimono', 'hakama'} <= set(hakama['tags']) and hakama['top_character']['gsqe'][0] <= CHAR_GATE
+    # hakama 는 세부형(hakama pants · hakama skirt)으로 접혀도 된다 - 함의로 hakama 를 품으면 통과(11-18 포함 기준 게이트로
+    # 빔 순위가 바뀌어 1위가 kimono + hakama pants 가 됐다).
+    checks['hakama'] = ('kimono' in hakama['tags'] and any(t == 'hakama' or 'hakama' in anc(t) for t in hakama['tags'])
+                        and hakama['top_character']['gsqe'][0] <= CHAR_GATE)
     armor = first('male', 'free', 'armor', 'gsqe')
     checks['armor'] = bool({'breastplate', 'pauldrons'} & set(armor['tags'])) and len(armor['tags']) >= 3
     checks['bikini_gs'] = 'bikini' in first('female', 'free', 'bikini', 'gs')['tags']
@@ -344,7 +348,7 @@ def build_pack(args, checked):
     records, statuses = [], {p: {} for p in POOLS}
     for pool in POOLS:
         counts['seed_status'][pool] = dict.fromkeys(['ok', 'few', 'character_bound', 'copyright_bound'], 0)
-    # Thread workers share immutable primary arrays and index mmap; each job owns its layer state.
+    # Thread workers share immutable character/copyright lists and index mmap; each job owns its layer state.
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         for job, (rows, state, dropped) in zip(jobs, executor.map(run_seed, jobs)):
             pool, start, seed = job

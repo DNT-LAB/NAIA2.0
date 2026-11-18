@@ -74,7 +74,7 @@ def build_pack(args, engine, checked, vocabulary, outfit_pack):
                        implications=args.implications, vocab=args.vocab, outfit_vocab=args.outfit_vocab).items()},
                    outfit_pack=fingerprint(args.outfit_pack), outfit_pack_inputs=outfit_pack['build']['inputs'],
                    join_check=checked, pools=engine.pool_info(), counts={'states': len(states), 'by_set': len(by_set)},
-                   params=dict(MIN_SUP={p: MIN_SUP[p] for p in POOLS}, CHAR_GATE=0.5, CP_GATE=0.6,
+                   params=dict(MIN_SUP={p: MIN_SUP[p] for p in POOLS}, CHAR_GATE=0.5, CP_GATE=0.6, GATE='inclusion',
                                GARMENT_SHARE=0.15, SET_SHARE=0.10, MIN_LIFT=2.0, LIFT_CAP=30,
                                GARMENT_MAX=6, SET_MAX=4, EXACT=True), calibration=checks),
         types=TYPES, states=states, by_set=by_set)

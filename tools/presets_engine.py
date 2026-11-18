@@ -1,7 +1,7 @@
 """Bake outfit sets from a vocabulary; no tree or classifier dependency.
 
 The search functions are ported from prototype v5. Threads share the one pair
-of primary-character/copyright arrays; no cache or temporary files are needed.
+of per-record character/copyright lists (CSR); no cache or temporary files are needed.
 """
 import argparse
 from collections import Counter, defaultdict
@@ -41,7 +41,26 @@ PARAMS = dict(MIN_SUP=MIN_SUP, FLOOR=FLOOR, EARLY_SHARE=EARLY_SHARE,
               KEEP=KEEP, BEAM=BEAM, K=CANDIDATE_K, VARIANTS={'gsqe': 3, 'other': 1},
               VARIANT_DIFFERENCE=2, SCAN=SCAN, CHAR_GATE=CHAR_GATE, CP_GATE=CP_GATE,
               FILL_SHARE=FILL_SHARE, FILL_LIFT=1.0, SIDE_SHARE=SIDE_SHARE,
-              SIDE_MAX=4, SIDE_SCAN=50000, SCAN_SEED=1, GATE_SEED=3, SIDE_SEED=5)
+              SIDE_MAX=4, SIDE_SCAN=50000, SCAN_SEED=1, GATE_SEED=3, SIDE_SEED=5,
+              GATE='inclusion')
+class Owners:
+    """게시물마다 캐릭터(또는 작품) id 전부 - CSR. 코퍼스 blob 은 id 오름차순이라 첫 값은 '대표' 가 아니다(Fable 리뷰 11-18).
+
+    쏠림은 포함 기준으로 센다: 어떤 캐릭터가 붙은 게시물 수 / 게시물 수. 캐릭터 없는 게시물은 분모에만 든다.
+    """
+    def __init__(self, offsets, ids):
+        self.offsets, self.ids = offsets, ids
+
+    def gather(self, rids):
+        starts = self.offsets[rids]
+        lengths = self.offsets[rids + 1] - starts
+        total = int(lengths.sum())
+        if not total:
+            return self.ids[:0]
+        idx = np.repeat(starts - np.concatenate(([0], np.cumsum(lengths)[:-1])), lengths) + np.arange(total)
+        return self.ids[idx]
+
+
 ENGINE_CONSTANTS = ["POOLS","LAYERS","MIN_SUP","FLOOR","MIN_SHARE","EARLY_SHARE","MIN_LIFT","LIFT_CAP","MAX_SIZE","KEEP","BEAM","SCAN","CANDIDATE_K","FILL_SHARE","BASE_LIFT","CHAR_GATE","CP_GATE","SIDE_SHARE","BASE_SLOTS","XDRESS"]
 
 class PresetEngine:
@@ -59,6 +78,8 @@ class PresetEngine:
         self.par = defaultdict(set)
         self._anc = {}
         self.keep_seed = False
+        self.suffix_collapse = True     # 의상 전용: 'X bikini' 와 'bikini' 같은 끝 낱말 세부형
+        self.collapse_any_slot = False  # 갈래: 함의 조상은 칸이 달라도 접는다(Fable 리뷰 11-18)
         self.floor_basis = 'gsq'
         self.fill_enabled = True
         self.kind_fn = None
@@ -106,9 +127,8 @@ class PresetEngine:
         if not rids.size:
             return 0.0, -1
         take = rids if exact or rids.size <= self.SCAN else np.random.default_rng(3).choice(rids, self.SCAN, replace=False)
-        a = arr[take]
-        n = a.size
-        a = a[a >= 0]
+        n = take.size
+        a = arr.gather(take)
         if not a.size:
             return 0.0, -1
         u, c = np.unique(a, return_counts=True)
@@ -123,7 +143,7 @@ class PresetEngine:
     def layer_setup(self, pool, layer):
         lut = np.zeros(256, bool); lut[[self.pid[f'{r}_{p}'] for r in layer for p in self.POOLS[pool]]] = True
         N = int(self.NLIVE[lut].sum()); full = np.zeros(self.ix.n_tags, np.int64); full[self.vid] = self.M[:, lut].sum(1)
-        floor_scale = N / max(1, int(self.NLIVE[[self.pid[f'{r}_{p}'] for r in self.floor_basis for p in self.POOLS[pool]]].sum()))   # v3 하한은 gsq 기준
+        floor_scale = N / max(1, int(self.NLIVE[[self.pid[f'{r}_{p}'] for r in self.floor_basis for p in self.POOLS[pool]]].sum()))   # 의상(v3) 하한은 gsq 기준 · 갈래는 gsqe(seed 고르는 하한과 같게)
         return dict(lut=lut, N=N, full=full, pbase=full / max(N, 1), floor=max(30, int(self.FLOOR[pool] * floor_scale)), pool=pool, layer=layer)
 
     def count(self, take):
@@ -133,13 +153,16 @@ class PresetEngine:
         return np.bincount(b, minlength=self.ix.n_tags)
 
     def try_add(self, S, name, blocked):
-        if name in blocked or any(o.endswith(' ' + name) for o in S):
+        suffix = self.suffix_collapse
+        if name in blocked or (suffix and any(o.endswith(' ' + name) for o in S)):
             return None
         a = self.anc(name)
         # 같은 옷의 세부형(끝 낱말 같음)만 바꾼다. 부분품(side-tie bikini bottom → bikini)은 전체를 지우지 않고 곁에 둔다
         # (같은 칸이면 상위 태그를 접는다: underwear → panties · hat → nurse cap · school uniform → serafuku)
-        repl = [o for o in S if (o in a or name.endswith(' ' + o))
-                and (self.kind(o) == self.kind(name) or self.SLOTS.get(o, 'OUTFIT') == self.SLOTS.get(name, 'OUTFIT'))]
+        # 갈래(collapse_any_slot)는 칸이 달라도 함의 조상을 접는다: kiss + french kiss → french kiss.
+        repl = [o for o in S if (o in a or (suffix and name.endswith(' ' + o)))
+                and (self.collapse_any_slot or self.kind(o) == self.kind(name)
+                     or self.SLOTS.get(o, 'OUTFIT') == self.SLOTS.get(name, 'OUTFIT'))]
         S2 = [o for o in S if o not in repl] + [name]
         if any(self.kind(o) == self.kind(name) for o in S2[:-1]):
             return None
@@ -283,32 +306,50 @@ class PresetEngine:
         try:
             checked = self.join_check(db)
             self.NAMES = dict(db.execute('SELECT id,name FROM tags'))
-            self.prim, self.primcp = np.full(self.NP, -2, np.int32), np.full(self.NP, -2, np.int32)
             glut = np.zeros(256, bool)
             glut[[self.pid[f'{r}_{p}'] for r in 'gsqe' for pp in self.POOLS.values() for p in pp]] = True
             rr = np.flatnonzero(glut[self.ix.part_arr] & self.live)
+            seen = np.zeros(self.NP, bool)
+            lens = {'c': np.zeros(self.NP, np.int64), 'y': np.zeros(self.NP, np.int64)}
+            blobs = {'c': bytearray(), 'y': bytearray()}
             for k in range(0, rr.size, 50000):
                 lo, hi = int(rr[k]), int(rr[min(k + 50000, rr.size) - 1])
                 for i, c, y in db.execute(
-                        'SELECT id,character,copyright FROM records WHERE id BETWEEN ? AND ?', (lo, hi)):
+                        'SELECT id,character,copyright FROM records WHERE id BETWEEN ? AND ? ORDER BY id', (lo, hi)):
                     if i < self.NP:
-                        self.prim[i] = int(np.frombuffer(c, '<u4')[0]) if c else -1
-                        self.primcp[i] = int(np.frombuffer(y, '<u4')[0]) if y else -1
-            for tid, name in self.NAMES.items():
-                if name == 'original':
-                    self.primcp[self.primcp == tid] = -1
-            if np.any(self.prim[rr] == -2) or np.any(self.primcp[rr] == -2):
+                        seen[i] = True
+                        for key, blob in (('c', c), ('y', y)):
+                            if blob:
+                                lens[key][i] = len(blob) // 4
+                                blobs[key] += blob
+            if not seen[rr].all():
                 raise ValueError('missing corpus records in selected pools')
+            original = {tid for tid, name in self.NAMES.items() if name == 'original'}
+            owners = {}
+            for key in ('c', 'y'):
+                ids = np.frombuffer(bytes(blobs[key]), '<u4').astype(np.int64)
+                ln = lens[key]
+                if key == 'y' and original:
+                    keep = ~np.isin(ids, list(original))
+                    ln = np.bincount(np.repeat(np.arange(self.NP), ln)[keep], minlength=self.NP).astype(np.int64)
+                    ids = ids[keep]
+                owners[key] = Owners(np.concatenate(([0], np.cumsum(ln))).astype(np.int64), ids)
+            self.prim, self.primcp = owners['c'], owners['y']
         finally:
             db.close()
         self.par.clear()
         self._anc.clear()
         im = pd.read_parquet(args.implications)
-        # 맵 이름은 이모티콘의 밑줄을 남긴다(`^_^` · `>_<` 등 - core/event_map/index.py resolve 주석). 맵에 그 이름 그대로
-        # 있으면 바꾸지 않는다 - 전부 공백으로 바꾸면 `^_^ -> closed eyes` 같은 함의가 끊긴다(Codex 리뷰 11-17).
-        canon = lambda n: n if n in self.ix.by_name else n.replace('_', ' ')
+        # 맵에는 이모티콘이 밑줄 판(`^_^` id 476)과 공백 판(`^ ^` id 1839)으로 **둘 다** 따로 있다(밑줄 이름 17개).
+        # 함의는 두 판 모두에 단다 - 밑줄 판에만 달면 팩에 실리는 `^ ^` 가 `closed eyes` 와 한 세트에 남는다
+        # (11-17 Codex 리뷰 수정이 공백 판을 놓쳤다 - 11-18 갈래 팩 함의 쌍 검사로 발견).
+        def forms(n):
+            spaced = n.replace('_', ' ')
+            return {f for f in (n, spaced) if f in self.ix.by_name} or {spaced}
         for a, c in im.loc[im.status == 'active', ['antecedent_name', 'consequent_name']].itertuples(index=False):
-            self.par[canon(a)].add(canon(c))
+            parents = forms(c)
+            for child in forms(a):
+                self.par[child].update(parents)
         self.vocab = np.zeros(self.ix.n_tags, bool)
         self.MODMASK = np.zeros(self.ix.n_tags, bool)
         for i, n in self.ix.by_id.items():
@@ -360,8 +401,9 @@ class PresetEngine:
 
 
     def configure(self, *, slots, caps, order=None, pools=None, min_sup=None,
-                  floor=None, floor_basis='gsq', kind_fn=None, keep_seed=True,
-                  lift_floor_fn=None, score_mask=None, fill=False, max_size=6, side=None):
+                  floor=None, floor_basis='gsqe', kind_fn=None, keep_seed=True,
+                  lift_floor_fn=None, score_mask=None, fill=False, max_size=6, side=None,
+                  suffix_collapse=False, collapse_any_slot=True):
         self.SLOTS = dict(slots)
         self.CAP = {s: caps.get(s, caps.get('*', 2)) for s in sorted(set(slots.values()))}
         self.ORDER = order or {s: i for i, s in enumerate(sorted(self.CAP))}
@@ -372,6 +414,7 @@ class PresetEngine:
         if floor is not None:
             self.FLOOR = floor
         self.floor_basis, self.kind_fn, self.keep_seed = floor_basis, kind_fn, keep_seed
+        self.suffix_collapse, self.collapse_any_slot = suffix_collapse, collapse_any_slot
         self.fill_enabled, self.MAX_SIZE, self.side = fill, max_size, side or {}
         self.vocab = self.mask(slots)
         self.vid = np.flatnonzero(self.vocab)

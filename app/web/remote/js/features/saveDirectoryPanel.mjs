@@ -1,18 +1,57 @@
+import {createSaveSettingsWindow, paintWhenIdle} from './saveSettingsWindow.mjs?v=20261118-savewin4';
+
 export function createSaveDirectoryPanel({
   document,
+  window: win = (typeof window !== 'undefined' ? window : null),
   escHtml,
   openModule,
   setModuleParam,
   showToast,
+  // 떠 있는 창으로 그린다(사용자 지시 2026-11-18). 떼어 낸 브라우저 창은 false - 예전 모듈 팝업 그대로.
+  useWindow = false,
+  requestState = () => {},
+  onDetach = null,
+  onClose = () => {},
 }) {
-  const moduleBody = document.getElementById('modulePopupBody');
   let lastState = null;
+  let windowShell = null;
+
+  function ensureWindow() {
+    if (!windowShell) {
+      windowShell = createSaveSettingsWindow({
+        document,
+        window: win,
+        title: 'Save Directory',
+        storageKey: 'save-directory',
+        width: 360,
+        height: 620,
+        escHtml,
+        onShow: () => requestState(),
+        onDetach,
+        onClose,
+        renderCached: () => {
+          if (!lastState) return false;
+          render(lastState);
+          return true;
+        },
+      });
+    }
+    return windowShell;
+  }
+
+  function bodyEl() {
+    return useWindow ? ensureWindow().host : document.getElementById('modulePopupBody');
+  }
 
   function setState(state) {
     lastState = state;
   }
 
-  function open() {
+  function open(options = {}) {
+    if (useWindow) {
+      ensureWindow().show({toggle: !!options.toggle, requestState: options.requestState !== false});
+      return;
+    }
     openModule('save_directory');
   }
 
@@ -20,6 +59,11 @@ export function createSaveDirectoryPanel({
     const m = state || lastState;
     if (!m) return;
     lastState = m;
+    const moduleBody = bodyEl();
+    paintWhenIdle(document, moduleBody, () => paint(m, moduleBody));
+  }
+
+  function paint(m, moduleBody) {
 
     const controlAllowed = !!m.control_allowed;
     const browseAllowed = !!m.browse_allowed;
@@ -31,7 +75,10 @@ export function createSaveDirectoryPanel({
     const classificationOptions = (m.classification_method_options || []).map(opt =>
       `<option value="${escHtml(opt.value)}" ${opt.value === m.classification_method ? 'selected' : ''}>${escHtml(opt.label)}</option>`
     ).join('');
-    const rulesVisible = m.classification_method === 'prompt_recognition';
+    const rulesVisible = m.classification_method === 'prompt_recognition'
+      || m.classification_method === 'model_type_prompt';
+    const modelVisible = m.classification_method === 'model_type'
+      || m.classification_method === 'model_type_prompt';
     const accessNotice = !controlAllowed
       ? `<div class="mod-notice">${escHtml(m.control_block_reason || 'This setting is read-only on this client.')}</div>`
       : '';
@@ -96,11 +143,16 @@ export function createSaveDirectoryPanel({
           <select class="mod-select" ${controlAllowed ? '' : 'disabled'} onchange="onSaveDirectoryClassificationChange(this.value)">
             ${classificationOptions}
           </select>
+          ${modelVisible ? `
+            <div class="mod-policy-text mod-dim" style="margin-top:6px">
+              그림을 만든 모델로 나눕니다: <b>V5/</b> · <b>V4.5/</b> …${m.classification_method === 'model_type_prompt' ? ' 그 아래에서 규칙으로 한 번 더' : ''}.
+              NAI 가 아닌 그림(ComfyUI · WebUI)은 모델 폴더 없이 저장됩니다.
+            </div>` : ''}
         </label>
         ${rulesVisible ? `
           <label class="mod-field">
             <span class="mod-field-label">Classification Rules</span>
-            <textarea class="mod-textarea mod-textarea-lg" ${controlAllowed ? '' : 'disabled'}
+            <textarea class="mod-textarea mod-textarea-lg" id="saveDirRules" ${controlAllowed ? '' : 'disabled'}
                       placeholder="*1girl, *2girls, (landscape|scenery)"
                       oninput="onModTextEdit('save_directory','classification_rules',this.value)">${escHtml(m.classification_rules || '')}</textarea>
             <div style="font-size:11px;color:var(--text-muted,#9aa);line-height:1.7;margin-top:6px;word-break:keep-all">
@@ -187,6 +239,9 @@ export function createSaveDirectoryPanel({
     setState,
     open,
     render,
+    // 떠 있는 창이 열려 있는가(접힌 것 포함). 열려 있으면 상태가 올 때마다 다시 그린다.
+    closeWindow: () => { if (windowShell) windowShell.close(); },
+    isWindowOpen: () => !!(useWindow && windowShell && windowShell.isOpen()),
     browse,
     pickAndApply,
     onTimestampToggle,

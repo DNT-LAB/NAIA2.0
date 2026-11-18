@@ -548,6 +548,9 @@ let e621Window = null;
 // 떼어 낸 모듈 화면(?detached=module)은 그 창 전체가 모듈 팝업이라 예전 배치를 그대로 쓴다(E621 과 같다).
 const peUsesWindow = !isDetachedModule;
 let promptEngineeringWindow = null;
+// Auto Save · Save Directory 도 떠 있는 창이다(saveSettingsWindow.mjs, 사용자 지시 2026-11-18).
+// 떼어 낸 모듈 화면(?detached=module)은 그 창 전체가 모듈 팝업이라 예전 배치를 그대로 쓴다(PE 와 같다).
+const saveUsesWindow = !isDetachedModule;
 let eventStreamPanel = null;
 let wildcardPanel = null;
 let latestWildcardFreezeState = {locations: [], legacy: [], characters: []};
@@ -1875,7 +1878,7 @@ const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261006-hi
       openSaveDirectory: () => openSaveDirectoryPanel(),
       getSaveDirectory: () => saveDirectoryPanel?.getState()?.current_save_directory || '',
       requestSaveDirectory: () => requestModuleState('save_directory'),
-      openQuicksaveSettings: () => openModule('auto_save'),
+      openQuicksaveSettings: () => openModule('auto_save', {forceOpen: true}),
       // 미저장 이미지는 지우면 휴지통에도 안 남는다 — 확인 창을 건너뛸지
       // 말지가 이 값에 걸린다. 상태가 아직 없으면 -1(모름)로 넘긴다.
       clearAllHistory: () => clearResultHistory(),
@@ -3161,10 +3164,15 @@ const eventPresetReady = import('./js/features/eventPresetPanel.mjs?v=20260609-s
   .catch(error => {
     console.error('Failed to initialize Event Preset panel module', error);
   });
-const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260831-saveorder')
+const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20261118-savewin4')
   .then(({createAutoSavePanel}) => {
     autoSavePanel = createAutoSavePanel({
       document,
+      window,
+      useWindow: saveUsesWindow,
+      requestState: () => requestModuleState('auto_save'),
+      onDetach: () => detachSaveWindow('auto_save'),
+      onClose: () => flushPendingModuleEdit('auto_save'),
       getWs: () => ws,
       WebSocket,
       getCurrentModuleId: () => currentModuleId,
@@ -3179,10 +3187,15 @@ const autoSavePanelReady = import('./js/features/autoSavePanel.mjs?v=20260831-sa
   .catch(error => {
     console.error('Failed to initialize auto save panel module', error);
   });
-const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20260818-counterreset1')
+const saveDirectoryPanelReady = import('./js/features/saveDirectoryPanel.mjs?v=20261118-savewin4')
   .then(({createSaveDirectoryPanel}) => {
     saveDirectoryPanel = createSaveDirectoryPanel({
       document,
+      window,
+      useWindow: saveUsesWindow,
+      requestState: () => requestModuleState('save_directory'),
+      onDetach: () => detachSaveWindow('save_directory'),
+      onClose: () => flushPendingModuleEdit('save_directory'),
       escHtml,
       openModule,
       setModuleParam,
@@ -5459,6 +5472,8 @@ function onInitComplete() {
   if (conditionalPromptWindow && conditionalPromptWindow.isOpen()) requestModuleState('conditional_prompt');
   if (e621Window && e621Window.isOpen()) requestModuleState('e621_event');
   if (promptEngineeringWindow && promptEngineeringWindow.isOpen()) requestModuleState('prompt_engineering');
+  if (autoSavePanel?.isWindowOpen?.()) requestModuleState('auto_save');
+  if (saveDirectoryPanel?.isWindowOpen?.()) requestModuleState('save_directory');
   window.wireFlow?.reload?.();
   // 재시작/재연결 시 NAI 전용 도구(character/charref/vibe) 배지·Activated 요약 하이드레이션:
   // 모듈을 열지 않아도 복원된 활성 상태가 배지에 즉시 반영되도록 접속 직후 module_state 요청.
@@ -9602,7 +9617,8 @@ function applyMetadataVibeTransfer(payload) {
 // ---- Stats functions ----
 
 function toggleAutoSave() {
-  if (autoSavePanel) autoSavePanel.open();
+  // 아래 상태 줄의 Auto Save 칩 - 예전처럼 다시 누르면 닫힌다(openModule 의 토글과 같다).
+  if (autoSavePanel) autoSavePanel.open({toggle: true});
 }
 
 function setAutoSaveEnabled(enabled) {
@@ -13448,6 +13464,28 @@ function openModule(moduleId, options = {}) {
     });
     return;
   }
+  // Auto Save · Save Directory 도 떠 있는 창이다(사용자 지시 2026-11-18). 런처 · 상태 줄 칩 · 뷰어 설정 판의
+  // '저장 경로' 줄 · [Save Directory Settings] 단추가 전부 여기나 패널의 open() 을 지난다. 상태는 창이 열릴 때 받는다.
+  if ((moduleId === 'auto_save' || moduleId === 'save_directory') && saveUsesWindow) {
+    const ready = moduleId === 'auto_save' ? autoSavePanelReady : saveDirectoryPanelReady;
+    ready.then(() => {
+      const target = moduleId === 'auto_save' ? autoSavePanel : saveDirectoryPanel;
+      if (!target) return;
+      // 떼어 낸 창을 다시 붙이면 그 창의 상태가 함께 온다 - 토글로 닫지 말고 그 상태로 연다(PE 창과 같다).
+      const initial = options.initialState && options.initialState.module_id === moduleId ? options.initialState : null;
+      if (initial) {
+        moduleStateCache.set(moduleId, initial);
+        target.setState(initial);
+        if (options.guardInitialState) guardTransferredModuleState(moduleId);
+      }
+      target.open({
+        toggle: !options.forceOpen && !initial,
+        requestState: !initial && !options.skipStateRequest,
+      });
+      if (initial) target.render(initial);
+    });
+    return;
+  }
   // NAI 전용 모듈 가드
   if (['character', 'character_reference', 'vibe_transfer'].includes(moduleId) && modeSelect.value !== 'NAI'
       && !(moduleId === 'character_reference' && isAnimaManagedMode())) {
@@ -13603,6 +13641,14 @@ function isPromptEngineeringOpen() {
 
 /** PE 창의 ↗ - 별도 브라우저 창으로 뗀다(모듈 팝업의 ↗ 와 같은 일). 밀린 편집과 칸의 글을 먼저 보내고, 칸의 글로
  *  사본을 만든 뒤 창을 닫는다(닫기가 한 번 더 보내는 것은 같은 글이다). */
+// Auto Save · Save Directory 창의 ↗ - 예전 모듈 팝업의 '떼어 내기' 와 같다(대기 중인 글을 먼저 보낸다).
+function detachSaveWindow(moduleId) {
+  flushPendingModuleEdit(moduleId);
+  const popup = openDetachedModule(moduleId);
+  const target = moduleId === 'auto_save' ? autoSavePanel : saveDirectoryPanel;
+  if (popup && target) target.closeWindow();
+}
+
 function detachPromptEngineeringWindow() {
   flushPromptEngineeringEdits();
   const popup = openDetachedModule('prompt_engineering');
@@ -14188,6 +14234,14 @@ function onModuleState(m) {
   // 여기서 넘긴다. 창이 닫혀 있어도 흘려 넣는다(Search 창과 같은 원칙 - 다음에 열 때 이미 최신).
   if (m.module_id === 'conditional_prompt') {
     renderConditionalPrompt(m);
+    return;
+  }
+
+  // Auto Save · Save Directory 도 떠 있는 창이다(떼어 낸 브라우저 창에서는 예전 모듈 팝업이라 아래 관문을 탄다).
+  // 열려 있을 때만 그린다 - 닫혀 있으면 위에서 setState 로 받아 두고, 열 때 그것으로 그린다.
+  if ((m.module_id === 'auto_save' || m.module_id === 'save_directory') && saveUsesWindow) {
+    const target = m.module_id === 'auto_save' ? autoSavePanel : saveDirectoryPanel;
+    if (target && target.isWindowOpen()) renderModuleState(m);
     return;
   }
 

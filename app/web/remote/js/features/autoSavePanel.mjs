@@ -1,5 +1,8 @@
+import {createSaveSettingsWindow, paintWhenIdle} from './saveSettingsWindow.mjs?v=20261118-savewin4';
+
 export function createAutoSavePanel({
   document,
+  window: win = (typeof window !== 'undefined' ? window : null),
   getWs,
   WebSocket,
   getCurrentModuleId,
@@ -9,9 +12,14 @@ export function createAutoSavePanel({
   setModuleParam,
   showToast,
   showAppDialog,
+  // 떠 있는 창으로 그린다(사용자 지시 2026-11-18). 떼어 낸 브라우저 창은 false - 예전 모듈 팝업 그대로.
+  useWindow = false,
+  requestState = () => {},
+  onDetach = null,
+  onClose = () => {},
 }) {
   const statsSave = document.getElementById('statsSave');
-  const moduleBody = document.getElementById('modulePopupBody');
+  let windowShell = null;
   let enabled = true;
   let lastState = null;
   let bulkBusy = false;
@@ -42,7 +50,39 @@ export function createAutoSavePanel({
     updateSaveUi();
   }
 
-  function open() {
+  function ensureWindow() {
+    if (!windowShell) {
+      windowShell = createSaveSettingsWindow({
+        document,
+        window: win,
+        title: 'Auto Save',
+        storageKey: 'auto-save',
+        width: 380,
+        height: 640,
+        escHtml,
+        onShow: () => requestState(),
+        onDetach,
+        onClose,
+        // 받은 상태가 없어도 기본값으로 그린다(예전 openModule 의 renderCached 와 같다).
+        renderCached: () => { render(); return true; },
+      });
+    }
+    return windowShell;
+  }
+
+  function bodyEl() {
+    return useWindow ? ensureWindow().host : document.getElementById('modulePopupBody');
+  }
+
+  function isWindowOpen() {
+    return !!(useWindow && windowShell && windowShell.isOpen());
+  }
+
+  function open(options = {}) {
+    if (useWindow) {
+      ensureWindow().show({toggle: !!options.toggle, requestState: options.requestState !== false});
+      return;
+    }
     openModule('auto_save');
   }
 
@@ -61,6 +101,11 @@ export function createAutoSavePanel({
   }
 
   function render(state = lastState) {
+    const moduleBody = bodyEl();
+    paintWhenIdle(document, moduleBody, () => paint(state, moduleBody));
+  }
+
+  function paint(state, moduleBody) {
     const panelState = state || defaultState();
     panelState.auto_save = !!panelState.auto_save;
     enabled = panelState.auto_save;
@@ -153,7 +198,7 @@ export function createAutoSavePanel({
         </label>
         <label class="mod-field">
           <span class="mod-field-label">Max History Length</span>
-          <input class="mod-input" type="number" min="100" max="10000" step="100"
+          <input class="mod-input" id="autoSaveMaxHistory" type="number" min="100" max="10000" step="100"
                  value="${escHtml(String(panelState.max_history_length ?? 2000))}"
                  ${panelState.history_limit_enabled ? '' : 'disabled'}
                  onchange="onHistoryLimitLengthChange(this.value)">
@@ -212,7 +257,7 @@ export function createAutoSavePanel({
     const text = enabled ? 'Auto Save' : 'Auto Save OFF';
     if (dot) { dot.nextSibling.textContent = text; }
     statsSave.title = enabled ? 'Open auto-save settings (enabled)' : 'Open auto-save settings (disabled)';
-    if (getCurrentModuleId() === 'auto_save' && isModulePopupOpen()) {
+    if (isWindowOpen() || (!useWindow && getCurrentModuleId() === 'auto_save' && isModulePopupOpen())) {
       render();
     }
   }
@@ -389,6 +434,8 @@ export function createAutoSavePanel({
     // 남으므로, 확인 창을 건너뛸지 말지가 이 값에 걸린다.
     getState: () => lastState,
     open,
+    closeWindow: () => { if (windowShell) windowShell.close(); },
+    isWindowOpen,
     setEnabled,
     syncEnabled,
     setState,

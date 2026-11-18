@@ -58,7 +58,19 @@ SAVE_DIRECTORY_FILENAME_OPTIONS = [
 SAVE_DIRECTORY_CLASSIFICATION_OPTIONS = [
     {"value": "none", "label": "분류 없음"},
     {"value": "prompt_recognition", "label": "프롬프트 인식"},
+    # 사용자 요청 2026-11-18: 할당량 때문에 4.5 와 5 를 오가며 만든 그림을 모델별로 가른다.
+    # 모델 폴더는 NAI 그림만 만든다(ComfyUI · WebUI 는 나누지 않음 - 사용자 지정).
+    {"value": "model_type", "label": "모델 종류 (V5 · V4.5 …)"},
+    {"value": "model_type_prompt", "label": "모델 종류 → 프롬프트 인식"},
 ]
+# NAI 모델 계열 -> 저장 하위 폴더 이름. 계열은 nai_model_contract 의 spec.family 다.
+NAI_FAMILY_FOLDERS = {
+    "v5": "V5",
+    "v4.5": "V4.5",
+    "v4.0": "V4",
+    "v4": "V4",
+    "v3": "V3",
+}
 
 
 class HeadlessSaveService:
@@ -544,17 +556,61 @@ class HeadlessSaveService:
         method = str(context.save_directory_state.get("classification_method") or "none")
         if method == "none":
             return None
-        rules = str(context.save_directory_state.get("classification_rules") or "")
-        # 분류는 켰지만 규칙이 비어/공백이면 분류하지 않는다(no-op). 안 그러면 빈 규칙에서
-        # classify가 "misc"를 돌려줘 모든 이미지가 misc/ 로 쏠리는 footgun이 된다(Codex MEDIUM).
-        # 규칙 없는 활성은 기존처럼 베이스 폴더에 저장.
-        if not rules.strip():
+        parts: list[str] = []
+        if method in {"model_type", "model_type_prompt"}:
+            # 모델을 모르는 그림(NAI 가 아닌 것 · 바깥에서 들여온 것)은 모델 폴더 없이 간다.
+            model_folder = self._item_model_folder(item)
+            if model_folder:
+                parts.append(model_folder)
+        if method in {"prompt_recognition", "model_type_prompt"}:
+            rules = str(context.save_directory_state.get("classification_rules") or "")
+            # 분류는 켰지만 규칙이 비어/공백이면 분류하지 않는다(no-op). 안 그러면 빈 규칙에서
+            # classify가 "misc"를 돌려줘 모든 이미지가 misc/ 로 쏠리는 footgun이 된다(Codex MEDIUM).
+            # 규칙 없는 활성은 기존처럼 베이스 폴더에 저장.
+            if rules.strip():
+                prompt_folder = image_classification.classify(
+                    self._item_classification_tags(item),
+                    "prompt_recognition",
+                    rules,
+                )
+                if prompt_folder:
+                    parts.append(prompt_folder)
+        return "/".join(parts) if parts else None
+
+    def _item_model_folder(self, item: Any) -> str | None:
+        """이 그림을 **만든** NAI 모델의 계열 폴더(V5 · V4.5 …). NAI 가 아니거나 모르면 None.
+
+        ⚠️ 지금 고른 모델이 아니라 그림에 남은 모델을 본다 - 4.5 로 만든 뒤 V5 로 바꾸고
+           일괄 저장해도 V4.5 로 가야 한다.
+        ⚠️ 인페인트 wire 이름(`nai-diffusion-5-full-inpainting`)도 같은 계열로 묶는다 -
+           `nai_key_from_exact_name` 이 정확히 아는 이름만 키로 바꾼다(부분 문자열 매칭 금지).
+        """
+        params = getattr(item, "generation_params", {}) or {}
+        if not isinstance(params, dict):
             return None
-        return image_classification.classify(
-            self._item_classification_tags(item),
-            method,
-            rules,
-        )
+        api_mode = str(params.get("api_mode") or "").strip().upper()
+        if api_mode and api_mode != "NAI":
+            return None
+        raw_model = str(params.get("model") or "").strip()
+        if not raw_model:
+            return None
+        from core.nai_model_contract import nai_key_from_exact_name, nai_model_badge
+
+        def family_of(key: str) -> str:
+            try:
+                return str(nai_model_badge(key, self.context).get("family") or "")
+            except Exception:
+                return ""
+
+        # 적힌 키 그대로 먼저 본다(내장 키 · 사용자 등록 키). 업데이트 전에 `NAID5.0F` 같은 옛 별칭 이름으로
+        # 등록한 사용자 모델이 있으면 생성도 그 모델로 갔다 - 별칭 번역을 먼저 하면 다른 계열 폴더로 간다(Codex 리뷰).
+        family = family_of(raw_model)
+        if not family:
+            # wire 이름(`nai-diffusion-5-full-inpainting`) · 옛 별칭 · 표시 라벨 -> 정확히 아는 이름만 키로 바꾼다.
+            exact = nai_key_from_exact_name(raw_model)
+            if exact:
+                family = family_of(exact)
+        return NAI_FAMILY_FOLDERS.get(family)
 
     @staticmethod
     def _item_classification_tags(item: Any) -> str:

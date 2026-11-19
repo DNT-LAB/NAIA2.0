@@ -1,0 +1,53 @@
+{
+  "template_version": "2026-11-18b",
+  "fragments": {
+    "ARTIST": "0.38::kanzarin, nns (sobchan), torino aqua ::, 0.43::ixy ::, 0.67::epi zero ::, -0.93::artist collaboration ::",
+    "TAIL_Q": "0.18::ebora, kedama milk, mikozin ::",
+    "QUALITY": "year 2024, best quality, 0.9::high complexity ::, very aesthetic, contrast, 0.25::ultra complexity ::",
+    "BG_PERSON": "white background, -2.5::color background, detailed background, multiple views, furry , ai-generated ::",
+    "BG_SCENE": "-2.5::1girl, solo, multiple views, furry , ai-generated ::"
+  },
+  "templates": {
+    "outfit": "{head}, ARTIST, full body, standing, arms at sides, looking at viewer, {tags}, TAIL_Q, straight-on, QUALITY, BG_PERSON",
+    "event": "{head}, ARTIST, {tags}, TAIL_Q, QUALITY, BG_PERSON",
+    "link": "{head}, ARTIST, {tags}, TAIL_Q, QUALITY, BG_PERSON",
+    "expression": "{head}, ARTIST, portrait, looking at viewer, {tags}, TAIL_Q, straight-on, QUALITY, BG_PERSON",
+    "scene": "{head}, ARTIST, scenery, {tags}, TAIL_Q, QUALITY, BG_SCENE"
+  },
+  "weighting": {
+    "note": "Information weighting (user 11-18): set tags with at least common_min_posts Danbooru posts get common_weight, the rest (and tags missing from the snapshot) get rare_weight.",
+    "source": "data/danbooru_tag_snapshot/tags.parquet",
+    "common_min_posts": 100000,
+    "common_weight": "0.7",
+    "rare_weight": "1.3"
+  },
+  "explicit": {
+    "note": "Sets whose most common rating is E get these tags right after the head. The adult cue keeps every explicit thumbnail clearly adult.",
+    "rating": "e",
+    "prefix": "nsfw",
+    "adult_cue": {
+      "1girl": "mature female",
+      "1girl, 1boy": "mature female",
+      "2girls": "mature female",
+      "2boys": "mature male",
+      "no humans": ""
+    }
+  },
+  "resolutions": {
+    "outfit": [832, 1216],
+    "event": [1024, 1024],
+    "link": [1024, 1024],
+    "expression": [1024, 1024],
+    "scene": [1024, 1024]
+  },
+  "generation": {
+    "model": "NAID5F",
+    "api_model": "nai-diffusion-5-full-medium",
+    "steps": 14,
+    "sampler": "k_euler_ancestral",
+    "noise_schedule": "karras",
+    "cfg_scale": 5.1,
+    "cfg_rescale": 0,
+    "negative_prompt": ""
+  }
+}

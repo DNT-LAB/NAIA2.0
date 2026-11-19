@@ -1,6 +1,6 @@
 """Bake event (including link), expression and scene preset packs."""
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
@@ -127,6 +127,51 @@ def calibration(engines):
     return checks
 
 
+# 비슷한 세트 덜어 내기(사용자 11-18 "1번"): 같은 seed 안에서 순위가 더 높은 세트와 **흔한 태그만** 다른 세트는 뺀다.
+# 흔한 태그 = 그 갈래에서 PRUNE_HUB_SEEDS 개 이상의 seed 세트에 나오는 태그(standing · sitting · hand up · open mouth · outdoors …).
+# 썸네일이 거의 같게 나왔다(petting + sitting / petting + on back). 전체 빌드에서만 건다 - 흔한 태그는 전체 seed 를 봐야 정해진다.
+PRUNE_HUB_SEEDS = 30
+
+
+def hub_tags(records, hub_seeds=PRUNE_HUB_SEEDS):
+    seeds = defaultdict(set)
+    for rec in records:
+        for tag in rec['tags']:
+            seeds[rec['family'], tag].add(rec['seed'])
+    hubs = defaultdict(list)
+    for (fam, tag), found in seeds.items():
+        if len(found) >= hub_seeds:
+            hubs[fam].append(tag)
+    return {fam: sorted(tags) for fam, tags in sorted(hubs.items())}
+
+
+def _set_order(rec):
+    return (min(rec['rank'].values()), -max(rec['support_by_layer'].values()), tuple(rec['tags']))
+
+
+def _hub_only(a, b, hubs):
+    diff = set(a) ^ set(b)
+    return bool(diff) and diff <= hubs
+
+
+def prune_near_duplicates(records, hubs):
+    groups = defaultdict(list)
+    for rec in records:
+        groups[rec['family'], rec['pool'], rec['seed']].append(rec)
+    kept, pruned = [], 0
+    for (fam, _, _), rows in groups.items():
+        hub = set(hubs.get(fam, ()))
+        keep = []
+        for rec in sorted(rows, key=_set_order):
+            if any(_hub_only(rec['tags'], other['tags'], hub) for other in keep):
+                pruned += 1
+                continue
+            keep.append(rec)
+        kept.extend(keep)
+    kept.sort(key=lambda r: (r['pool'], r['family'], r['seed'], tuple(r['tags'])))
+    return kept, pruned
+
+
 def validate_pack(pack, vocabulary, ancestors=lambda _: set(), subcategories=None):
     def require(ok, message):
         if not ok:
@@ -188,6 +233,14 @@ def validate_pack(pack, vocabulary, ancestors=lambda _: set(), subcategories=Non
                         require(vocabulary['tags'].get(tag, {}).get('family') == target, 'side family')
                     elif subcategories is not None:
                         require(subcategories.get(tag, [None])[0] == 'object', 'side object')
+    prune = pack['build'].get('prune')
+    if prune and prune.get('applied'):
+        groups = defaultdict(list)
+        for rec in pack['sets']:
+            groups[rec['family'], rec['pool'], rec['seed']].append(rec['tags'])
+        for (fam, _, _), rows in groups.items():
+            hub = set(prune['hub_tags'].get(fam, ()))
+            require(not any(_hub_only(a, b, hub) for i, a in enumerate(rows) for b in rows[i + 1:]), 'near duplicate')
     return True
 
 
@@ -219,6 +272,10 @@ def build_pack(args, family, engines, checked, vocabulary):
                 statuses[pool][seed] = failed
             counts['dropped_final_gate'] += dropped
     records.sort(key=lambda r: (r['pool'], r['family'], r['seed'], tuple(r['tags'])))
+    hubs = hub_tags(records)
+    prune = dict(applied=not only, hub_seeds=PRUNE_HUB_SEEDS, hub_tags=hubs, before=len(records))
+    if not only:
+        records, prune['pruned'] = prune_near_duplicates(records, hubs)
     pools, slots, tag_slot = {}, {}, {}
     for engine in engines.values():
         pools.update(engine.pool_info())
@@ -240,7 +297,7 @@ def build_pack(args, family, engines, checked, vocabulary):
                   SIDE_SHARE=0.15, SIDE_LIFT=2.0, SIDE_MAX=4, SIDE_SCAN=50000, seeds=sorted(only))
     return dict(schema=f'naia.{family}_presets.v1', note='tools/build_family_presets.py 가 굽는다. 손으로 고치지 말 것',
         build=dict(built_at=datetime.now(timezone.utc).isoformat(), builder='build_family_presets.py', git_head=git_head(),
-                   params=params, inputs={k: fingerprint(p) for k, p in dict(map=args.map, corpus=args.corpus,
+                   params=params, prune=prune, inputs={k: fingerprint(p) for k, p in dict(map=args.map, corpus=args.corpus,
                    implications=args.implications, vocab=args.vocab, outfit_vocab=args.outfit_vocab,
                    subcategories=args.subcategories).items()}, join_check=checked, pools=pools, counts=counts, calibration=checks),
         slots=slots, tag_slot={t: tag_slot[t] for r in records for t in r['tags']}, seed_status=statuses, sets=records)

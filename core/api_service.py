@@ -388,6 +388,37 @@ def _embed_stealth_pnginfo(image: Image.Image, chunks: Dict[str, str]) -> Image.
     return rgba
 
 
+# NAI 오류 본문에 실려 오는 긴 base64(보낸 그림을 통째로 되돌려 준다)를 줄인다.
+# 실측 2026-11-19: V5 에 CR 이미지를 JSON 안 base64 로 보냈더니 400 메시지가 그 PNG 전체를 담아
+# 1,187,062자였다 - 토스트 · 생성 오류 · 로그가 그대로 받아 잘려 보였다.
+_ERROR_BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{200,}={0,2}")
+
+
+def _shorten_base64_in_error(text: str) -> str:
+    return _ERROR_BASE64_RUN.sub(lambda m: f"{m.group(0)[:16]}…(base64 {len(m.group(0)):,}자 생략)", str(text or ""))
+
+
+V5_CHARACTER_REFERENCE_UNSUPPORTED = "현재 V5 Character Reference 지원 상태가 아닙니다."
+
+
+def _nai_unsupported_director_reference_message(status_code: int, body: str) -> str:
+    """NAI 가 "이 모델은 director reference(Character Reference)를 안 받는다" 고 답했으면 띄울 글. 아니면 "".
+
+    V5 CRef 는 NovelAI 출시 전에 NAIA 에서 미리 켰다(사용자 지시 2026-11-19 · 4.5F 사양). 출시 전 응답(실측):
+      400 {"statusCode":400,"message":"Validation error: model nai-diffusion-5-full doesn't support director reference images"}
+    재시도 세 번은 같은 답을 세 번 받을 뿐이다 - 호출부가 no_retry 로 바로 돌려준다.
+    """
+    if int(status_code or 0) != 400:
+        return ""
+    text = str(body or "")
+    if "support director reference" not in text:
+        return ""
+    if "diffusion-5" in text:
+        return V5_CHARACTER_REFERENCE_UNSUPPORTED
+    match = re.search(r'"message"\s*:\s*"([^"]+)"', text)
+    return f"이 모델은 Character Reference 를 지원하지 않습니다: {match.group(1) if match else text}"
+
+
 class APIService:
     def _nai_registry_knows(self, model_key: Any) -> bool:
         """레지스트리(빌트인 + 사용자 등록)가 이 키를 아는가. 조회 실패는 False."""
@@ -1094,6 +1125,10 @@ class APIService:
     # V5 multipart 에서 **파트로 떼어 보내야 하는** parameters 필드.
     # 값은 base64 문자열이고, 떼어낸 뒤 JSON 에는 파트 이름만 남긴다.
     _NAI_MULTIPART_BLOB_FIELDS = ("image", "mask")
+    # 목록으로 오는 이미지 필드 - 장마다 파트 하나(`<필드>_<번호>`), JSON 목록에는 그 이름들이 남는다.
+    # Character Reference(director) 이미지가 그렇다. base64 그대로 두면 V5 가 위와 같은 400 을 준다
+    # (실측 2026-11-19 · V5FM + CR 1장 - V5 CRef 사전 활성화 시험).
+    _NAI_MULTIPART_BLOB_LIST_FIELDS = ("director_reference_images",)
 
     @staticmethod
     def _nai_request_body_kwargs(payload: Dict[str, Any], multipart: bool) -> Dict[str, Any]:
@@ -1128,6 +1163,24 @@ class APIService:
                     continue                  # base64 가 아니면 이미 파트 이름일 수 있다
                 parameters[field] = field     # JSON 은 파트를 **이름으로** 가리킨다
                 parts[field] = (field, raw, "image/png")
+            for field in APIService._NAI_MULTIPART_BLOB_LIST_FIELDS:
+                values = parameters.get(field)
+                if not isinstance(values, list):
+                    continue
+                names = []
+                for index, encoded in enumerate(values):
+                    if not isinstance(encoded, str) or not encoded:
+                        names.append(encoded)
+                        continue
+                    try:
+                        raw = base64.b64decode(encoded, validate=True)
+                    except Exception:
+                        names.append(encoded)  # base64 가 아니면 이미 파트 이름일 수 있다
+                        continue
+                    name = f"{field}_{index}"
+                    names.append(name)
+                    parts[name] = (name, raw, "image/png")
+                parameters[field] = names
         body = json.dumps(payload, ensure_ascii=False)
         files: Dict[str, Any] = {"request": ("blob", body, "application/json")}
         files.update(parts)
@@ -1876,7 +1929,7 @@ class APIService:
 
                             print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
-            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 전용
+            # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 · V5(4.5F 사양 · 2026-11-19)
             if model_spec.supports_character_reference:
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
@@ -2088,7 +2141,13 @@ class APIService:
                 lost = NaiConnectionLost(origin_timeout_status=e.response.status_code)
                 print(f"❌ {lost}")
                 return {'status': 'error', 'message': str(lost), 'no_retry': True}
-            error_message = f"API 오류 (HTTP {e.response.status_code}): {e.response.text}"
+            body = _shorten_base64_in_error(e.response.text or "")
+            unsupported_cref = _nai_unsupported_director_reference_message(e.response.status_code, body)
+            if unsupported_cref:
+                # 모델이 Character Reference 를 안 받는다 - 다시 보내도 같다. 바로 알린다(사용자 지시 2026-11-19).
+                print(f"❌ {unsupported_cref} (HTTP {e.response.status_code}: {body})")
+                return {'status': 'error', 'message': unsupported_cref, 'no_retry': True}
+            error_message = f"API 오류 (HTTP {e.response.status_code}): {body}"
             print(f"❌ {error_message}")
             return {'status': 'error', 'message': error_message}
         except requests.exceptions.ConnectionError as e:

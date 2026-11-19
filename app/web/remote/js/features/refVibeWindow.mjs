@@ -163,6 +163,13 @@ export function createRefVibeWindow({
     onLayout();
   }
 
+  // Vibe 탭을 아예 뺀다 - 흐리게 남기지 않는다. 내장 ANIMA(Ref Adapter v2 · 2026-11-05) 그리고
+  // Vibe 는 못 쓰고 Char Ref 만 되는 모델(V5 · 사용자 지시 2026-11-19 "Anima Reference 의 UI 를 참조").
+  // ⚠️ 둘 다 못 쓰는 경우(V3 · WEBUI 등)는 여기 들지 않는다 - 그때는 두 탭이 흐려지고 안내가 뜬다.
+  function vibeHidden() {
+    return isAnima() || (isToolUnsupported(KINDS.vibe) && !isToolUnsupported(KINDS.cr));
+  }
+
   // ── 창 ────────────────────────────────────────────────────────────────────
   function ensurePanel() {
     if (panel) return Promise.resolve(panel);
@@ -234,9 +241,10 @@ export function createRefVibeWindow({
   /** 열기. `toggle` 이면 같은 탭으로 열려 있을 때 닫는다(런처 단추를 두 번 누르는 손버릇). */
   function show({tab: nextTab = '', toggle = false} = {}) {
     return ensurePanel().then(() => {
-      // ANIMA 에는 Char Ref 탭뿐 - 무엇을 달라 해도 그 탭(기억된 탭은 그대로 - NAI 로 돌아가면 그 탭)
-      const wanted = isAnima() ? 'cr' : (nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab);
-      if (toggle && panel.isOpen() && wanted === (isAnima() ? 'cr' : tab)) { panel.close(); return; }
+      // ANIMA · V5 에는 Char Ref 탭뿐 - 무엇을 달라 해도 그 탭(기억된 탭은 그대로 - 4.5 로 돌아가면 그 탭)
+      const crOnly = vibeHidden();
+      const wanted = crOnly ? 'cr' : (nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab);
+      if (toggle && panel.isOpen() && wanted === (crOnly ? 'cr' : tab)) { panel.close(); return; }
       setTab(wanted, {quiet: true});
       panel.open();
       // 이번 실행 첫 열기는 결과 칸 가운데로(사용자 지시 2026-10-23). 공용 규칙(FN | Result 경계)은 퀵 슬롯 ·
@@ -267,7 +275,7 @@ export function createRefVibeWindow({
 
   function setTab(next, {quiet = false} = {}) {
     if (next !== 'vibe' && next !== 'cr') return;
-    if (next === 'vibe' && isAnima()) next = 'cr';
+    if (next === 'vibe' && vibeHidden()) next = 'cr';
     const changed = next !== tab;
     tab = next;
     try { storage?.setItem(TAB_KEY, tab); } catch (_) { /* 기억 못 해도 된다 */ }
@@ -295,8 +303,8 @@ export function createRefVibeWindow({
       const key = button.dataset.rvwTab;
       button.classList.toggle('on', key === tab);
       button.classList.toggle('is-off', isToolUnsupported(KINDS[key]));
-      // ANIMA 에는 Vibe 가 없다 - 흐리게 남기지 않고 뺀다(사용자 지정 2026-11-05)
-      button.hidden = key === 'vibe' && isAnima();
+      // ANIMA · V5 에는 Vibe 가 없다 - 흐리게 남기지 않고 뺀다(사용자 지정 2026-11-05 · V5 는 2026-11-19)
+      button.hidden = key === 'vibe' && vibeHidden();
       const loaded = (key === 'vibe' ? vibeState : crState)?.frames?.length || 0;
       button.textContent = `${key === 'vibe' ? 'Vibe' : 'Char Ref'} ${key === 'vibe' ? vibeOn : crOn}/${loaded}`;
       button.dataset.naiaTitle = key === 'vibe'
@@ -330,7 +338,7 @@ export function createRefVibeWindow({
     const scrollTop = host.querySelector('.rvw-rows')?.scrollTop || 0;
     if (isToolUnsupported(moduleId)) {
       host.innerHTML = `<div class="rvw-notice">${tab === 'vibe' ? 'Vibe Transfer' : 'Character Reference'} 는 지금 모델에서 쓰지 않습니다. `
-        + `${tab === 'vibe' ? 'V4 / V4.5' : 'V4.5'} 모델을 고르면 쓸 수 있습니다.</div>`;
+        + `${tab === 'vibe' ? 'V4 / V4.5' : 'V4.5 / V5'} 모델을 고르면 쓸 수 있습니다.</div>`;
       return;
     }
     if (tab === 'cr' && isAnima()) {
@@ -2134,7 +2142,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
 
   /** 모델 · 모드가 바뀌었다 - 알약과 탭의 '지원 안 함' 표시를 다시. */
   function refresh() {
-    if (isAnima() && tab === 'vibe') tab = 'cr';
+    if (vibeHidden() && tab === 'vibe') tab = 'cr';
     // Char Ref 칸은 모드별(NAI · ANIMA 따로)이다 - 바뀐 모드의 칸을 다시 묻는다(알약 배지도 그 수)
     requestModuleState(KINDS.cr);
     paintPill();

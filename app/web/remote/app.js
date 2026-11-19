@@ -3280,7 +3280,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261106-ref6')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261119-v5cr')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3589,7 +3589,7 @@ const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mj
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20261023-rv1')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20261119-v5cr')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,
@@ -12406,7 +12406,7 @@ const MODULE_OVERVIEW_GUIDES = {
     '여러 장을 동시에 켤 수 있고 5장 이상은 Anlas가 추가될 수 있습니다. 활성 강도 합이 1.0을 넘으면 Normalize로 정규화하세요. Character Reference와 상호배타입니다(하나를 켜면 다른 쪽이 꺼집니다).',
   ].join('\n\n'),
   character_reference: [
-    'Character Reference — 참조 이미지의 캐릭터/화풍을 director 방식으로 반영하는 NAID4.5 전용 도구입니다. Upload/Paste하거나 Storage에서 불러온 뒤 Enable하면 적용됩니다.',
+    'Character Reference — 참조 이미지의 캐릭터/화풍을 director 방식으로 반영하는 NAID4.5 · V5 도구입니다. Upload/Paste하거나 Storage에서 불러온 뒤 Enable하면 적용됩니다.',
     '참조 유형 — Char & Style(캐릭터+화풍) / Character(캐릭터만) / Style(화풍만). Strength — 반영 강도. Fidelity — 원본 충실도(높을수록 참조에 가깝게).',
     'Vibe Transfer와 상호배타이며(하나를 켜면 다른 쪽이 꺼짐), NAID4.5F/C 모델에서만 동작합니다.',
   ].join('\n\n'),
@@ -13202,8 +13202,8 @@ function naiModelBlocksReference() {
 // 이쪽은 계약의 능력 플래그(`capabilities.character_reference` / `.vibe`)를
 // 도구 하나씩 본다.
 //
-// ⚠️ 셋을 한 덩어리로 묶으면 안 된다. V5 는 CR·VT 는 못 쓰지만 **Character 는
-//    쓴다**(V5 도 `v4_prompt` 를 그대로 쓴다 — core/nai_model_contract.py).
+// ⚠️ 셋을 한 덩어리로 묶으면 안 된다. V5 는 VT 는 못 쓰지만 **Character · CR 은
+//    쓴다**(CR 은 2026-11-19 부터)(V5 도 `v4_prompt` 를 그대로 쓴다 — core/nai_model_contract.py).
 //    기존 공용 게이트를 넓혔다가는 V5 에서 멀쩡한 캐릭터 프롬프트 모듈이 잠긴다.
 // ⚠️ 모델을 모르거나(커스텀·미확정) 플래그가 없으면 **막지 않는다**. 모르는 것을
 //    막으면 사용자가 등록한 모델이 조용히 잠긴다.

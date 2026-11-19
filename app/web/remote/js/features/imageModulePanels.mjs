@@ -563,8 +563,8 @@ export function createImageModulePanels({
 
   function renderCharacterReference(message) {
     if (!message.is_naid45) {
-      // V5 도 여기로 온다 - 스키마엔 필드가 있으나 라이브 미검증이라 계약에서 껐다.
-      moduleBody.innerHTML = '<div class="mod-notice">Character Reference는 NAID4.5 모델에서만 사용할 수 있습니다</div>';
+      // V4.0 · V3 이 여기로 온다(V5 는 2026-11-19 부터 4.5F 사양으로 쓴다 - 계약 supports_character_reference).
+      moduleBody.innerHTML = '<div class="mod-notice">Character Reference는 NAID4.5 · V5 모델에서만 사용할 수 있습니다</div>';
       return;
     }
     const frames = (message.frames || []).map((frame, index) => `

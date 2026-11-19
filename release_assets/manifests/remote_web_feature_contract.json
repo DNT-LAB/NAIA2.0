@@ -19,6 +19,7 @@
     "app/backend/server/event_compress_routes.py",
     "app/backend/server/event_map_routes.py",
     "app/backend/server/event_preset_routes.py",
+    "app/backend/server/preset_bench_routes.py",
     "app/backend/server/fast_search_routes.py",
     "app/backend/server/font_routes.py",
     "app/backend/server/guide_editor_routes.py",
@@ -210,7 +211,9 @@
         {"method": "POST", "path": "/api/install-manager/event-map/download", "smoke": "asset_runtime"},
         {"method": "POST", "path": "/api/install-manager/event-map/download/cancel", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/install-manager/style-variants/download", "smoke": "asset_runtime"},
-        {"method": "POST", "path": "/api/install-manager/style-variants/download/cancel", "smoke": "state_mutation"}
+        {"method": "POST", "path": "/api/install-manager/style-variants/download/cancel", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/install-manager/preset-thumbs/download", "smoke": "asset_runtime"},
+        {"method": "POST", "path": "/api/install-manager/preset-thumbs/download/cancel", "smoke": "state_mutation"}
       ]
     },
     {
@@ -379,6 +382,11 @@
       "source_files": [
         "core/web_session_app.py",
         "app/backend/server/event_preset_routes.py",
+        "core/preset_bench_service.py",
+        "core/preset_thumbs.py",
+        "core/outfit_tag_semantics.py",
+        "core/preset_thumb_key.py",
+        "app/backend/server/preset_bench_routes.py",
         "app/backend/server/preset_services.py",
         "core/event_preset_service.py",
         "core/clothes_preset_service.py",
@@ -388,6 +396,12 @@
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [
+        {"method": "GET", "path": "/api/presets/catalog", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/sets", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/search", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/thumb/{key}", "smoke": "asset_runtime"},
+        {"method": "GET", "path": "/api/presets/thumb-pack/status", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/outfit-related", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-preset/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-preset/download", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-preset/download", "smoke": "asset_runtime"},
@@ -1251,6 +1265,13 @@
     }
   ],
   "data_dependencies": [
+    {
+      "feature": "presets",
+      "description": "Optional preset bench WebP pack. Installed on explicit loopback request and indexed on demand.",
+      "paths": ["<user-data>/data/preset_thumbs/preset_thumbs.json", "<user-data>/data/preset_thumbs/preset_thumbs.source", "<user-data>/data/preset_thumbs/preset_thumbs.sha256", "<user-data>/data/preset_thumbs/preset-thumbs-key-index.json"],
+      "provisioning": "downloader",
+      "provisioned_by": "POST /api/install-manager/preset-thumbs/download"
+    },
     {
       "feature": "thumb_character_viewer",
       "description": "Optional Thumb A|B variants JSON (311249091 bytes). Explicit loopback download only, never auto-started. Metadata and PreviewKeyIndex offsets are loaded lazily from user-data and refreshed when the file changes.",

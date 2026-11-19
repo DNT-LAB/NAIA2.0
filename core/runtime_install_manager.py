@@ -19,6 +19,11 @@ import zipfile
 
 from app.backend.runtime import RuntimePaths
 from core.character_preview_index import PreviewKeyIndex, character_pack_fingerprint
+from core.preset_thumbs import (
+    PRESET_THUMBS_APPROX_MB, PRESET_THUMBS_INDEX_NAME, PRESET_THUMBS_NAME,
+    installed_signature, mark_corrupt, open_preset_thumbs, preset_thumbs_path,
+    read_metadata as read_preset_thumbs_metadata,
+)
 from core.style_variants import (
     STYLE_VARIANTS_APPROX_MB, STYLE_VARIANTS_INDEX_NAME, STYLE_VARIANTS_NAME,
     open_variants, style_variants_path,
@@ -82,6 +87,12 @@ CHARACTER_PACK_URL = os.environ.get(
 STYLE_VARIANTS_URL = os.environ.get(
     "NAIA_STYLE_VARIANTS_URL",
     "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/2026/NAIA_style_variants_261026.json",
+).strip()
+
+
+PRESET_THUMBS_URL = os.environ.get(
+    "NAIA_PRESET_THUMBS_URL",
+    "https://huggingface.co/baqu2213/PoemForSmallFThings/resolve/main/NAIA/NAIA_preset_thumbs_261119.json",
 ).strip()
 
 
@@ -244,6 +255,8 @@ class RuntimeInstallManager:
         on_character_pack_complete: Callable[[], None] | None = None,
         character_pack_replace_guard: Callable[[], Any] | None = None,
         character_pack_lock: Callable[[], Any] | None = None,
+        preset_thumbs_url: str | None = None,
+        preset_thumbs_lock: Callable[[], Any] | None = None,
         style_variants_url: str | None = None,
         style_variants_lock: Callable[[], Any] | None = None,
     ):
@@ -252,6 +265,12 @@ class RuntimeInstallManager:
             character_pack_url = CHARACTER_PACK_URL
         if style_variants_url is None:
             style_variants_url = STYLE_VARIANTS_URL
+        if preset_thumbs_url is None:
+            preset_thumbs_url = PRESET_THUMBS_URL
+        thumbs_lock = RLock()
+        self._preset_thumbs_lock = preset_thumbs_lock or (lambda: thumbs_lock)
+        self._preset_thumbs_ready_cache = None
+        self._preset_thumbs_metadata_cache = None
         variants_lock = RLock()
         self._style_variants_lock = style_variants_lock or (lambda: variants_lock)
         self._style_variants_ready_cache = None
@@ -339,6 +358,12 @@ class RuntimeInstallManager:
             "corpus_archive": on_corpus_archive_complete,
             "event_map": on_event_map_complete,
         }
+        self._specs["preset_thumbs"] = ArchiveSpec(
+            key="preset_thumbs", url=preset_thumbs_url, subdir="preset_thumbs",
+            suffixes=(".json",), label="프리셋 썸네일",
+            temp_name="preset_thumbs_" + hashlib.sha256(preset_thumbs_url.encode()).hexdigest()[:16] + ".download_tmp",
+            count_glob=PRESET_THUMBS_NAME, required_names=(PRESET_THUMBS_NAME,), raw_name=PRESET_THUMBS_NAME,
+        )
         self._specs["style_variants"] = ArchiveSpec(
             key="style_variants", url=style_variants_url, subdir="style_variants",
             suffixes=(".json",), label="스타일 변형 그림",
@@ -468,9 +493,32 @@ class RuntimeInstallManager:
                 pass
             return False
 
+    def _preset_thumbs_ready(self, spec: ArchiveSpec, *, wait: bool) -> bool:
+        path = preset_thumbs_path(self.runtime_paths)
+        with self._preset_thumbs_lock():
+            signature = installed_signature(path)
+            if signature is None:
+                return False
+            try:
+                if path.with_suffix(".source").read_text(encoding="utf-8").strip() != spec.url:
+                    return False
+                generation = (*signature, spec.url)
+                if wait and self._preset_thumbs_ready_cache != generation:
+                    metadata, _ = open_preset_thumbs(path)
+                    self._preset_thumbs_metadata_cache = (signature, metadata)
+                    self._preset_thumbs_ready_cache = generation
+                return True
+            except OSError:
+                return False
+            except (ValueError, KeyError, TypeError):
+                mark_corrupt(path, signature)
+                return False
+
     def _archive_ready(self, spec: ArchiveSpec, count: int | None = None, *, wait: bool = False) -> bool:
         if spec.key == "style_variants":
             return self._style_variants_ready(spec, wait=wait)
+        if spec.key == "preset_thumbs":
+            return self._preset_thumbs_ready(spec, wait=wait)
         if spec.key == "character_pack":
             # Same pure lock as service reads and installation; never invalidate
             # the service simply because a snapshot asks whether the pack is ready.
@@ -565,9 +613,38 @@ class RuntimeInstallManager:
         self.runtime_paths.ensure_writable_dirs()
         self._copy_bootstrap_data_files()
         self.tag_dir.mkdir(parents=True, exist_ok=True)
-        return self.snapshot()
+        return self.snapshot(read_preset_metadata=False)
 
-    def snapshot(self) -> dict[str, Any]:
+    def _preset_thumbs_snapshot(self, download, *, read_metadata):
+        spec = self._spec("preset_thumbs")
+        archive = self._archive_snapshot(spec, download)
+        path = preset_thumbs_path(self.runtime_paths)
+        metadata = {}
+        installed = False
+        # The bootstrap initialize path may stat the pack and read receipts, never its body.
+        with self._preset_thumbs_lock():
+            signature = installed_signature(path)
+            if signature is not None:
+                try:
+                    cached = self._preset_thumbs_metadata_cache
+                    if cached and cached[0] == signature:
+                        metadata = cached[1]
+                    elif read_metadata:
+                        metadata = read_preset_thumbs_metadata(path)
+                        self._preset_thumbs_metadata_cache = (signature, metadata)
+                    installed = True
+                except ValueError:
+                    mark_corrupt(path, signature)
+                    archive["ready"] = False
+                except OSError:
+                    archive["ready"] = False
+        downloading = bool(download.get("active") and download.get("phase") == spec.key)
+        return dict(archive, approx_mb=PRESET_THUMBS_APPROX_MB, installed=installed, name=path.name,
+                    count=metadata.get("count", 0), kinds=metadata.get("kinds", {}),
+                    template_version=metadata.get("template_version"), quality=metadata.get("quality"),
+                    downloading=downloading, progress=download.get("percent", 0) if downloading else (100 if installed else 0))
+
+    def snapshot(self, *, read_preset_metadata: bool = True) -> dict[str, Any]:
         self.runtime_paths.ensure_writable_dirs()
         count = self._tag_file_count()
         ready = self._tag_archive_ready(count)
@@ -577,7 +654,7 @@ class RuntimeInstallManager:
         # 선택 화면 여부). 진행 상태는 하나뿐이라 확장 팩 체인이 여기 비치면 선택 화면이 사라지고 팩 오류가 태그 오류가 된다
         # (사용자 제보 2026-10-22). 확장 팩만 받는 체인이면 이 칸에는 쉬는 상태를 준다 - `character_pack` · `downloads` 는 그대로.
         tag_download = download
-        if set(download.get("chain") or [download.get("phase")]) in ({"character_pack"}, {"style_variants"}):
+        if set(download.get("chain") or [download.get("phase")]) in ({"character_pack"}, {"style_variants"}, {"preset_thumbs"}):
             tag_download = {"active": False, "phase": "idle", "percent": 0, "downloaded_mb": 0.0, "total_mb": 0.0,
                             "message": "", "error": "", "done": False, "updated_at": download.get("updated_at", "")}
         return {
@@ -623,6 +700,7 @@ class RuntimeInstallManager:
                 **self._archive_snapshot(self._spec("style_variants"), download),
                 "approx_mb": STYLE_VARIANTS_APPROX_MB,
             },
+            "preset_thumbs": self._preset_thumbs_snapshot(download, read_metadata=read_preset_metadata),
             "downloads": self._downloads_snapshot(),
         }
 
@@ -649,6 +727,9 @@ class RuntimeInstallManager:
 
     def start_event_map_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("event_map", blocking=blocking)
+
+    def start_preset_thumbs_download(self, *, blocking: bool = False) -> dict[str, Any]:
+        return self.start_archive_download("preset_thumbs", blocking=blocking)
 
     def start_style_variants_download(self, *, blocking: bool = False) -> dict[str, Any]:
         return self.start_archive_download("style_variants", blocking=blocking)
@@ -881,7 +962,7 @@ class RuntimeInstallManager:
         finally:
             try:
                 # Preserve interrupted extension downloads for the user's explicit retry.
-                if spec.key not in {"character_pack", "style_variants"} or download_complete:
+                if spec.key not in {"character_pack", "style_variants", "preset_thumbs"} or download_complete:
                     temp_zip.unlink(missing_ok=True)
             except Exception:
                 pass
@@ -978,7 +1059,7 @@ class RuntimeInstallManager:
         if last_error is not None:
             raise last_error
         minimum = 1024 * 1024 if spec.raw_name else 1024
-        if spec.key == "style_variants":
+        if spec.key in {"style_variants", "preset_thumbs"}:
             # Structural validation below is authoritative. Even tiny error
             # responses must be retained as marked staging files for diagnosis.
             minimum = 0
@@ -1022,7 +1103,7 @@ class RuntimeInstallManager:
                     last_update = now
         self._set_state(bytes=downloaded, total=total_size,
                         downloaded_mb=round(downloaded / 1024**2, 1), total_mb=total_mb)
-        if spec.key == "character_pack" and total_size and downloaded != total_size:
+        if spec.key in {"character_pack", "preset_thumbs"} and total_size and downloaded != total_size:
             raise OSError("다운로드가 완료되기 전에 연결이 종료되었습니다.")
         return downloaded
 
@@ -1046,8 +1127,8 @@ class RuntimeInstallManager:
             pass
         # downloads_dir 와 data_dir 가 다른 볼륨일 수 있다(사용자가 user-data 를 옮긴 경우).
         shutil.move(str(temp_file), str(staging))
-        if spec.key == "style_variants":
-            self._install_style_variants(spec, staging, target)
+        if spec.key in {"style_variants", "preset_thumbs"}:
+            self._install_thumbnail_pack(spec, staging, target)
         elif spec.key == "character_pack":
             digest = hashlib.sha256()
             with staging.open("rb") as handle:
@@ -1086,20 +1167,23 @@ class RuntimeInstallManager:
         self._set_state(percent=99, message=f"{spec.label} 설치 중... 1/1")
         return 1
 
-    def _install_style_variants(self, spec: ArchiveSpec, staging: Path, target: Path) -> None:
+    def _install_thumbnail_pack(self, spec: ArchiveSpec, staging: Path, target: Path) -> None:
+        preset = spec.key == "preset_thumbs"
+        opener = open_preset_thumbs if preset else open_variants
+        lock = self._preset_thumbs_lock if preset else self._style_variants_lock
         digest = hashlib.sha256()
         with staging.open("rb") as handle:
             for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b""):
                 digest.update(chunk)
         try:
-            _, index = open_variants(staging, cache_write=False, validate_images=True)
+            metadata, index = opener(staging, cache_write=False, validate_images=True)
         except (ValueError, KeyError, TypeError):
             # Preserve rejected bytes for diagnosis; do not overwrite a valid old pack.
             staging.with_suffix(staging.suffix + ".corrupt").write_text(
                 "verification failed\n", encoding="utf-8", newline="\n")
             raise
         stat = staging.stat()
-        cache = target.parent / STYLE_VARIANTS_INDEX_NAME
+        cache = target.parent / (PRESET_THUMBS_INDEX_NAME if preset else STYLE_VARIANTS_INDEX_NAME)
         cache_tmp = cache.with_suffix(".json.install_tmp")
         index._save(cache_tmp, signature=[str(target.resolve()), stat.st_size, stat.st_mtime_ns], strict=True)
         fingerprint = target.with_suffix(".sha256")
@@ -1108,16 +1192,20 @@ class RuntimeInstallManager:
         source = target.with_suffix(".source")
         source_tmp = source.with_suffix(".source.install_tmp")
         source_tmp.write_text(spec.url + "\n", encoding="utf-8", newline="\n")
-        with self._style_variants_lock():
-            self._style_variants_ready_cache = None
+        with lock():
             fingerprint.unlink(missing_ok=True)
             os.replace(staging, target)
             os.replace(cache_tmp, cache)
-            os.replace(fingerprint_tmp, fingerprint)
             os.replace(source_tmp, source)
+            os.replace(fingerprint_tmp, fingerprint)  # Publish the receipt only after body, index and origin.
             target.with_suffix(".corrupt").unlink(missing_ok=True)
             staging.with_suffix(staging.suffix + ".corrupt").unlink(missing_ok=True)
-            self._style_variants_ready_cache = (digest.hexdigest(), stat.st_size, stat.st_mtime_ns, spec.url)
+            generation = (digest.hexdigest(), stat.st_size, stat.st_mtime_ns, spec.url)
+            if preset:
+                self._preset_thumbs_ready_cache = generation
+                self._preset_thumbs_metadata_cache = (generation[:3], metadata)
+            else:
+                self._style_variants_ready_cache = generation
 
     def _extract_archive(self, spec: ArchiveSpec, temp_zip: Path) -> int:
         self._set_state(percent=90, message=f"{spec.label} 압축 해제 중...")

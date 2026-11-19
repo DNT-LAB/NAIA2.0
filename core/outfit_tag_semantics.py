@@ -19,7 +19,7 @@ import hashlib
 import json
 import threading
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from core.preset_thumb_key import preset_thumb_key
@@ -37,7 +37,9 @@ GROUP_LABELS = {
 
 
 class OutfitTagSemantics:
-    def __init__(self, pack_path: Path = PACK_PATH, index_path: Path = INDEX_PATH):
+    def __init__(self, pack_path: Path = PACK_PATH, index_path: Path = INDEX_PATH, *,
+                 pack_source: Callable[[], tuple[dict, str]] | None = None):
+        self._pack_source = pack_source
         self.pack_path = Path(pack_path)
         self.index_path = Path(index_path)
         self._lock = threading.Lock()
@@ -50,11 +52,14 @@ class OutfitTagSemantics:
         with self._lock:
             if self._loaded:
                 return
-            raw = self.pack_path.read_bytes()
-            pack = json.loads(raw)
+            if self._pack_source is None:
+                raw = self.pack_path.read_bytes()
+                pack, digest = json.loads(raw), hashlib.sha256(raw).hexdigest()
+            else:
+                pack, digest = self._pack_source()
             index = json.loads(self.index_path.read_text(encoding="utf-8"))
             built_for = index.get("build", {}).get("inputs", {}).get("outfit_presets", {}).get("sha256")
-            self.stale = built_for != hashlib.sha256(raw).hexdigest()
+            self.stale = built_for != digest
             self.slot = pack["tag_slot"]
             self.tags = index["tags"]
             self.accessory_slots = set(index.get("rules", {}).get("accessory_slots", ()))

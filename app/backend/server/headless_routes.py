@@ -16,6 +16,7 @@ from app.backend.server.grok_routes import register_grok_routes  # Grok 연동 (
 from app.backend.server.event_map_routes import register_event_map_routes
 from app.backend.server.event_compress_routes import register_event_compress_routes
 from app.backend.server.event_preset_routes import register_event_preset_routes
+from app.backend.server.preset_bench_routes import register_preset_bench_routes
 from app.backend.server.extension_install_routes import register_extension_install_routes
 from app.backend.server.fast_search_routes import register_fast_search_routes
 from app.backend.server.font_routes import register_font_routes
@@ -264,6 +265,9 @@ def register_headless_routes(
     register_data_migration_routes(app, context, run_in_thread=run_in_thread)
     register_danbooru_routes(app, context, run_in_thread=run_in_thread)
     register_grok_routes(app, context, run_in_thread=run_in_thread)  # Grok 연동 (제거 가능)
+    register_preset_bench_routes(
+        app, context, run_in_thread=run_in_thread, clients=clients, start_generation_runner=ensure_generation_runner,
+    )
     register_event_preset_routes(
         app,
         context,

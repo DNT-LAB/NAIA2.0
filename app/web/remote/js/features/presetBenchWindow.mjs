@@ -28,7 +28,7 @@
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-co1';
+} from './presetBenchModel.mjs?v=20261120-ac1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -329,7 +329,18 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-rcol.has-hist .pbw-resfloat { bottom: 80px; }
 .pbw-rl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
 .pbw-rl-body.is-one { display: flex; overflow: hidden; }
-.pbw-rl-one { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.pbw-rl-one { position: relative; flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+/* 이 생성에 쓴 칸(사용자 11-20) - 그림 좌하단 칩 · 누르면 그 세트 자리로. 한 장 = 그림 모서리(placeUsed 가 잰다) · 비교 = 고른 카드 안. */
+.pbw-used { position: absolute; left: 8px; bottom: 8px; z-index: 2; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: calc(100% - 16px); }
+.pbw-rl-one .pbw-used { visibility: hidden; }
+.pbw-rl-one .pbw-used.is-placed { visibility: visible; }
+.pbw-res .pbw-used { left: 4px; bottom: 24px; gap: 2px; max-width: calc(100% - 8px); }
+.pbw-used button { display: flex; align-items: baseline; gap: 5px; max-width: 100%; padding: 2px 7px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(16,16,22,0.74); color: #eee; font: inherit; font-size: 12px; line-height: 1.35; cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbw-used button:hover { border-color: #f0c674; background: rgba(40,36,20,0.88); }
+.pbw-used b { font-weight: 500; font-size: 11px; color: #f0c674; flex: none; }
+.pbw-used small { font-size: 11px; color: #9a9a9a; }
+.pbw-res .pbw-used button { font-size: 11px; padding: 1px 5px; }
 .pbw-rl-one img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
 .pbw-rl-one .pbw-res-box { width: auto; aspect-ratio: auto; font-size: 13px; }
 .pbw-rl-one.is-error .pbw-res-box { color: #ffb4b4; }
@@ -1571,13 +1582,15 @@ export function createPresetBench({
     // 이미 그 칸에 든 세트면 단추를 띄우지 않는다(고정한 뒤에도 남아 있었다).
     const pin = picked && run.axis && item.set && item.status === 'done' && st.picks[run.axis]?.id !== item.set.id
       ? '<button type="button" class="pbw-pin" data-act="pin">이걸로 고정</button>' : '';
-    return `<div class="pbw-res${picked ? ' is-pick' : ''}${cls}" data-run="${esc(run.id)}" data-index="${index}" title="${esc(item.label)}">${pin}${body}<div class="pbw-res-cap">${esc(item.label)}</div></div>`;
+    const used = picked && item.status === 'done' ? usedHtml(run, index) : '';
+    return `<div class="pbw-res${picked ? ' is-pick' : ''}${cls}" data-run="${esc(run.id)}" data-index="${index}" title="${esc(item.label)}">${pin}${body}${used}<div class="pbw-res-cap">${esc(item.label)}</div></div>`;
   }
 
   // 한 장 = 판 크기에 맞춰 원본을 크게. 고르기 · 고정은 비교(여러 장)에만 있다.
-  function bigResult(item) {
+  function bigResult(run) {
+    const item = run.items[0];
     if (item.status === 'done' && item.historyId) {
-      return `<div class="pbw-rl-one"><img src="${API.historyImage(item.historyId)}" alt=""></div>`;
+      return `<div class="pbw-rl-one"><img src="${API.historyImage(item.historyId)}" alt="">${usedHtml(run, 0)}</div>`;
     }
     const text = item.status === 'pending' ? '그리는 중…' : item.status === 'error' ? esc(item.message || '실패') : item.status === 'cancelled' ? '취소' : '사라짐';
     return `<div class="pbw-rl-one${item.status === 'error' ? ' is-error' : ''}"><div class="pbw-res-box">${text}</div></div>`;
@@ -1604,9 +1617,10 @@ export function createPresetBench({
       return;
     }
     const one = run.items.length === 1;
-    box.innerHTML = `<div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run.items[0]) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>
+    box.innerHTML = `<div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>
       ${st.runs.length > 1 ? `<div class="pbw-rl-hist">${[...st.runs].reverse().map(row => historyCard(row, run)).join('')}</div>` : ''}`;
     fitResults();
+    placeUsed();
   }
 
   // 비교 격자를 결과 열에 맞춘다 - 모든 장이 한눈에 들어오는 가장 큰 칸(3:4 + 이름 줄). 너무 작아지면(90px) 스크롤.
@@ -1647,7 +1661,7 @@ export function createPresetBench({
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
     const items = buildItems({cast: castNow(), target: autoTarget(), names: st.names, picks: picksTags(), meta: picksMeta(), axis, ucs: st.ucs,
-      extras: st.extras.slice(0, st.count), extraMain: st.extraMain});
+      extras: st.extras.slice(0, st.count), extraMain: st.extraMain, known: knownChars()});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
     const refs = activeRefs();
@@ -1673,8 +1687,10 @@ export function createPresetBench({
       id: requestId, axis: axisSlot ? axisSlot.id : null,
       label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : '한 장',
       base: `${currentBase().label} · ${st.size}` + (refs.length ? ` · REF ${refs.length}` : ''),
-      items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: ''})),
+      items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: '',
+        used: usedSnapshot(axisSlot ? axisSlot.id : null, item.set)})),
     };
+    void fillUsed(run);
     void slotsNow;
     st.runs.push(run);
     if (st.runs.length > 30) st.runs.splice(0, st.runs.length - 30);
@@ -1718,10 +1734,101 @@ export function createPresetBench({
   }
 
   // ---------------------------------------------------------------- 칸 조작
+  // 이름 있는 캐릭터 = 불러온 캐릭터(DB · 에셋) 또는 캐릭터 사전이 알아본 이름 - 의상을 입히면 alternate costume(사용자 11-20).
+  function knownChars() {
+    return Array.from({length: st.count}, (_, i) => !!st.loaded[i] || st.subjects[i]?.source === 'character');
+  }
+
+  // 세트를 고른 자리 - vpool = 따로 뺀 대분류의 가상 풀(남남 · 후타나리 · 아니면 '') · cat = 둘러보던 대분류.
+  // 쓴 칸 칩을 누르면 이 자리로 돌아간다(세트 요약의 pool 은 진짜 풀이라 따로 둔다).
+  function placeOf(slotId) {
+    const slot = slotById(slotId);
+    const view = viewOf(slotId);
+    return {vpool: slot && (slot.kind === 'event' || slot.kind === 'link') ? view.pool || '' : '', cat: view.mode === 'browse' ? view.cat : ''};
+  }
+
   function putIntoSlot(slotId, set) {
+    const place = 'vpool' in set ? {vpool: set.vpool || '', cat: set.cat || ''} : placeOf(slotId);
     st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || '',
-      add: [...(set.add || [])], adult: !!set.adult};
+      add: [...(set.add || [])], adult: !!set.adult, ...place};
     persist();
+  }
+
+  // ---------------------------------------------------------------- 쓴 칸(결과 그림 좌하단 칩 - 사용자 11-20)
+  const USED_LABELS = {outfit: '의상', event: '자세', expression: '표정', link: '2인', scene: '배경'};
+  const USED_ORDER = ['outfit', 'event', 'expression', 'link', 'scene'];
+
+  // 생성 때 고른 것을 장마다 따로 적어 둔다 - 칸을 바꿔도 그 생성의 칩은 그때 것. 비교 축 칸은 그 장의 세트.
+  function usedSnapshot(axisSlotId, axisSet) {
+    const rows = [];
+    for (const slot of slots()) {
+      const set = axisSlotId === slot.id && axisSet ? axisSet : st.picks[slot.id];
+      if (!set?.tags?.length || !set.id) continue;
+      rows.push({
+        slotId: slot.id, kind: slot.kind, slotPool: slot.pool, id: set.id, seed: set.seed || '', vpool: set.vpool || '', cat: set.cat || '',
+        tags: [...set.tags], ko: '', label: USED_LABELS[slot.kind] + (st.count > 1 && slot.owner > 0 ? ` ${slot.owner}` : ''),
+      });
+    }
+    return rows.sort((a, b) => USED_ORDER.indexOf(a.kind) - USED_ORDER.indexOf(b.kind) || a.slotId.localeCompare(b.slotId));
+  }
+
+  // 한글 이름 · 대분류를 분류표에서 채운다(분류표는 캐시 - 고를 때 이미 받은 것).
+  async function fillUsed(run) {
+    const rows = run.items.flatMap(item => item.used || []);
+    await Promise.all(rows.map(async row => {
+      try {
+        const groups = (await catalogOf(row.kind, row.slotPool)).groups || [];
+        const has = group => (group.pool || '') === row.vpool && (group.seeds || []).some(seed => seed.seed === row.seed);
+        const group = groups.find(item => item.slot === row.cat && has(item)) || groups.find(has);
+        if (!group) return;
+        row.cat = group.slot;
+        row.ko = String(group.seeds.find(seed => seed.seed === row.seed)?.ko || '');
+      } catch (_) { /* 영문 이름으로 둔다 */ }
+    }));
+    if (shownRun() === run) renderResults();
+  }
+
+  function usedHtml(run, index) {
+    const rows = run.items[index]?.used || [];
+    if (!rows.length) return '';
+    return `<div class="pbw-used">${rows.map((row, k) => {
+      const name = row.ko && row.ko !== row.seed ? `${esc(row.ko)} <small>${esc(row.seed)}</small>` : esc(row.seed || row.tags[0] || '');
+      return `<button type="button" data-used="${k}" data-run="${esc(run.id)}" data-index="${index}" title="${esc(`${row.tags.join(', ')}\n누르면 이 세트 자리로 갑니다`)}"><b>${esc(row.label)}</b>${name}</button>`;
+    }).join('')}</div>`;
+  }
+
+  // 한 장 그림은 칸 가운데에 맞춰 줄어든다 - 칩 묶음을 그림의 좌하단 모서리에 붙인다(그림을 받은 뒤 · 크기가 바뀔 때).
+  function placeUsed() {
+    const one = $('results')?.querySelector('.pbw-rl-one');
+    const img = one?.querySelector('img');
+    const box = one?.querySelector('.pbw-used');
+    if (!img || !box) return;
+    if (!img.complete || !img.naturalWidth) { img.addEventListener('load', placeUsed, {once: true}); return; }
+    box.style.left = `${img.offsetLeft + 8}px`;
+    box.style.bottom = `${one.clientHeight - img.offsetTop - img.offsetHeight + 8}px`;
+    box.style.maxWidth = `${Math.max(80, img.offsetWidth - 16)}px`;
+    box.classList.add('is-placed');
+  }
+
+  // 칩 누르기 = 그 칸을 고르고, 그 세트가 든 대분류 · 묶음을 열어 카드를 노랗게 표시하고 보이는 곳으로.
+  async function gotoUsed(row) {
+    const slot = slotById(row.slotId);
+    if (!slot) { notify('그 칸은 지금 없습니다 - 캐릭터 수가 바뀌었습니다', 'error'); return; }
+    st.cur = slot.id;
+    st.baseOpen = false;
+    st.note = '';
+    st.memo = null;
+    const view = viewOf(slot.id);
+    Object.assign(view, {mode: 'browse', q: '', hits: [], related: null, relatedTag: '', cat: row.cat || view.cat, sub: '', seed: row.seed, hitSet: row.id});
+    searchInput.value = '';
+    renderNote();
+    renderSlots();
+    renderOverlay();
+    renderBaseCard();
+    await renderExplorer();
+    const card = $('grid')?.querySelector(`.pbw-card[data-set="${CSS.escape(row.id)}"]`);
+    card?.scrollIntoView({block: 'center'});
+    $('seeds')?.querySelector('.pbw-seed.is-on')?.scrollIntoView({block: 'nearest'});
   }
 
   function toggleCompare(slotId, set) {
@@ -1729,7 +1836,8 @@ export function createPresetBench({
     if (map.has(set.id)) {
       map.delete(set.id);
     } else {
-      map.set(set.id, {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed});
+      map.set(set.id, {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || '',
+        add: [...(set.add || [])], adult: !!set.adult, ...placeOf(slotId)});
       if (map.size >= 2 && st.axis && st.axis !== slotId) {
         st.memo = {slotId: st.axis, map: st.chk[st.axis]};
         st.note = `비교: ${esc(KIND_LABELS[slotById(st.axis)?.kind] || '')} → ${esc(KIND_LABELS[slotById(slotId)?.kind] || '')}`;
@@ -1797,6 +1905,12 @@ export function createPresetBench({
     const t = event.target;
     const act = t.closest('[data-act]')?.dataset.act;
     if (act === 'res-go') { showRun(t.closest('[data-run]').dataset.run); return; }
+    const usedBtn = t.closest('[data-used]');
+    if (usedBtn) {
+      const row = st.runs.find(r => r.id === usedBtn.dataset.run)?.items[Number(usedBtn.dataset.index)]?.used?.[Number(usedBtn.dataset.used)];
+      if (row) void gotoUsed(row);
+      return;
+    }
     if (act === 'base') { st.baseOpen = !st.baseOpen; renderAllBase(); return; }
     if (act === 'base-close') { st.baseOpen = false; renderAllBase(); return; }
     if (act === 'go') { void generate(); return; }
@@ -2241,7 +2355,7 @@ export function createPresetBench({
     if (wrap) wrap.classList.toggle('is-w3', wrap.clientWidth >= zoomWidth() * ZOOM_SKIP_RATIO * 3 + 12);
   }
   if (win.ResizeObserver) {
-    new win.ResizeObserver(() => fitResults()).observe($('results'));
+    new win.ResizeObserver(() => { fitResults(); placeUsed(); }).observe($('results'));
     new win.ResizeObserver(() => fitGridCols()).observe($('grid'));
   }
   fitGridCols();

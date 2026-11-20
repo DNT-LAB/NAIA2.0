@@ -87,6 +87,10 @@ export const NSFW_TAG = 'nsfw';
 // NAI 수치 가중치 꼴 `0.7::태그, 태그::`(벤치 생성은 NAI 만 받는다).
 export const POSE_WEIGHT_WITH_LINK = 0.7;
 
+// 이름 있는 캐릭터(불러오기 · 캐릭터 사전이 알아본 이름)에게 의상 세트를 입히면 그 의상 뒤에 붙인다 -
+// 캐릭터의 기본 옷이 아니라 이 옷이라는 뜻(사용자 11-20).
+export const ALT_COSTUME_TAG = 'alternate costume';
+
 /** 캐릭터 프롬프트 칸에 싣는 칸인가(target = 'char' 일 때). 1인의 자세는 캐릭터 몫이지만 메인에 둔다 -
  *  NAI 는 동작을 메인에 둘 때 더 잘 따른다(목업 3안 미리보기와 같다). */
 function goesToCharacter(slot) {
@@ -108,12 +112,13 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   ucs       - [캐릭터1 UC, 캐릭터2 UC] (에셋에서 불러온 캐릭터 UC - 캐릭터 칸에만 실린다)
  *   extras    - [캐릭터1 추가 프롬프트, …] - 그 캐릭터 몫 끝(캐릭터 칸 · target 'main' 이면 메인)
  *   extraMain - 추가 프롬프트 - 메인 끝(기반 postfix 앞)
+ *   known     - [캐릭터1 은 이름 있는 캐릭터인가, …] - 그 캐릭터의 의상 칸에 세트가 있으면 의상 뒤에 ALT_COSTUME_TAG.
  *   meta      - {칸 id: {add, adult}} - 고른 세트의 서버 요약에서(variant 면 variant.add · variant.adult).
  *               add = 그 세트와 거의 늘 함께 나오는 몸 태그(penis 등) - 늘 **메인**에, 그 칸 태그 뒤에(사용자 11-20).
  *               adult = 성인 세트 - 하나라도 있으면 메인 인원 태그 뒤에 nsfw.
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
-export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = [], extras = [], extraMain = '', meta = {}}) {
+export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = [], extras = [], extraMain = '', meta = {}, known = []}) {
   const {count} = normalizeCast(cast);
   const slots = slotsFor(count);
   const tagsOf = slot => {
@@ -130,8 +135,9 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
   const nameOf = i => String(names[i] || '').trim();
   const extraOf = i => String(extras[i] || '').trim();
   // 칸 한 개의 글 - 2인 자세가 있으면 1인 자세(event)는 POSE_WEIGHT_WITH_LINK 로 감싼다. 2인 자세는 늘 메인(goesToCharacter 밖).
+  const costume = slot => (slot.kind === 'outfit' && slot.owner > 0 && known[slot.owner - 1] && tagsOf(slot).length ? ALT_COSTUME_TAG : '');
   const slotText = (slot, withAdds = false) => {
-    const text = joinTags([...tagsOf(slot), ...(withAdds ? addsOf(slot) : [])]);
+    const text = joinTags([...tagsOf(slot), costume(slot), ...(withAdds ? addsOf(slot) : [])]);
     return text && slot.kind === 'event' && linkTags.length ? `${POSE_WEIGHT_WITH_LINK}::${text}::` : text;
   };
   if (target === 'main') {
@@ -177,15 +183,15 @@ export function variantLabel(tags) {
 }
 
 /** 생성 요청의 items. 비교 축이 있으면 축 칸의 세트마다 한 장, 없으면 한 장. */
-export function buildItems({cast, target, names, picks, axis = null, ucs = [], extras = [], extraMain = '', meta = {}}) {
+export function buildItems({cast, target, names, picks, axis = null, ucs = [], extras = [], extraMain = '', meta = {}, known = []}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta,
+      const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta, known,
         variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool, add: set.add || [], adult: !!set.adult}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }
-  const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta});
+  const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta, known});
   return [{label: '한 장', main, characters, set: null}];
 }
 

@@ -32,6 +32,9 @@ PERSONS = {"female": "1girl_solo,1girl", "male": "1boy_solo,1boy", "girl_boy": "
 ALLOW = ("penis", "testicles", "erection", "pussy", "nipples", "ass", "anus", "pectorals", "feet", "toes",
          "armpits", "bulge", "tentacles")
 SHARE, LIFT, MIN_POSTS = 0.9, 3.0, 50
+# 후타나리 내용 세트 = 같은 인원 갈래 게시물의 85% 이상에 futanari(태그가 세트에 없어도 - 1인 'precum, ejaculation').
+# 벤치는 이 세트를 맨 끝 별도 대분류 '후타나리'로 뺀다(사용자 11-20). 근거 수 문턱은 두지 않는다(빼는 쪽이 안전).
+FUTA_TAG, FUTA_SHARE = "futanari", 0.85
 FAMILIES = ("event", "link")      # 메인 프롬프트로 가는 갈래(1인 자세 · 2인 자세)
 
 
@@ -39,11 +42,13 @@ def build(map_root: Path, pack_path: Path) -> dict:
     # 색인 폴더 + 저장소 data(대분류 표 KR_tags 등) - 앱의 default_roots 와 같은 차례.
     service = EventMapService([map_root, ROOT / "data"])
     raw = pack_path.read_bytes()
-    sets = {}
+    sets, futa = {}, []
     for row in json.loads(raw)["sets"]:
         if row["family"] not in FAMILIES:
             continue
         result = service.explore(pins=",".join(row["tags"]), persons=PERSONS[row["pool"]], limit=60, sort="posts")
+        if any(c["tag"] == FUTA_TAG and c["share"] >= FUTA_SHARE for c in result.get("candidates") or []):
+            futa.append(row["id"])
         if int(result.get("observed_posts") or 0) < MIN_POSTS:
             continue
         tags = [c["tag"] for c in result.get("candidates") or []
@@ -54,10 +59,11 @@ def build(map_root: Path, pack_path: Path) -> dict:
         "schema": SCHEMA,
         "note": "set id -> body tags that almost always co-occur with the set (added to the bench main prompt)",
         "rule": {"share": SHARE, "lift": LIFT, "min_posts": MIN_POSTS, "allow": list(ALLOW),
-                 "families": list(FAMILIES), "persons": PERSONS},
+                 "families": list(FAMILIES), "persons": PERSONS, "futanari_share": FUTA_SHARE},
         "build": {"built_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
                   "event_presets_sha256": hashlib.sha256(raw).hexdigest()},
         "sets": dict(sorted(sets.items())),
+        "futanari": sorted(futa),
     }
 
 

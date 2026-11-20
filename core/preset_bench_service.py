@@ -41,6 +41,13 @@ _POOL_PRIORITY = {"female": 0, "male": 1, "girl_boy": 0, "girl_girl": 1, "boy_bo
 SEPARATE = {"link": ("남남", ("boy_boy",)), "event": ("남남", ())}
 YAOI_TAGS = frozenset({"yaoi", "implied yaoi", "bara"})
 APART_POOL = "apart"
+# 후타나리 세트도 같은 갈래에서 따로 - '남남' 다음 맨 끝 대분류(사용자 11-20). 남남이 먼저 가져간다.
+# 판정 = 태그(futanari · futa with female · futa on male …) 또는 공출현 표의 futanari 목록(85% 이상).
+FUTA_POOL = "futa"
+FUTA_LABEL = "후타나리"
+_FUTA_TAG = re.compile(r"\bfuta(nari)?\b")
+# 따로 뺀 대분류 차례(목록 맨 끝에 이 차례로) - (가상 풀, 이름).
+APART_GROUPS = ((APART_POOL, SEPARATE["link"][0]), (FUTA_POOL, FUTA_LABEL))
 _SUBJECTS = ("girl", "boy", "other")
 
 
@@ -54,22 +61,37 @@ def is_adult(support_by_rating):
 
 
 def load_cooccur(path, pack_sha256):
-    """세트 id -> 덧붙일 몸 태그. 파일이 없거나 · 틀리거나 · 다른 팩으로 구운 것이면 빈 사전(기능만 꺼진다)."""
+    """(세트 id -> 덧붙일 몸 태그, 후타나리 세트 id 모음). 파일이 없거나 · 틀리거나 · 다른 팩으로 구운 것이면
+    빈 값(기능만 꺼진다 - 후타나리는 태그 판정만 남는다)."""
     try:
         data = json.loads(Path(path).read_bytes())
     except (OSError, ValueError):
         _LOG.info("Preset co-occurrence table unavailable")
-        return {}
+        return {}, frozenset()
     if data.get("schema") != COOCCUR_SCHEMA or data.get("build", {}).get("event_presets_sha256") != pack_sha256:
         _LOG.warning("Preset co-occurrence table does not match the event pack - ignored")
-        return {}
-    return {set_id: [str(tag) for tag in tags] for set_id, tags in (data.get("sets") or {}).items()}
+        return {}, frozenset()
+    adds = {set_id: [str(tag) for tag in tags] for set_id, tags in (data.get("sets") or {}).items()}
+    return adds, frozenset(str(set_id) for set_id in data.get("futanari") or ())
+
+
+def is_futa(row, futa_ids=frozenset()):
+    return row["id"] in futa_ids or any(_FUTA_TAG.search(tag) for tag in (row["seed"], *row["tags"]))
 
 
 def is_apart(row):
     """따로 뺀 대분류(남남)에 갈 세트인가 - 통째로 빼는 풀이거나 yaoi 내용."""
     spec = SEPARATE.get(row["kind"])
     return bool(spec) and (row["pool"] in spec[1] or row["seed"] in YAOI_TAGS or not YAOI_TAGS.isdisjoint(row["tags"]))
+
+
+def apart_pool(row):
+    """따로 뺀 대분류의 가상 풀 - 남남(APART_POOL) · 후타나리(FUTA_POOL) · 아니면 ""."""
+    if row["kind"] not in SEPARATE:
+        return ""
+    if is_apart(row):
+        return APART_POOL
+    return FUTA_POOL if row.get("futa") else ""
 
 
 _HANGUL = re.compile("[가-힣]")
@@ -144,7 +166,7 @@ class PresetBenchService:
             states = json.loads((self.data_dir / "outfit_states.json").read_bytes())["by_set"]
             by_id = {}
             seeds = defaultdict(lambda: defaultdict(list))
-            cooccur = {}
+            cooccur, futa_ids = {}, frozenset()
             for pack_kind in ("outfit", "event", "expression", "scene"):
                 raw = (self.data_dir / f"{pack_kind}_presets.json").read_bytes()
                 pack = json.loads(raw)
@@ -152,14 +174,15 @@ class PresetBenchService:
                     self._outfit_digest = hashlib.sha256(raw).hexdigest()
                     self._outfit_slots = pack["tag_slot"]
                 if pack_kind == "event":
-                    cooccur = load_cooccur(self.data_dir / COOCCUR_NAME, hashlib.sha256(raw).hexdigest())
+                    cooccur, futa_ids = load_cooccur(self.data_dir / COOCCUR_NAME, hashlib.sha256(raw).hexdigest())
                 for row in pack["sets"]:
                     kind = "outfit" if pack_kind == "outfit" else row["family"]
                     pool, seed = row["pool"], row["seed"]
                     summary = {field: row[field] for field in _FIELDS}
                     head = head_for(kind, pool)
                     summary.update(kind=kind, key=preset_thumb_key(kind, head, row["tags"]),
-                                   add=cooccur.get(row["id"], []), adult=is_adult(row["support_by_rating"]))
+                                   add=cooccur.get(row["id"], []), adult=is_adult(row["support_by_rating"]),
+                                   futa=is_futa(row, futa_ids))
                     if kind == "outfit":
                         summary["states"] = states.get(row["id"], {})
                     by_id[row["id"]] = summary
@@ -168,18 +191,20 @@ class PresetBenchService:
                 for rows in seed_rows.values():
                     rows.sort(key=_order)
             for kind in {kind for kind, _ in seeds}:
-                merged, apart, seen = defaultdict(list), defaultdict(list), set()
+                lists = {ALL_POOLS: defaultdict(list), **{key: defaultdict(list) for key, _ in APART_GROUPS}}
+                seen = set()
                 pools = sorted((pool for k, pool in seeds if k == kind), key=lambda pool: _POOL_PRIORITY.get(pool, 9))
                 for pool in pools:
                     for seed, rows in seeds[kind, pool].items():
                         for row in rows:
-                            mark = (is_apart(row), seed, tuple(sorted(row["tags"])))
+                            mark = (apart_pool(row), seed, tuple(sorted(row["tags"])))
                             if mark not in seen:
                                 seen.add(mark)
-                                (apart if mark[0] else merged)[seed].append(row)
-                seeds[kind, ALL_POOLS] = merged
+                                lists[mark[0]][seed].append(row)
+                seeds[kind, ALL_POOLS] = lists[ALL_POOLS]
                 if kind in SEPARATE:
-                    seeds[kind, APART_POOL] = apart
+                    for key, _ in APART_GROUPS:
+                        seeds[kind, key] = lists[key]
             # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸(tag_slot)과 별개인 손으로 고른 표다.
             # 갈래 다섯 모두 표가 있어야 한다(11-20 v3 + 의상).
             browse = json.loads((self.data_dir / BROWSE_TAXONOMY_NAME).read_bytes())
@@ -251,8 +276,7 @@ class PresetBenchService:
             items = [entry(seed, None) for seed in rest]
             groups.append({"slot": UNSORTED_LABEL, "label": UNSORTED_LABEL,
                            "subs": [{"name": UNSORTED_LABEL, "seeds": items}], "seeds": items})
-        if pool == ALL_POOLS and kind in SEPARATE:
-            label, apart = SEPARATE[kind][0], APART_POOL
+        for apart, label in (APART_GROUPS if pool == ALL_POOLS and kind in SEPARATE else ()):
             source = self._seeds[kind, apart]
             subs, placed = [], set()
             for category in self._browse[kind]:
@@ -297,7 +321,7 @@ class PresetBenchService:
                 if (query in tag.casefold()
                         or query in str(record.get("description") or record.get("desc") or "").casefold()
                         or query in str(record.get("keywords_kr") or "").casefold()):
-                    matches.append({"kind": row["kind"], "pool": APART_POOL if is_apart(row) else row["pool"],
+                    matches.append({"kind": row["kind"], "pool": apart_pool(row) or row["pool"],
                                     "seed": row["seed"],
                                     "set_id": row["id"], "matched": tag,
                                     "ko": korean_tag_name(_translation(translations, row["seed"]))})

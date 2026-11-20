@@ -9782,7 +9782,11 @@ function toggleFnMenu(event) {
 //    항목을 더하면 여기도 같이 더해야 한다 - 안 그러면 그 기능만 빠른 칸에 못 올라온다.
 const FN_QUICK_STORE = 'naia.fn.lastUsed';
 const FN_QUICK_ITEMS = [
-  {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
+  // ⚠️ Preset 진입로는 회수했다(사용자 지시 2026-11-20 · 대신 [프롬프트 도구] > [Presets 벤치]).
+  //    index.html `#fnMenu` 의 짝도 함께 닫혀 있다. 마지막으로 쓴 칸이 'preset' 으로 저장된
+  //    사용자는 `fnQuickItem()` 이 null 을 돌려 빠른 칸이 그냥 빈다. 패널 인스턴스는
+  //    `preset:` 자동완성이 데이터를 받느라 계속 만든다.
+  // {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
   {key: 'sequence', icon: '▶', label: 'Sequence', tab: 'sequence', run: () => openFnSequence()},
   // ⚠️ I.Sequence 는 진입로를 닫아 뒀다(index.html `#fnMenu` 의 짝도 함께).
   //    기능은 그대로 살아 있고 `openFnISequence()` 도 부를 수 있다 - 메뉴에만

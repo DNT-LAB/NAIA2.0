@@ -170,8 +170,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
 .pbw-gcol .pbw-ex-ctx { font-size: 12px; color: var(--text-muted); }
 .pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-/* 그림 칸이 넓어진 만큼 카드도 키운다 - 칸 너비 500px 이면 한 줄 2장(약 240px). */
-.pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
+/* 그림 칸 = 너비와 무관하게 한 줄 2장(사용자 11-20 - 스크롤당 볼 것이 많지 않다). */
+.pbw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 .pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
 .pbw-card { position: relative; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-surface); }
 .pbw-card:hover { border-color: var(--accent); }
@@ -860,7 +860,6 @@ export function createPresetBench({
         group.sets.forEach(set => shownSets.set(set.id, set));
         return `<div class="pbw-sec">${esc(group.label)} · ${group.sets.length}</div><div class="pbw-grid">${group.sets.map(set => cardHtml(slot, set)).join('')}</div>`;
       }).join('') : '<div class="pbw-empty">관련 의상이 없습니다</div>';
-      fitGrid();
       return;
     }
 
@@ -917,27 +916,6 @@ export function createPresetBench({
     shownSets = new Map(sets.map(set => [set.id, set]));
     ctx.textContent = `${seedName} · ${sets.length}세트`;
     grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
-    fitGrid();
-  }
-
-  // 그림 칸 열 수(사용자 11-20 "작아지더라도 최소 2줄") - 한 줄에 2장 이상, 그리고 세로로 2줄이 칸 높이에 들어가게.
-  // 카드 = 그림(의상은 525:768 세로, 나머지 정사각) + 이름 두 줄. 넓으면 190px 기준으로 더 늘린다(최대 8열).
-  function fitGrid() {
-    const wrap = $('grid');
-    const grids = wrap ? [...wrap.querySelectorAll('.pbw-grid')] : [];
-    if (!grids.length || !wrap.clientWidth) return;
-    const gap = 6;
-    const caption = 36;
-    const width = wrap.clientWidth;
-    const height = wrap.clientHeight;
-    const ratio = wrap.querySelector('.pbw-th.is-tall') ? 768 / 525 : 1;
-    let cols = Math.max(2, Math.floor((width + gap) / (190 + gap)));
-    while (cols < 8) {
-      const cardWidth = (width - gap * (cols - 1)) / cols;
-      if (!height || 2 * (cardWidth * ratio + caption) + gap <= height) break;
-      cols += 1;
-    }
-    grids.forEach(grid => { grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`; });
   }
 
   async function runSearch(q) {
@@ -1519,7 +1497,6 @@ export function createPresetBench({
   applySplit();
   if (win.ResizeObserver) {
     new win.ResizeObserver(() => fitResults()).observe($('results'));
-    new win.ResizeObserver(() => fitGrid()).observe($('grid'));
   }
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)

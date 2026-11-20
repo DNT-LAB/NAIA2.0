@@ -860,6 +860,7 @@ export function createPresetBench({
         group.sets.forEach(set => shownSets.set(set.id, set));
         return `<div class="pbw-sec">${esc(group.label)} · ${group.sets.length}</div><div class="pbw-grid">${group.sets.map(set => cardHtml(slot, set)).join('')}</div>`;
       }).join('') : '<div class="pbw-empty">관련 의상이 없습니다</div>';
+      fitGrid();
       return;
     }
 
@@ -916,6 +917,27 @@ export function createPresetBench({
     shownSets = new Map(sets.map(set => [set.id, set]));
     ctx.textContent = `${seedName} · ${sets.length}세트`;
     grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
+    fitGrid();
+  }
+
+  // 그림 칸 열 수(사용자 11-20 "작아지더라도 최소 2줄") - 한 줄에 2장 이상, 그리고 세로로 2줄이 칸 높이에 들어가게.
+  // 카드 = 그림(의상은 525:768 세로, 나머지 정사각) + 이름 두 줄. 넓으면 190px 기준으로 더 늘린다(최대 8열).
+  function fitGrid() {
+    const wrap = $('grid');
+    const grids = wrap ? [...wrap.querySelectorAll('.pbw-grid')] : [];
+    if (!grids.length || !wrap.clientWidth) return;
+    const gap = 6;
+    const caption = 36;
+    const width = wrap.clientWidth;
+    const height = wrap.clientHeight;
+    const ratio = wrap.querySelector('.pbw-th.is-tall') ? 768 / 525 : 1;
+    let cols = Math.max(2, Math.floor((width + gap) / (190 + gap)));
+    while (cols < 8) {
+      const cardWidth = (width - gap * (cols - 1)) / cols;
+      if (!height || 2 * (cardWidth * ratio + caption) + gap <= height) break;
+      cols += 1;
+    }
+    grids.forEach(grid => { grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`; });
   }
 
   async function runSearch(q) {
@@ -1495,7 +1517,10 @@ export function createPresetBench({
   });
   splitBar.addEventListener('dblclick', () => { st.split = 0.45; applySplit(); persist(); });
   applySplit();
-  if (win.ResizeObserver) new win.ResizeObserver(() => fitResults()).observe($('results'));
+  if (win.ResizeObserver) {
+    new win.ResizeObserver(() => fitResults()).observe($('results'));
+    new win.ResizeObserver(() => fitGrid()).observe($('grid'));
+  }
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {

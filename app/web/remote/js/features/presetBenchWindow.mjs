@@ -207,10 +207,15 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-ov { position: absolute; inset: 0; z-index: 2; background: var(--bg-elevated, var(--bg-surface)); padding: 10px 12px; overflow-y: auto; border-left: 1px solid var(--accent); }
 /* 기반 설정 판 - NAIA 표준(사용자 11-20): 칸 이름 = mod-section-label · 글 칸 = mod-textarea · 설정 = Params 탭의 params-grid ·
    프리셋 고르기 = PE Quick Preset 과 같은 표준 드롭다운(mod-select mod-preset-select - 모델 배지 · 짚으면 미리보기). */
-.pbw-bs { padding: 10px 16px 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
-.pbw-bs-head { display: flex; align-items: center; gap: 10px; }
+/* 판 높이에 맞춘다(사용자 11-20 "빈 공간 자동 fitting"): 두 칸 모두 세로 flex - 글 칸(.pbw-bs-ro · mod-textarea)이 남는 높이를 나눠 갖는다.
+   왼쪽 = 앞 · 뒤, 오른쪽 = Params 아래 Negative. 판이 낮으면 글 칸 최소 높이에서 멈추고 판이 스크롤된다. */
+.pbw-bs { padding: 10px 16px 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; box-sizing: border-box; }
+.pbw-bs-head { display: flex; align-items: center; gap: 10px; flex: none; }
 .pbw-bs-head b { font: 600 13px var(--font-display); color: var(--text-primary); }
-.pbw-bs-cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 18px; margin-top: 4px; align-items: start; }
+.pbw-bs-cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 18px; margin-top: 4px; flex: 1 0 auto; }
+.pbw-bs-cols > div { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.pbw-bs-cols > div > * { flex: none; }
+.pbw-bs-cols > div > .pbw-bs-ro, .pbw-bs-cols > div > .mod-textarea { flex: 1 1 0; min-height: 90px; max-height: none; }
 .pbw-bs .mod-section-label { margin-top: 12px; display: flex; align-items: baseline; gap: 8px; }
 .pbw-bs-note { font: 400 10px var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--text-dim); line-height: 1.5; }
 .pbw-bs-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -540,9 +545,9 @@ export function createPresetBench({
             <button type="button" class="pbw-bs-btn" data-act="to-direct" title="이 프리셋의 값을 직접 설정으로 옮겨 고칩니다">이 값으로 직접 설정 ›</button></div>
           <div class="mod-section-label">Prefix prompt</div>${ro(preset?.prefix)}
           <div class="mod-section-label">Postfix prompt</div>${ro(preset?.postfix)}
-          <div class="mod-section-label">Negative</div>${ro(preset?.negative_prompt)}
         </div><div>
           <div class="mod-section-label">Params</div><div class="params-grid">${paramRows(preset?.params || {}, false)}</div>
+          <div class="mod-section-label">Negative</div>${ro(preset?.negative_prompt)}
         </div></div></div>`;
       return;
     }
@@ -562,7 +567,6 @@ export function createPresetBench({
         <div class="pbw-bs-line pbw-bs-src"><span>불러온 값 · ${from}</span>${presetSelect('load-from', '', '다른 프리셋에서 불러오기')}</div>
         <div class="mod-section-label">Prefix prompt</div><textarea class="mod-textarea" data-field="prefix" spellcheck="false">${esc(d.prefix)}</textarea>
         <div class="mod-section-label">Postfix prompt</div><textarea class="mod-textarea" data-field="postfix" spellcheck="false">${esc(d.postfix)}</textarea>
-        <div class="mod-section-label">Negative</div><textarea class="mod-textarea" data-field="negative_prompt" spellcheck="false">${esc(d.negative_prompt)}</textarea>
       </div><div>
         <div class="mod-section-label">Params <span class="pbw-bs-note">비운 칸 = 메인 화면 세션 값(흐린 글자)</span></div>
         <div class="params-grid">${paramRows(d.params, true)}</div>
@@ -571,6 +575,7 @@ export function createPresetBench({
           `<option value="${esc(p.name)}"${p.name === st.exportTarget ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
           <button type="button" class="pbw-bs-btn" data-act="export">보내기</button></div>
         <div class="pbw-bs-note" style="margin-top:4px">지금 쓰는 프리셋${bases?.current ? `(${esc(bases.current)})` : ''}에는 보낼 수 없습니다.</div>
+        <div class="mod-section-label">Negative</div><textarea class="mod-textarea" data-field="negative_prompt" spellcheck="false">${esc(d.negative_prompt)}</textarea>
       </div></div></div>`;
   }
 

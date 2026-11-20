@@ -72,8 +72,8 @@ const API = {
   },
 };
 const DB_LIST_LIMIT = 300;
-// 벤치 해상도 = 1024² 묶음만(사용자 11-20) - 서버 BENCH_SIZES 와 짝.
-const BENCH_SIZES = ['1024 x 1024', '960 x 1088', '896 x 1152', '832 x 1216', '1088 x 960', '1152 x 896', '1216 x 832'];
+// 벤치 해상도 = 메인과 분리된 사양(사용자 11-20) - 1024² 묶음 + 768 x 1344(세로만). 서버 BENCH_SIZES 와 짝.
+const BENCH_SIZES = ['1024 x 1024', '960 x 1088', '896 x 1152', '832 x 1216', '768 x 1344', '1088 x 960', '1152 x 896', '1216 x 832'];
 const DEFAULT_SIZE = '832 x 1216';
 const MAX_REFS = 4;
 const REF_TYPES = ['character&style', 'character', 'style'];
@@ -305,6 +305,10 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 /* 해상도 - 결과 열 오른쪽 아래에 떠 있는 표준 드롭다운(customSelects 가 quick-select 를 감싼다). 이전 생성 줄이 있으면 그 위로. */
 .pbw-rcol { position: relative; }
 .pbw-resfloat { position: absolute; right: 10px; bottom: 10px; z-index: 3; }
+/* 해상도 단추 = 반투명 바탕(사용자 11-20 - 투명이면 그림 위에서 안 읽힌다). */
+.pbw-resfloat .param-select.quick-select { background-color: rgba(12, 12, 18, 0.62); border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 6px; color: var(--text-primary); backdrop-filter: blur(4px); }
+.pbw-resfloat .param-select.quick-select:hover { background-color: rgba(12, 12, 18, 0.8); }
 .pbw-rcol.has-hist .pbw-resfloat { bottom: 80px; }
 .pbw-rl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
 .pbw-rl-body.is-one { display: flex; overflow: hidden; }
@@ -477,7 +481,8 @@ export function createPresetBench({
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
     // 추가 프롬프트 - 캐릭터마다(그 캐릭터 몫 끝) · 메인(메인 끝).
     extras: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.extras?.[i] || '')),
-    extraMain: String(saved.extraMain || ''),
+    // 처음 상태(저장값에 아직 없음)는 'full body'(사용자 11-20) - 비우면 빈 채로 기억한다.
+    extraMain: saved.extraMain === undefined ? 'full body' : String(saved.extraMain || ''),
     size: BENCH_SIZES.includes(saved.size) ? saved.size : DEFAULT_SIZE,     // 벤치 해상도(기반의 크기 대신)
     // 캐릭터마다 - 에셋에서 불러온 UC · 어디서 불러왔나(카드 아래 한 줄) · REF 줄.
     ucs: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.ucs?.[i] || '')),

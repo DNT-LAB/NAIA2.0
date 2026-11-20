@@ -9792,6 +9792,8 @@ const FN_QUICK_ITEMS = [
   //    사용자는 `fnQuickItem()` 이 null 을 돌려 빠른 칸이 그냥 빈다. 패널 인스턴스는
   //    `preset:` 자동완성이 데이터를 받느라 계속 만든다.
   // {key: 'preset', icon: '▦', label: 'Preset', tab: 'preset', run: () => openFnPreset()},
+  // Presets 벤치(사용자 지시 2026-11-20) - 오른쪽 탭 단추는 숨기고 여기서 연다. 프롬프트 칸 탭이 아니라 tab 은 비운다.
+  {key: 'presets', icon: '▤', label: 'Presets', tab: '', run: () => openFnPresets()},
   {key: 'sequence', icon: '▶', label: 'Sequence', tab: 'sequence', run: () => openFnSequence()},
   // ⚠️ I.Sequence 는 진입로를 닫아 뒀다(index.html `#fnMenu` 의 짝도 함께).
   //    기능은 그대로 살아 있고 `openFnISequence()` 도 부를 수 있다 - 메뉴에만
@@ -9862,6 +9864,12 @@ function openFnPreset() {
   closeFnMenu();
   rememberFnQuick('preset');
   switchTab('preset');
+}
+
+function openFnPresets() {
+  closeFnMenu();
+  rememberFnQuick('presets');
+  switchRightTab('presets');
 }
 
 function openFnSequence() {
@@ -12904,14 +12912,13 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ref7')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-fn1')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
           window,
           escHtml,
           bindTagAssist,
-          applyMainPrompt: text => applyPromptText(text),
           notify: (msg, type) => showToast(msg, type),
           showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
           hideZoom: () => remoteController?.hideZoom?.(),

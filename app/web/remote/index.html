@@ -557,6 +557,7 @@
              되살리려면 이 주석을 걷고 app.js 의 `FN_QUICK_ITEMS` 짝도 함께 풀면 된다.
         <button type="button" role="menuitem" onclick="openFnPreset()"><span>&#9638;</span><span>Preset</span></button>
         -->
+        <button type="button" role="menuitem" onclick="openFnPresets()"><span>&#9636;</span><span>Presets</span></button>
         <button type="button" role="menuitem" onclick="openFnSequence()"><span>&#9654;</span><span>Sequence</span></button>
         <!-- I.Sequence 진입로는 **일부러 닫아 뒀다**(사용자 지정 2026-08-28).
              기능은 살아 있다 - 백엔드·패널·테스트 전부 그대로고, 라이브로
@@ -938,7 +939,9 @@
     <button class="right-tab-btn" data-right-tab="charAssets" onclick="switchRightTab('charAssets')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🧍</span><span>Assets</span>
     </button>
-    <button class="right-tab-btn" data-right-tab="presets" onclick="switchRightTab('presets')" role="tab" aria-selected="false">
+    <!-- Presets 벤치는 Fn 메뉴에서 연다(사용자 지시 2026-11-20) - 탭 단추는 숨기고 탭(자리)은 그대로 쓴다.
+         data-right-tab-hidden 을 쓰면 rightTabs 가 이 탭으로 못 넘어가므로 style 로만 감춘다. -->
+    <button class="right-tab-btn" data-right-tab="presets" onclick="switchRightTab('presets')" role="tab" aria-selected="false" style="display:none">
       <span class="right-tab-icon">▤</span><span>Presets</span>
     </button>
     <button class="right-tab-btn" data-right-tab="danbooru" data-right-tab-hidden="true" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>

@@ -4,7 +4,7 @@
 //   │ Presets 벤치 [← 프롬프트]││ 칸 이름 · 맥락 · [검색] [결과]                          │
 //   │ 기반 요약 카드           ││ 대분류 | 소분류 · 시드 | 세트 카드(위에 결과 판이 뜬다) │
 //   │ 넣을 곳 · 캐릭터 카드    ││                                                         │
-//   │ [N장 생성 | 중지]        │├ 프롬프트 미리보기 · [복사] [메인 프롬프트로] ───────────┤
+//   │ [N장 생성 | 중지]        ││                                     [해상도 ▾] (떠 있음) │
 //   └─────────────────────────┘└─────────────────────────────────────────────────────────┘
 //
 // - 덮개는 Assets 신 사양과 같은 방식이다: body.preset-bench-mode 가 메인 프롬프트 · 도구 줄 · 아래 조작줄을 가린다
@@ -21,9 +21,11 @@
 //   DB = Characters 창의 캐릭터(옷 태그는 뺀다 - 의상 칸이 따로) · 에셋 = 캐릭터 프롬프트 + UC (+ 그 그림을 REF 로) ·
 //   REF = 보관함 그림을 그 카드의 REF 줄에. REF 는 이 요청에만 실린다(세션 REF 창 · 목록은 안 바꾼다).
 //   NAI 의 Character Reference 는 그림 한 장 전체에 걸린다 - 2명이면 경고만 하고 나누지 않는다. 한 번에 4장까지.
+// - 해상도(사용자 11-20) = 결과 열 오른쪽 아래 드롭다운(1024² 묶음 7가지 · 기본 832 x 1216) - 기반의 크기 대신 늘 이것.
+//   프롬프트 미리보기 줄 · 결과 머리 줄은 걷었다(자리를 그림에). Presets 는 Fn 메뉴에서 연다(탭 단추는 숨김).
 
 import {
-  MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
+  MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
 } from './presetBenchModel.mjs?v=20261120-ref1';
 
 const STYLE_ID = 'pbw-style';
@@ -66,6 +68,9 @@ const API = {
   },
 };
 const DB_LIST_LIMIT = 300;
+// 벤치 해상도 = 1024² 묶음만(사용자 11-20) - 서버 BENCH_SIZES 와 짝.
+const BENCH_SIZES = ['1024 x 1024', '960 x 1088', '896 x 1152', '832 x 1216', '1088 x 960', '1152 x 896', '1216 x 832'];
+const DEFAULT_SIZE = '832 x 1216';
 const MAX_REFS = 4;
 const REF_TYPES = ['character&style', 'character', 'style'];
 const REF_TYPE_SHORT = {'character&style': 'C&S', character: 'C', style: 'S'};
@@ -125,7 +130,6 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-lhead .pbw-btn { margin-left: auto; }
 .pbw-right { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .pbw-ex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
-.pbw-pv { flex: 0 0 auto; border-top: 1px solid var(--border-dim); padding: 5px 10px; }
 .pbw-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pbw-dim { color: var(--text-dim); }
 .pbw-sm { font-size: 11px; }
@@ -250,10 +254,10 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-rl-h .pbw-res-box { height: 100%; aspect-ratio: auto; }
 .pbw-rl-h span { position: absolute; right: 2px; bottom: 2px; padding: 0 3px; border-radius: 3px; font-size: 10px; line-height: 14px;
   background: rgba(0, 0, 0, 0.65); color: #fff; }
-.pbw-rl-head { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-bottom: 1px solid var(--border-dim); }
-.pbw-rl-head > .pbw-dim { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pbw-rl-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.pbw-rl-nav .pbw-btn { padding: 0 7px; font-size: 13px; line-height: 20px; }
+/* 해상도 - 결과 열 오른쪽 아래에 떠 있는 표준 드롭다운(customSelects 가 quick-select 를 감싼다). 이전 생성 줄이 있으면 그 위로. */
+.pbw-rcol { position: relative; }
+.pbw-resfloat { position: absolute; right: 10px; bottom: 10px; z-index: 3; }
+.pbw-rcol.has-hist .pbw-resfloat { bottom: 80px; }
 .pbw-rl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
 .pbw-rl-body.is-one { display: flex; overflow: hidden; }
 .pbw-rl-one { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
@@ -298,8 +302,6 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-bs-ses { margin-left: 6px; padding: 0 4px; border: 1px dashed var(--border-dim); border-radius: 3px; font-size: 9.5px; color: var(--text-dim); }
 .pbw-bs .param-row { padding: 4px 12px; min-height: 32px; gap: 8px; }
 .pbw-bs .param-input::placeholder { color: var(--text-dim); opacity: 0.8; }
-.pbw-bs-size { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.pbw-bs-size .param-input { flex: 0 0 52px; }
 .pbw-bs-src { margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .pbw-bs-src > span:first-child { flex: none; }
 .pbw-bs-badge { color: #f0c674; font-weight: 600; }
@@ -309,12 +311,6 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-params label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-dim); }
 .pbw-params input { width: 84px; }
 .pbw-params input.is-wide { width: 150px; }
-.pbw-pp { font-family: var(--font-mono); font-size: 11px; line-height: 1.6; word-break: break-word; }
-.pbw-pr { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; border-top: 1px solid var(--border-dim); padding: 2px 0; }
-.pbw-pr:first-child { border-top: 0; }
-.pbw-src { color: var(--text-dim); }
-.pbw-hl { color: var(--accent); }
-.pbw-pv-line { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-band { padding: 6px 8px; border: 1px solid rgba(240,198,116,0.45); border-radius: 6px; font-size: 11px; display: flex; gap: 8px; align-items: center; }
 /* 캐릭터 불러오기 - 카드 머리를 누르면 고르기가 그 캐릭터로. 고르는 중인 카드 머리 = 칸과 같은 옅은 보라 + 곧은 막대. */
 .pbw-ex-head { flex-wrap: wrap; }
@@ -374,7 +370,6 @@ function paramsSummary(params) {
   const p = params || {};
   const parts = [];
   if (p.model) parts.push(String(p.model));
-  parts.push(p.width && p.height ? `${p.width}x${p.height}` : '크기 = 세션');
   if (p.steps) parts.push(`${p.steps}스텝`);
   if (p.cfg_scale !== undefined) parts.push(`CFG ${p.cfg_scale}`);
   if (p.sampler) parts.push(String(p.sampler));
@@ -392,8 +387,6 @@ export function createPresetBench({
   hideZoom = () => {},
   // 캐릭터 글 칸에 태그 자동완성을 붙인다(app.js bindTagAssist). 없으면 그냥 글 칸.
   bindTagAssist = null,
-  // [메인 프롬프트로] - 가운데 몫을 메인 프롬프트 칸에 넣는다(app.js applyPromptText).
-  applyMainPrompt = null,
   notify = () => {},
   onVisibilityChange = () => {},
   // 기반 설정 판(사용자 11-20) - 메인 Params 탭의 지금 값 · 고를 목록(모델 · 샘플러 · 스케줄러) · PE 프리셋 요약(모델 배지 · 미리보기) ·
@@ -423,6 +416,7 @@ export function createPresetBench({
     subjects: Array.from({length: MAX_CHARACTERS}, () => ({gender: '', source: '', name: ''})),
     target: saved.target === 'main' ? 'main' : 'char',
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
+    size: BENCH_SIZES.includes(saved.size) ? saved.size : DEFAULT_SIZE,     // 벤치 해상도(기반의 크기 대신)
     // 캐릭터마다 - 에셋에서 불러온 UC · 어디서 불러왔나(카드 아래 한 줄) · REF 줄.
     ucs: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.ucs?.[i] || '')),
     loaded: Array.from({length: MAX_CHARACTERS}, (_, i) => (saved.loaded?.[i]?.label
@@ -446,7 +440,6 @@ export function createPresetBench({
     runs: [],
     pick: null,           // [run id, item index]
     baseOpen: false,
-    pvOpen: false,
     resRun: '',           // 결과 열이 보여 주는 생성(run id) - 비면 마지막 생성
     // 그림 칸 : 결과 열 너비(그림 칸 몫 0.25~0.75) - 경계를 끌어 바꾸고 기억한다. 두 번 누르면 0.45.
     split: Math.min(0.75, Math.max(0.25, Number(saved.split) || 0.45)),
@@ -475,7 +468,7 @@ export function createPresetBench({
   function persist() {
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
-        count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split,
+        count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split, size: st.size,
         ucs: st.ucs, loaded: st.loaded, refs: st.refs, cv: {src: st.cv.src, attach: st.cv.attach},
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
       }));
@@ -529,15 +522,16 @@ export function createPresetBench({
             <div class="pbw-grid-wrap" data-role="grid"></div>
           </div>
           <div class="pbw-split" data-role="split" title="끌어서 너비 조정 · 두 번 누르면 처음대로"></div>
-          <div class="pbw-rcol"><div class="pbw-rl" data-role="results"></div></div>
+          <div class="pbw-rcol" data-role="rcol"><div class="pbw-rl" data-role="results"></div>
+            <div class="pbw-resfloat" title="벤치 생성 해상도 - 기반 프리셋의 크기 대신 이것으로 그립니다"><select class="param-select quick-select" data-role="res">${BENCH_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}</select></div></div>
         </div>
         <div data-role="overlay"></div>
-      </div>
-      <div class="pbw-pv" data-role="preview"></div>`;
+      </div>`;
   const $ = role => qs(`[data-role="${role}"]`);
   const baseCard = qs('[data-act="base"]');
   const goBtn = qs('[data-act="go"]');
   const searchInput = $('search');
+  $('res').value = st.size;
 
   async function getJson(url, options) {
     const response = await fetchFn(url, options);
@@ -587,7 +581,8 @@ export function createPresetBench({
   }
 
   // ---- 기반 설정 판(사용자 11-20 - NAIA 표준 · 직접 설정은 현재 값을 채워서)
-  const PARAM_ROWS = [['model', 'Model'], ['sampler', 'Sampler'], ['scheduler', 'Scheduler'], ['size', 'Resolution'],
+  // 해상도는 여기 없다 - 결과 열의 해상도 드롭다운이 정한다(사용자 11-20).
+  const PARAM_ROWS = [['model', 'Model'], ['sampler', 'Sampler'], ['scheduler', 'Scheduler'],
     ['steps', 'Steps'], ['cfg_scale', 'CFG Scale'], ['cfg_rescale', 'CFG Rescale']];
   const sessionParams = () => cleanParams(getSessionParams() || {});
   const presetSummary = name => (getPresetSummaries() || []).find(row => row && row.name === name) || null;
@@ -625,13 +620,8 @@ export function createPresetBench({
     return PARAM_ROWS.map(([key, label]) => {
       let body;
       if (!editable) {
-        const text = key === 'size'
-          ? (shown('width') && shown('height') ? `${shown('width')} x ${shown('height')}` : '-')
-          : String(shown(key) === '' ? '-' : shown(key));
-        body = `<span class="pbw-bs-val">${esc(text)}${sesTag(key === 'size' ? 'width' : key)}</span>`;
-      } else if (key === 'size') {
-        const box = side => `<input class="param-input" type="number" step="64" min="64" max="2048" data-param="${side}" value="${own(side) ?? ''}" placeholder="${ses[side] ?? ''}">`;
-        body = `<span class="pbw-bs-size">${box('width')}<span class="pbw-dim">x</span>${box('height')}</span>`;
+        const text = String(shown(key) === '' ? '-' : shown(key));
+        body = `<span class="pbw-bs-val">${esc(text)}${sesTag(key)}</span>`;
       } else if (key === 'model' || key === 'sampler' || key === 'scheduler') {
         const list = [...(choices[key] || [])];
         const cur = String(shown(key) || '');
@@ -761,7 +751,6 @@ export function createPresetBench({
   function renderAllBase() {
     renderBaseCard();
     renderOverlay();
-    renderPreview();
     renderCharMeta();
   }
 
@@ -863,7 +852,6 @@ export function createPresetBench({
       st.subjects[i] = {gender: String(row.gender || ''), source: String(row.source || ''), name: String(row.name || '')};
       renderSubjects();
       renderSlots();      // 2인 이상 자세의 성별 어긋남 표지
-      renderPreview();
     }, delay);
   }
 
@@ -1318,7 +1306,6 @@ export function createPresetBench({
   function afterLoad() {
     persist();
     renderCharMeta();
-    renderPreview();
   }
 
   async function loadDb(i, group, character, card) {
@@ -1379,7 +1366,6 @@ export function createPresetBench({
     qsa(`.pbw-card[data-rhash="${CSS.escape(hash)}"]`).forEach(el => el.classList.toggle('is-sel', on));
     persist();
     renderCharMeta();
-    renderPreview();
   }
 
   // ---------------------------------------------------------------- 결과 열(오른쪽 - 남는다)
@@ -1419,20 +1405,14 @@ export function createPresetBench({
 
   function renderResults() {
     const box = $('results');
+    $('rcol').classList.toggle('has-hist', st.runs.length > 1);
     const run = shownRun();
     if (!run) {
       box.innerHTML = '<div class="pbw-empty">[생성] 결과가 여기에 남습니다<br><span class="pbw-sm">그림 칸에서 2개 이상 체크하면 비교 생성 - 결과가 격자로 나옵니다</span></div>';
       return;
     }
-    const at = st.runs.indexOf(run);
-    const nav = st.runs.length > 1
-      ? `<button type="button" class="pbw-btn" data-act="res-prev" title="앞선 생성"${at <= 0 ? ' disabled' : ''}>‹</button>
-         <span class="pbw-dim pbw-sm">${at + 1} / ${st.runs.length}</span>
-         <button type="button" class="pbw-btn" data-act="res-next" title="다음 생성"${at >= st.runs.length - 1 ? ' disabled' : ''}>›</button>` : '';
     const one = run.items.length === 1;
-    box.innerHTML = `<div class="pbw-rl-head"><b style="font-weight:600;white-space:nowrap">${esc(run.label)}</b><span class="pbw-dim pbw-sm">· ${run.items.length}장 · ${esc(run.base)}</span>
-        <span class="pbw-rl-nav">${nav}</span></div>
-      <div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run.items[0]) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>
+    box.innerHTML = `<div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run.items[0]) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>
       ${st.runs.length > 1 ? `<div class="pbw-rl-hist">${[...st.runs].reverse().map(row => historyCard(row, run)).join('')}</div>` : ''}`;
     fitResults();
   }
@@ -1462,58 +1442,11 @@ export function createPresetBench({
   function showRun(runId) {
     if (!st.runs.some(run => run.id === runId)) return;
     st.resRun = runId;
-    const hadPick = Boolean(st.pick);
     st.pick = null;
     leaveCard();
     renderResults();
-    if (hadPick) renderPreview();
   }
 
-  // ---------------------------------------------------------------- 미리보기
-  function renderPreview() {
-    const box = $('preview');
-    let variant = null;
-    let title = '프롬프트 미리보기';
-    if (st.pick) {
-      const run = st.runs.find(r => r.id === st.pick[0]);
-      const item = run?.items[st.pick[1]];
-      if (run && item) {
-        if (run.axis && item.set) variant = {slotId: run.axis, tags: item.set.tags, pool: item.set.pool};
-        title = `고른 결과 · ${item.label}`;
-      }
-    }
-    const axisSlot = slotById(st.axis);
-    const rows = previewRows({
-      cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant, ucs: st.ucs,
-      axis: axisSlot ? {slotId: axisSlot.id, label: KIND_LABELS[axisSlot.kind], count: axisSets().length} : null,
-    });
-    const base = currentBase();
-    const front = `<span class="pbw-src">[${esc(base.short)} 앞]</span>`;
-    const back = `<span class="pbw-src">[${esc(base.short)} 뒤]</span>`;
-    const hl = text => esc(text).replace(/\{[^}]*×\d+\}/g, m => `<span class="pbw-hl">${m}</span>`);
-    const mainHtml = [front, hl(rows[0].text), back].filter(Boolean).join(', ');
-    const ucLines = st.target === 'char' ? rows.slice(1).map((row, i) => (st.ucs[i] ? {label: `UC ${i + 1}`, html: esc(st.ucs[i])} : null)).filter(Boolean) : [];
-    const refs = activeRefs();
-    const lines = [{label: '메인', html: mainHtml}, ...rows.slice(1).map(row => ({label: row.label, html: hl(row.text) || '<span class="pbw-src">(비어 있음)</span>'})),
-      ...ucLines,
-      {label: '네거티브', html: `<span class="pbw-src">[${esc(base.short)} 네거티브]</span>`},
-      ...(refs.length ? [{label: 'REF', html: esc(refs.map(ref => `${ref.label || ref.file_hash || ref.id} (${REF_TYPE_SHORT[ref.reference_type]} S ${ref.strength} F ${ref.fidelity})`).join(' · '))}] : [])];
-    box.innerHTML = `<div class="pbw-row"><a data-act="pv" style="cursor:pointer">${st.pvOpen ? '▾' : '▸'} <b style="font-weight:600">${esc(title)}</b></a>
-      ${st.pvOpen ? '' : `<span class="pbw-pp pbw-dim pbw-pv-line">${mainHtml}</span>`}
-      <span class="pbw-row" style="margin-left:auto"><button type="button" class="pbw-btn" data-act="copy">복사</button><button type="button" class="pbw-btn" data-act="to-main" title="가운데 몫(기반 앞뒤 제외)을 메인 프롬프트 칸에 넣습니다">메인 프롬프트로</button></span></div>` +
-      (st.pvOpen ? `<div class="pbw-pp" style="margin-top:4px">${lines.map(line => `<div class="pbw-pr"><span class="pbw-dim" style="font-family:inherit">${line.label}</span><span>${line.html}</span></div>`).join('')}</div>` : '');
-  }
-
-  function previewText() {
-    let variant = null;
-    if (st.pick) {
-      const run = st.runs.find(r => r.id === st.pick[0]);
-      const item = run?.items[st.pick[1]];
-      if (run?.axis && item?.set) variant = {slotId: run.axis, tags: item.set.tags, pool: item.set.pool};
-    }
-    const rows = previewRows({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant, ucs: st.ucs});
-    return rows;
-  }
 
   // ---------------------------------------------------------------- 생성
   async function generate() {
@@ -1546,7 +1479,7 @@ export function createPresetBench({
     const run = {
       id: requestId, axis: axisSlot ? axisSlot.id : null,
       label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : '한 장',
-      base: currentBase().label + (refs.length ? ` · REF ${refs.length}` : ''),
+      base: `${currentBase().label} · ${st.size}` + (refs.length ? ` · REF ${refs.length}` : ''),
       items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: ''})),
     };
     void slotsNow;
@@ -1556,10 +1489,9 @@ export function createPresetBench({
     st.resRun = run.id;
     renderResults();
     renderLeftControls();
-    renderPreview();
     try {
       const data = await sendJson(API.generate, 'POST', {
-        request_id: requestId, base, references,
+        request_id: requestId, base, references, size: st.size,
         items: items.map(item => ({label: item.label, main: item.main, characters: item.characters})),
       });
       (data.requests || []).forEach(row => {
@@ -1625,7 +1557,6 @@ export function createPresetBench({
     void renderExplorer();
     renderResults();
     renderOverlay();
-    renderPreview();
   }
 
   let booted = false;
@@ -1645,11 +1576,6 @@ export function createPresetBench({
     const t = event.target;
     const act = t.closest('[data-act]')?.dataset.act;
     if (act === 'res-go') { showRun(t.closest('[data-run]').dataset.run); return; }
-    if (act === 'res-prev' || act === 'res-next') {
-      const at = st.runs.indexOf(shownRun()) + (act === 'res-prev' ? -1 : 1);
-      if (st.runs[at]) showRun(st.runs[at].id);
-      return;
-    }
     if (act === 'base') { st.baseOpen = !st.baseOpen; renderAllBase(); return; }
     if (act === 'base-close') { st.baseOpen = false; renderAllBase(); return; }
     if (act === 'go') { void generate(); return; }
@@ -1680,7 +1606,6 @@ export function createPresetBench({
       if (gone?.source === 'storage') qsa(`.pbw-card[data-rhash="${CSS.escape(gone.file_hash)}"]`).forEach(card => card.classList.remove('is-sel'));
       persist();
       renderCharMeta();
-      renderPreview();
       return;
     }
     if (act === 'undo') {
@@ -1695,26 +1620,10 @@ export function createPresetBench({
       return;
     }
     if (act === 'note-x') { st.note = ''; st.memo = null; renderNote(); return; }
-    if (act === 'pv') { st.pvOpen = !st.pvOpen; renderPreview(); return; }
     if (act === 'related-back') { viewOf(st.cur).mode = viewOf(st.cur).q ? 'search' : 'browse'; void renderExplorer(); return; }
     if (act === 'thumb-dl') {
       sendJson(API.thumbDownload, 'POST', {}).then(() => refreshThumbStatus())
         .catch(error => notify(`받기를 시작하지 못했습니다: ${error.message}`, 'error'));
-      return;
-    }
-    if (act === 'copy') {
-      const rows = previewText();
-      const base = currentBase();
-      const text = rows.map(row => `${row.label}: ${row.key === 'main' ? [base.preset?.prefix || st.base.direct.prefix, row.text, base.preset?.postfix || st.base.direct.postfix].filter(Boolean).join(', ') : row.text}`).join('\n');
-      win.navigator?.clipboard?.writeText?.(text).then(() => notify('복사했습니다', 'success'), () => notify('복사하지 못했습니다', 'error'));
-      return;
-    }
-    if (act === 'to-main') {
-      const rows = previewText();
-      if (typeof applyMainPrompt === 'function') {
-        applyMainPrompt(rows[0].text);
-        notify(rows.length > 1 ? '메인 프롬프트에 넣었습니다 - 캐릭터 칸 몫은 옮기지 않았습니다' : '메인 프롬프트에 넣었습니다', 'success');
-      }
       return;
     }
     if (act === 'pin') {
@@ -1754,7 +1663,7 @@ export function createPresetBench({
     if (act === 'export') { void exportDirect(false); return; }
 
     const tg = t.closest('[data-target]');
-    if (tg) { st.target = tg.dataset.target; persist(); renderLeftControls(); renderPreview(); return; }
+    if (tg) { st.target = tg.dataset.target; persist(); renderLeftControls(); return; }
     const mode = t.closest('[data-mode]');
     if (mode) {
       // 직접 설정으로 처음 넘어갈 때(저장본 없음 · 빈 값)는 지금 고른 프리셋의 값을 채워서 연다(사용자 11-20).
@@ -1855,22 +1764,19 @@ export function createPresetBench({
         renderLeftControls();
         renderSlots();
         renderNote();
-        renderPreview();
       }
       return;
     }
     const card = t.closest('[data-set]');
     if (card) {
       const set = shownSets.get(card.dataset.set);
-      if (set) { putIntoSlot(st.cur, set); renderSlots(); renderPreview(); qsa('.pbw-card').forEach(el => el.classList.toggle('is-sel', el.dataset.set === set.id)); }
+      if (set) { putIntoSlot(st.cur, set); renderSlots(); qsa('.pbw-card').forEach(el => el.classList.toggle('is-sel', el.dataset.set === set.id)); }
       return;
     }
     const res = t.closest('.pbw-rgrid .pbw-res');
     if (res && !res.classList.contains('is-cancel')) {
       st.pick = [res.dataset.run, Number(res.dataset.index)];
-      st.pvOpen = true;
       renderResults();
-      renderPreview();
     }
   });
 
@@ -1894,6 +1800,7 @@ export function createPresetBench({
     }
     if (t.dataset.role === 'export-target') { st.exportTarget = t.value; return; }
     if (t.dataset.role === 'attach') { st.cv.attach = t.checked; persist(); return; }
+    if (t.dataset.role === 'res') { if (BENCH_SIZES.includes(t.value)) { st.size = t.value; persist(); } return; }
     if (t.dataset.param) { setDirectParam(t); return; }
   });
 
@@ -1905,7 +1812,6 @@ export function createPresetBench({
       // 글을 다 지우면 불러온 표시 · UC 도 걷는다(REF 줄은 따로 뺀다).
       if (!t.value.trim() && (st.loaded[i] || st.ucs[i])) { st.loaded[i] = null; st.ucs[i] = ''; renderCharMeta(); }
       persist();
-      renderPreview();
       refreshSubject(Number(t.dataset.name));
       return;
     }

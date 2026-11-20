@@ -21,6 +21,8 @@ MAX_REFERENCES = 4
 _REFERENCE_SOURCES = ("storage", "asset")
 # REF 창(Character Reference 모듈)과 같은 셋 - 보관함 설정의 종류를 그대로 싣는다.
 _REFERENCE_TYPES = ("character&style", "character", "style")
+# 벤치 해상도 = 1024² 묶음만(사용자 11-20). 기반 프리셋 · 직접 설정의 크기 대신 늘 이것으로 그린다.
+BENCH_SIZES = ("1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216", "1088 x 960", "1152 x 896", "1216 x 832")
 
 
 def _text(source, key):
@@ -273,6 +275,12 @@ def generation_commands(context, payload):
         base = direct_base(base)
     else:
         raise ValueError("Invalid base mode")
+    size = payload.get("size")
+    if size is not None:
+        if size not in BENCH_SIZES:
+            raise ValueError(f"size must be one of {', '.join(BENCH_SIZES)}")
+        width, height = (int(side) for side in size.split(" x "))
+        base = {**base, "params": {**base["params"], "width": width, "height": height}}
     references = bench_reference_params(context, payload.get("references"), base["params"])
 
     commands = []

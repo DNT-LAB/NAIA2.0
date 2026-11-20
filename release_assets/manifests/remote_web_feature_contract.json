@@ -395,7 +395,8 @@
         "core/preset_composer_service.py",
         "app/web/remote/js/features/eventPresetPanel.mjs",
         "app/web/remote/js/features/presetBenchWindow.mjs",
-        "app/web/remote/js/features/presetBenchModel.mjs"
+        "app/web/remote/js/features/presetBenchModel.mjs",
+        "app/web/remote/js/features/presetMiniPopup.mjs"
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [
@@ -406,6 +407,8 @@
         {"method": "GET", "path": "/api/presets/thumb-pack/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/presets/outfit-related", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/presets/bench/bases", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/bench/subject", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/bench/db-character", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/presets/bench/direct", "smoke": "non_destructive"},
         {"method": "PUT", "path": "/api/presets/bench/direct/{name:path}", "smoke": "state_mutation"},
         {"method": "DELETE", "path": "/api/presets/bench/direct/{name:path}", "smoke": "state_mutation"},

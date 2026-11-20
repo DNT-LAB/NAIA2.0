@@ -25,6 +25,37 @@ _REFERENCE_TYPES = ("character&style", "character", "style")
 BENCH_SIZES = ("1024 x 1024", "960 x 1088", "896 x 1152", "832 x 1216", "1088 x 960", "1152 x 896", "1216 x 832")
 
 
+def _split_tags(text):
+    return [tag.strip() for tag in str(text or "").split(",") if tag.strip()]
+
+
+def person_first_prompt(prefix, main, postfix):
+    """prefix + 가운데 몫 + postfix 를 잇되 인원 태그(1girl · 1boy …)는 맨 앞에 둔다(사용자 11-20).
+
+    NAIA 메인 생성의 규칙(prompt_processor 최종 포맷 단계)과 같다 - 가운데 몫(main_tags)의 인원 태그를 꺼내
+    boys -> girls -> others 로 세워 prefix 보다 앞에 두고, 같은 인원 태그는 처음 것만 남긴다.
+    prefix · postfix 글은 인원 태그가 겹칠 때만 태그 단위로 다시 짠다(아니면 쓴 그대로 - 줄바꿈 · 주석을 지킨다).
+    """
+    from core.prompt_processor import ALL_PERSON_TAGS, PERSON_TAG_SETS
+    middle = _split_tags(main)
+    rank = lambda tag: 0 if tag in PERSON_TAG_SETS["boys"] else 1 if tag in PERSON_TAG_SETS["girls"] else 2
+    people = []
+    for tag in sorted((tag for tag in middle if tag in ALL_PERSON_TAGS), key=rank):
+        if tag not in people:
+            people.append(tag)
+    if not people:
+        return ", ".join(filter(None, (prefix, main, postfix)))
+    rest = ", ".join(tag for tag in middle if tag not in ALL_PERSON_TAGS)
+
+    def without_people(text):
+        tags = _split_tags(text)
+        if not any(tag in people for tag in tags):
+            return text
+        return ", ".join(tag for tag in tags if tag not in people)
+
+    return ", ".join(filter(None, (", ".join(people), without_people(prefix), rest, without_people(postfix))))
+
+
 def _text(source, key):
     value = source.get(key, "")
     if not isinstance(value, str):
@@ -291,7 +322,7 @@ def generation_commands(context, payload):
         if not isinstance(characters, list) or len(characters) > 5 or not all(isinstance(c, dict) for c in characters):
             raise ValueError("Expected up to 5 character objects")
         label = _text(item, "label")
-        prompt = ", ".join(filter(None, (base["prefix"], _text(item, "main"), base["postfix"])))
+        prompt = person_first_prompt(base["prefix"], _text(item, "main"), base["postfix"])
         overrides = {
             **base["params"], "input": prompt, "_raw_input": prompt, "negative_prompt": base["negative_prompt"],
             "characters": [_text(c, "prompt") for c in characters], "uc": [_text(c, "uc") for c in characters],

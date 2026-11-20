@@ -4,9 +4,10 @@ from __future__ import annotations
 import threading
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 from app.backend.server.install_manager_routes import runtime_install_manager
+from core.preset_bench_generation import DirectSettingsStore, export_direct_base, generation_commands, preset_bench_bases
 from core.preset_bench_service import PresetBenchService
 
 
@@ -61,3 +62,55 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
     async def outfit_related(tag: str, pool: str = "female", ctx: str = ""):
         context = [t.strip() for t in ctx.split("|") if t.strip()]
         return await query(preset_bench_service(session_context).related, tag, pool, context)
+
+    @app.get("/api/presets/bench/bases")
+    async def bases():
+        return await query(preset_bench_bases, session_context)
+
+    @app.get("/api/presets/bench/direct")
+    async def direct_list():
+        return await query(DirectSettingsStore(session_context.runtime_paths).list_items)
+
+    @app.put("/api/presets/bench/direct/{name:path}")
+    async def direct_put(name: str, payload: dict):
+        return await query(DirectSettingsStore(session_context.runtime_paths).put, name, payload)
+
+    @app.delete("/api/presets/bench/direct/{name:path}")
+    async def direct_delete(name: str):
+        return await query(DirectSettingsStore(session_context.runtime_paths).delete, name)
+
+    @app.post("/api/presets/bench/direct/export")
+    async def direct_export(payload: dict):
+        ok, message = await query(export_direct_base, session_context, payload)
+        if not ok:
+            return JSONResponse({"error": message}, status_code=409)
+        return {"ok": True, "name": message}
+
+    @app.post("/api/presets/bench/generate")
+    async def generate(payload: dict):
+        from app.backend.server.generation_commands import generation_service
+        from core.generation_access_policy import access_policy
+        from core.headless_generation_service import HeadlessGenerationDispatch
+
+        if session_context.get_api_mode() != "NAI":
+            return JSONResponse({"error": "NAI 모드에서만 생성할 수 있습니다"}, status_code=409)
+        request_id, commands = await query(generation_commands, session_context, payload)
+        service = generation_service(session_context)
+        policy = access_policy(session_context)
+        if policy.blocked or not service._credential_for_mode("NAI"):
+            reason = policy.reason() if policy.blocked else "NAI credential is not configured."
+            blocked = HeadlessGenerationDispatch(None, "NAI", reason).websocket_payload()
+            return JSONResponse({**blocked, "queued": 0, "requests": []}, status_code=409)
+
+        requests = []
+        try:
+            for candidate, command in enumerate(commands):
+                dispatch = await run_in_thread(service.enqueue_remote_request, command)
+                result = dispatch.websocket_payload()
+                if not dispatch.ok:
+                    return JSONResponse({**result, "queued": len(requests), "requests": requests}, status_code=409)
+                requests.append({"candidate": candidate, "request_id": result["request_id"]})
+        finally:
+            if requests and session_context.headless_generation_execute_enabled:
+                start_generation_runner(session_context, clients)
+        return {"ok": True, "request_id": request_id, "queued": len(requests), "requests": requests}

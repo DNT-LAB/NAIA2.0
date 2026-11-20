@@ -2165,6 +2165,13 @@ async def _broadcast_waiting_window_failure(
             "candidate": params.get("character_asset_candidate"),
             "message": message,
         })
+    if params.get("preset_bench_request"):
+        await broadcast_json(clients, {
+            "type": "preset_bench_generation_error",
+            "requestId": str(params.get("preset_bench_request_id") or ""),
+            "candidate": params.get("preset_bench_candidate"),
+            "message": message,
+        })
 
 
 async def _save_artist_thumbnail(context: WebSessionContext, stored, params: dict) -> None:

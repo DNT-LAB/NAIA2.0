@@ -5806,6 +5806,7 @@ const wsMessageHandlers = {
     if (characterAssetControl) characterAssetControl.handleGenerationError(m);
     characterBuilderV5Control?.handleGenerationError?.(m);
   },
+  preset_bench_generation_error: m => { presetBenchWindow?.handleGenerationError?.(m); },
   comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
   api_status: updateApiStatus,
@@ -6043,6 +6044,7 @@ function updateMeta(m) {
     characterAssetControl.handleResultMeta(m);
   }
   characterBuilderV5Control?.handleResultMeta?.(m);
+  presetBenchWindow?.handleResultMeta?.(m);
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
     resultEnhance.setCurrentMeta({
@@ -12882,6 +12884,36 @@ function openArtistTagTool() {
     .finally(() => { artistTagWindowLoading = null; });
 }
 
+// [프롬프트 도구] > [Presets 벤치](사용자 지시 2026-11-19 · 목업 3안 수정판) - 세트를 골라 비교 생성하는 떠 있는 창.
+// 기반 프리셋은 이 창에서만 쓴다(서버가 요청마다 싣는다) - 메인 화면의 현재 프리셋 · 세션 설정은 그대로다.
+let presetBenchWindow = null;
+let presetBenchWindowLoading = null;
+function openPresetBenchTool() {
+  if (presetBenchWindow) {
+    presetBenchWindow.toggle();
+    return;
+  }
+  if (presetBenchWindowLoading) return;
+  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261119-pb1')
+    .then(({createPresetBenchWindow}) => {
+      presetBenchWindow = createPresetBenchWindow({
+        document,
+        window,
+        escHtml,
+        bindTagAssist,
+        applyMainPrompt: text => applyPromptText(text),
+        notify: (msg, type) => showToast(msg, type),
+        onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+      });
+      presetBenchWindow.open();
+    })
+    .catch(error => {
+      console.error('Failed to open preset bench window', error);
+      showToast('Presets 벤치를 열지 못했습니다', 'error');
+    })
+    .finally(() => { presetBenchWindowLoading = null; });
+}
+
 function openDanbooruBrowserTool() {
   if (danbooruTabControl?.openBrowser) {
     danbooruTabControl.openBrowser();
@@ -12896,7 +12928,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261111-atw1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261119-pb1')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -12912,6 +12944,8 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261111-
       isViewpointControlOpen: () => Boolean(viewpointControl && viewpointControl.isOpen()),
       openArtistTags: openArtistTagTool,
       isArtistTagsOpen: () => Boolean(artistTagWindow && artistTagWindow.isOpen()),
+      openPresetBench: openPresetBenchTool,
+      isPresetBenchOpen: () => Boolean(presetBenchWindow && presetBenchWindow.isOpen()),
       openWireFlow: () => { wireFlowReady.then(() => wireFlowControl?.toggle()); },
       isWireFlowOpen: () => Boolean(wireFlowControl?.isOpen()),
       isWireFlowOn: () => Boolean(wireFlowControl?.isModeOn()),

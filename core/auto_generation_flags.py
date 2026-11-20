@@ -15,6 +15,7 @@ from typing import Any, Callable
 AUTO_GENERATE_SUPPRESSED_FLAGS = {
     "artist_thumb_request",
     "character_asset_request",
+    "preset_bench_request",
     "character_viewer_request",
     "event_preset_request",
     "interactive_mode_request",

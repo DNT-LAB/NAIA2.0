@@ -383,6 +383,7 @@
         "core/web_session_app.py",
         "app/backend/server/event_preset_routes.py",
         "core/preset_bench_service.py",
+        "core/preset_bench_generation.py",
         "core/preset_thumbs.py",
         "core/outfit_tag_semantics.py",
         "core/preset_thumb_key.py",
@@ -392,7 +393,9 @@
         "core/clothes_preset_service.py",
         "core/expression_preset_service.py",
         "core/preset_composer_service.py",
-        "app/web/remote/js/features/eventPresetPanel.mjs"
+        "app/web/remote/js/features/eventPresetPanel.mjs",
+        "app/web/remote/js/features/presetBenchWindow.mjs",
+        "app/web/remote/js/features/presetBenchModel.mjs"
       ],
       "legacy_dependency": "legacy_compat",
       "routes": [
@@ -402,6 +405,12 @@
         {"method": "GET", "path": "/api/presets/thumb/{key}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/presets/thumb-pack/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/presets/outfit-related", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/bench/bases", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/presets/bench/direct", "smoke": "non_destructive"},
+        {"method": "PUT", "path": "/api/presets/bench/direct/{name:path}", "smoke": "state_mutation"},
+        {"method": "DELETE", "path": "/api/presets/bench/direct/{name:path}", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/presets/bench/direct/export", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/presets/bench/generate", "smoke": "external_live"},
         {"method": "GET", "path": "/api/event-preset/status", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/event-preset/download", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/event-preset/download", "smoke": "asset_runtime"},

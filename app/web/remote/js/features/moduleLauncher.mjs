@@ -211,6 +211,14 @@ const MODULE_REGISTRY = {
     category: 'assistant_tools',
     action: 'artist_tags',
   },
+  // 프리셋 벤치(사용자 지시 2026-11-19) - 의상 · 자세 · 표정 · 배경 세트를 골라 비교 생성하는 떠 있는 창(presetBenchWindow).
+  // Fn › Preset 탭을 대치할 창이다 - 지금은 여기서 연다(탭 정리는 따로).
+  preset_bench: {
+    label: 'Presets 벤치',
+    title: 'Presets 벤치 - 의상 · 자세 · 표정 · 배경 세트를 골라 비교 생성합니다',
+    category: 'prompt_tools',
+    action: 'preset_bench',
+  },
 };
 
 // 단축키(Ctrl+글자) -> 모듈(사용자 지정 2026-09-29). 위 표의 `shortcut` 이 단 하나의 원본이다 - 단추 말풍선의
@@ -245,7 +253,7 @@ const CATEGORY_REGISTRY = [
     //    지우는 것은 별도 작업으로 둔다(31KB · 배선이 여러 곳).
     // Wire-Flow 는 아직 개발 중 - 런처 줄을 숨겨 들어가는 길만 막는다(사용자 지시 2026-11-02 · 코드는 그대로 싣는다).
     // 개발 중에 보려면 localStorage 'naia.wireFlow.dev' = '1' 뒤 새로고침.
-    moduleIds: [...(WIRE_FLOW_VISIBLE ? ['wire_flow'] : []), 'event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
+    moduleIds: [...(WIRE_FLOW_VISIBLE ? ['wire_flow'] : []), 'preset_bench', 'event_stream', 'e621_event', 'wildcard', 'conditional_prompt', 'danbooru_browser', 'viewpoint_control'],
     // EV 칩을 합산 숫자가 아닌 개별 칩으로 렌더(NAI 전용 도구의 C/V 패턴).
     splitBadges: true,
   },
@@ -298,6 +306,9 @@ export function createModuleLauncher({
   // 아티스트 태그 관리 창 열기(다시 누르면 닫힌다) · 열려 있나.
   openArtistTags = null,
   isArtistTagsOpen = () => false,
+  // 프리셋 벤치 창 열기(다시 누르면 닫힌다) · 열려 있나.
+  openPresetBench = null,
+  isPresetBenchOpen = () => false,
   // Wire-Flow 창 열기(다시 누르면 닫힌다) · 열려 있나 · 모드가 켜져 있나 · 모드 바꾸기.
   openWireFlow = null,
   isWireFlowOpen = () => false,
@@ -613,6 +624,8 @@ export function createModuleLauncher({
       openViewpointControl?.();
     } else if (config.action === 'artist_tags') {
       openArtistTags?.();
+    } else if (config.action === 'preset_bench') {
+      openPresetBench?.();
     } else if (config.action === 'wire_flow') {
       openWireFlow?.();
     } else if (config.action === 'comfyui_workflow_default') {
@@ -714,6 +727,7 @@ export function createModuleLauncher({
     if (MODULE_REGISTRY[moduleId]?.action === 'danbooru_browser') return false;
     if (MODULE_REGISTRY[moduleId]?.action === 'viewpoint_control') return Boolean(isViewpointControlOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'artist_tags') return Boolean(isArtistTagsOpen());
+    if (MODULE_REGISTRY[moduleId]?.action === 'preset_bench') return Boolean(isPresetBenchOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'wire_flow') return Boolean(isWireFlowOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;

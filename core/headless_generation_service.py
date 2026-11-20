@@ -258,7 +258,7 @@ class HeadlessGenerationService:
             )
 
         params = self._normalized_params(command, api_mode, credential)
-        if self.is_sequence_command_text(params.get("_raw_input")):
+        if not params.get("preset_bench_request") and self.is_sequence_command_text(params.get("_raw_input")):
             if not enqueue or params.get("_session_pool_character") or params.get("_temporary_character"):
                 # Enhance 같은 비-큐 경로는 요청 하나만 돌려줄 수 있다 - N 컷을 놓을 자리가 없다.
                 return HeadlessGenerationDispatch(
@@ -292,6 +292,8 @@ class HeadlessGenerationService:
             # ⚠️ 옛 계보 키만이다. 모르는 키를 다른 모델로 바꾸는 판단은 하지 않는다(아래 엄격한 판정).
             try:
                 key = normalize_nai_model_key(params.get("model"))
+                if params.get("preset_bench_request") and "model" in command.get("overrides", {}) and not key:
+                    raise UnknownNaiModelError(key)
                 legacy_key = NAI_LEGACY_KEY_ALIASES.get(key)
                 if legacy_key:
                     # 업데이트 전에 등록된 동명 커스텀이 있으면 그 모델을 그대로 쓴다.
@@ -317,8 +319,9 @@ class HeadlessGenerationService:
                     api_mode=api_mode,
                     blocked_reason=str(exc),
                 )
-        if ((params.get("_session_pool_character") or params.get("_temporary_character"))
-                and nai_model_spec is not None and not nai_model_spec.uses_v4_payload):
+        needs_character_slots = (params.get("_session_pool_character") or params.get("_temporary_character")
+                                 or (params.get("preset_bench_request") and params.get("characters")))
+        if needs_character_slots and nai_model_spec is not None and not nai_model_spec.uses_v4_payload:
             return HeadlessGenerationDispatch(None, api_mode, "캐릭터 슬롯을 지원하는 NAI 모델을 선택해 주세요.")
         base_negative = str(params.get("negative_prompt") or "")
         # 프롬프트 런 판정과 작가 기록은 current_prompt_context 를 읽는다 - Auto Gen 프리페치가 그것을 잠깐 바꿔 두는
@@ -934,6 +937,10 @@ class HeadlessGenerationService:
         params.update(self.context.remote_params)
 
         overrides = command.get("overrides") if isinstance(command.get("overrides"), dict) else {}
+        if overrides.get("preset_bench_request"):
+            # A bench item owns its entire cast, including an explicitly empty cast.
+            for key in (*self._EXPLICIT_CHARACTER_KEYS, "character_positions", "character_ids"):
+                params.pop(key, None)
         params.update(overrides)
 
         # Interactive 요청이면 충돌 플래그를 **요청 단위로** 끈다. 바로 위
@@ -1186,6 +1193,9 @@ class HeadlessGenerationService:
         params["_linked_artist"] = {"artist": artist, "weight": linked.get("weight")}
 
     def _prompt_run_id_for_command(self, command: dict[str, Any], params: dict[str, Any]) -> str:
+        # Matching the main text must never replay another run's conditional negative.
+        if params.get("preset_bench_request"):
+            return ""
         explicit = (
             command.get("prompt_run_id")
             or command.get("promptRunId")

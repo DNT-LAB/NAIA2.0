@@ -24,6 +24,18 @@ def preset_bench_service(context):
         return service
 
 
+def tag_translations(context):
+    """한국어 태그 사전(자동완성과 같은 것). 아직 안 읽었으면 여기서 읽는다 - 화면이 목록을 한 번 받고 담아 두므로
+    이름이 빈 채로 가면 창을 닫을 때까지 영문만 보인다. 읽지 못하면 빈 사전(목록은 영문으로)."""
+    try:
+        from app.backend.server.autocomplete_commands import _ensure_kr_raw
+
+        raw = _ensure_kr_raw(context)
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return getattr(context, "kr_tags_raw", None) or {}
+
+
 def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread, clients, start_generation_runner):
     async def query(method, *args):
         try:
@@ -36,7 +48,7 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
     # pool 을 비우면 그 갈래의 모든 풀(벤치는 인원 선택 없이 이것만 쓴다).
     @app.get("/api/presets/catalog")
     async def catalog(kind: str, pool: str = ALL_POOLS):
-        return await query(preset_bench_service(session_context).catalog, kind, pool)
+        return await query(lambda: preset_bench_service(session_context).catalog(kind, pool, tag_translations(session_context)))
 
     @app.get("/api/presets/sets")
     async def sets(kind: str, seed: str, pool: str = ALL_POOLS):
@@ -50,7 +62,8 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
 
     @app.get("/api/presets/search")
     async def search(q: str, kind: str | None = None):
-        return await query(preset_bench_service(session_context).search, q, kind, getattr(session_context, "kr_tags_raw", None))
+        # 목록과 같은 사전 - 아직 안 읽었으면 여기서 읽는다.
+        return await query(lambda: preset_bench_service(session_context).search(q, kind, tag_translations(session_context)))
 
     @app.get("/api/presets/thumb/{key}")
     async def thumbnail(key: str, req: Request):

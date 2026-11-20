@@ -91,17 +91,22 @@ const PBW_CSS = `
 .pbw-note a { color: var(--accent); cursor: pointer; }
 .pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; }
 .pbw-cat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; padding: 3px 7px; border: 0; border-radius: 4px;
-  color: var(--text-dim); font-size: 12px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
+  color: var(--text-muted); font-size: 12px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
 .pbw-cat small { font-size: 10px; color: var(--text-dim); }
 .pbw-cat:hover { color: var(--text-primary); }
-.pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
+.pbw-cat { position: relative; }
+/* 고른 칸 표시는 곧은 막대로 - inset 그림자는 둥근 모서리를 따라 휘어 { 처럼 보인다(사용자 지시 2026-11-20). */
+.pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); }
+.pbw-cat.is-on::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--accent); }
 .pbw-sub { font-size: 10px; color: var(--text-dim); padding: 6px 5px 1px; letter-spacing: .02em; }
 .pbw-sub:first-child { padding-top: 0; }
 .pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px 190px minmax(0, 1fr); gap: 8px; }
 .pbw-ex2.is-related { grid-template-columns: 124px 0 minmax(0, 1fr); }
 .pbw-seeds { min-height: 0; overflow-y: auto; }
-.pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-dim); font-size: 11px; }
-.pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; }
+.pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 12px; }
+/* 글자를 한 단계 밝게(사용자 지시 11-20) - 이름은 text-muted, 수는 한 단계 낮게 */
+.pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.pbw-seed.is-on span:last-child, .pbw-seed:hover span:last-child { color: inherit; }
 .pbw-seed span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbw-seed:hover { color: var(--text-primary); }
 .pbw-seed.is-on { background: var(--bg-hover); color: var(--text-primary); }
@@ -643,16 +648,17 @@ export function createPresetBenchWindow({
     if (view.mode === 'search') {
       seeds = view.hits;
       seedsBox.innerHTML = seeds.length
-        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched)}"><span>${esc(hit.seed)}</span><span>${hit.count}</span></div>`).join('')
+        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched === hit.seed ? hit.seed : `${hit.seed} · 찾은 태그 ${hit.matched}`)}"><span>${esc(hit.ko || hit.seed)}</span><span>${hit.count}</span></div>`).join('')
         : `<div class="pbw-empty">'${esc(view.q)}' 결과 없음</div>`;
     } else {
       const group = groups.find(item => item.slot === view.cat);
       seeds = group?.seeds || [];
       // 소분류 머리글 + Danbooru 게시물 수. 표에 아직 없는 시드('분류 전')는 posts 가 없어 세트 수를 보인다.
+      // 이름은 한글만(사용자 지시 11-20) - 영문 태그는 툴팁 첫 줄. 사전에 이름이 없으면 영문 그대로.
       const row = seed => {
         const shown = seed.posts != null ? formatPosts(seed.posts) : seed.sets;
         const tip = seed.posts != null ? `Danbooru 게시물 ${Number(seed.posts).toLocaleString()} · 세트 ${seed.sets}` : `세트 ${seed.sets}`;
-        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(tip)}"><span>${esc(seed.seed)}</span><span>${shown}</span></div>`;
+        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(`${seed.seed} · ${tip}`)}"><span>${esc(seed.ko || seed.seed)}</span><span>${shown}</span></div>`;
       };
       seedsBox.innerHTML = group?.subs
         ? group.subs.map(sub => `<div class="pbw-sub">${esc(sub.name)}</div>${sub.seeds.map(row).join('')}`).join('')
@@ -691,7 +697,7 @@ export function createPresetBenchWindow({
     const bySeed = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
       if (slot.pool && row.pool !== slot.pool) continue;   // 칸 pool '' = 모든 풀
-      const hit = bySeed.get(row.seed) || {seed: row.seed, matched: row.matched, count: 0, first: row.set_id};
+      const hit = bySeed.get(row.seed) || {seed: row.seed, ko: row.ko || '', matched: row.matched, count: 0, first: row.set_id};
       hit.count += 1;
       bySeed.set(row.seed, hit);
     }

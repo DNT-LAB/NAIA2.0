@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 from pathlib import Path
+import re
 import threading
 
 from core.outfit_tag_semantics import OutfitTagSemantics, POOLS
@@ -32,6 +33,37 @@ _SUBJECTS = ("girl", "boy", "other")
 
 def _order(row):
     return min(row["rank"].values()), -max(row["score"].values()), row["id"]
+
+
+_HANGUL = re.compile("[가-힣]")
+_PRIMARY_NAME = re.compile(r"<primary>\s*:\s*(.+)$")
+
+
+def _translation(translations, tag):
+    return (translations or {}).get(tag.casefold().replace("\\(", "(").replace("\\)", ")"), {})
+
+
+def korean_tag_name(record):
+    """태그 사전 항목 -> 목록에 보일 한글 이름. 없으면 "" (화면은 영문 태그를 그대로 보인다).
+
+    keywords_kr 의 차례: <primary>:이름 > [이름] > 첫 한글 키워드 > <라벨>(흔히 윗분류지만 가끔 그 태그 이름).
+    벤치 목록 2,036개 중 2,030개가 이름을 얻는다(11-20 실측 - 빠지는 것은 이모티콘 · 사전에 없는 태그).
+    """
+    items = [x.strip() for x in str((record or {}).get("keywords_kr") or "").split(",") if x.strip()]
+    for item in items:
+        match = _PRIMARY_NAME.match(item)
+        if match and _HANGUL.search(match.group(1)):
+            return match.group(1).strip()
+    for item in items:
+        if item.startswith("[") and item.endswith("]") and _HANGUL.search(item):
+            return item.strip("[]").strip()
+    for item in items:
+        if not item.startswith(("<", "[")) and ":" not in item and _HANGUL.search(item):
+            return item
+    for item in items:
+        if item.startswith("<") and item.endswith(">") and _HANGUL.search(item):
+            return item.strip("<>").strip()
+    return ""
 
 
 def name_subject(text, find_by_tag):
@@ -147,15 +179,18 @@ class PresetBenchService:
             raise ValueError("Unknown pool for preset kind")
         return self._seeds[kind, pool]
 
-    def catalog(self, kind, pool):
-        """대분류 > 소분류 > 시드(게시물 수 차례). 그 풀에 세트가 없는 시드 · 빈 소분류 · 빈 대분류는 뺀다."""
+    def catalog(self, kind, pool, translations=None):
+        """대분류 > 소분류 > 시드(게시물 수 차례). 그 풀에 세트가 없는 시드 · 빈 소분류 · 빈 대분류는 뺀다.
+
+        `ko` = 목록에 보일 한글 이름(사용자 지시 11-20 - 목록은 한글만, 영문은 툴팁). 프롬프트에 싣는 것은 늘 `seed`.
+        """
         seeds = self._pool(kind, pool)
         index, _ = self._thumbs()
 
         def entry(seed, posts):
             rows = seeds[seed]
             return {"seed": seed, "sets": len(rows), "with_thumb": sum(row["key"] in index for row in rows),
-                    "posts": posts}
+                    "posts": posts, "ko": korean_tag_name(_translation(translations, seed))}
 
         groups, placed = [], set()
         for category in self._browse[kind]:
@@ -198,12 +233,13 @@ class PresetBenchService:
             if kind is not None and kind != row["kind"]:
                 continue
             for tag in (row["seed"], *row["tags"]):
-                record = translations.get(tag.casefold().replace("\\(", "(").replace("\\)", ")"), {})
+                record = _translation(translations, tag)
                 if (query in tag.casefold()
                         or query in str(record.get("description") or record.get("desc") or "").casefold()
                         or query in str(record.get("keywords_kr") or "").casefold()):
                     matches.append({"kind": row["kind"], "pool": row["pool"], "seed": row["seed"],
-                                    "set_id": row["id"], "matched": tag})
+                                    "set_id": row["id"], "matched": tag,
+                                    "ko": korean_tag_name(_translation(translations, row["seed"]))})
                     break
             if len(matches) == 200:
                 break

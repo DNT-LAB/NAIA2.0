@@ -12904,7 +12904,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-tab1')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-base2')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -12915,6 +12915,10 @@ function loadPresetBench() {
           notify: (msg, type) => showToast(msg, type),
           showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
           hideZoom: () => remoteController?.hideZoom?.(),
+          getSessionParams: presetBenchSessionParams,
+          getParamChoices: () => ({model: selectChoices('pModel'), sampler: selectChoices('pSampler'), scheduler: selectChoices('pScheduler')}),
+          getPresetSummaries: () => lastPromptEngineeringState?.preset_summaries || [],
+          askText: (message, options) => showPromptDialog(message, options),
           leftMount: document.getElementById('pbBlocks'),
           rightMount: document.getElementById('presetBenchRoot'),
           onLeave: () => switchRightTab('result'),
@@ -12931,6 +12935,23 @@ function loadPresetBench() {
       });
   }
   return presetBenchLoading;
+}
+
+// 기반 설정 판이 '세션 값' 으로 보이는 값 - 메인 Params 탭의 지금 값(NAI). 해상도는 '1024 x 1024' 꼴에서 숫자 둘.
+function presetBenchSessionParams() {
+  const value = id => document.getElementById(id)?.value ?? '';
+  const size = String(value('pResolution')).match(/(\d+)\D+(\d+)/);
+  return {
+    model: value('pModel'), sampler: value('pSampler'), scheduler: value('pScheduler'),
+    width: size ? Number(size[1]) : '', height: size ? Number(size[2]) : '',
+    steps: value('pSteps'), cfg_scale: value('pCfgScale'), cfg_rescale: value('pCfgRescale'),
+  };
+}
+
+function selectChoices(id) {
+  return [...(document.getElementById(id)?.options || [])]
+    .map(option => ({value: option.value, label: option.textContent.trim() || option.value}))
+    .filter(option => option.value);
 }
 
 function syncPresetBenchMode(activeRightTab) {

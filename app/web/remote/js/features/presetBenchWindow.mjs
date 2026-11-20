@@ -205,6 +205,32 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-pin { position: absolute; left: 4px; right: 4px; top: 4px; padding: 2px 0; font-size: 11px; border-radius: 4px; border: 1px solid var(--accent);
   background: rgba(12,12,18,0.9); color: var(--text-primary); cursor: pointer; font-family: inherit; }
 .pbw-ov { position: absolute; inset: 0; z-index: 2; background: var(--bg-elevated, var(--bg-surface)); padding: 10px 12px; overflow-y: auto; border-left: 1px solid var(--accent); }
+/* 기반 설정 판 - NAIA 표준(사용자 11-20): 칸 이름 = mod-section-label · 글 칸 = mod-textarea · 설정 = Params 탭의 params-grid ·
+   프리셋 고르기 = PE Quick Preset 과 같은 표준 드롭다운(mod-select mod-preset-select - 모델 배지 · 짚으면 미리보기). */
+.pbw-bs { padding: 10px 16px 16px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.pbw-bs-head { display: flex; align-items: center; gap: 10px; }
+.pbw-bs-head b { font: 600 13px var(--font-display); color: var(--text-primary); }
+.pbw-bs-cols { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 18px; margin-top: 4px; align-items: start; }
+.pbw-bs .mod-section-label { margin-top: 12px; display: flex; align-items: baseline; gap: 8px; }
+.pbw-bs-note { font: 400 10px var(--font-mono); letter-spacing: 0; text-transform: none; color: var(--text-dim); line-height: 1.5; }
+.pbw-bs-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pbw-bs-line > select, .pbw-bs-line > .custom-select { flex: 1 1 auto; min-width: 0; }
+.pbw-bs-btn { flex: none; padding: 5px 12px; border: 1px solid var(--border-dim); border-radius: 6px; background: var(--bg-elevated, var(--bg-card));
+  color: var(--text-primary); font: 500 11px var(--font-mono); cursor: pointer; white-space: nowrap; }
+.pbw-bs-btn:hover { border-color: var(--accent); }
+.pbw-bs-btn.is-danger { background: rgba(244, 67, 54, 0.12); color: #ff8a80; border-color: rgba(244, 67, 54, 0.32); }
+.pbw-bs-ro { background: var(--bg-deep); border: 1px solid var(--border-dim); border-radius: 6px; padding: 8px 10px; color: var(--text-muted);
+  font-family: var(--font-editor, var(--font-mono)); font-size: 11px; line-height: 1.45; word-break: break-word; max-height: 150px; overflow-y: auto; }
+.pbw-bs .mod-textarea { display: block; box-sizing: border-box; resize: vertical; min-height: 96px; }
+.pbw-bs-val { font: 500 12px var(--font-mono); color: var(--text-muted); text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbw-bs-ses { margin-left: 6px; padding: 0 4px; border: 1px dashed var(--border-dim); border-radius: 3px; font-size: 9.5px; color: var(--text-dim); }
+.pbw-bs .param-row { padding: 4px 12px; min-height: 32px; gap: 8px; }
+.pbw-bs .param-input::placeholder { color: var(--text-dim); opacity: 0.8; }
+.pbw-bs-size { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.pbw-bs-size .param-input { flex: 0 0 52px; }
+.pbw-bs-src { margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
+.pbw-bs-src > span:first-child { flex: none; }
+.pbw-bs-badge { color: #f0c674; font-weight: 600; }
 .pbw-form { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 6px 8px; align-items: start; margin-top: 8px; }
 .pbw-form > .pbw-dim { padding-top: 4px; }
 .pbw-params { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -238,7 +264,9 @@ function cleanParams(raw) {
   for (const key of PARAM_KEYS) {
     const value = source[key];
     if (value === undefined || value === null || value === '') continue;
-    out[key] = ['model', 'sampler', 'scheduler'].includes(key) ? String(value) : Number(value);
+    if (['model', 'sampler', 'scheduler'].includes(key)) { out[key] = String(value); continue; }
+    const number = Number(value);
+    if (Number.isFinite(number)) out[key] = number;
   }
   return out;
 }
@@ -269,6 +297,12 @@ export function createPresetBench({
   applyMainPrompt = null,
   notify = () => {},
   onVisibilityChange = () => {},
+  // 기반 설정 판(사용자 11-20) - 메인 Params 탭의 지금 값 · 고를 목록(모델 · 샘플러 · 스케줄러) · PE 프리셋 요약(모델 배지 · 미리보기) ·
+  // 이름 묻기(앱 표준 대화 상자). 없으면 빈 값 · 빈 목록 · 브라우저 prompt.
+  getSessionParams = () => ({}),
+  getParamChoices = () => ({}),
+  getPresetSummaries = () => [],
+  askText = null,
   // 메인 화면의 두 자리 - 왼쪽 프롬프트 열 안(#pbBlocks) · 오른쪽 Presets 탭 안(#presetBenchRoot).
   leftMount,
   rightMount,
@@ -307,6 +341,7 @@ export function createPresetBench({
       mode: saved.base?.mode === 'direct' ? 'direct' : 'preset',
       preset: String(saved.base?.preset || ''),
       directName: String(saved.base?.directName || ''),
+      directFrom: String(saved.base?.directFrom || ''),     // 직접 설정 값을 불러온 프리셋 이름
       direct: {
         prefix: String(saved.base?.direct?.prefix || ''),
         postfix: String(saved.base?.direct?.postfix || ''),
@@ -315,9 +350,6 @@ export function createPresetBench({
       },
     },
     exportTarget: '',
-    exportName: '',
-    loadFrom: '',
-    newName: '',
   };
   let bases = null;        // {current, presets: [...]}
   let directs = [];        // [{name, prefix, postfix, negative_prompt, params}]
@@ -331,7 +363,7 @@ export function createPresetBench({
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
         count: st.count, target: st.target, names: st.names, picks: st.picks,
-        base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, direct: st.base.direct},
+        base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
       }));
     } catch (_) { /* 이번 실행만 */ }
   }
@@ -429,57 +461,131 @@ export function createPresetBench({
     }
   }
 
+  // ---- 기반 설정 판(사용자 11-20 - NAIA 표준 · 직접 설정은 현재 값을 채워서)
+  const PARAM_ROWS = [['model', 'Model'], ['sampler', 'Sampler'], ['scheduler', 'Scheduler'], ['size', 'Resolution'],
+    ['steps', 'Steps'], ['cfg_scale', 'CFG Scale'], ['cfg_rescale', 'CFG Rescale']];
+  const sessionParams = () => cleanParams(getSessionParams() || {});
+  const presetSummary = name => (getPresetSummaries() || []).find(row => row && row.name === name) || null;
+  const directIsEmpty = () => {
+    const d = st.base.direct;
+    return !d.prefix && !d.postfix && !d.negative_prompt && !Object.keys(d.params || {}).length;
+  };
+
+  // PE Quick Preset 과 같은 옵션 속성 - customSelects 가 모델 배지와 '짚으면 미리보기' 를 그린다(inpaintPromptSwap 과 같은 이름).
+  function presetOption(preset, selected) {
+    const summary = presetSummary(preset.name) || {};
+    const clip = (text, limit) => {
+      const flat = String(text || '').replace(/\s+/g, ' ').trim();
+      return flat.length > limit ? `${flat.slice(0, limit - 3)}...` : flat;
+    };
+    const attr = (name, value) => ` ${name}="${esc(String(value ?? ''))}"`;
+    return '<option' + attr('value', preset.name) + (selected ? ' selected' : '')
+      + attr('data-preview-name', preset.name) + attr('data-preview-mode', 'NAI')
+      + attr('data-preview-prefix', clip(summary.pre_prompt_preview ?? preset.prefix, 1200))
+      + attr('data-preview-postfix', clip(summary.post_prompt_preview ?? preset.postfix, 1200))
+      + attr('data-preview-description', clip(summary.description, 300))
+      + attr('data-preview-thumbnail', summary.thumbnail_url || '')
+      + (summary.model_label ? attr('data-model-label', summary.model_label) + attr('data-model-family', summary.model_family || '')
+        + attr('data-model-variant', summary.model_variant || '') : '')
+      + `>${esc(preset.name)}${preset.is_current ? ' · 현재' : ''}</option>`;
+  }
+
+  // Params 탭과 같은 줄(params-grid · param-row). 프리셋에 없는 값은 메인 화면 세션 값을 보이고 '세션' 표지를 단다.
+  function paramRows(params, editable) {
+    const ses = sessionParams();
+    const own = key => params?.[key];
+    const shown = key => own(key) ?? ses[key] ?? '';
+    const sesTag = key => (own(key) === undefined ? '<span class="pbw-bs-ses" title="이 값은 메인 화면의 세션 값을 따릅니다">세션</span>' : '');
+    const choices = getParamChoices() || {};
+    return PARAM_ROWS.map(([key, label]) => {
+      let body;
+      if (!editable) {
+        const text = key === 'size'
+          ? (shown('width') && shown('height') ? `${shown('width')} x ${shown('height')}` : '-')
+          : String(shown(key) === '' ? '-' : shown(key));
+        body = `<span class="pbw-bs-val">${esc(text)}${sesTag(key === 'size' ? 'width' : key)}</span>`;
+      } else if (key === 'size') {
+        const box = side => `<input class="param-input" type="number" step="64" min="64" max="2048" data-param="${side}" value="${own(side) ?? ''}" placeholder="${ses[side] ?? ''}">`;
+        body = `<span class="pbw-bs-size">${box('width')}<span class="pbw-dim">x</span>${box('height')}</span>`;
+      } else if (key === 'model' || key === 'sampler' || key === 'scheduler') {
+        const list = [...(choices[key] || [])];
+        const cur = String(shown(key) || '');
+        if (cur && !list.some(option => option.value === cur)) list.unshift({value: cur, label: cur});
+        body = `<select class="param-select" data-param="${key}">${list.map(option =>
+          `<option value="${esc(option.value)}"${option.value === cur ? ' selected' : ''}>${esc(option.label)}</option>`).join('')}</select>`;
+      } else {
+        const step = key === 'steps' ? 1 : (key === 'cfg_scale' ? 0.1 : 0.01);
+        body = `<input class="param-input" type="number" step="${step}" data-param="${key}" value="${own(key) ?? ''}" placeholder="${ses[key] ?? ''}">`;
+      }
+      return `<div class="param-row"><span class="param-label">${label}</span>${body}</div>`;
+    }).join('');
+  }
+
   function renderOverlay() {
     const box = $('overlay');
     if (!st.baseOpen) { box.innerHTML = ''; return; }
     const presets = bases?.presets || [];
     const cur = currentBase();
-    const head = `<div class="pbw-row"><b style="font-weight:600">기반 설정</b>
+    const head = `<div class="pbw-bs-head"><b>기반 설정</b>
       <span class="pbw-seg" data-role="base-mode"><button type="button" data-mode="preset" class="${st.base.mode === 'preset' ? 'is-on' : ''}">프리셋</button><button type="button" data-mode="direct" class="${st.base.mode === 'direct' ? 'is-on' : ''}">직접 설정</button></span>
-      <button type="button" class="pbw-btn" data-act="base-close" style="margin-left:auto">닫기</button></div>`;
-    const presetOptions = (selected, {skipCurrent = false, blank = ''} = {}) =>
-      (blank ? `<option value="">${esc(blank)}</option>` : '') +
-      presets.filter(p => !(skipCurrent && p.is_current)).map(p =>
-        `<option value="${esc(p.name)}"${p.name === selected ? ' selected' : ''}>${p.is_current ? '현재 · ' : ''}${esc(p.name)}</option>`).join('');
+      <button type="button" class="pbw-bs-btn" data-act="base-close" style="margin-left:auto">닫기</button></div>`;
+    const presetSelect = (role, selected, blank = '') => `<select class="mod-select mod-preset-select" data-role="${role}" data-preview-kind="prompt-preset" data-preset-detail="1">`
+      + (blank ? `<option value="">${esc(blank)}</option>` : '') + presets.map(p => presetOption(p, p.name === selected)).join('') + '</select>';
     if (st.base.mode === 'preset') {
       const preset = cur.preset;
-      box.innerHTML = `<div class="pbw-ov">${head}
-        <div class="pbw-dim pbw-sm" style="margin-top:6px">메인 화면의 현재 프리셋은 바뀌지 않습니다 - 이 창의 생성에만 씁니다.</div>
-        <div class="pbw-form">
-          <span class="pbw-dim">프리셋</span><select class="pbw-select" data-role="base-preset">${presetOptions(cur.label)}</select>
-          <span class="pbw-dim">설정</span><span class="pbw-sm">${esc(paramsSummary(preset?.params))}</span>
-          <span class="pbw-dim">앞</span><span class="pbw-pp pbw-dim">${esc(preset?.prefix || '(없음)')}</span>
-          <span class="pbw-dim">뒤</span><span class="pbw-pp pbw-dim">${esc(preset?.postfix || '(없음)')}</span>
-          <span class="pbw-dim">네거티브</span><span class="pbw-pp pbw-dim">${esc(preset?.negative_prompt || '(없음)')}</span>
-          <span></span><span><button type="button" class="pbw-btn" data-act="to-direct">직접 설정으로 받아오기</button></span>
-        </div></div>`;
+      const ro = text => `<div class="pbw-bs-ro">${esc(text || '(없음)')}</div>`;
+      box.innerHTML = `<div class="pbw-ov pbw-bs">${head}<div class="pbw-bs-cols"><div>
+          <div class="mod-section-label">Quick preset <span class="pbw-bs-note">메인 화면의 현재 프리셋은 그대로 - 이 벤치의 생성에만 씁니다</span></div>
+          <div class="pbw-bs-line">${presetSelect('base-preset', cur.label)}
+            <button type="button" class="pbw-bs-btn" data-act="to-direct" title="이 프리셋의 값을 직접 설정으로 옮겨 고칩니다">이 값으로 직접 설정 ›</button></div>
+          <div class="mod-section-label">Prefix prompt</div>${ro(preset?.prefix)}
+          <div class="mod-section-label">Postfix prompt</div>${ro(preset?.postfix)}
+          <div class="mod-section-label">Negative</div>${ro(preset?.negative_prompt)}
+        </div><div>
+          <div class="mod-section-label">Params</div><div class="params-grid">${paramRows(preset?.params || {}, false)}</div>
+        </div></div></div>`;
       return;
     }
     const d = st.base.direct;
-    const p = d.params;
-    const num = (key, label, step = 1) => `<label>${label}<input class="pbw-input" type="number" step="${step}" data-param="${key}" value="${p[key] ?? ''}" placeholder="세션"></label>`;
-    const txt = (key, label) => `<label>${label}<input class="pbw-input is-wide" data-param="${key}" value="${esc(p[key] ?? '')}" placeholder="세션"></label>`;
-    box.innerHTML = `<div class="pbw-ov">${head}
-      <div class="pbw-form">
-        <span class="pbw-dim">저장본</span>
-        <span class="pbw-row"><select class="pbw-select" data-role="direct-pick" style="flex:1;min-width:120px"><option value="">(저장 안 함)</option>${directs.map(item => `<option value="${esc(item.name)}"${item.name === st.base.directName ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select>
-          <button type="button" class="pbw-btn" data-act="direct-save"${st.base.directName ? '' : ' disabled'}>저장</button>
-          <button type="button" class="pbw-btn" data-act="direct-delete"${st.base.directName ? '' : ' disabled'}>삭제</button></span>
-        <span class="pbw-dim">새 이름</span>
-        <span class="pbw-row"><input class="pbw-input" data-role="new-name" value="${esc(st.newName)}" placeholder="이름" maxlength="60" style="flex:1"><button type="button" class="pbw-btn" data-act="direct-save-as">새 이름으로 저장</button></span>
-        <span class="pbw-dim">앞</span><textarea class="pbw-text" rows="2" data-field="prefix">${esc(d.prefix)}</textarea>
-        <span class="pbw-dim">뒤</span><textarea class="pbw-text" rows="2" data-field="postfix">${esc(d.postfix)}</textarea>
-        <span class="pbw-dim">네거티브</span><textarea class="pbw-text" rows="2" data-field="negative_prompt">${esc(d.negative_prompt)}</textarea>
-        <span class="pbw-dim">설정</span>
-        <span class="pbw-params">${txt('model', '모델')}${num('width', '가로', 64)}${num('height', '세로', 64)}${num('steps', '스텝')}${num('cfg_scale', 'CFG', 0.1)}${num('cfg_rescale', 'Rescale', 0.01)}${txt('sampler', '샘플러')}${txt('scheduler', '스케줄러')}</span>
-        <span class="pbw-dim">받아오기</span>
-        <span class="pbw-row"><select class="pbw-select" data-role="load-from">${presetOptions(st.loadFrom, {blank: '프리셋 고르기'})}</select><button type="button" class="pbw-btn" data-act="load-from">프리셋에서 받아오기</button></span>
-        <span class="pbw-dim">보내기</span>
-        <span class="pbw-row"><select class="pbw-select" data-role="export-target">${presetOptions(st.exportTarget, {skipCurrent: true, blank: '새 프리셋'})}</select>
-          <input class="pbw-input" data-role="export-name" value="${esc(st.exportName)}" placeholder="새 프리셋 이름" maxlength="60"${st.exportTarget ? ' hidden' : ''}>
-          <button type="button" class="pbw-btn" data-act="export">프리셋으로 보내기</button></span>
-        <span></span><span class="pbw-dim pbw-sm">비운 설정은 메인 화면의 세션 값을 따릅니다. 지금 쓰는 프리셋에는 보낼 수 없습니다.</span>
-      </div></div>`;
+    const fromSummary = presetSummary(st.base.directFrom);
+    const from = st.base.directFrom
+      ? `${fromSummary?.model_label ? `<span class="pbw-bs-badge">[${esc(fromSummary.model_label)}]</span> ` : ''}${esc(st.base.directFrom)}`
+      : (st.base.directName ? `저장본 '${esc(st.base.directName)}'` : '(빈 값)');
+    const named = Boolean(st.base.directName);
+    box.innerHTML = `<div class="pbw-ov pbw-bs">${head}<div class="pbw-bs-cols"><div>
+        <div class="mod-section-label">저장본</div>
+        <div class="pbw-bs-line"><select class="mod-select" data-role="direct-pick"><option value="">(저장 안 함)</option>${directs.map(item =>
+          `<option value="${esc(item.name)}"${item.name === st.base.directName ? ' selected' : ''}>${esc(item.name)}</option>`).join('')}</select>
+          ${named ? '<button type="button" class="pbw-bs-btn" data-act="direct-save">저장</button>' : ''}
+          <button type="button" class="pbw-bs-btn" data-act="direct-save-as">${named ? '다른 이름으로' : '이름 붙여 저장'}</button>
+          ${named ? '<button type="button" class="pbw-bs-btn is-danger" data-act="direct-delete">삭제</button>' : ''}</div>
+        <div class="pbw-bs-line pbw-bs-src"><span>불러온 값 · ${from}</span>${presetSelect('load-from', '', '다른 프리셋에서 불러오기')}</div>
+        <div class="mod-section-label">Prefix prompt</div><textarea class="mod-textarea" data-field="prefix" spellcheck="false">${esc(d.prefix)}</textarea>
+        <div class="mod-section-label">Postfix prompt</div><textarea class="mod-textarea" data-field="postfix" spellcheck="false">${esc(d.postfix)}</textarea>
+        <div class="mod-section-label">Negative</div><textarea class="mod-textarea" data-field="negative_prompt" spellcheck="false">${esc(d.negative_prompt)}</textarea>
+      </div><div>
+        <div class="mod-section-label">Params <span class="pbw-bs-note">비운 칸 = 메인 화면 세션 값(흐린 글자)</span></div>
+        <div class="params-grid">${paramRows(d.params, true)}</div>
+        <div class="mod-section-label">프리셋으로 보내기</div>
+        <div class="pbw-bs-line"><select class="mod-select" data-role="export-target"><option value="">새 프리셋</option>${presets.filter(p => !p.is_current).map(p =>
+          `<option value="${esc(p.name)}"${p.name === st.exportTarget ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+          <button type="button" class="pbw-bs-btn" data-act="export">보내기</button></div>
+        <div class="pbw-bs-note" style="margin-top:4px">지금 쓰는 프리셋${bases?.current ? `(${esc(bases.current)})` : ''}에는 보낼 수 없습니다.</div>
+      </div></div></div>`;
+  }
+
+  // 이름 묻기 - 앱 표준 대화 상자(app.js showPromptDialog). 취소 = 빈 글.
+  async function askName(message, value = '') {
+    if (typeof askText === 'function') {
+      const answer = await askText(message, {defaultValue: value, placeholder: '이름'});
+      return answer === null || answer === undefined || answer === false ? '' : String(answer).trim();
+    }
+    return String(win.prompt(message, value) || '').trim();
+  }
+
+  async function saveDirectAs() {
+    const name = await askName('직접 설정을 저장할 이름', st.base.directName || st.base.directFrom || '');
+    if (name) await saveDirect(name);
   }
 
   async function saveDirect(name) {
@@ -488,7 +594,6 @@ export function createPresetBench({
     try {
       await sendJson(API.directOne(clean), 'PUT', {...st.base.direct});
       st.base.directName = clean;
-      st.newName = '';
       directs = (await getJson(API.direct)).items || [];
       persist();
       notify(`직접 설정 '${clean}' 을 저장했습니다`, 'success');
@@ -499,16 +604,15 @@ export function createPresetBench({
   }
 
   async function exportDirect(overwrite = false) {
-    const name = String(st.exportTarget || st.exportName || '').trim();
-    if (!name) { notify('보낼 프리셋 이름을 적어 주세요', 'error'); return; }
+    const name = String(st.exportTarget || '').trim() || await askName('새 프리셋 이름', '');
+    if (!name) return;
     try {
       await sendJson(API.directExport, 'POST', {preset: name, ...st.base.direct, overwrite});
       notify(`프리셋 '${name}' 으로 보냈습니다(현재 프리셋은 그대로)`, 'success');
-      st.exportName = '';
       await loadBases();
     } catch (error) {
       if (error.status === 409 && error.data?.error === 'exists' && !overwrite) {
-        if (win.confirm(`프리셋 '${name}' 이 이미 있습니다. 덮어쓸까요?`)) return exportDirect(true);
+        if (win.confirm(`프리셋 '${name}' 이 이미 있습니다. 덮어쓸까요?`)) { st.exportTarget = name; return exportDirect(true); }
         return;
       }
       notify(`보내지 못했습니다: ${error.message}`, 'error');
@@ -521,9 +625,10 @@ export function createPresetBench({
     if (!preset) { notify('프리셋을 골라 주세요', 'error'); return false; }
     st.base.direct = {
       prefix: String(preset.prefix || ''), postfix: String(preset.postfix || ''),
-      negative_prompt: String(preset.negative_prompt || ''), params: cleanParams(preset.params),
+      negative_prompt: String(preset.negative_prompt || ''), params: {...sessionParams(), ...cleanParams(preset.params)},
     };
     st.base.directName = '';
+    st.base.directFrom = preset.name;
     persist();
     return true;
   }
@@ -1132,7 +1237,7 @@ export function createPresetBench({
       return;
     }
     if (act === 'direct-save') { void saveDirect(st.base.directName); return; }
-    if (act === 'direct-save-as') { void saveDirect(st.newName); return; }
+    if (act === 'direct-save-as') { void saveDirectAs(); return; }
     if (act === 'direct-delete') {
       const name = st.base.directName;
       if (!name || !win.confirm(`직접 설정 '${name}' 을 지울까요?`)) return;
@@ -1144,16 +1249,20 @@ export function createPresetBench({
       }).catch(error => notify(`지우지 못했습니다: ${error.message}`, 'error'));
       return;
     }
-    if (act === 'load-from') {
-      if (copyPresetToDirect(st.loadFrom)) { notify(`'${st.loadFrom}' 의 값을 받아왔습니다(아직 저장 안 함)`, 'success'); renderAllBase(); }
-      return;
-    }
     if (act === 'export') { void exportDirect(false); return; }
 
     const tg = t.closest('[data-target]');
     if (tg) { st.target = tg.dataset.target; persist(); renderLeftControls(); renderPreview(); return; }
     const mode = t.closest('[data-mode]');
-    if (mode) { st.base.mode = mode.dataset.mode; persist(); renderAllBase(); return; }
+    if (mode) {
+      // 직접 설정으로 처음 넘어갈 때(저장본 없음 · 빈 값)는 지금 고른 프리셋의 값을 채워서 연다(사용자 11-20).
+      const fromPreset = st.base.mode === 'preset' ? currentBase().preset?.name : (bases?.current || '');
+      st.base.mode = mode.dataset.mode === 'direct' ? 'direct' : 'preset';
+      if (st.base.mode === 'direct' && !st.base.directName && directIsEmpty() && fromPreset) copyPresetToDirect(fromPreset);
+      persist();
+      renderAllBase();
+      return;
+    }
     const clear = t.closest('[data-clear]');
     if (clear) {
       const id = clear.dataset.clear;
@@ -1232,13 +1341,18 @@ export function createPresetBench({
       st.base.directName = item ? item.name : '';
       if (item) {
         st.base.direct = {prefix: item.prefix || '', postfix: item.postfix || '', negative_prompt: item.negative_prompt || '', params: cleanParams(item.params)};
+        st.base.directFrom = '';
       }
       persist();
       renderAllBase();
       return;
     }
-    if (t.dataset.role === 'load-from') { st.loadFrom = t.value; return; }
-    if (t.dataset.role === 'export-target') { st.exportTarget = t.value; renderOverlay(); return; }
+    if (t.dataset.role === 'load-from') {
+      if (t.value && copyPresetToDirect(t.value)) { notify(`'${t.value}' 의 값을 불러왔습니다(아직 저장 안 함)`, 'success'); renderAllBase(); }
+      return;
+    }
+    if (t.dataset.role === 'export-target') { st.exportTarget = t.value; return; }
+    if (t.dataset.param) { setDirectParam(t); return; }
   });
 
   listen('input', event => {
@@ -1258,17 +1372,18 @@ export function createPresetBench({
       return;
     }
     if (t.dataset.field) { st.base.direct[t.dataset.field] = t.value; persist(); return; }
-    if (t.dataset.param) {
-      const key = t.dataset.param;
-      if (t.value === '') delete st.base.direct.params[key];
-      else st.base.direct.params[key] = ['model', 'sampler', 'scheduler'].includes(key) ? t.value : Number(t.value);
-      persist();
-      renderBaseCard();
-      return;
-    }
-    if (t.dataset.role === 'new-name') { st.newName = t.value; return; }
-    if (t.dataset.role === 'export-name') { st.exportName = t.value; return; }
+    if (t.dataset.param) { setDirectParam(t); return; }
   });
+
+  // 직접 설정의 설정 칸 - 비우면 세션 값을 따른다. 고르는 칸(모델 · 샘플러 · 스케줄러)은 change 로, 숫자 칸은 input 으로 온다.
+  function setDirectParam(t) {
+    const key = t.dataset.param;
+    if (t.value === '') delete st.base.direct.params[key];
+    else if (['model', 'sampler', 'scheduler'].includes(key)) st.base.direct.params[key] = t.value;
+    else if (Number.isFinite(Number(t.value))) st.base.direct.params[key] = Number(t.value);
+    persist();
+    renderBaseCard();
+  }
 
   // ---------------------------------------------------------------- 올리면 창 옆에 크게
   const HOVER_DELAY_MS = 140;      // 리모컨 · 아티스트 태그 관리 창과 같은 뜸 - 지나가는 마우스에는 안 뜬다

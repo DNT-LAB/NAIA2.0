@@ -31,9 +31,6 @@ function areaLabel(area) {
 }
 const SLOTS = [1, 2, 3, 4, 5, 6];
 
-// 이벤트 맵 쿼리의 갈래 - 서버 core/event_map/post_pick.CATEGORIES 와 같은 id · 이름.
-const EVENT_MAP_KINDS = [['attire', '의상'], ['action', '행동'], ['pose', '자세'], ['expression', '표정'], ['place', '장소'],
-  ['composition', '구도 · 조명'], ['sex', '성행위']];
 // 노드 종류 - 서버 NODE_PORTS 와 같은 이름 · 같은 포트여야 한다(다르면 저장이 거절된다).
 // 노드는 '넣을 곳' 을 고르지 않는다 - 흘러온 줄기(시작한 입력 노드: 메인 / 캐릭터 N)를 읽고 고친다(사용자 결정 2026-11-01).
 const NODE_TYPES = {
@@ -57,19 +54,6 @@ const NODE_TYPES = {
     note: '프롬프트는 그대로 · 변수에만 담음',
     fields: [{key: 'name', kind: 'text', label: '변수', placeholder: 'rating', def: ''},
       {key: 'lines', kind: 'lines', label: '후보', placeholder: 'sensitive\nquestionable\nexplicit', def: ''}]},
-  // 이벤트 맵 게시물 하나에서 그 게시물의 한 갈래 태그만(사용자 2026-11-01 - 1차 = 개인용 의상 · "행동만 받는다던지").
-  // 조건 태그 여러 개 · -빼기 · @뽑기. 담을 변수를 비우면 갈래 이름(의상 · 행동 …)으로 담는다.
-  event_map_query: {group: '처리', label: '이벤트 맵 쿼리', tone: 'var', ins: ['in'], outs: [['out', '']],
-    note: '게시물 하나에서 고른 갈래의 태그만',
-    fields: [{key: 'what', kind: 'select', label: '무엇을', options: EVENT_MAP_KINDS, def: 'attire'},
-      {key: 'who', kind: 'select', label: '게시물', options: [['solo', '1인'], ['any', '인원 무관']], def: 'solo'},
-      {key: 'pins', kind: 'text', label: '조건 태그', placeholder: '1girl, maid, -apron, @캐릭터', def: ''},
-      {key: 'ratings', kind: 'select', label: '등급', options: [['gs', 'G · S'], ['g', 'G'], ['s', 'S'], ['q', 'Q'], ['e', 'E'],
-        ['qe', 'Q · E'], ['gsqe', '전체']], def: 'gs'},
-      {key: 'rating_var', kind: 'text', label: '등급 변수', placeholder: '(선택) rating', def: ''},
-      {key: 'series', kind: 'select', label: '작품 고유 물건', options: [['drop', '빼기'], ['keep', '남김']], def: 'drop'},
-      {key: 'name', kind: 'text', label: '담을 변수', placeholder: '(비우면 무엇을 이름)', def: ''},
-      {key: 'pos', kind: 'select', label: '줄기에', options: [['back', '뒤에 넣기'], ['front', '앞에 넣기'], ['none', '안 넣음']], def: 'back'}]},
   var_set: {group: '처리', label: '변수 저장', tone: 'var', ins: ['in'], outs: [['out', '']],
     fields: [{key: 'var', kind: 'text', label: '변수', placeholder: 'wet', def: ''},
       {key: 'op', kind: 'select', label: '동작', options: [['set', '= 넣기'], ['add', '+ 더하기']], def: 'set'},
@@ -96,7 +80,6 @@ const NODE_TYPES = {
       {key: 'post', kind: 'select', label: 'PE 후행', options: [['on', '붙임'], ['off', '안 붙임']], def: 'on'}]},
 };
 const GROUPS = ['입력', '조건', '처리', '출력'];
-function eventMapKindLabel(kind) { return (EVENT_MAP_KINDS.find(([id]) => id === (kind || 'attire')) || EVENT_MAP_KINDS[0])[1]; }
 const PORT_COLOR = {branch: '#1D9E75', else: '#D85A30', out: '#8a8aa0'};
 function portColor(port) {
   if (port === 'else') return PORT_COLOR.else;
@@ -367,8 +350,7 @@ export function installWireFlow({
 
   // 이 워크플로우의 변수 이름 - 변수 뽑기 · 변수 저장에 적힌 것(Switch 의 '입력' 목록)
   function variableNames() {
-    const names = graph.nodes.map(n => (n.type === 'var_draw' ? n.params.name : n.type === 'var_set' ? n.params.var
-      : n.type === 'event_map_query' ? (String(n.params.name || '').trim() || eventMapKindLabel(n.params.what)) : ''))
+    const names = graph.nodes.map(n => (n.type === 'var_draw' ? n.params.name : n.type === 'var_set' ? n.params.var : ''))
       .map(name => String(name || '').trim()).filter(Boolean);
     return [...new Set(names)];
   }
@@ -809,8 +791,7 @@ export function installWireFlow({
     if (!node) return;
     const key = input.dataset.wfField;
     node.params[key] = input.type === 'number' ? (Number(input.value) || 0) : input.value;
-    if (((node.type === 'var_draw' || node.type === 'event_map_query') && key === 'name') || (node.type === 'var_set' && key === 'var')
-      || (node.type === 'event_map_query' && key === 'what')) {
+    if ((node.type === 'var_draw' && key === 'name') || (node.type === 'var_set' && key === 'var')) {
       els.nodes.querySelectorAll('[data-wf-subject]').forEach(select => { select.innerHTML = subjectOptions(select.value); });
     }
     if (input.tagName === 'TEXTAREA') {

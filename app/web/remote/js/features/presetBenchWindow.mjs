@@ -271,7 +271,7 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 /* 캐릭터 고르기(DB · 에셋 · REF)는 한 줄 3장(사용자 11-20) - 칸 고르기는 2장 그대로. */
 .pbw-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-/* 판이 넓으면(크게 보기 너비 x 2.95 초과) 칸 고르기도 한 줄 3장(사용자 11-20) - 판 너비를 재서 붙인다(fitGridCols). */
+/* 판이 넓으면(3장으로 나눠도 칸이 크게 보기의 80% 이상) 칸 고르기도 한 줄 3장(사용자 11-20) - 판 너비를 재서 붙인다(fitGridCols). */
 .pbw-grid-wrap.is-w3 .pbw-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pbw-sec { font-size: 12px; color: var(--text-muted); margin: 8px 0 3px; }
 .pbw-sec:first-child { margin-top: 0; }
@@ -2007,6 +2007,8 @@ export function createPresetBench({
   let hoverTimer = null;
   // 크게 보기 상자 너비 = style.css .rctl-zoom (320px · 최대 42vw). 칸이 이보다 크면 크게 보기가 뜻이 없다.
   const zoomWidth = () => Math.min(320, (win.innerWidth || 1600) * 0.42);
+  // 칸이 크게 보기의 80% 에 닿으면 크게 보기를 띄우지 않는다(사용자 11-20 "한 80% 정도 도달하면").
+  const ZOOM_SKIP_RATIO = 0.8;
 
   function leaveCard() {
     if (hoverTimer) { win.clearTimeout(hoverTimer); hoverTimer = null; }
@@ -2019,8 +2021,8 @@ export function createPresetBench({
     leaveCard();
     const src = card?.querySelector('img')?.getAttribute('src');
     if (!src || typeof showZoom !== 'function') return;     // '미생성' 칸은 띄울 것이 없다
-    // 칸이 크게 보기보다 넓으면 띄우지 않는다(사용자 11-20 - 작게 겹쳐 가리기만 한다).
-    if (card.getBoundingClientRect().width >= zoomWidth()) return;
+    // 칸이 크게 보기의 80% 이상이면 띄우지 않는다(사용자 11-20 - 비슷한 크기로 겹쳐 가리기만 한다).
+    if (card.getBoundingClientRect().width >= zoomWidth() * ZOOM_SKIP_RATIO) return;
     hoverCard = card;
     hoverTimer = win.setTimeout(() => {
       hoverTimer = null;
@@ -2066,10 +2068,11 @@ export function createPresetBench({
   });
   splitBar.addEventListener('dblclick', () => { st.split = 0.45; applySplit(); persist(); });
   applySplit();
-  // 칸 고르기 그림 판 - 너비가 크게 보기 x 2.95 를 넘으면 한 줄 3장(사용자 11-20). 캐릭터 고르기(is-3)는 늘 3장.
+  // 칸 고르기 그림 판 - 한 줄 3장으로 나눠도 칸이 크게 보기의 80% 이상이면 3장(사용자 11-20 "3줄 조건을 약화" -
+  // 처음 x 2.95 에서 낮춤 · 크게 보기 320px 면 판 780px 남짓부터). 캐릭터 고르기(is-3)는 늘 3장.
   function fitGridCols() {
     const wrap = $('grid');
-    if (wrap) wrap.classList.toggle('is-w3', wrap.clientWidth > zoomWidth() * 2.95);
+    if (wrap) wrap.classList.toggle('is-w3', wrap.clientWidth >= zoomWidth() * ZOOM_SKIP_RATIO * 3 + 12);
   }
   if (win.ResizeObserver) {
     new win.ResizeObserver(() => fitResults()).observe($('results'));

@@ -11543,8 +11543,12 @@ body.resizing-result-info {
 /* 활성 Extension 칩(E{n}) — 연주황 (NAI 전용 도구 C/V 칩과 같은 부여 방식) */
 .module-category-badge-ext { background: rgba(240,165,100,0.24); color: #f5bd84; }
 .module-category-badge.hidden { display: none; }
-/* Tools & Assistants 런처(버튼 · 펼친 메뉴): 끌면 글자가 파랗게 잡히던 것을 막는다(사용자 지시 2026-11-20).
-   잘못 끌다가 누르는 일이 없게 - 글을 고르는 칸이 없는 자리라 잃는 것이 없다. */
+/* 단추만 모인 자리: 끌면 글자가 파랗게 잡히던 것을 막는다(사용자 지시 2026-11-20).
+   잘못 끌다가 누르는 일이 없게 - 글을 고르는 칸이 없는 자리라 잃는 것이 없다.
+   Tools & Assistants 묶음(런처 포함) · 아래 조작줄(옵션 · 해상도 · Random/Generate) · 오른쪽 위 탭 줄. */
+.assistants-section, .assistants-section *,
+.bottom-controls, .bottom-controls *,
+.right-tab-bar, .right-tab-bar *,
 #moduleLauncher, #moduleLauncher * { -webkit-user-select: none; user-select: none; }
 .module-category-menu {
   display: none;

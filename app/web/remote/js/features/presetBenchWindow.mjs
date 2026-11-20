@@ -54,8 +54,6 @@ const API = {
     if (gender) p.append('gender', gender);
     return `/api/character-viewer/list?${p}`;
   },
-  dbDetail: '/api/character-viewer/detail',
-  dbThumb: (group, character, variant) => `/api/character-viewer/thumbnail?${new URLSearchParams({group, character, variant, size: 'grid'})}`,
   dbCharacter: (group, character, variant) => `/api/presets/bench/db-character?${new URLSearchParams({group, character, variant})}`,
   assetList: '/api/character-asset/list',
   assetDetail: (id, variation) => `/api/character-asset/detail?${new URLSearchParams({id, variation})}`,
@@ -425,13 +423,14 @@ export function createPresetBench({
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
     // 캐릭터마다 - 에셋에서 불러온 UC · 어디서 불러왔나(카드 아래 한 줄) · REF 줄.
     ucs: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.ucs?.[i] || '')),
-    loaded: Array.from({length: MAX_CHARACTERS}, (_, i) => (saved.loaded?.[i]?.label ? {src: String(saved.loaded[i].src || ''), label: String(saved.loaded[i].label)} : null)),
+    loaded: Array.from({length: MAX_CHARACTERS}, (_, i) => (saved.loaded?.[i]?.label
+      ? {src: String(saved.loaded[i].src || ''), key: String(saved.loaded[i].key || ''), label: String(saved.loaded[i].label)} : null)),
     refs: Array.from({length: MAX_CHARACTERS}, (_, i) => (Array.isArray(saved.refs?.[i]) ? saved.refs[i].map(cleanRef).filter(Boolean) : [])),
     // 캐릭터 고르기(st.cur = 'char1' · 'char2') - 출처 · 에셋 그림을 REF 로도 붙이나 · 출처마다 탐색 자리.
     cv: {
       src: ['db', 'asset', 'ref'].includes(saved.cv?.src) ? saved.cv.src : 'db',
       attach: saved.cv?.attach !== false,
-      db: {group: '__ALL__', gender: '', q: '', sel: null},
+      db: {group: '__ALL__', gender: '', q: ''},
       asset: {cat: 'v5', q: '', sel: ''},
       ref: {filter: 'all', cat: '', q: ''},
     },
@@ -1076,7 +1075,6 @@ export function createPresetBench({
     if (charIndex() >= 0) {
       const box = st.cv[st.cv.src];
       box.q = q;
-      if (st.cv.src === 'db') box.sel = null;
       await renderExplorer();
       return;
     }
@@ -1137,10 +1135,9 @@ export function createPresetBench({
   // ---------------------------------------------------------------- 캐릭터 고르기(DB · 에셋 · REF)
   const dbGroupsCache = new Map();     // 성별 -> 그룹 목록(All · original · etc · 작품)
   const dbListCache = new Map();       // 그룹|검색|성별 -> 캐릭터 줄
-  const dbDetailCache = new Map();     // 그룹|캐릭터 -> 상세(변형 목록)
   let assetListPromise = null;
   let refTotal = null;
-  let dbRows = [];                     // 지금 소분류 열의 캐릭터 줄(누르기가 찾는다)
+  let dbRows = [];                     // 지금 그림 칸의 캐릭터(카드 누르기가 찾는다)
   let dbGroupKo = {};
   let assetRows = [];
   let refRows = new Map();             // file_hash -> 보관함 항목
@@ -1206,7 +1203,7 @@ export function createPresetBench({
     const src = st.cv.src;
     const serial = ++searchSerial;
     shownSets = new Map();
-    $('ex2').classList.remove('is-related');
+    $('ex2').classList.remove('is-related');      // DB 만 한 열(작품)로 쓴다 - 아래에서 다시 붙인다
     renderCharTitle();
     searchInput.placeholder = src === 'db' ? '이름 · 한글 · 초성 · work:작품' : src === 'asset' ? '에셋 이름' : '보관함 이름';
     if (doc.activeElement !== searchInput && searchInput.value !== st.cv[src].q) searchInput.value = st.cv[src].q;
@@ -1218,8 +1215,12 @@ export function createPresetBench({
     tools.innerHTML = '';
     const fail = error => { if (serial === searchSerial) grid.innerHTML = `<div class="pbw-empty">읽지 못했습니다: ${esc(error.message)}</div>`; };
 
+    // DB = 왼쪽은 작품(한 열 - 성별 · 작품), 그림 칸은 캐릭터 한 명당 카드 한 장. 누르면 바로 그 캐릭터 칸에(옷 태그는 뺀다).
+    // 변형은 따로 고르지 않는다 - DB 에서 'reisa (magical)' 처럼 제 이름으로 따로 있어 검색으로 찾는다(사용자 11-20).
     if (src === 'db') {
       const db = st.cv.db;
+      $('ex2').classList.add('is-related');
+      seedsBox.innerHTML = '';
       let groups;
       try { groups = await dbGroupsOf(db.gender); } catch (error) { fail(error); return; }
       if (serial !== searchSerial) return;
@@ -1228,7 +1229,7 @@ export function createPresetBench({
       cats.innerHTML = `<span class="pbw-seg">${genders.map(([g, label]) => `<button type="button" class="${db.gender === g ? 'is-on' : ''}" data-cgender="${g}">${label}</button>`).join('')}</span>` +
         groups.map(g => `<button type="button" class="pbw-cat${g.key === db.group ? ' is-on' : ''}" data-cgroup="${esc(g.key)}" title="${esc(g.key)}"><span>${esc(dbGroupLabel(g.key))}</span><small>${formatPosts(g.count)}</small></button>`).join('');
       const q = db.q.trim();
-      seedsBox.innerHTML = '<div class="pbw-hint">찾는 중…</div>';
+      ctx.textContent = '찾는 중…';
       let rows;
       try {
         rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}`, () => getJson(API.dbList(db.group, q, db.gender)).then(data => ({
@@ -1238,30 +1239,17 @@ export function createPresetBench({
       dbRows = rows.rows;
       // 여러 작품이 섞인 목록(전체 · etc · 검색)은 이름 옆에 작품을 흐리게 - 같은 이름(hoshino ai)을 가른다.
       const mixed = db.group === '__ALL__' || db.group === GROUP_ETC || Boolean(q);
-      const more = rows.total > dbRows.length ? `<div class="pbw-hint">${dbRows.length} / ${rows.total.toLocaleString()} - 검색으로 좁히세요</div>` : '';
-      if (!db.sel || !dbRows.some(row => row.group === db.sel.group && row.character === db.sel.character)) {
-        db.sel = dbRows[0] ? {group: dbRows[0].group, character: dbRows[0].character} : null;
-      }
-      seedsBox.innerHTML = (q ? `<div class="pbw-hint">검색 '${esc(q)}' · ${rows.total.toLocaleString()}</div>` : '') + (dbRows.length
-        ? dbRows.map((row, k) => `<div class="pbw-seed${db.sel && row.group === db.sel.group && row.character === db.sel.character ? ' is-on' : ''}" data-cchar="${k}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장`)}"><span>${esc(dbShortName(row.character, row.group))}${mixed ? ` <small class="pbw-dim">${esc(dbGroupLabel(row.group))}</small>` : ''}</span><span>${formatPosts(row.count)}</span></div>`).join('') + more
-        : '<div class="pbw-empty">캐릭터가 없습니다</div>');
-      if (!db.sel) { grid.innerHTML = ''; ctx.textContent = ''; return; }
-      const sel = db.sel;
-      ctx.textContent = `${dbGroupLabel(sel.group)} › ${dbShortName(sel.character, sel.group)}`;
-      let detail;
-      try {
-        detail = await cached(dbDetailCache, `${sel.group}|${sel.character}`, () => sendJson(API.dbDetail, 'POST', {group: sel.group, character: sel.character, variant: ''}));
-      } catch (error) { fail(error); return; }
-      if (serial !== searchSerial) return;
-      const variants = Array.isArray(detail.variants) && detail.variants.length ? detail.variants : [{label: '', name: 'Default', rows: detail.count}];
-      ctx.textContent = `${dbGroupLabel(sel.group)} › ${dbShortName(sel.character, sel.group)} · 변형 ${variants.length} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
-      const fallback = detail.default_thumbnail_url || '';
-      grid.innerHTML = `<div class="pbw-grid">${variants.map(v => {
-        const name = v.label ? String(v.name || v.label).replace(/_/g, ' ') : '기본';
-        return `<div class="pbw-card" data-cvar="${esc(v.label || '')}" data-cvname="${esc(name)}" data-zt="${esc(`${sel.character} · ${name}`)}" title="${esc(`${name} · 데이터 ${Number(v.rows || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
-          <img class="pbw-th is-tall" loading="lazy" src="${esc(API.dbThumb(sel.group, sel.character, v.label || ''))}" alt=""${fallback ? ` onerror="this.onerror=null;this.src='${esc(fallback)}'"` : ''}>
-          <div class="pbw-cap">${esc(name)} · ${formatPosts(v.rows)}</div></div>`;
-      }).join('')}</div>`;
+      const shown = rows.total > dbRows.length ? `${dbRows.length} / ${rows.total.toLocaleString()}명 - 검색으로 좁히세요` : `${rows.total.toLocaleString()}명`;
+      ctx.textContent = `${q ? `${db.group === '__ALL__' ? '' : `${dbGroupLabel(db.group)} 안 `}검색 '${q}'` : dbGroupLabel(db.group)} · ${shown} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
+      const mine = st.loaded[i]?.src === 'db' ? st.loaded[i].key : '';
+      grid.innerHTML = dbRows.length ? `<div class="pbw-grid">${dbRows.map((row, k) => {
+        const name = dbShortName(row.character, row.group);
+        const picture = row.has_thumbnail && row.thumbnail_url
+          ? `<img class="pbw-th is-tall" loading="lazy" src="${esc(row.thumbnail_url)}" alt="">`
+          : '<div class="pbw-th is-tall pbw-none">썸네일 없음</div>';
+        return `<div class="pbw-card${mine === `${row.group}|${row.character}` ? ' is-sel' : ''}" data-cchar="${k}" data-zt="${esc(`${row.character} · ${dbGroupLabel(row.group)}`)}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
+          ${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
+      }).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : '캐릭터가 없습니다'}</div>`;
       return;
     }
 
@@ -1331,11 +1319,12 @@ export function createPresetBench({
     renderPreview();
   }
 
-  async function loadDb(i, group, character, variant, variantName) {
+  async function loadDb(i, group, character, card) {
     try {
-      const data = await getJson(API.dbCharacter(group, character, variant));
-      startLoad(i, {src: 'db', label: `DB ${dbGroupLabel(group)} › ${dbShortName(character, group)} · ${variantName}`}, data.prompt, '');
+      const data = await getJson(API.dbCharacter(group, character, ''));
+      startLoad(i, {src: 'db', key: `${group}|${character}`, label: `DB ${dbGroupLabel(group)} › ${dbShortName(character, group)}`}, data.prompt, '');
       afterLoad();
+      qsa('.pbw-card[data-cchar]').forEach(el => el.classList.toggle('is-sel', el === card));
       const removed = Array.isArray(data.removed) ? data.removed : [];
       notify(removed.length ? `캐릭터 ${i + 1} 에 넣었습니다 - 옷 태그 ${removed.length}개(${removed.slice(0, 3).join(', ')}${removed.length > 3 ? ' …' : ''})는 뺐습니다` : `캐릭터 ${i + 1} 에 넣었습니다`, 'success');
     } catch (error) {
@@ -1809,18 +1798,21 @@ export function createPresetBench({
         return;
       }
       const cg = t.closest('[data-cgender]');
-      if (cg) { st.cv.db.gender = cg.dataset.cgender; st.cv.db.sel = null; void renderExplorer(); return; }
+      if (cg) { st.cv.db.gender = cg.dataset.cgender; void renderExplorer(); return; }
       const cgroup = t.closest('[data-cgroup]');
-      if (cgroup) { st.cv.db.group = cgroup.dataset.cgroup; st.cv.db.sel = null; void renderExplorer(); return; }
-      const cchar = t.closest('[data-cchar]');
-      if (cchar) {
-        const row = dbRows[Number(cchar.dataset.cchar)];
-        if (row) st.cv.db.sel = {group: row.group, character: row.character};
+      if (cgroup) {
+        st.cv.db.group = cgroup.dataset.cgroup;
+        st.cv.db.q = '';
+        searchInput.value = '';
         void renderExplorer();
         return;
       }
-      const cvar = t.closest('[data-cvar]');
-      if (cvar && st.cv.db.sel) { void loadDb(ci, st.cv.db.sel.group, st.cv.db.sel.character, cvar.dataset.cvar, cvar.dataset.cvname || '기본'); return; }
+      const cchar = t.closest('[data-cchar]');
+      if (cchar) {
+        const row = dbRows[Number(cchar.dataset.cchar)];
+        if (row) void loadDb(ci, row.group, row.character, cchar);
+        return;
+      }
       const acat = t.closest('[data-acat]');
       if (acat) { st.cv.asset.cat = acat.dataset.acat; st.cv.asset.sel = ''; void renderExplorer(); return; }
       const avar = t.closest('[data-avar]');

@@ -3403,7 +3403,7 @@ export function createTagAssistController({
   //    안 걸린다.
   const SEQUENCE_SKELETON = ':begin,\n:seq1 text,\n:seq2 text,\n:end';
   // 명령 하나 = {name, aliases?, desc, insert?(→ 캐럿에 넣을 글) | run?() | choices?() → [{label, desc?, current?, run()}]}
-  // instant: true = 이름을 다 치는 순간 Enter 없이 곧바로 실행한다(`/preset` 미니 창 - 사용자 11-20 "완성되면 즉시 UI Draw").
+  // instant: true = 이름을 다 치는 순간 Enter 없이 곧바로 실행한다(`/의상` 등 미니 프리셋 창 - 사용자 11-20 "완성되면 즉시 UI Draw").
   // choice.run() 이 {next: [...]} 를 돌려주면 엔트리는 **안 닫히고** 그 목록으로 이어진다(해상도 Preset ▸).
   const BUILTIN_SLASH_COMMANDS = [
     {name: 'seq', desc: '시퀀스 뼈대 삽입 (:begin / :seq1 / :seq2 / :end)', insert: () => SEQUENCE_SKELETON},
@@ -3633,6 +3633,8 @@ export function createTagAssistController({
     const typed = String(value || '').toLowerCase();
     const cmd = typed ? allSlashCommands().find(c => c.instant && String(c.name || '').toLowerCase() === typed) : null;
     if (!cmd) return false;
+    // 한글 이름(`/의상`)은 마지막 글자가 아직 조합 중이다 - 먼저 놓아 조합을 이 칸에서 끝낸다(새 창의 칸으로 새지 않게).
+    try { open.input.blur(); } catch (_) {}
     runSlashCommand({_wc_type: 'slash', _cmd: cmd});
     return true;
   }

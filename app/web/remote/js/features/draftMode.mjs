@@ -20,7 +20,7 @@
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm10';
-import { initDraftChipCard } from './draftChipCard.mjs?v=20261120-pm1';
+import { initDraftChipCard } from './draftChipCard.mjs?v=20261120-pm2';
 import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm9';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };

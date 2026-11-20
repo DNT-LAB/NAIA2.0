@@ -1726,7 +1726,7 @@ function syncPermanentExcludeField(text) {
 }
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261120-pm1')
+import('./js/features/draftMode.mjs?v=20261120-pm2')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -16585,11 +16585,12 @@ function slashPresetChoices(activeGroup = '') {
   ];
 }
 
-// /preset 미니 프리셋 창 - 처음 쓸 때 불러온다.
+// 미니 프리셋 창(/의상 · /자세 · /표정 · /배경) - 처음 쓸 때 불러온다. 2인 자세는 창 안의 탭.
+const PRESET_MINI_COMMANDS = [['의상', 'outfit'], ['자세', 'event'], ['표정', 'expression'], ['배경', 'scene']];
 let presetMini = null;
 function openPresetMini(ctx) {
   if (presetMini) return presetMini.open(ctx);
-  import('./js/features/presetMiniPopup.mjs?v=20261120-pm1')
+  import('./js/features/presetMiniPopup.mjs?v=20261120-pm2')
     .then(({createPresetMiniPopup}) => {
       presetMini ||= createPresetMiniPopup({document, window, showToast});
       presetMini.open(ctx);
@@ -16626,12 +16627,12 @@ function slashCommandRegistry() {
     slashToggleCommand('autogen', 'auto_generate', 'Auto Gen'),
     slashToggleCommand('promptfix', 'prompt_fixed', 'Prompt Fixed'),
     slashToggleCommand('wcsolo', 'wildcard_standalone', 'WC Solo'),
-    // `/preset` = 미니 프리셋 창(사용자 11-20 - 옛 `preset:` 대신). 다 치면 Enter 없이 곧바로 뜨고, 그림을 누르면 그 세트 태그가 들어간다.
-    {name: 'preset', instant: true, desc: '프리셋 고르기 - 의상 · 자세 · 2인 · 표정 · 배경 세트 그림을 누르면 이 자리에 태그로 넣기',
-      popup: ctx => openPresetMini(ctx)},
-    // PE 프롬프트 프리셋 전환은 `/pepreset`(줄여 `/pp`)으로 옮겼다(11-20 - `/preset` 을 미니 창에 내줌).
-    {name: 'pepreset', aliases: ['pp'], desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /pp 이름·본문 으로 좁힌다`,
+    {name: 'preset', desc: `프롬프트 프리셋 (지금 ${slashPeState().preset || '-'}) — /preset 이름·본문 으로 좁힌다`,
       choices: slashPresetChoices, filters: slashPresetFilters},
+    // 미니 프리셋 창(사용자 11-20 - 옛 `preset:` 대신). 이름을 다 치면 Enter 없이 곧바로 그 탭으로 뜨고, 그림을 누르면 그 세트 태그가 들어간다.
+    // ⚠️ `/preset` 은 PE 프롬프트 프리셋 그대로다(사용자 11-20 '기존 사양 회복').
+    ...PRESET_MINI_COMMANDS.map(([name, kind]) => ({name, instant: true,
+      desc: `${name} 프리셋 - 세트 그림을 누르면 이 자리에 태그로 넣기`, popup: ctx => openPresetMini({...ctx, kind})})),
     {name: 'pe', desc: 'Prompt Engineering — prefix · postfix · autohide · tools · 옵션', choices: slashPeChoices},
     // 바로가기(사용자 지정 2026-09-13: 당장은 여는 것만). /search = **프롬프트 검색 패널**(상단 Prompt: N 단추와 같은 것) -
     // 키워드·제외·등급·기간으로 아카이브를 검색해 생성 풀을 만드는 그 화면. Tag Search 가 아니다(한 번 헛짚었다).
@@ -16717,7 +16718,7 @@ $('acTouchPlacement')?.addEventListener('click', event => {
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261120-pm1')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261120-pm2')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

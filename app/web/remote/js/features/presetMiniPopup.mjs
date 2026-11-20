@@ -1,4 +1,5 @@
-/* /preset 미니 프리셋 창(사용자 11-20) — 메인 프롬프트에서 `/preset` 을 다 치면 곧바로 캐럿 자리에 뜬다.
+/* 미니 프리셋 창(사용자 11-20) — 메인 프롬프트에서 `/의상` · `/자세` · `/표정` · `/배경` 을 다 치면 곧바로 그 탭으로
+ * 캐럿 자리에 뜬다(`/preset` 은 PE 프롬프트 프리셋 그대로 - 사용자 11-20).
  *
  * 옛 `preset:` 팝업(분류 › 묶음 › 고르기)을 프리셋 벤치의 세트 목록으로 다시 그린 것:
  *   갈래 탭(의상 · 자세 · 2인 · 표정 · 배경) · 대분류 › 묶음 › 세트 그림.
@@ -121,6 +122,7 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
   function open(ctx = {}) {
     close('replaced');
     ensureStyle();
+    if (MINI_KINDS.some(item => item.kind === ctx.kind)) memo.kind = ctx.kind;
     const el = document.createElement('div');
     el.className = 'pmini';
     el.setAttribute('role', 'dialog');

@@ -28,14 +28,25 @@ UNSORTED_LABEL = "분류 전"
 # 같은 시드 · 같은 태그 세트는 앞 풀 것 하나만 남긴다. 차례 = 여성(연결은 girl_boy) 먼저.
 ALL_POOLS = ""
 _POOL_PRIORITY = {"female": 0, "male": 1, "girl_boy": 0, "girl_girl": 1, "boy_boy": 2}
-# 모든 풀 목록에 섞지 않고 맨 끝 별도 대분류로 빼는 풀(사용자 11-20 - 남남은 싫어하는 사람이 많다).
-# 그 대분류의 소분류 = 탐색 분류표의 대분류 이름. 화면은 대분류의 `pool` 로 세트를 받는다.
-SEPARATE_POOLS = {"link": ("boy_boy", "남남")}
+# 모든 풀 목록에 섞지 않고 맨 끝 별도 대분류로 빼는 세트(사용자 11-20 - 남남은 싫어하는 사람이 많다).
+# 갈래 -> (대분류 이름, 통째로 빼는 풀). yaoi 내용 세트(태그 · 시드에 YAOI_TAGS)도 어느 풀이든 함께 뺀다
+# (빌더의 장르 거르개를 빠져나온 'implied yaoi' - 2인 자세 · 1인 이벤트 남성 풀에 있다).
+# 뺀 세트는 가상 풀 APART_POOL 에 모인다. 그 대분류의 소분류 = 탐색 분류표의 대분류 이름.
+# 화면은 대분류의 `pool` 로 세트를 받고, 검색 결과도 뺀 세트는 pool = APART_POOL 로 보인다.
+SEPARATE = {"link": ("남남", ("boy_boy",)), "event": ("남남", ())}
+YAOI_TAGS = frozenset({"yaoi", "implied yaoi", "bara"})
+APART_POOL = "apart"
 _SUBJECTS = ("girl", "boy", "other")
 
 
 def _order(row):
     return min(row["rank"].values()), -max(row["score"].values()), row["id"]
+
+
+def is_apart(row):
+    """따로 뺀 대분류(남남)에 갈 세트인가 - 통째로 빼는 풀이거나 yaoi 내용."""
+    spec = SEPARATE.get(row["kind"])
+    return bool(spec) and (row["pool"] in spec[1] or row["seed"] in YAOI_TAGS or not YAOI_TAGS.isdisjoint(row["tags"]))
 
 
 _HANGUL = re.compile("[가-힣]")
@@ -130,18 +141,18 @@ class PresetBenchService:
                 for rows in seed_rows.values():
                     rows.sort(key=_order)
             for kind in {kind for kind, _ in seeds}:
-                merged, seen = defaultdict(list), set()
-                apart = SEPARATE_POOLS.get(kind, (None,))[0]
-                pools = sorted((pool for k, pool in seeds if k == kind and pool != apart),
-                               key=lambda pool: _POOL_PRIORITY.get(pool, 9))
+                merged, apart, seen = defaultdict(list), defaultdict(list), set()
+                pools = sorted((pool for k, pool in seeds if k == kind), key=lambda pool: _POOL_PRIORITY.get(pool, 9))
                 for pool in pools:
                     for seed, rows in seeds[kind, pool].items():
                         for row in rows:
-                            mark = (seed, tuple(sorted(row["tags"])))
+                            mark = (is_apart(row), seed, tuple(sorted(row["tags"])))
                             if mark not in seen:
                                 seen.add(mark)
-                                merged[seed].append(row)
+                                (apart if mark[0] else merged)[seed].append(row)
                 seeds[kind, ALL_POOLS] = merged
+                if kind in SEPARATE:
+                    seeds[kind, APART_POOL] = apart
             # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸(tag_slot)과 별개인 손으로 고른 표다.
             # 갈래 다섯 모두 표가 있어야 한다(11-20 v3 + 의상).
             browse = json.loads((self.data_dir / BROWSE_TAXONOMY_NAME).read_bytes())
@@ -213,9 +224,9 @@ class PresetBenchService:
             items = [entry(seed, None) for seed in rest]
             groups.append({"slot": UNSORTED_LABEL, "label": UNSORTED_LABEL,
                            "subs": [{"name": UNSORTED_LABEL, "seeds": items}], "seeds": items})
-        if pool == ALL_POOLS and kind in SEPARATE_POOLS:
-            apart, label = SEPARATE_POOLS[kind]
-            source = self._seeds.get((kind, apart), {})
+        if pool == ALL_POOLS and kind in SEPARATE:
+            label, apart = SEPARATE[kind][0], APART_POOL
+            source = self._seeds[kind, apart]
             subs, placed = [], set()
             for category in self._browse[kind]:
                 tags = sorted(((tag, posts) for sub in category["subcategories"] for tag, posts in sub["tags"]
@@ -259,7 +270,8 @@ class PresetBenchService:
                 if (query in tag.casefold()
                         or query in str(record.get("description") or record.get("desc") or "").casefold()
                         or query in str(record.get("keywords_kr") or "").casefold()):
-                    matches.append({"kind": row["kind"], "pool": row["pool"], "seed": row["seed"],
+                    matches.append({"kind": row["kind"], "pool": APART_POOL if is_apart(row) else row["pool"],
+                                    "seed": row["seed"],
                                     "set_id": row["id"], "matched": tag,
                                     "ko": korean_tag_name(_translation(translations, row["seed"]))})
                     break

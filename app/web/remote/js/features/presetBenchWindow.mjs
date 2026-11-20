@@ -2,12 +2,14 @@
 //
 //   ┌ 왼쪽 좁은 열 ─────┐┌ 탐색(위) ───────────────────────────────┐
 //   │ 기반 요약 카드     ││ 칸 이름 · 풀 · [검색]                    │
-//   │ 인원 · 넣을 곳     ││ 분류 칩 / seed 목록 | 세트 카드           │
-//   │ 캐릭터 글          │├ 결과 띠(아래 붙박이) ─────────────────────┤
+//   │ 넣을 곳            ││ 분류 칩 / seed 목록 | 세트 카드           │
+//   │ 캐릭터 글 · 성별   │├ 결과 띠(아래 붙박이) ─────────────────────┤
 //   │ 칸(의상·자세 …)    ││ 마지막 실행 · [이전 기록] · [이걸로 고정] │
 //   │ [N장 생성 | 중지]  │└──────────────────────────────────────────┘
 //   └───────────────────┘ 아래: 프롬프트 미리보기(접힘) · [복사] [메인 프롬프트로]
 //
+// - 인원은 고르지 않는다(사용자 11-20) - [+ 캐릭터 추가] / × 로 1 ~ 2명. 맨 앞 인원 태그(1girl · 1boy …)는
+//   캐릭터 글로 서버에 물어 정한다(이름 사전 gender · 글의 girl/boy 태그 · 모르면 girl). 목록은 여성 · 남성 세트를 한데 보인다.
 // - 카드 누르기 = 그 칸에 넣기 · 카드 오른쪽 위 상자 = 비교에 넣기. 한 칸에서 둘 이상 체크하면 그 칸이 '비교 축' 이다.
 //   다른 칸에서 비교를 시작하면 앞 축은 풀리고 [되돌리기] 를 띄운다.
 // - 기반 = 프리셋(기본 = 현재 프리셋 · **이 창에서만** 쓴다) | 직접 설정(이름 붙여 저장 · 프리셋에서 받아오기 · 프리셋으로 보내기).
@@ -17,12 +19,13 @@
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
-  CASTS, DEFAULT_CAST, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-tx2';
+  MAX_CHARACTERS, normalizeCast, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
+} from './presetBenchModel.mjs?v=20261120-tx3';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
 const API = {
+  subject: text => `/api/presets/bench/subject?text=${encodeURIComponent(text)}`,
   catalog: (kind, pool) => `/api/presets/catalog?kind=${encodeURIComponent(kind)}&pool=${encodeURIComponent(pool)}`,
   sets: (kind, pool, seed) => `/api/presets/sets?kind=${encodeURIComponent(kind)}&pool=${encodeURIComponent(pool)}&seed=${encodeURIComponent(seed)}`,
   search: (q, kind) => `/api/presets/search?q=${encodeURIComponent(q)}&kind=${encodeURIComponent(kind)}`,
@@ -67,6 +70,12 @@ const PBW_CSS = `
 .pbw-seg button { border: 0; background: transparent; color: var(--text-dim); padding: 2px 8px; font-family: inherit; font-size: 11px; cursor: pointer; }
 .pbw-seg button.is-on { background: var(--bg-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
 .pbw-grp { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.pbw-chead { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); margin: 2px 0 3px; }
+.pbw-subj { padding: 0 5px; border: 1px solid var(--border-dim); border-radius: 4px; font-size: 10.5px; color: var(--text-primary); }
+.pbw-subj.is-guess { color: var(--text-dim); border-style: dashed; }
+.pbw-add { align-self: flex-start; font-size: 11px; padding: 2px 8px; }
+.pbw-pool { position: absolute; left: 3px; top: 3px; z-index: 1; padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px;
+  background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: none; }
 .pbw-slot { border: 1px solid var(--border-dim); border-radius: 6px; padding: 4px 6px; cursor: pointer; }
 .pbw-slot.is-cur { border-color: var(--accent); }
 .pbw-slot.is-axis { background: var(--bg-hover); border-color: var(--accent); }
@@ -194,7 +203,10 @@ export function createPresetBenchWindow({
     try { return JSON.parse(storage?.getItem(STORE_KEY) || '{}') || {}; } catch (_) { return {}; }
   })();
   const st = {
-    castId: CASTS[saved.castId] ? saved.castId : DEFAULT_CAST,
+    // 캐릭터 수. 옛 저장값(castId)의 2인 인원(gb · gg · bb)은 2명으로 옮긴다.
+    count: normalizeCast({count: saved.count ?? (['gb', 'gg', 'bb'].includes(saved.castId) ? 2 : 1)}).count,
+    // 캐릭터마다 서버가 정한 성별(저장하지 않는다 - 창을 열 때 글로 다시 묻는다).
+    subjects: Array.from({length: MAX_CHARACTERS}, () => ({gender: '', source: '', name: ''})),
     target: saved.target === 'main' ? 'main' : 'char',
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
     picks: saved.picks && typeof saved.picks === 'object' ? saved.picks : {},   // 칸 id -> 세트 요약
@@ -236,13 +248,14 @@ export function createPresetBenchWindow({
   function persist() {
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
-        castId: st.castId, target: st.target, names: st.names, picks: st.picks,
+        count: st.count, target: st.target, names: st.names, picks: st.picks,
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, direct: st.base.direct},
       }));
     } catch (_) { /* 이번 실행만 */ }
   }
 
-  const slots = () => slotsFor(st.castId);
+  const slots = () => slotsFor(st.count);
+  const castNow = () => ({count: st.count, genders: st.subjects.slice(0, st.count).map(row => row.gender)});
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
   const viewOf = id => (st.views[id] ||= {cat: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
@@ -262,7 +275,6 @@ export function createPresetBenchWindow({
     <div class="pbw-cols">
       <div class="pbw-left">
         <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
-        <select class="pbw-select" data-role="cast">${Object.entries(CASTS).map(([id, cast]) => `<option value="${id}">${esc(cast.label)}</option>`).join('')}</select>
         <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
           <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
         <div data-role="chars"></div>
@@ -272,7 +284,7 @@ export function createPresetBenchWindow({
         <div class="pbw-ex">
           <div data-role="note"></div>
           <div data-role="band"></div>
-          <div class="pbw-row"><b data-role="ex-title" style="font-weight:600"></b><span class="pbw-dim" data-role="ex-pool"></span>
+          <div class="pbw-row"><b data-role="ex-title" style="font-weight:600"></b>
             <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색" style="flex:1;min-width:140px"></div>
           <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div><div class="pbw-grid-wrap" data-role="grid"></div></div>
         </div>
@@ -284,7 +296,6 @@ export function createPresetBenchWindow({
   const $ = role => panel.body.querySelector(`[data-role="${role}"]`);
   const baseCard = panel.body.querySelector('[data-act="base"]');
   const goBtn = panel.body.querySelector('[data-act="go"]');
-  const castSelect = $('cast');
   const searchInput = $('search');
 
   async function getJson(url, options) {
@@ -440,18 +451,72 @@ export function createPresetBenchWindow({
   }
 
   // ---------------------------------------------------------------- 왼쪽 열
-  // 캐릭터마다 [이름 칸 + 그 캐릭터의 칸] 한 묶음, 끝에 '함께' 칸. 이름 칸은 인원을 바꿀 때만 새로 만든다
-  // (자동완성 붙이기 · 치는 중 초점을 지킨다) - 칸 목록은 renderSlots 가 묶음 안의 자리(data-slots)만 다시 그린다.
+  // 캐릭터마다 [머리(캐릭터 N · 성별 표지 · ×) + 이름 칸 + 그 캐릭터의 칸] 한 묶음, 끝에 '함께'(1명이면 '장면') 칸.
+  // 이름 칸은 캐릭터 수가 바뀔 때만 새로 만든다(자동완성 붙이기 · 치는 중 초점을 지킨다) -
+  // 칸 목록은 renderSlots 가, 성별 표지는 renderSubjects 가 제자리만 다시 그린다.
   function renderChars() {
     const box = $('chars');
-    const count = CASTS[st.castId].pools.length;
-    box.innerHTML = Array.from({length: count}, (_, i) => `${count > 1 ? `<div class="pbw-grp">캐릭터 ${i + 1}</div>` : ''}
+    const count = st.count;
+    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-chead"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
+        ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div data-slots="${i + 1}" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>`).join('') +
-      `${count > 1 ? '<div class="pbw-grp">함께</div>' : ''}<div data-slots="0" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>`;
+      (count < MAX_CHARACTERS ? '<button type="button" class="pbw-btn pbw-add" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정, 함께 = 연결 · 배경으로 바뀝니다">+ 캐릭터 추가</button>' : '') +
+      `<div class="pbw-grp">${count > 1 ? '함께' : '장면'}</div><div data-slots="0" style="display:flex;flex-direction:column;gap:6px;margin-top:2px"></div>`;
     box.querySelectorAll('textarea[data-name]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
     });
+    renderSubjects();
+  }
+
+  // 성별 표지: 'girl · 자동'(이름 사전) · 'boy · 태그'(글에 쓴 1boy) · 'girl · 기본'(모름 - girl 로 본다).
+  function renderSubjects() {
+    panel.body.querySelectorAll('[data-subj]').forEach(el => {
+      const row = st.subjects[Number(el.dataset.subj)] || {};
+      const gender = row.gender || 'girl';
+      const how = row.source === 'character' ? '자동' : row.source === 'tags' ? '태그' : '기본';
+      el.textContent = `${gender} · ${how}`;
+      el.classList.toggle('is-guess', !row.source);
+      el.title = row.source === 'character' ? `캐릭터 사전: ${row.name} -> ${gender}`
+        : row.source === 'tags' ? `글에 쓴 인원 태그 -> ${gender}`
+          : '이름으로 성별을 몰라 girl 로 봅니다 - 글에 1boy 를 쓰면 boy 가 됩니다';
+    });
+  }
+
+  const subjectTimers = [];
+  const subjectSerial = [];
+  function refreshSubject(i, delay = 350) {
+    win.clearTimeout(subjectTimers[i]);
+    subjectTimers[i] = win.setTimeout(async () => {
+      const text = String(st.names[i] || '').trim();
+      const serial = (subjectSerial[i] = (subjectSerial[i] || 0) + 1);
+      let row = {gender: '', source: '', name: ''};
+      if (text) {
+        try { row = await getJson(API.subject(text)); } catch (_) { /* 모르면 girl 로 본다 */ }
+      }
+      if (serial !== subjectSerial[i]) return;   // 그사이 다시 쳤다
+      st.subjects[i] = {gender: String(row.gender || ''), source: String(row.source || ''), name: String(row.name || '')};
+      renderSubjects();
+      renderPreview();
+    }, delay);
+  }
+
+  // 캐릭터 수 바꾸기. 칸 id 가 같은 칸(o1 · e1 · scene)은 고른 것 · 비교 · 탐색 자리를 그대로 둔다(풀이 같다).
+  function setCount(count) {
+    st.count = normalizeCast({count}).count;
+    if (st.count < 2) {
+      st.names[1] = '';
+      st.subjects[1] = {gender: '', source: '', name: ''};
+    }
+    const keep = new Set(slots().map(slot => slot.id));
+    for (const bag of [st.picks, st.chk, st.views]) for (const id of Object.keys(bag)) if (!keep.has(id)) delete bag[id];
+    if (st.axis && !keep.has(st.axis)) st.axis = null;
+    if (st.memo && !keep.has(st.memo.slotId)) { st.memo = null; st.note = ''; }
+    st.pick = null;
+    if (!keep.has(st.cur)) st.cur = 'o1';
+    persist();
+    renderChars();
+    renderAll();
   }
 
   function renderSlots() {
@@ -475,7 +540,6 @@ export function createPresetBenchWindow({
   }
 
   function renderLeftControls() {
-    castSelect.value = st.castId;
     $('target').querySelectorAll('button').forEach(btn => btn.classList.toggle('is-on', btn.dataset.target === st.target));
     const n = st.axis ? axisSets().length : 1;
     goBtn.textContent = running() ? '■ 중지' : `▶ ${n}장 생성`;
@@ -516,8 +580,11 @@ export function createPresetBenchWindow({
     else if (thumbStatus?.installed) { catalogCache.clear(); setsCache.clear(); }
   }
 
+  // 기본 풀이 아닌 세트에 작은 표지(목록은 여성 · girl_boy 세트가 먼저 온다).
+  const POOL_BADGES = {male: '남', girl_girl: '여여', boy_boy: '남남'};
   function cardHtml(slot, set, {hit = false} = {}) {
     const selected = st.picks[slot.id]?.id === set.id;
+    const badge = POOL_BADGES[set.pool] ? `<span class="pbw-pool" title="${esc(set.pool)} 세트">${POOL_BADGES[set.pool]}</span>` : '';
     const checked = st.chk[slot.id]?.has(set.id);
     const tall = slot.kind === 'outfit' ? ' is-tall' : '';
     const picture = set.has_thumb
@@ -525,7 +592,7 @@ export function createPresetBenchWindow({
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
     return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" title="${esc((set.tags || []).join(', '))}">
       <span class="pbw-ck${checked ? ' is-on' : ''}" data-check="${esc(set.id)}" role="checkbox" aria-checked="${checked ? 'true' : 'false'}" title="비교에 넣기">${checked ? '✓' : ''}</span>
-      ${picture}<div class="pbw-cap">${esc((set.tags || []).join(', '))}</div></div>`;
+      ${badge}${picture}<div class="pbw-cap">${esc((set.tags || []).join(', '))}</div></div>`;
   }
 
   // 지금 그리드에 보이는 세트(id -> 세트) - 카드 누르기 · 체크가 세트 요약을 찾는다.
@@ -535,9 +602,8 @@ export function createPresetBenchWindow({
     const slot = slotById(st.cur) || slots()[0];
     st.cur = slot.id;
     const view = viewOf(slot.id);
-    const owner = CASTS[st.castId].pools.length > 1 && slot.owner > 0 ? `캐릭터 ${slot.owner} ` : '';
+    const owner = st.count > 1 && slot.owner > 0 ? `캐릭터 ${slot.owner} ` : '';
     $('ex-title').textContent = `${owner}${KIND_LABELS[slot.kind]}`;
-    $('ex-pool').textContent = `· ${slot.pool}`;
     if (searchInput.value !== view.q && doc.activeElement !== searchInput) searchInput.value = view.q;
     const cats = $('cats');
     const seedsBox = $('seeds');
@@ -624,7 +690,7 @@ export function createPresetBenchWindow({
     if (viewOf(slot.id).q !== q) return;      // 그사이 다시 쳤다
     const bySeed = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
-      if (row.pool !== slot.pool) continue;
+      if (slot.pool && row.pool !== slot.pool) continue;   // 칸 pool '' = 모든 풀
       const hit = bySeed.get(row.seed) || {seed: row.seed, matched: row.matched, count: 0, first: row.set_id};
       hit.count += 1;
       bySeed.set(row.seed, hit);
@@ -654,7 +720,8 @@ export function createPresetBenchWindow({
     void renderExplorer();
     const ctx = (st.picks[slotId]?.tags || []).filter(t => t !== tag).join('|');
     try {
-      view.related = await getJson(API.related(tag, slot.pool, ctx));
+      // 관련 의상은 풀마다 따로 센다 - 그 칸에 든 세트의 풀(옛 저장값엔 없다 -> female).
+      view.related = await getJson(API.related(tag, st.picks[slotId]?.pool || slot.pool || 'female', ctx));
     } catch (error) {
       view.related = {groups: []};
       notify(error.status === 404 ? `'${tag}' 의 관련 의상 정보가 없습니다` : `관련 의상을 읽지 못했습니다: ${error.message}`, error.status === 404 ? 'info' : 'error');
@@ -705,7 +772,7 @@ export function createPresetBenchWindow({
     }
     const axisSlot = slotById(st.axis);
     const rows = previewRows({
-      castId: st.castId, target: st.target, names: st.names, picks: picksTags(), variant,
+      cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant,
       axis: axisSlot ? {slotId: axisSlot.id, label: KIND_LABELS[axisSlot.kind], count: axisSets().length} : null,
     });
     const base = currentBase();
@@ -728,7 +795,7 @@ export function createPresetBenchWindow({
       const item = run?.items[st.pick[1]];
       if (run?.axis && item?.set) variant = {slotId: run.axis, tags: item.set.tags};
     }
-    const rows = previewRows({castId: st.castId, target: st.target, names: st.names, picks: picksTags(), variant});
+    const rows = previewRows({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant});
     return rows;
   }
 
@@ -738,7 +805,7 @@ export function createPresetBenchWindow({
     const slotsNow = slots();
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({castId: st.castId, target: st.target, names: st.names, picks: picksTags(), axis});
+    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     let base;
     if (st.base.mode === 'direct') {
@@ -799,7 +866,7 @@ export function createPresetBenchWindow({
 
   // ---------------------------------------------------------------- 칸 조작
   function putIntoSlot(slotId, set) {
-    st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed};
+    st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || ''};
     persist();
   }
 
@@ -837,6 +904,7 @@ export function createPresetBenchWindow({
     if (!booted) {
       booted = true;
       renderChars();
+      for (let i = 0; i < st.count; i += 1) refreshSubject(i, 0);
     }
     renderAll();
     await Promise.all([loadBases(), refreshThumbStatus()]);
@@ -850,6 +918,8 @@ export function createPresetBenchWindow({
     if (act === 'base') { st.baseOpen = !st.baseOpen; renderAllBase(); return; }
     if (act === 'base-close') { st.baseOpen = false; renderAllBase(); return; }
     if (act === 'go') { void generate(); return; }
+    if (act === 'char-add') { setCount(st.count + 1); return; }
+    if (act === 'char-remove') { setCount(st.count - 1); return; }
     if (act === 'undo') {
       if (st.memo) {
         if (st.axis) delete st.chk[st.axis];
@@ -999,23 +1069,6 @@ export function createPresetBenchWindow({
 
   panel.body.addEventListener('change', event => {
     const t = event.target;
-    if (t === castSelect) {
-      st.castId = CASTS[t.value] ? t.value : DEFAULT_CAST;
-      // 칸 구성이 바뀐다 - 같은 id 의 칸(o1 · e1 · scene …)은 풀이 같을 때만 고른 것을 남긴다.
-      const keep = new Map(slots().map(slot => [slot.id, slot]));
-      for (const id of Object.keys(st.picks)) if (!keep.has(id)) delete st.picks[id];
-      st.chk = {};
-      st.axis = null;
-      st.memo = null;
-      st.note = '';
-      st.pick = null;
-      st.views = {};
-      if (!keep.has(st.cur)) st.cur = 'o1';
-      persist();
-      renderChars();
-      renderAll();
-      return;
-    }
     if (t.dataset.role === 'base-preset') { st.base.preset = t.value; persist(); renderAllBase(); return; }
     if (t.dataset.role === 'direct-pick') {
       const item = directs.find(row => row.name === t.value);
@@ -1037,6 +1090,7 @@ export function createPresetBenchWindow({
       st.names[Number(t.dataset.name)] = t.value;
       persist();
       renderPreview();
+      refreshSubject(Number(t.dataset.name));
       return;
     }
     if (t === searchInput) {

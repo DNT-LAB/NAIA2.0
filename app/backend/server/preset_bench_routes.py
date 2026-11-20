@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.backend.server.install_manager_routes import runtime_install_manager
 from core.preset_bench_generation import DirectSettingsStore, export_direct_base, generation_commands, preset_bench_bases
-from core.preset_bench_service import PresetBenchService
+from core.preset_bench_service import ALL_POOLS, PresetBenchService, name_subject
 
 
 _SERVICE_LOCK = threading.Lock()
@@ -33,13 +33,20 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
+    # pool 을 비우면 그 갈래의 모든 풀(벤치는 인원 선택 없이 이것만 쓴다).
     @app.get("/api/presets/catalog")
-    async def catalog(kind: str, pool: str):
+    async def catalog(kind: str, pool: str = ALL_POOLS):
         return await query(preset_bench_service(session_context).catalog, kind, pool)
 
     @app.get("/api/presets/sets")
-    async def sets(kind: str, pool: str, seed: str):
+    async def sets(kind: str, seed: str, pool: str = ALL_POOLS):
         return await query(preset_bench_service(session_context).sets, kind, pool, seed)
+
+    @app.get("/api/presets/bench/subject")
+    async def subject(text: str = ""):
+        from app.backend.server.character_viewer_routes import character_viewer_service
+
+        return await query(lambda: name_subject(text, character_viewer_service(session_context).find_by_tag))
 
     @app.get("/api/presets/search")
     async def search(q: str, kind: str | None = None):

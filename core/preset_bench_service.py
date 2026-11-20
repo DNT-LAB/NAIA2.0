@@ -23,10 +23,36 @@ _FIELDS = ("id", "pool", "seed", "tags", "rank", "score", "layers", "support_by_
 BROWSE_TAXONOMY_NAME = "preset_browse_taxonomy.json"
 # 표에 아직 없는 시드(팩을 다시 구운 뒤 표를 안 고쳤을 때)가 숨지 않게 맨 끝에 모아 보인다.
 UNSORTED_LABEL = "분류 전"
+# 풀 "" = 그 갈래의 모든 풀을 한 목록으로(벤치에서 인원 선택을 없앴다 - 사용자 11-20).
+# 같은 시드 · 같은 태그 세트는 앞 풀 것 하나만 남긴다. 차례 = 여성(연결은 girl_boy) 먼저.
+ALL_POOLS = ""
+_POOL_PRIORITY = {"female": 0, "male": 1, "girl_boy": 0, "girl_girl": 1, "boy_boy": 2}
+_SUBJECTS = ("girl", "boy", "other")
 
 
 def _order(row):
     return min(row["rank"].values()), -max(row["score"].values()), row["id"]
+
+
+def name_subject(text, find_by_tag):
+    """캐릭터 칸 글 -> 인원 태그의 성별(girl · boy · other) · 근거.
+
+    1) 글에 직접 쓴 1girl / 1boy 태그 - 사용자가 정한 것이 이긴다(성전환 등)
+       (캐릭터 즉시 생성과 같은 판정 - cowboy shot 은 boy 가 아니다)
+    2) 쉼표로 나눈 태그 가운데 캐릭터 사전에 있는 이름의 `gender`(rem (re:zero) -> girl)
+    3) 모르면 빈 값 - 화면은 girl 로 본다(캐릭터 뷰어의 옛 기본값).
+    """
+    from core.character_instant_service import detect_subject
+
+    detected = detect_subject(text)
+    if detected:
+        return {"gender": detected[1:], "source": "tags", "name": ""}
+    for tag in (part.strip() for part in str(text or "").split(",")):
+        hit = find_by_tag(tag) if tag else None
+        gender = str((hit[1] or {}).get("gender") or "").strip().lower() if hit else ""
+        if gender in _SUBJECTS:
+            return {"gender": gender, "source": "character", "name": tag}
+    return {"gender": "", "source": "", "name": ""}
 
 
 class PresetBenchService:
@@ -68,6 +94,17 @@ class PresetBenchService:
             for seed_rows in seeds.values():
                 for rows in seed_rows.values():
                     rows.sort(key=_order)
+            for kind in {kind for kind, _ in seeds}:
+                merged, seen = defaultdict(list), set()
+                pools = sorted((pool for k, pool in seeds if k == kind), key=lambda pool: _POOL_PRIORITY.get(pool, 9))
+                for pool in pools:
+                    for seed, rows in seeds[kind, pool].items():
+                        for row in rows:
+                            mark = (seed, tuple(sorted(row["tags"])))
+                            if mark not in seen:
+                                seen.add(mark)
+                                merged[seed].append(row)
+                seeds[kind, ALL_POOLS] = merged
             # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸(tag_slot)과 별개인 손으로 고른 표다.
             # 갈래 다섯 모두 표가 있어야 한다(11-20 v3 + 의상).
             browse = json.loads((self.data_dir / BROWSE_TAXONOMY_NAME).read_bytes())

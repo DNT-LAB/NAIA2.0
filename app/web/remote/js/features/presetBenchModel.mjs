@@ -5,29 +5,45 @@
 //
 //   인원(cast) -> 칸 목록(slots) -> 칸마다 고른 세트(태그 목록) -> assemble() -> {main, characters}
 //
+// 인원은 고르지 않는다(사용자 11-20: "1girl, 1boy 등을 선택해야 하는데 없는 게 더 편하다").
+// cast = {count: 캐릭터 수(1 · 2), genders: ['girl' | 'boy' | 'other' | '', ...]} - 성별은 창이 캐릭터 이름으로
+// 서버에 묻는다(GET /api/presets/bench/subject). 목록은 여성 · 남성 세트를 한데 보인다(칸 pool = '').
+//
 // 기반 프리셋의 prefix · postfix · negative 는 서버가 붙인다(POST /api/presets/bench/generate).
 // 여기서 만드는 main 은 그 사이에 들어갈 **가운데 몫**이다.
 
-// 인원. head = 메인 프롬프트 맨 앞 인원 태그. pool = 칸 갈래(의상 · 자세 · 표정 · 배경)가 읽을 풀(캐릭터마다).
-// link = 연결 갈래 풀(2인만).
-export const CASTS = {
-  f1: {label: '1인 · 1girl', head: '1girl', pools: ['female']},
-  m1: {label: '1인 · 1boy', head: '1boy', pools: ['male']},
-  gb: {label: '2인 · 1girl, 1boy', head: '1girl, 1boy', pools: ['female', 'male'], link: 'girl_boy'},
-  gg: {label: '2인 · 2girls', head: '2girls', pools: ['female', 'female'], link: 'girl_girl'},
-  bb: {label: '2인 · 2boys', head: '2boys', pools: ['male', 'male'], link: 'boy_boy'},
-};
-export const DEFAULT_CAST = 'f1';
+export const MAX_CHARACTERS = 2;
+const SUBJECT_ORDER = ['girl', 'boy', 'other'];
+
+/** 저장된 값을 {count, genders} 로(캐릭터 1 ~ 2명 · 모르는 성별은 빈 값). */
+export function normalizeCast(value) {
+  const count = Math.min(MAX_CHARACTERS, Math.max(1, Number(value && value.count) || 1));
+  const genders = Array.from({length: count}, (_, i) => {
+    const g = String((value && value.genders && value.genders[i]) || '');
+    return SUBJECT_ORDER.includes(g) ? g : '';
+  });
+  return {count, genders};
+}
+
+/** 메인 맨 앞 인원 태그. 모르는 성별은 girl(캐릭터 뷰어의 옛 기본값). girl+boy = '1girl, 1boy' · girl+girl = '2girls'. */
+export function headFor(cast) {
+  const {genders} = normalizeCast(cast);
+  return SUBJECT_ORDER
+    .map(g => [g, genders.filter(x => (x || 'girl') === g).length])
+    .filter(([, n]) => n > 0)
+    .map(([g, n]) => `${n}${g}${n > 1 ? 's' : ''}`)
+    .join(', ');
+}
 
 // 갈래(서버 kind) -> 칸 이름.
 export const KIND_LABELS = {outfit: '의상', event: '자세', link: '연결', expression: '표정', scene: '배경'};
 
-/** 인원의 칸 목록. 칸 = {id, kind, pool, owner}. owner = 캐릭터 번호(1 · 2) 또는 0(함께 · 장면).
+/** 캐릭터 수의 칸 목록. 칸 = {id, kind, pool, owner}. owner = 캐릭터 번호(1 · 2) 또는 0(함께 · 장면).
+ *  pool '' = 모든 풀(서버가 여성 · 남성 세트를 겹침 없이 한 목록으로 준다).
  *  1인: 의상 · 자세 · 표정 · 배경. 2인: 캐릭터마다 의상 · 표정, 함께 = 연결 · 배경. */
-export function slotsFor(castId) {
-  const cast = CASTS[castId] || CASTS[DEFAULT_CAST];
-  if (cast.pools.length === 1) {
-    const pool = cast.pools[0];
+export function slotsFor(count) {
+  const pool = '';
+  if ((Number(count) || 1) < 2) {
     return [
       {id: 'o1', kind: 'outfit', pool, owner: 1},
       {id: 'pose', kind: 'event', pool, owner: 1},
@@ -36,13 +52,12 @@ export function slotsFor(castId) {
     ];
   }
   return [
-    {id: 'o1', kind: 'outfit', pool: cast.pools[0], owner: 1},
-    {id: 'e1', kind: 'expression', pool: cast.pools[0], owner: 1},
-    {id: 'o2', kind: 'outfit', pool: cast.pools[1], owner: 2},
-    {id: 'e2', kind: 'expression', pool: cast.pools[1], owner: 2},
-    {id: 'link', kind: 'link', pool: cast.link, owner: 0},
-    // 배경 갈래는 여/남 풀이 따로 있다 - 2인이면 첫째 캐릭터의 풀을 쓴다(배경은 사람 없이 그린 세트라 차이가 작다).
-    {id: 'scene', kind: 'scene', pool: cast.pools[0], owner: 0},
+    {id: 'o1', kind: 'outfit', pool, owner: 1},
+    {id: 'e1', kind: 'expression', pool, owner: 1},
+    {id: 'o2', kind: 'outfit', pool, owner: 2},
+    {id: 'e2', kind: 'expression', pool, owner: 2},
+    {id: 'link', kind: 'link', pool, owner: 0},
+    {id: 'scene', kind: 'scene', pool, owner: 0},
   ];
 }
 
@@ -53,34 +68,36 @@ function goesToCharacter(slot) {
 }
 
 const joinTags = parts => parts.map(part => String(part || '').trim()).filter(Boolean).join(', ');
+// 메인 한 줄 안에서 같은 태그를 한 번만(이름 칸에 1boy 를 직접 써도 맨 앞 인원 태그와 겹치지 않게).
+const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => tag.trim()).filter(Boolean))].join(', ');
 
 /**
  * 프롬프트 조립(순수 함수).
- *   castId    - CASTS 키
+ *   cast      - {count, genders}
  *   target    - 'char'(캐릭터 프롬프트 칸) | 'main'(메인에 다 싣는다)
  *   names     - [캐릭터1 글, 캐릭터2 글] (이름이나 직접 쓴 캐릭터 프롬프트)
  *   picks     - {칸 id: 태그 배열}
  *   variant   - {slotId, tags} 이면 그 칸만 이 태그로 바꿔 조립한다(비교 축의 한 장)
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
-export function assemble({castId, target = 'char', names = [], picks = {}, variant = null}) {
-  const cast = CASTS[castId] || CASTS[DEFAULT_CAST];
-  const slots = slotsFor(castId);
+export function assemble({cast, target = 'char', names = [], picks = {}, variant = null}) {
+  const {count} = normalizeCast(cast);
+  const head = headFor(cast);
+  const slots = slotsFor(count);
   const tagsOf = slot => {
     if (variant && variant.slotId === slot.id) return variant.tags || [];
     return picks[slot.id] || [];
   };
-  const count = cast.pools.length;
   const nameOf = i => String(names[i] || '').trim();
   if (target === 'main') {
-    const main = joinTags([
-      cast.head,
+    const main = uniqueTags(joinTags([
+      head,
       ...Array.from({length: count}, (_, i) => nameOf(i)),
       ...slots.map(slot => joinTags(tagsOf(slot))),
-    ]);
+    ]));
     return {main, characters: []};
   }
-  const main = joinTags([cast.head, ...slots.filter(slot => !goesToCharacter(slot)).map(slot => joinTags(tagsOf(slot)))]);
+  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slot => joinTags(tagsOf(slot)))]));
   const characters = [];
   for (let i = 0; i < count; i += 1) {
     const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1)
@@ -92,12 +109,12 @@ export function assemble({castId, target = 'char', names = [], picks = {}, varia
 }
 
 /** 미리보기 줄: 메인 · 캐릭터 N. 비교 축 칸은 `{의상 ×3}` 처럼 표시한다(axisCount > 1 이고 variant 가 없을 때). */
-export function previewRows({castId, target, names, picks, variant = null, axis = null}) {
+export function previewRows({cast, target, names, picks, variant = null, axis = null}) {
   let shownPicks = picks;
   if (!variant && axis && axis.count > 1) {
     shownPicks = {...picks, [axis.slotId]: [`{${axis.label} ×${axis.count}}`]};
   }
-  const {main, characters} = assemble({castId, target, names, picks: shownPicks, variant});
+  const {main, characters} = assemble({cast, target, names, picks: shownPicks, variant});
   const rows = [{key: 'main', label: '메인', text: main}];
   characters.forEach((row, i) => rows.push({key: `c${i + 1}`, label: `캐릭터 ${i + 1}`, text: row.prompt}));
   return rows;
@@ -111,14 +128,14 @@ export function variantLabel(tags) {
 }
 
 /** 생성 요청의 items. 비교 축이 있으면 축 칸의 세트마다 한 장, 없으면 한 장. */
-export function buildItems({castId, target, names, picks, axis = null}) {
+export function buildItems({cast, target, names, picks, axis = null}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({castId, target, names, picks, variant: {slotId: axis.slotId, tags: set.tags}});
+      const {main, characters} = assemble({cast, target, names, picks, variant: {slotId: axis.slotId, tags: set.tags}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }
-  const {main, characters} = assemble({castId, target, names, picks});
+  const {main, characters} = assemble({cast, target, names, picks});
   return [{label: '한 장', main, characters, set: null}];
 }
 

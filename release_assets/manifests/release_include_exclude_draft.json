@@ -53,6 +53,7 @@
       "data/scene_presets.json",
       "data/outfit_states.json",
       "data/outfit_tag_index.json",
+      "data/preset_browse_taxonomy.json",
       "data/character_debut.json",
       "data/character_group_ko.json",
       "data/character_group_membership.json",

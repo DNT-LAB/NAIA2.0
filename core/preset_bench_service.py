@@ -20,6 +20,9 @@ from core.style_variants import is_webp
 ROOT = Path(__file__).resolve().parents[1]
 _LOG = logging.getLogger(__name__)
 _FIELDS = ("id", "pool", "seed", "tags", "rank", "score", "layers", "support_by_rating", "side")
+BROWSE_TAXONOMY_NAME = "preset_browse_taxonomy.json"
+# 표에 아직 없는 시드(팩을 다시 구운 뒤 표를 안 고쳤을 때)가 숨지 않게 맨 끝에 모아 보인다.
+UNSORTED_LABEL = "분류 전"
 
 
 def _order(row):
@@ -71,6 +74,11 @@ class PresetBenchService:
             for seed_rows in seeds.values():
                 for rows in seed_rows.values():
                     rows.sort(key=_order)
+            # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸과 별개인 손으로 고른 표다(11-20 v3).
+            browse = json.loads((self.data_dir / BROWSE_TAXONOMY_NAME).read_bytes())
+            if browse.get("schema") != "naia.preset_browse_taxonomy.v1":
+                raise ValueError("Unknown preset browse taxonomy schema")
+            self._browse = browse["families"]
             self._seeds = seeds
             self._slots = slots
             self._slot_order = slot_order
@@ -112,6 +120,8 @@ class PresetBenchService:
     def catalog(self, kind, pool):
         seeds = self._pool(kind, pool)
         index, _ = self._thumbs()
+        if kind in self._browse:
+            return self._browse_catalog(kind, pool, seeds, index)
         groups = defaultdict(list)
         for seed, rows in sorted(seeds.items(), key=lambda item: _order(item[1][0])):
             groups[self._slots[kind, seed]].append({
@@ -120,6 +130,31 @@ class PresetBenchService:
         ordered = dict.fromkeys((*self._slot_order[kind], *groups))
         return {"kind": kind, "pool": pool,
                 "groups": [{"slot": slot, "seeds": groups[slot]} for slot in ordered if slot in groups]}
+
+    def _browse_catalog(self, kind, pool, seeds, index):
+        """대분류 > 소분류 > 시드(게시물 수 차례). 그 풀에 세트가 없는 시드 · 빈 소분류 · 빈 대분류는 뺀다."""
+        def entry(seed, posts):
+            rows = seeds[seed]
+            return {"seed": seed, "sets": len(rows), "with_thumb": sum(row["key"] in index for row in rows),
+                    "posts": posts}
+
+        groups, placed = [], set()
+        for category in self._browse[kind]:
+            subs = []
+            for sub in category["subcategories"]:
+                items = [entry(tag, posts) for tag, posts in sub["tags"] if tag in seeds]
+                placed.update(item["seed"] for item in items)
+                if items:
+                    subs.append({"name": sub["name"], "seeds": items})
+            if subs:
+                groups.append({"slot": category["category"], "label": category["category"], "subs": subs,
+                               "seeds": [item for sub in subs for item in sub["seeds"]]})
+        rest = sorted(set(seeds) - placed, key=lambda seed: _order(seeds[seed][0]))
+        if rest:
+            items = [entry(seed, 0) for seed in rest]
+            groups.append({"slot": UNSORTED_LABEL, "label": UNSORTED_LABEL,
+                           "subs": [{"name": UNSORTED_LABEL, "seeds": items}], "seeds": items})
+        return {"kind": kind, "pool": pool, "groups": groups}
 
     def sets(self, kind, pool, seed):
         rows = self._pool(kind, pool).get(seed, ())

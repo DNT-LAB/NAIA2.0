@@ -137,6 +137,15 @@ export function categoryLabel(kind, slot) {
   return lane === 'adult' ? `성인 · ${rest}` : (rest || text);
 }
 
+/** Danbooru 게시물 수를 짧게 - 1.0M · 128k · 9.5k · 450. */
+export function formatPosts(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (v >= 1e4) return `${Math.round(v / 1e3)}k`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
+  return String(v);
+}
+
 /** 카탈로그 그룹 차례 - 의상은 전신 · 상의 · 하의 … 먼저, 나머지는 서버 차례. */
 export function orderCategories(kind, groups) {
   const list = Array.isArray(groups) ? groups.slice() : [];

@@ -18,7 +18,8 @@
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
   CASTS, DEFAULT_CAST, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, categoryLabel, orderCategories,
-} from './presetBenchModel.mjs?v=20261119-pb1';
+  formatPosts,
+} from './presetBenchModel.mjs?v=20261120-tx1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -80,12 +81,19 @@ const PBW_CSS = `
 .pbw-go { margin-top: auto; padding: 6px; font-size: 13px; }
 .pbw-note { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; background: var(--bg-hover); font-size: 11px; }
 .pbw-note a { color: var(--accent); cursor: pointer; }
-.pbw-cats { display: flex; flex-wrap: wrap; gap: 4px; }
-.pbw-cat { padding: 1px 8px; border: 1px solid var(--border-dim); border-radius: 5px; color: var(--text-dim); font-size: 11px; cursor: pointer; background: transparent; font-family: inherit; }
-.pbw-cat.is-on { color: var(--text-primary); border-color: var(--accent); }
-.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; }
+.pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; }
+.pbw-cat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; padding: 3px 7px; border: 0; border-radius: 4px;
+  color: var(--text-dim); font-size: 12px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
+.pbw-cat small { font-size: 10px; color: var(--text-dim); }
+.pbw-cat:hover { color: var(--text-primary); }
+.pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
+.pbw-sub { font-size: 10px; color: var(--text-dim); padding: 6px 5px 1px; letter-spacing: .02em; }
+.pbw-sub:first-child { padding-top: 0; }
+.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 112px 190px minmax(0, 1fr); gap: 8px; }
+.pbw-ex2.is-related { grid-template-columns: 112px 0 minmax(0, 1fr); }
 .pbw-seeds { min-height: 0; overflow-y: auto; }
-.pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px; border-radius: 4px; cursor: pointer; color: var(--text-dim); font-size: 11px; }
+.pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-dim); font-size: 11px; }
+.pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; }
 .pbw-seed span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbw-seed:hover { color: var(--text-primary); }
 .pbw-seed.is-on { background: var(--bg-hover); color: var(--text-primary); }
@@ -267,8 +275,7 @@ export function createPresetBenchWindow({
           <div data-role="band"></div>
           <div class="pbw-row"><b data-role="ex-title" style="font-weight:600"></b><span class="pbw-dim" data-role="ex-pool"></span>
             <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색" style="flex:1;min-width:140px"></div>
-          <div class="pbw-cats" data-role="cats"></div>
-          <div class="pbw-ex2"><div class="pbw-seeds" data-role="seeds"></div><div class="pbw-grid-wrap" data-role="grid"></div></div>
+          <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div><div class="pbw-grid-wrap" data-role="grid"></div></div>
         </div>
         <div class="pbw-rs" data-role="results"></div>
         <div data-role="overlay"></div>
@@ -537,6 +544,7 @@ export function createPresetBenchWindow({
     const seedsBox = $('seeds');
     const grid = $('grid');
     const serial = ++searchSerial;
+    $('ex2').classList.toggle('is-related', view.mode === 'related');
 
     if (view.mode === 'related') {
       cats.innerHTML = `<button type="button" class="pbw-cat is-on" data-act="related-back">← 분류로</button><span class="pbw-dim pbw-sm">'${esc(view.relatedTag)}' 관련</span>`;
@@ -563,7 +571,7 @@ export function createPresetBenchWindow({
     if (serial !== searchSerial) return;
     const groups = orderCategories(slot.kind, catalog.groups);
     if (!view.cat || !groups.some(group => group.slot === view.cat)) view.cat = groups[0]?.slot || '';
-    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}">${esc(categoryLabel(slot.kind, group.slot))}</button>`).join('');
+    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || categoryLabel(slot.kind, group.slot))}</span><small>${(group.seeds || []).length}</small></button>`).join('');
 
     let seeds;
     if (view.mode === 'search') {
@@ -572,8 +580,17 @@ export function createPresetBenchWindow({
         ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched)}"><span>${esc(hit.seed)}</span><span>${hit.count}</span></div>`).join('')
         : `<div class="pbw-empty">'${esc(view.q)}' 결과 없음</div>`;
     } else {
-      seeds = (groups.find(group => group.slot === view.cat)?.seeds || []);
-      seedsBox.innerHTML = seeds.map(seed => `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}"><span>${esc(seed.seed)}</span><span>${seed.sets}</span></div>`).join('');
+      const group = groups.find(item => item.slot === view.cat);
+      seeds = group?.seeds || [];
+      // 탐색 분류가 있는 갈래(자세 · 연결 · 표정 · 배경)는 소분류 머리글 + Danbooru 게시물 수, 의상은 예전대로 세트 수.
+      const row = seed => {
+        const shown = seed.posts != null ? formatPosts(seed.posts) : seed.sets;
+        const tip = seed.posts != null ? `Danbooru 게시물 ${Number(seed.posts).toLocaleString()} · 세트 ${seed.sets}` : `세트 ${seed.sets}`;
+        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(tip)}"><span>${esc(seed.seed)}</span><span>${shown}</span></div>`;
+      };
+      seedsBox.innerHTML = group?.subs
+        ? group.subs.map(sub => `<div class="pbw-sub">${esc(sub.name)}</div>${sub.seeds.map(row).join('')}`).join('')
+        : seeds.map(row).join('');
     }
     if (!view.seed || !seeds.some(seed => seed.seed === view.seed)) view.seed = seeds[0]?.seed || '';
     seedsBox.querySelectorAll('.pbw-seed').forEach(row => row.classList.toggle('is-on', row.dataset.seed === view.seed));

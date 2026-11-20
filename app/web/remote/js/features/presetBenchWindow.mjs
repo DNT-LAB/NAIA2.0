@@ -157,6 +157,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-chead { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600; color: var(--text-primary);
   border-bottom: 1px solid var(--border-dim); }
 .pbw-ccard > .pbw-text { display: block; margin: 6px 8px; width: calc(100% - 16px); }
+/* 캐릭터 프롬프트 칸 = 기본 네 줄(사용자 11-20 "너무 좁다") - 아래 모서리로 더 늘릴 수 있다. */
+.pbw-ccard > .pbw-text { min-height: 74px; line-height: 1.5; padding: 4px 6px; }
 .pbw-subj { padding: 0 5px; border: 1px solid var(--border-glow); border-radius: 4px; font-size: 10.5px; font-weight: 400; color: var(--text-primary); }
 .pbw-subj.is-guess { color: var(--text-dim); border-style: dashed; }
 .pbw-addc { border: 1px dashed var(--border-glow); border-radius: 6px; background: transparent; color: var(--text-muted); padding: 4px;
@@ -782,7 +784,7 @@ export function createPresetBench({
     box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard" data-ccard="${i}"><div class="pbw-chead" data-act="char-pick" data-index="${i}" title="누르면 아래에서 캐릭터 검색 · 에셋 · 캐릭터 레퍼런스로 고릅니다"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
         <span class="pbw-gap"></span><span class="pbw-cpick">고르는 중</span>
         ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
-      <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
+      <textarea class="pbw-text" rows="4" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
       <div data-slots="${i + 1}"></div></div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +

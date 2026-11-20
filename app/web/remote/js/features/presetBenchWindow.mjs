@@ -274,7 +274,13 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-ex-ctx { min-width: 0; color: var(--text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
 .pbw-gcol .pbw-ex-ctx { font-size: 12px; color: var(--text-muted); }
-.pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+/* 가운데 그림 칸 스크롤바 = 잘 보이게(사용자 11-20). 세트가 수백이면 칸이 4만 px 라 막대가 10px 로 줄어 안 보였다 -
+   막대 최소 높이 48px. scrollbar-color 를 주면 크로미움이 ::-webkit-scrollbar 를 통째로 무시하므로 쓰지 않는다. */
+.pbw-grid-wrap::-webkit-scrollbar { width: 10px; }
+.pbw-grid-wrap::-webkit-scrollbar-track { background: rgba(255,255,255,0.07); border-radius: 5px; }
+.pbw-grid-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.8); border-radius: 5px; min-height: 48px; }
+.pbw-grid-wrap::-webkit-scrollbar-thumb:hover { background: #fff; }
 /* 그림 칸 = 너비와 무관하게 한 줄 2장(사용자 11-20 - 스크롤당 볼 것이 많지 않다). */
 .pbw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 /* 캐릭터 고르기(DB · 에셋 · REF)는 한 줄 3장(사용자 11-20) - 칸 고르기는 2장 그대로. */
@@ -1156,7 +1162,7 @@ export function createPresetBench({
     if (view.mode === 'search') {
       seeds = view.hits;
       seedsBox.innerHTML = seeds.length
-        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched === hit.seed ? hit.seed : `${hit.seed} · 찾은 태그 ${hit.matched}`)}">${seedLabel(hit)}<span>${hit.count}</span></div>`).join('')
+        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" data-pbw-tip="${esc(hit.seed)}" data-pbw-tip-src="검색" data-pbw-tip-sets="${hit.count}"${hit.matched === hit.seed ? '' : ` data-pbw-tip-hint="찾은 태그 ${esc(hit.matched)}"`}>${seedLabel(hit)}<span>${hit.count}</span></div>`).join('')
         : `<div class="pbw-empty">'${esc(view.q)}' 결과 없음</div>`;
     } else {
       const group = curGroup;
@@ -1164,9 +1170,12 @@ export function createPresetBench({
       seeds = sub ? sub.seeds : (group?.seeds || []);
       // 소분류 머리글 + 오른쪽 수 = 고를 수 있는 세트 수(사용자 11-20 - 게시물 수는 툴팁으로).
       // 이름 = 한글 + 옆에 작은 영문 태그(사용자 11-20). 사전에 이름이 없으면 영문만.
+      // 줄에 올리면 태그 카드(이름 · 분류 경로 · 한글 설명 · 세트 수 · 게시물 · 썸네일 - 사용자 11-20).
+      const subOf = new Map();
+      for (const item of group?.subs || []) for (const one of item.seeds) if (!subOf.has(one.seed)) subOf.set(one.seed, item.name);
       const row = seed => {
-        const tip = seed.posts != null ? `세트 ${seed.sets} · Danbooru 게시물 ${Number(seed.posts).toLocaleString()}` : `세트 ${seed.sets}`;
-        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(`${seed.seed} · ${tip}`)}">${seedLabel(seed)}<span>${seed.sets}</span></div>`;
+        const where = [group?.label, subOf.get(seed.seed)].filter((name, i, all) => name && all.indexOf(name) === i).join(' › ');
+        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" data-pbw-tip="${esc(seed.seed)}" data-pbw-tip-src="${esc(where)}" data-pbw-tip-sets="${seed.sets}"${seed.posts != null ? ` data-pbw-tip-posts="${Number(seed.posts)}"` : ''}>${seedLabel(seed)}<span>${seed.sets}</span></div>`;
       };
       // 맨 위 줄 = 대분류(또는 고른 소분류)를 누른 상태 - 그 안의 세트를 다 나열(사용자 11-20 "첫 그룹을 고르지 말고 전체").
       const all = `<div class="pbw-seed is-all${view.seed ? '' : ' is-on'}" data-seed="" title="이 분류의 세트를 모두 나열합니다"><span>${sub ? esc(sub.name) : '전체'}</span><span>${setTotal(seeds)}</span></div>`;
@@ -2084,6 +2093,101 @@ export function createPresetBench({
   listen('mouseleave', leaveCard);
   listen('scroll', leaveCard, true);
 
+  // ---------------------------------------------------------------- 시드 줄 = 태그 카드
+  // 이벤트 맵의 툴팁과 같은 작은 카드(.em-tip - 사용자 11-20 '그림 3'): 이름 · 분류 경로 · 한글 설명(/api/tag/lookup)
+  // · 세트 수 · Danbooru 게시물 · 썸네일(Interactive 썸네일 축에 있는 태그만). 조회는 태그마다 한 번.
+  let tipEl = null;
+  let tipOwner = null;
+  let thumbAxis = null;
+  let thumbAsked = false;
+  const tipLooked = new Map();     // 태그 -> {desc, count} | null(조회해 봤는데 없다)
+  const tipAsked = new Set();
+
+  function ensureTip(doc) {
+    if (tipEl && tipEl.ownerDocument === doc && doc.body.contains(tipEl)) return tipEl;
+    tipEl?.remove();
+    tipEl = doc.createElement('div');
+    tipEl.className = 'em-tip';
+    doc.body.appendChild(tipEl);           // body 직계 - 칸 안에 두면 overflow 에 잘린다
+    return tipEl;
+  }
+
+  async function askTip(tag) {
+    if (tipLooked.has(tag) || tipAsked.has(tag)) return;
+    tipAsked.add(tag);
+    try {
+      const data = await getJson(`/api/tag/lookup?tag=${encodeURIComponent(tag)}`);
+      tipLooked.set(tag, data && data.tag ? {desc: String(data.desc || ''), count: Number(data.count) || 0} : null);
+    } catch (_) {
+      tipLooked.set(tag, null);
+    }
+    if (tipOwner?.dataset.pbwTip === tag) paintTip(tipOwner);
+  }
+
+  async function askThumbAxis() {
+    if (thumbAxis || thumbAsked) return;
+    thumbAsked = true;
+    try {
+      const axes = (await getJson('/api/interactive-thumb/index')).axes || {};
+      thumbAxis = new Map();
+      for (const [axis, tags] of Object.entries(axes)) for (const tag of tags) if (!thumbAxis.has(tag)) thumbAxis.set(tag, axis);
+    } catch (_) {
+      thumbAxis = new Map();
+    }
+    if (tipOwner) paintTip(tipOwner);
+  }
+
+  function paintTip(owner) {
+    if (!owner.isConnected) { hideTip(); return; }
+    const doc = owner.ownerDocument;
+    const view = doc.defaultView || win;
+    const tip = ensureTip(doc);
+    const tag = owner.dataset.pbwTip || '';
+    const looked = tipLooked.get(tag);
+    const axis = thumbAxis?.get(tag);
+    const thumb = axis ? `<img class="em-tip-thumb" alt="" src="/api/interactive-thumb?axis=${encodeURIComponent(axis)}&tag=${encodeURIComponent(tag)}">` : '';
+    const posts = owner.dataset.pbwTipPosts ? Number(owner.dataset.pbwTipPosts) : (looked?.count || 0);
+    const stats = [`세트 ${owner.dataset.pbwTipSets || 0}`, posts ? `Danbooru ${posts.toLocaleString('en-US')}` : ''].filter(Boolean).join(' · ');
+    tip.innerHTML = `<div class="em-tip-row"><div class="em-tip-main">`
+      + `<div class="em-tip-head"><span class="em-tip-tag">${esc(tag)}</span><span class="em-tip-src">${esc(owner.dataset.pbwTipSrc || '')}</span></div>`
+      + (looked?.desc ? `<div class="em-tip-desc">${esc(looked.desc)}</div>` : (looked === undefined ? '<div class="em-tip-desc em-tip-wait">…</div>' : ''))
+      + `<div class="em-tip-stats">${esc(stats)}</div>`
+      + `<div class="em-tip-foot"><div class="em-tip-hint">${esc(owner.dataset.pbwTipHint || '클릭 = 이 태그의 세트 보기')}</div></div>`
+      + `</div>${thumb}</div>`;
+    tip.classList.add('open');
+    // 이벤트 맵과 같은 자리: 줄 가운데의 살짝 오른쪽 · 바로 아래. 아래가 모자라면 위로.
+    const a = owner.getBoundingClientRect();
+    const b = tip.getBoundingClientRect();
+    let left = a.left + a.width * 0.5 + 16;
+    left = Math.max(8, Math.min(left, view.innerWidth - b.width - 8));
+    let top = a.bottom + 6;
+    if (top + b.height > view.innerHeight - 8) top = a.top - b.height - 6;
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(Math.max(8, top))}px`;
+  }
+
+  function showTip(owner) {
+    if (owner === tipOwner) return;
+    tipOwner = owner;
+    void askTip(owner.dataset.pbwTip || '');
+    void askThumbAxis();
+    paintTip(owner);
+  }
+
+  function hideTip() {
+    tipOwner = null;
+    tipEl?.classList.remove('open');
+  }
+
+  listen('mouseover', event => {
+    const owner = event.target?.closest?.('[data-pbw-tip]');
+    if (owner) showTip(owner);
+    else if (tipOwner) hideTip();
+  });
+  listen('mouseleave', hideTip);
+  listen('scroll', hideTip, true);
+  listen('pointerdown', hideTip, true);     // 누르면 목록이 다시 그려진다 - 떠난 줄의 카드를 남기지 않는다
+
   // 그림 칸 : 결과 열 경계 - 끌어서 너비를 바꾸고 기억한다(두 번 누르면 처음대로).
   function applySplit() { $('gcol').style.flexBasis = `${Math.round(st.split * 1000) / 10}%`; }
   const splitBar = $('split');
@@ -2153,7 +2257,7 @@ export function createPresetBench({
     active = want;
     leftMount.hidden = !want;
     if (want) void boot();
-    else leaveCard();
+    else { leaveCard(); hideTip(); }
     onVisibilityChange();
   }
 

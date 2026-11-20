@@ -115,7 +115,25 @@ function goesToCharacter(slot) {
 
 const joinTags = parts => parts.map(part => String(part || '').trim()).filter(Boolean).join(', ');
 // 메인 한 줄 안에서 같은 태그를 한 번만(이름 칸에 1boy 를 직접 써도 맨 앞 인원 태그와 겹치지 않게).
-const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => tag.trim()).filter(Boolean))].join(', ');
+// 가중치 묶음(`1.2::smile, blush::`) 안의 조각과 `::` 가 붙은 조각은 그대로 둔다 - 닫는 표식을 지우면 묶음이 안 닫힌다(Codex 리뷰 11-20).
+export function uniqueTags(text) {
+  const seen = new Set();
+  const out = [];
+  let open = false;
+  for (const raw of String(text || '').split(',')) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    const marks = (tag.match(/::/g) || []).length;
+    const inside = open || marks > 0;
+    if (marks % 2) open = !open;
+    if (!inside) {
+      if (seen.has(tag)) continue;
+      seen.add(tag);
+    }
+    out.push(tag);
+  }
+  return out.join(', ');
+}
 
 /**
  * 프롬프트 조립(순수 함수).

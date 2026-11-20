@@ -28,7 +28,7 @@
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts, siblingTags,
-} from './presetBenchModel.mjs?v=20261120-pl1';
+} from './presetBenchModel.mjs?v=20261120-pl2';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -47,6 +47,7 @@ const API = {
   directExport: '/api/presets/bench/direct/export',
   generate: '/api/presets/bench/generate',
   queueAction: '/api/queue/action',
+  queueState: '/api/queue/state',
   historyThumb: id => `/api/history/thumb/${encodeURIComponent(id)}?size=320`,
   historyImage: id => `/api/history/image/${encodeURIComponent(id)}`,
   // 캐릭터 불러오기 - Characters 창 · Assets V5 · REF 창의 라우트를 그대로(읽기만).
@@ -962,9 +963,19 @@ export function createPresetBench({
 
   const subjectTimers = [];
   const subjectSerial = [];
+  const subjectDue = [];     // 미뤄 둔(아직 안 물은) 칸
+  const subjectRuns = [];    // 묻는 중인 칸의 약속
   function refreshSubject(i, delay = 350) {
     win.clearTimeout(subjectTimers[i]);
-    subjectTimers[i] = win.setTimeout(async () => {
+    subjectDue[i] = true;
+    subjectTimers[i] = win.setTimeout(() => { void runSubject(i); }, delay);
+  }
+  // 생성 직전 - 방금 고친 이름의 성별을 기다린다(350ms 미룸 사이에 누르면 옛 성별이 실렸다 · Codex 리뷰 11-20).
+  const subjectsSettled = () => Promise.all(Array.from({length: st.count}, (_, i) => (subjectDue[i] ? runSubject(i) : subjectRuns[i])));
+  function runSubject(i) {
+    win.clearTimeout(subjectTimers[i]);
+    subjectDue[i] = false;
+    return (subjectRuns[i] = (async () => {
       const text = String(st.names[i] || '').trim();
       const serial = (subjectSerial[i] = (subjectSerial[i] || 0) + 1);
       let row = {gender: '', source: '', name: ''};
@@ -975,14 +986,16 @@ export function createPresetBench({
       st.subjects[i] = {gender: String(row.gender || ''), source: String(row.source || ''), name: String(row.name || '')};
       renderSubjects();
       renderSlots();      // 2인 이상 자세의 성별 어긋남 표지
-    }, delay);
+    })());
   }
 
   // 캐릭터 수 바꾸기. 칸 id 가 같은 칸(o1 · e1 · scene)은 고른 것 · 비교 · 탐색 자리를 그대로 둔다(풀이 같다).
   function setCount(count) {
     st.count = normalizeCast({count}).count;
     if (st.count < 2) {
+      bumpLoad(1);
       st.names[1] = '';
+      st.extras[1] = '';
       st.subjects[1] = {gender: '', source: '', name: ''};
       st.ucs[1] = '';
       st.loaded[1] = null;
@@ -1110,7 +1123,7 @@ export function createPresetBench({
     const picture = set.has_thumb
       ? `<img class="pbw-th${tall}" loading="lazy" src="${API.thumb(set.key)}" alt="">`
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
-    return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" title="${esc((set.tags || []).join(', '))}">
+    return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" data-card-slot="${esc(slot.id)}" title="${esc((set.tags || []).join(', '))}">
       <button type="button" class="pbw-play" data-play="${esc(set.id)}" title="지금 조합에서 이 칸만 이 세트로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 세트로 1장 생성">▶</button>
       ${badge}${picture}<div class="pbw-cap">${words}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
   }
@@ -1518,13 +1531,17 @@ export function createPresetBench({
 
   // 캐릭터 카드 ▶ (사용자 11-20) - 세트 카드의 ▶ 와 같다: 지금 조합에서 캐릭터 i 만 이 캐릭터로 바꿔 바로 1장(칸은 그대로).
   const playButton = (attrs, i) => `<button type="button" class="pbw-play" ${attrs} title="지금 조합에서 캐릭터 ${i + 1} 만 이 캐릭터로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 캐릭터로 1장 생성">▶</button>`;
+  // 캐릭터 칸 구성(수 · 칸마다 불러오기 차례) - ▶ 를 누른 뒤 응답이 오기 전에 바뀌었으면 보내지 않는다(Codex 리뷰 11-20).
+  const castToken = i => `${st.count}|${loadSerial[i] || 0}`;
   async function playChar(i, load) {
+    const token = castToken(i);
     let char;
     try { char = await load(); } catch (error) { notify(`캐릭터를 불러오지 못했습니다: ${error.message}`, 'error'); return; }
     if (!String(char.text || '').trim()) { notify('이 캐릭터엔 프롬프트가 없습니다', 'info'); return; }
     // 성별(맨 앞 인원 태그)은 칸에 넣을 때와 같은 길로 묻는다 - 모르면 girl.
     let gender = '';
     try { gender = String((await getJson(API.subject(char.text))).gender || ''); } catch (_) { /* girl 로 본다 */ }
+    if (i >= st.count || castToken(i) !== token) { notify('그사이 캐릭터 칸이 바뀌어 보내지 않았습니다', 'info'); return; }
     void generate({char: {...char, index: i, gender}});
   }
   const playDb = (i, row) => playChar(i, async () => {
@@ -1585,6 +1602,10 @@ export function createPresetBench({
     if (items.length) void loadMoreDb();                     // 화면이 아직 안 찼으면 이어서
   }
 
+  // 칸마다 불러오기 차례 - 새로 불러오거나 · 글을 고치거나 · 칸을 빼면 올라가 늦게 온 앞 응답을 버린다(Codex 리뷰 11-20).
+  const loadSerial = [];
+  const bumpLoad = i => (loadSerial[i] = (loadSerial[i] || 0) + 1);
+
   // 불러오기 - 앞서 에셋을 불러오며 저절로 붙은 REF 는 걷는다(다른 캐릭터의 그림이 남지 않게).
   function startLoad(i, loaded, text, uc) {
     setCharText(i, text);
@@ -1598,8 +1619,10 @@ export function createPresetBench({
   }
 
   async function loadDb(i, group, character, card) {
+    const mine = bumpLoad(i);
     try {
       const data = await getJson(API.dbCharacter(group, character, ''));
+      if (mine !== loadSerial[i] || i >= st.count) return;
       startLoad(i, {src: 'db', key: `${group}|${character}`, label: `DB ${dbGroupLabel(group)} › ${dbShortName(character, group)}`}, data.prompt, '');
       afterLoad();
       qsa('.pbw-card[data-cchar]').forEach(el => el.classList.toggle('is-sel', el === card));
@@ -1612,8 +1635,10 @@ export function createPresetBench({
 
   async function loadAsset(i, id, variation) {
     const row = assetRows.find(item => item.id === id);
+    const mine = bumpLoad(i);
     try {
       const detail = await getJson(API.assetDetail(id, variation));
+      if (mine !== loadSerial[i] || i >= st.count) return;
       const pics = [{hash: '', revision: detail.revision}, ...(detail.variations || [])];
       const at = Math.max(0, pics.findIndex(pic => pic.hash === variation));
       const picName = variation ? (pics[at]?.name || `변형 ${at}`) : '대표';
@@ -1745,6 +1770,7 @@ export function createPresetBench({
   // play = {char: {index, text, uc, label, gender, ref?}} 이면 캐릭터 카드 ▶ - 캐릭터 index 만 이 캐릭터로 바꿔 1장.
   async function generate(play = null) {
     if (!play && running()) return stop();
+    await subjectsSettled();
     const playSet = play?.set ? play : null;
     const playChar = play?.char || null;
     const slotsNow = slots();
@@ -1765,7 +1791,7 @@ export function createPresetBench({
       names[playChar.index] = playChar.text;
       ucs[playChar.index] = playChar.uc || '';
       known[playChar.index] = true;
-      if (playChar.gender) cast.genders[playChar.index] = playChar.gender;
+      cast.genders[playChar.index] = playChar.gender || '';   // 모르면 girl - 앞 캐릭터의 성별을 물려받지 않는다
     }
     const items = buildItems({cast, target: autoTarget(), names, picks, meta, axis, ucs,
       extras: st.extras.slice(0, st.count), extraMain: st.extraMain, known});
@@ -1850,7 +1876,7 @@ export function createPresetBench({
   // ---------------------------------------------------------------- 칸 조작
   // 이름 있는 캐릭터 = 불러온 캐릭터(DB · 에셋) 또는 캐릭터 사전이 알아본 이름 - 의상을 입히면 alternate costume(사용자 11-20).
   function knownChars() {
-    return Array.from({length: st.count}, (_, i) => !!st.loaded[i] || st.subjects[i]?.source === 'character');
+    return Array.from({length: st.count}, (_, i) => !!st.loaded[i] || Boolean(st.subjects[i]?.name));
   }
 
   // 세트를 고른 자리 - vpool = 따로 뺀 대분류의 가상 풀(남남 · 후타나리 · 아니면 '') · cat = 둘러보던 대분류.
@@ -2210,15 +2236,16 @@ export function createPresetBench({
     }
     const seed = t.closest('[data-seed]');
     if (seed) { viewOf(st.cur).seed = seed.dataset.seed; viewOf(st.cur).hitSet = ''; void renderExplorer(); return; }
+    // 카드는 그린 칸의 것만 - 칸을 바꾼 뒤 새 목록이 오기 전에 옛 카드를 눌렀으면 무시한다(Codex 리뷰 11-20).
     const play = t.closest('[data-play]');
     if (play) {
-      const set = shownSets.get(play.dataset.play);
+      const set = play.closest('[data-card-slot]')?.dataset.cardSlot === st.cur ? shownSets.get(play.dataset.play) : null;
       if (set && slotById(st.cur)) void generate({slotId: st.cur, set});
       return;
     }
     const card = t.closest('[data-set]');
     if (card) {
-      const set = shownSets.get(card.dataset.set);
+      const set = card.dataset.cardSlot === st.cur ? shownSets.get(card.dataset.set) : null;
       if (set) { putIntoSlot(st.cur, set); renderSlots(); qsa('.pbw-card').forEach(el => el.classList.toggle('is-sel', el.dataset.set === set.id)); }
       return;
     }
@@ -2263,6 +2290,7 @@ export function createPresetBench({
     }
     if (t.dataset.name !== undefined) {
       const i = Number(t.dataset.name);
+      bumpLoad(i);         // 손으로 고쳤다 - 진행 중인 불러오기가 덮지 않게
       st.names[i] = t.value;
       // 글을 다 지우면 불러온 표시 · UC 도 걷는다(REF 줄은 따로 뺀다).
       if (!t.value.trim() && (st.loaded[i] || st.ucs[i])) { st.loaded[i] = null; st.ucs[i] = ''; renderCharMeta(); }
@@ -2473,6 +2501,8 @@ export function createPresetBench({
     const run = st.runs.find(r => r.id === String(meta.preset_bench_request_id || ''));
     if (!run) return false;
     const item = run.items[Number(meta.preset_bench_candidate)];
+    // 기다리는 장만 받는다 - 기록에서 다시 생성하면 같은 표식이 실려 와 끝난 카드를 바꿔 묶었다(Codex 리뷰 11-20).
+    if (item && item.status !== 'pending') return false;
     if (item) {
       item.status = 'done';
       item.historyId = String(meta.history_id || '');
@@ -2491,6 +2521,26 @@ export function createPresetBench({
     }
     if (active) { renderResults(); renderLeftControls(); }
     return true;
+  }
+
+  // 큐 패널에서 지운 벤치 요청(Codex 리뷰 11-20) - 큐(대기 · 도는 장)에서 사라졌는데 결과도 오류도 안 오면 '취소' 로 접는다.
+  // 끝난 장도 결과가 오기 전 잠깐 큐에서 빠지므로 바로 접지 않는다 - QUEUE_GONE_MS 뒤 큐를 다시 읽어 그때도 없을 때만.
+  const QUEUE_GONE_MS = 8000;
+  let goneTimer = 0;
+  const queueIds = m => new Set([...(Array.isArray(m?.items) ? m.items : []), ...(m?.active ? [m.active] : [])]
+    .map(row => String(row?.generation_request_id || row?.id || '')).filter(Boolean));
+  const waiting = () => st.runs.flatMap(run => run.items.filter(item => item.status === 'pending' && item.queueId));
+  function handleQueueState(m) {
+    const live = queueIds(m);
+    if (waiting().some(item => !live.has(item.queueId)) && !goneTimer) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS);
+  }
+  async function sweepGone() {
+    goneTimer = 0;
+    let live;
+    try { live = queueIds(await getJson(API.queueState)); } catch (_) { return; }
+    const gone = waiting().filter(item => !live.has(item.queueId));
+    for (const item of gone) { item.status = 'cancelled'; item.message = '큐에서 빠짐'; }
+    if (gone.length && active) { renderResults(); renderLeftControls(); }
   }
 
   // 탭에 들어오면 덮개를 올리고(왼쪽 칸) 처음이면 불러온다. 떠나면 결과 판 · 크게 보기를 걷는다.
@@ -2517,6 +2567,7 @@ export function createPresetBench({
     generate: generateFromShortcut,
     handleResultMeta,
     handleGenerationError,
+    handleQueueState,
   };
 }
 

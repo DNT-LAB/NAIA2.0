@@ -5802,6 +5802,7 @@ const wsMessageHandlers = {
   queue_state: m => {
     queuePending = Array.isArray(m?.items) ? m.items.length : 0;
     if (queuePanel) queuePanel.handleState(m);
+    presetBenchControl?.handleQueueState?.(m);   // 큐 패널에서 지운 벤치 요청을 접는다
     // 대기 수는 Generate 단추에 보인다. 생성 중에는 타이머가 100ms 마다 다시 그린다.
     if (!generating) updateGenerateButtonMode();
   },
@@ -12912,7 +12913,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-pl4')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-pl6')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -16590,7 +16591,7 @@ const PRESET_MINI_COMMANDS = [['의상', 'outfit'], ['자세', 'event'], ['표�
 let presetMini = null;
 function openPresetMini(ctx) {
   if (presetMini) return presetMini.open(ctx);
-  import('./js/features/presetMiniPopup.mjs?v=20261120-pm3')
+  import('./js/features/presetMiniPopup.mjs?v=20261120-pm4')
     .then(({createPresetMiniPopup}) => {
       presetMini ||= createPresetMiniPopup({document, window, showToast});
       presetMini.open(ctx);

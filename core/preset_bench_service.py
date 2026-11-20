@@ -168,6 +168,18 @@ def _text_hit(query, record):
             or query in str(record.get("keywords_kr") or "").casefold())
 
 
+def _distinct_tags(row, siblings):
+    """형제 세트 가운데 이 세트에만 있는 태그 - 화면의 siblingTags(presetBenchModel.mjs)와 같은 규칙."""
+    sets = [other for other in siblings if isinstance(other.get("tags"), (list, tuple))]
+    if len(sets) < 2:
+        return []
+    count = defaultdict(int)
+    for other in sets:
+        for tag in set(other["tags"]):
+            count[tag] += 1
+    return [tag for tag in row["tags"] if count[tag] == 1]
+
+
 def name_subject(text, find_by_tag):
     """캐릭터 칸 글 -> 인원 태그의 성별(girl · boy · other) · 근거.
 
@@ -179,13 +191,18 @@ def name_subject(text, find_by_tag):
     from core.character_instant_service import detect_subject
 
     detected = detect_subject(text)
-    if detected:
-        return {"gender": detected[1:], "source": "tags", "name": ""}
+    known = ""
     for tag in (part.strip() for part in str(text or "").split(",")):
         hit = find_by_tag(tag) if tag else None
         gender = str((hit[1] or {}).get("gender") or "").strip().lower() if hit else ""
         if gender in _SUBJECTS:
-            return {"gender": gender, "source": "character", "name": tag}
+            if not detected:
+                return {"gender": gender, "source": "character", "name": tag}
+            known = tag
+            break
+    if detected:
+        # 성별은 쓴 태그가 이기되, 이름 있는 캐릭터인지(name)는 따로 알린다 - 의상 뒤 alternate costume(Codex 리뷰 11-20).
+        return {"gender": detected[1:], "source": "tags", "name": known}
     return {"gender": "", "source": "", "name": ""}
 
 
@@ -405,9 +422,18 @@ class PresetBenchService:
         if result is None:
             raise KeyError(tag)
         index, _ = self._thumbs()
+        self._load()
         for group in result["groups"]:
-            group["sets"] = [dict(row, has_thumb=row["key"] in index) for row in group["sets"]]
+            group["sets"] = [self._related_row(row, index) for row in group["sets"]]
         return result
+
+    def _related_row(self, row, index):
+        """관련 의상 한 장 = 일반 목록의 그 세트 요약(add · adult …) + 원래 형제 세트 기준 distinct(Codex 리뷰 11-20)."""
+        base = self._by_id.get(row.get("id"))
+        if base is None:
+            return dict(row, has_thumb=row["key"] in index)
+        siblings = self._seeds.get((base["kind"], base["pool"]), {}).get(base["seed"], ())
+        return dict(base, has_thumb=base["key"] in index, distinct=_distinct_tags(base, siblings))
 
     def thumbnail(self, key, if_none_match):
         with self.thumbs_lock:

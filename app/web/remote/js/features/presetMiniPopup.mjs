@@ -13,7 +13,7 @@
  * - Esc · Enter 는 여기서 전파를 끊는다(Ctrl+Enter = Generate 가 버블 단계에 있다 - slashPopup 과 같다).
  * - CSS 는 이 모듈이 싣는다. ⚠️ CSS 템플릿 안에는 백틱을 쓰지 않는다.
  */
-import { siblingTags } from './presetBenchModel.mjs?v=20261120-pl1';
+import { siblingTags } from './presetBenchModel.mjs?v=20261120-pl2';
 
 const STYLE_ID = 'preset-mini-style';
 const CSS = `
@@ -257,6 +257,7 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
   async function render() {
     if (!st) return;
     const serial = ++st.serial;
+    st.shown = [];   // 새 목록이 오기 전 [무작위] 가 앞 목록에서 고르지 않게(Codex 리뷰 11-20)
     const kind = memo.kind;
     const view = viewOf(kind);
     const box = name => st.el.querySelector(`[data-pm-${name}]`);

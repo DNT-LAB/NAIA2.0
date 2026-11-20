@@ -384,7 +384,8 @@ def register_install_manager_routes(
             return _loopback_only_response()
         try:
             manager = runtime_install_manager(session_context)
-            await run_in_thread(manager.cancel_archive_download)
+            # 프리셋 썸네일을 받는 중일 때만 - 그사이 시작된 다른 다운로드는 끊지 않는다(Codex 리뷰 11-20).
+            await run_in_thread(lambda: manager.cancel_archive_download(only_phase="preset_thumbs"))
             return await run_in_thread(manager.snapshot)
         except Exception as exc:
             return JSONResponse({"ok": False, "error": f"Preset thumbnails download cancel failed: {exc}"}, status_code=500)

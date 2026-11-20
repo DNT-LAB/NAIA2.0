@@ -58,6 +58,16 @@ def person_first_prompt(prefix, main, postfix):
     return ", ".join(filter(None, (", ".join(people), without_people(prefix), rest, without_people(postfix))))
 
 
+def _drop_inline_resolution(text):
+    """글 속 `resolution:WxH` 를 걷는다 - 벤치에서 크기를 골랐으면 그것이 이긴다(Codex 리뷰 11-20).
+
+    api_service 는 프롬프트의 resolution: 으로 width · height 를 다시 쓴다. 없으면 쓴 그대로 둔다(줄바꿈 · 주석).
+    """
+    if "resolution:" not in text:
+        return text
+    return ", ".join(tag for tag in _split_tags(text) if not tag.startswith("resolution:"))
+
+
 def _text(source, key):
     value = source.get(key, "")
     if not isinstance(value, str):
@@ -206,7 +216,9 @@ def export_direct_base(context, payload):
             name = target
             data = store.read_preset_data(name, "NAI")
         else:
-            main = context._prompt_engineering_service()._capture_main_settings()
+            # 지금 모드가 NAI 가 아니면 그 모드(WEBUI 등)의 설정을 NAI 프리셋에 싣지 않는다(Codex 리뷰 11-20).
+            main = (context._prompt_engineering_service()._capture_main_settings()
+                    if context.get_api_mode() == "NAI" else {})
             main.pop("prompt", None)
             data = {"module_settings": store.collect_settings("NAI"), "main_settings": main}
         data.setdefault("module_settings", {}).update(pre_prompt=base["prefix"], post_prompt=base["postfix"])
@@ -313,7 +325,9 @@ def generation_commands(context, payload):
         if size not in BENCH_SIZES:
             raise ValueError(f"size must be one of {', '.join(BENCH_SIZES)}")
         width, height = (int(side) for side in size.split(" x "))
-        base = {**base, "params": {**base["params"], "width": width, "height": height}}
+        base = {**base, "prefix": _drop_inline_resolution(base["prefix"]),
+                "postfix": _drop_inline_resolution(base["postfix"]),
+                "params": {**base["params"], "width": width, "height": height}}
     references = bench_reference_params(context, payload.get("references"), base["params"])
 
     commands = []

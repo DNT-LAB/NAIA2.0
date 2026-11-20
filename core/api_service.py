@@ -2598,6 +2598,7 @@ class APIService:
                 with guard.watch(response):
                     # 오류 응답은 본문을 읽어 예외로 처리 (재시도/에러 표시 일관성)
                     if response.status_code not in (200, 201):
+                        _ = response.content   # 닫기 전에 읽어 둔다 - 아니면 e.response.text 가 비어 CRef 미지원을 못 알아본다
                         response.raise_for_status()
 
                     for line in response.iter_lines(decode_unicode=True):

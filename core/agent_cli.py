@@ -481,7 +481,7 @@ def preset_sets(context, args):
             found = {}
             for hit in hits:
                 pool = hit["pool"] if hit["pool"] in separate else ""
-                if pool and not args.include_separate:
+                if pool and not args.include_separate and pool != args.pool:
                     continue
                 item = found.setdefault((hit["kind"], pool, hit["seed"]), {
                     "kind": hit["kind"], "pool": pool, "seed": hit["seed"], "ko": hit["ko"],

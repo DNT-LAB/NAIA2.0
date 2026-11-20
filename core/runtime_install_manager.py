@@ -841,9 +841,12 @@ class RuntimeInstallManager:
         with self._lock:
             return dict(self._download_state)
 
-    def cancel_archive_download(self) -> dict[str, Any]:
+    def cancel_archive_download(self, *, only_phase: str | None = None) -> dict[str, Any]:
+        """only_phase = 그 다운로드일 때만 취소한다(늦게 온 취소가 다음 다운로드를 끊지 않게)."""
         with self._lock:
             state = dict(self._download_state)
+            if only_phase is not None and state.get("phase") != only_phase:
+                return state
             if state.get("active") and state.get("phase") != "character_pack":
                 self._cancel.set()
                 phase = str(state.get("phase") or "")

@@ -235,6 +235,7 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
     const text = String(raw || '').trim();
     view.q = text;
     view.seed = '';
+    st.shown = [];   // 찾는 동안 [무작위] 가 앞 목록에서 고르지 않게(Codex 리뷰 11-20)
     if (!text) { view.hits = null; await render(); return; }
     let rows = [];
     try { rows = await getJson(API.search(text, kind)); }

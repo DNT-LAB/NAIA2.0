@@ -781,7 +781,9 @@ class APIService:
                         fix_res_value = [int(l) for l in v[11:].split('x')]  # "resolution:" 부분 제거
                         # ⚠️ 레퍼런스 인셋은 **캔버스**가 치수다. 여기서 덮으면 그림과 마스크는 1216x832 인데
                         #    요청은 832x1216 으로 나간다(Codex 리뷰 2026-10-09). 태그만 걷는다.
-                        if len(fix_res_value) == 2 and not parameters.get('_reference_inset_pin'):
+                        # 프리셋 벤치에서 크기를 골랐으면 그 크기가 이긴다(_preset_bench_size_pin · Codex 리뷰 11-20).
+                        if (len(fix_res_value) == 2 and not parameters.get('_reference_inset_pin')
+                                and not parameters.get('_preset_bench_size_pin')):
                             parameters['width'] = fix_res_value[0]
                             parameters['height'] = fix_res_value[1]
                     except:

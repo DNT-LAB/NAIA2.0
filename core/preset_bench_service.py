@@ -423,17 +423,19 @@ class PresetBenchService:
             raise KeyError(tag)
         index, _ = self._thumbs()
         self._load()
+        siblings = self._seeds.get(("outfit", pool), {})
         for group in result["groups"]:
-            group["sets"] = [self._related_row(row, index) for row in group["sets"]]
+            group["sets"] = [self._related_row(row, index, siblings) for row in group["sets"]]
         return result
 
-    def _related_row(self, row, index):
-        """관련 의상 한 장 = 일반 목록의 그 세트 요약(add · adult …) + 원래 형제 세트 기준 distinct(Codex 리뷰 11-20)."""
+    def _related_row(self, row, index, siblings):
+        """관련 의상 한 장 = 관련 행 그대로(rank · score 형식 유지) + 일반 목록의 생성 요약(add · adult)
+        + 일반 목록(같은 풀 · 같은 시드)과 같은 형제 기준 distinct(Codex 리뷰 11-20)."""
         base = self._by_id.get(row.get("id"))
         if base is None:
             return dict(row, has_thumb=row["key"] in index)
-        siblings = self._seeds.get((base["kind"], base["pool"]), {}).get(base["seed"], ())
-        return dict(base, has_thumb=base["key"] in index, distinct=_distinct_tags(base, siblings))
+        return dict(row, add=base["add"], adult=base["adult"], has_thumb=row["key"] in index,
+                    distinct=_distinct_tags(base, siblings.get(base["seed"], ())))
 
     def thumbnail(self, key, if_none_match):
         with self.thumbs_lock:

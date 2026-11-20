@@ -847,7 +847,9 @@ export function createPresetBench({
     if (!preset) { notify('프리셋을 골라 주세요', 'error'); return false; }
     st.base.direct = {
       prefix: String(preset.prefix || ''), postfix: String(preset.postfix || ''),
-      negative_prompt: String(preset.negative_prompt || ''), params: {...sessionParams(), ...cleanParams(preset.params)},
+      // 세션 값으로 빈 칸을 채우는 것은 지금 모드가 NAI 일 때만 - WEBUI 모델이 NAI 프리셋에 실리지 않게(Codex 리뷰 11-20).
+      negative_prompt: String(preset.negative_prompt || ''),
+      params: {...(String(getApiMode() || 'NAI').toUpperCase() === 'NAI' ? sessionParams() : {}), ...cleanParams(preset.params)},
     };
     st.base.directName = '';
     st.base.directFrom = preset.name;
@@ -971,7 +973,13 @@ export function createPresetBench({
     subjectTimers[i] = win.setTimeout(() => { void runSubject(i); }, delay);
   }
   // 생성 직전 - 방금 고친 이름의 성별을 기다린다(350ms 미룸 사이에 누르면 옛 성별이 실렸다 · Codex 리뷰 11-20).
-  const subjectsSettled = () => Promise.all(Array.from({length: st.count}, (_, i) => (subjectDue[i] ? runSubject(i) : subjectRuns[i])));
+  async function subjectsSettled() {
+    for (let round = 0; round < 5; round += 1) {
+      const runs = Array.from({length: st.count}, (_, i) => (subjectDue[i] ? runSubject(i) : subjectRuns[i]));
+      await Promise.all(runs);
+      if (Array.from({length: st.count}, (_, i) => subjectDue[i] || subjectRuns[i] !== runs[i]).every(changed => !changed)) return;
+    }
+  }
   function runSubject(i) {
     win.clearTimeout(subjectTimers[i]);
     subjectDue[i] = false;
@@ -1458,17 +1466,19 @@ export function createPresetBench({
         groups.map(g => `<button type="button" class="pbw-cat${g.key === db.group ? ' is-on' : ''}" data-cgroup="${esc(g.key)}" title="${esc(g.key)}"><span>${esc(dbGroupLabel(g.key))}</span><small>${formatPosts(g.count)}</small></button>`).join('');
       const q = db.q.trim();
       ctx.textContent = '찾는 중…';
+      // 조건은 보낼 때 한 번 떠 둔다 - 응답이 오기 전에 작품을 바꿔도 캐시 키 · 다음 묶음이 같은 조건(Codex 리뷰 11-20).
+      const query = [db.group, q, db.gender, db.fav];
       let rows;
       try {
-        rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}|${db.fav ? 1 : 0}`, () => getJson(API.dbList(db.group, q, db.gender, db.fav)).then(data => ({
-          rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0), query: [db.group, q, db.gender, db.fav]})));
+        rows = await cached(dbListCache, `${query[0]}|${q}|${query[2]}|${query[3] ? 1 : 0}`, () => getJson(API.dbList(...query)).then(data => ({
+          rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0), query})));
       } catch (error) { fail(error); return; }
       if (serial !== searchSerial) return;
       dbRows = rows.rows;
       // 여러 작품이 섞인 목록(전체 · etc · 검색)은 이름 옆에 작품을 흐리게 - 같은 이름(hoshino ai)을 가른다.
       const mixed = db.group === '__ALL__' || db.group === GROUP_ETC || Boolean(q);
       const mine = st.loaded[i]?.src === 'db' ? st.loaded[i].key : '';
-      dbView = {entry: rows, serial, i, mine, mixed,
+      dbView = {entry: rows, serial, i, mine, mixed, shown: rows.rows.length,
         head: `${q ? `${db.group === '__ALL__' ? '' : `${dbGroupLabel(db.group)} 안 `}검색 '${q}'` : dbGroupLabel(db.group)}`};
       dbCtx();
       grid.innerHTML = dbRows.length ? `<div class="pbw-grid is-3">${dbRows.map((row, k) => dbCardHtml(row, k)).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : db.fav ? '즐겨찾기한 캐릭터가 없습니다' : '캐릭터가 없습니다'}${
@@ -1548,14 +1558,14 @@ export function createPresetBench({
     const data = await getJson(API.dbCharacter(row.group, row.character, ''));
     return {text: data.prompt, uc: '', label: dbShortName(row.character, row.group)};
   });
-  const playAsset = (i, id, variation) => playChar(i, async () => {
+  const playAsset = (i, id, variation, attach = st.cv.attach) => playChar(i, async () => {
     const detail = await getJson(API.assetDetail(id, variation));
     const row = assetRows.find(item => item.id === id);
     const name = row ? assetName(row) : (detail.display_name || id.slice(0, 8));
     const pics = [{hash: '', revision: detail.revision}, ...(detail.variations || [])];
     const at = Math.max(0, pics.findIndex(pic => pic.hash === variation));
     // 'REF 로도' 가 켜져 있으면 불러올 때처럼 그 그림을 REF 로 - 이번 한 장에만.
-    const ref = st.cv.attach ? cleanRef({source: 'asset', id, variation, label: name, thumb: API.assetThumb(id, variation, pics[at]?.revision),
+    const ref = attach ? cleanRef({source: 'asset', id, variation, label: name, thumb: API.assetThumb(id, variation, pics[at]?.revision),
       ...ASSET_REF_DEFAULT, auto: true}) : null;
     return {text: detail.character_prompt, uc: detail.character_uc || '', label: name, ref};
   });
@@ -1592,12 +1602,15 @@ export function createPresetBench({
     catch (error) { notify(`캐릭터를 더 받지 못했습니다: ${error.message}`, 'error'); }
     entry.loading = false;
     const items = Array.isArray(data?.items) ? data.items : [];
-    const from = entry.rows.length;
     if (items.length) entry.rows.push(...items);
     else if (data) entry.total = entry.rows.length;          // 서버가 더 줄 것이 없다 - 다시 묻지 않는다
-    if (dbView !== view || view.serial !== searchSerial) return;   // 그사이 다른 목록으로 갔다(붙인 줄은 캐시에 남는다)
+    // 지금 화면이 같은 목록(캐시 항목)이면 - 그사이 다시 그렸어도 - 화면에 그린 곳부터 이어 그린다(Codex 리뷰 11-20).
+    const cur = dbView;
+    if (!cur || cur.entry !== entry || cur.serial !== searchSerial) return;   // 다른 목록(붙인 줄은 캐시에 남는다)
     dbRows = entry.rows;
-    wrap.querySelector('.pbw-grid.is-3')?.insertAdjacentHTML('beforeend', items.map((row, k) => dbCardHtml(row, from + k)).join(''));
+    const from = cur.shown;
+    wrap.querySelector('.pbw-grid.is-3')?.insertAdjacentHTML('beforeend', entry.rows.slice(from).map((row, k) => dbCardHtml(row, from + k)).join(''));
+    cur.shown = entry.rows.length;
     dbCtx();
     if (items.length) void loadMoreDb();                     // 화면이 아직 안 찼으면 이어서
   }
@@ -1768,9 +1781,13 @@ export function createPresetBench({
   // ---------------------------------------------------------------- 생성
   // play = {slotId, set} 이면 ▶ - 지금 조합에서 그 칸만 이 세트로 바꿔 1장(칸 · 비교는 그대로 · 그리는 중이어도 뒤에 쌓는다).
   // play = {char: {index, text, uc, label, gender, ref?}} 이면 캐릭터 카드 ▶ - 캐릭터 index 만 이 캐릭터로 바꿔 1장.
+  let settling = false;
   async function generate(play = null) {
     if (!play && running()) return stop();
-    await subjectsSettled();
+    // 성별을 기다리는 사이 다시 누르면(Ctrl+Enter 두 번) 같은 조합이 두 번 쌓였다 - 기다리는 동안은 받지 않는다(Codex 리뷰 11-20).
+    if (!play && settling) return;
+    if (!play) settling = true;
+    try { await subjectsSettled(); } finally { if (!play) settling = false; }
     const playSet = play?.set ? play : null;
     const playChar = play?.char || null;
     const slotsNow = slots();
@@ -2530,16 +2547,25 @@ export function createPresetBench({
   const queueIds = m => new Set([...(Array.isArray(m?.items) ? m.items : []), ...(m?.active ? [m.active] : [])]
     .map(row => String(row?.generation_request_id || row?.id || '')).filter(Boolean));
   const waiting = () => st.runs.flatMap(run => run.items.filter(item => item.status === 'pending' && item.queueId));
-  function handleQueueState(m) {
-    const live = queueIds(m);
-    if (waiting().some(item => !live.has(item.queueId)) && !goneTimer) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS);
+  // 항목마다 처음 사라진 때(goneAt)를 적는다 - 다른 항목의 타이머가 막 끝난(저장 중인) 장을 접지 않게.
+  function markGone(live) {
+    const now = Date.now();
+    for (const item of waiting()) {
+      if (live.has(item.queueId)) item.goneAt = 0;
+      else if (!item.goneAt) item.goneAt = now;
+    }
+    if (!goneTimer && waiting().some(item => item.goneAt)) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS);
   }
+  function handleQueueState(m) { markGone(queueIds(m)); }
   async function sweepGone() {
     goneTimer = 0;
     let live;
-    try { live = queueIds(await getJson(API.queueState)); } catch (_) { return; }
-    const gone = waiting().filter(item => !live.has(item.queueId));
+    try { live = queueIds(await getJson(API.queueState)); }
+    catch (_) { if (waiting().some(item => item.goneAt)) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS); return; }
+    const now = Date.now();
+    const gone = waiting().filter(item => item.goneAt && !live.has(item.queueId) && now - item.goneAt >= QUEUE_GONE_MS);
     for (const item of gone) { item.status = 'cancelled'; item.message = '큐에서 빠짐'; }
+    markGone(live);       // 아직 덜 된 것 · 다시 나타난 것을 정리하고 남았으면 다시 잡는다
     if (gone.length && active) { renderResults(); renderLeftControls(); }
   }
 

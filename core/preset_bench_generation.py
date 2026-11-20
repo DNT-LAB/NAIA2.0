@@ -58,14 +58,7 @@ def person_first_prompt(prefix, main, postfix):
     return ", ".join(filter(None, (", ".join(people), without_people(prefix), rest, without_people(postfix))))
 
 
-def _drop_inline_resolution(text):
-    """글 속 `resolution:WxH` 를 걷는다 - 벤치에서 크기를 골랐으면 그것이 이긴다(Codex 리뷰 11-20).
-
-    api_service 는 프롬프트의 resolution: 으로 width · height 를 다시 쓴다. 없으면 쓴 그대로 둔다(줄바꿈 · 주석).
-    """
-    if "resolution:" not in text:
-        return text
-    return ", ".join(tag for tag in _split_tags(text) if not tag.startswith("resolution:"))
+BENCH_SIZE_PIN = "_preset_bench_size_pin"
 
 
 def _text(source, key):
@@ -325,9 +318,7 @@ def generation_commands(context, payload):
         if size not in BENCH_SIZES:
             raise ValueError(f"size must be one of {', '.join(BENCH_SIZES)}")
         width, height = (int(side) for side in size.split(" x "))
-        base = {**base, "prefix": _drop_inline_resolution(base["prefix"]),
-                "postfix": _drop_inline_resolution(base["postfix"]),
-                "params": {**base["params"], "width": width, "height": height}}
+        base = {**base, "params": {**base["params"], "width": width, "height": height}}
     references = bench_reference_params(context, payload.get("references"), base["params"])
 
     commands = []
@@ -350,6 +341,8 @@ def generation_commands(context, payload):
             "_remote_queue_source": "Preset Bench", "_remote_queue_label": label,
             "preset_bench_request": True, "preset_bench_request_id": request_id,
             "preset_bench_candidate": candidate, "preset_bench_label": label,
+            # 벤치에서 고른 크기가 이긴다 - 글(와일드카드가 푼 것 포함)의 resolution: 은 태그만 걷는다(Codex 리뷰 11-20).
+            **({BENCH_SIZE_PIN: True} if size is not None else {}),
             # 레퍼런스가 있으면 director_* 가 실려 세션 CR 늦은 바인딩은 저절로 비켜난다(위 skip 표식은 없을 때의 격리).
             **references,
         }

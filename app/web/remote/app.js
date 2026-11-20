@@ -12898,7 +12898,7 @@ function openPresetBenchTool() {
     return;
   }
   if (presetBenchWindowLoading) return;
-  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ko')
+  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ui4')
     .then(({createPresetBenchWindow}) => {
       presetBenchWindow = createPresetBenchWindow({
         document,

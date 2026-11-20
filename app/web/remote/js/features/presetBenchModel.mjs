@@ -25,9 +25,11 @@ export function normalizeCast(value) {
   return {count, genders};
 }
 
-/** 메인 맨 앞 인원 태그. 모르는 성별은 girl(캐릭터 뷰어의 옛 기본값). girl+boy = '1girl, 1boy' · girl+girl = '2girls'. */
-export function headFor(cast) {
-  const {genders} = normalizeCast(cast);
+/** 메인 맨 앞 인원 태그. 모르는 성별은 girl(캐릭터 뷰어의 옛 기본값). girl+boy = '1girl, 1boy' · girl+girl = '2girls'.
+ *  캐릭터 1명이 2인 자세 세트를 골랐으면(linkPool) 그 세트의 풀이 정한다 - 상대는 캐릭터 칸 없이 이 태그로만 들어간다. */
+export function headFor(cast, linkPool = '') {
+  const {count, genders} = normalizeCast(cast);
+  if (count === 1 && LINK_POOLS[linkPool]) return LINK_POOLS[linkPool].head;
   return SUBJECT_ORDER
     .map(g => [g, genders.filter(x => (x || 'girl') === g).length])
     .filter(([, n]) => n > 0)
@@ -36,17 +38,33 @@ export function headFor(cast) {
 }
 
 // 갈래(서버 kind) -> 칸 이름.
-export const KIND_LABELS = {outfit: '의상', event: '자세', link: '연결', expression: '표정', scene: '배경'};
+// 연결 갈래 = 두 사람이 함께 하는 자세(포옹 · 함께 자기 …). 화면 이름은 '자세 (2인 이상)'(사용자 11-20).
+export const KIND_LABELS = {outfit: '의상', event: '자세', link: '자세 (2인 이상)', expression: '표정', scene: '배경'};
+// 연결 세트 풀 -> 맨 앞 인원 태그 · 짧은 표지. 캐릭터가 1명인데 2인 자세를 고르면 상대는 이 태그로만 들어간다.
+export const LINK_POOLS = {
+  girl_boy: {head: '1girl, 1boy', badge: '남녀', genders: ['girl', 'boy']},
+  girl_girl: {head: '2girls', badge: '여여', genders: ['girl']},
+  boy_boy: {head: '2boys', badge: '남남', genders: ['boy']},
+};
 
-/** 캐릭터 수의 칸 목록. 칸 = {id, kind, pool, owner}. owner = 캐릭터 번호(1 · 2) 또는 0(함께 · 장면).
+/** 캐릭터 1명 + 2인 자세에서 캐릭터 성별이 세트 풀과 어긋나나(boy 인데 여여 세트). 모르는 성별은 girl 로 본다. */
+export function linkMismatch(gender, pool) {
+  const info = LINK_POOLS[pool];
+  const g = gender || 'girl';
+  return Boolean(info) && g !== 'other' && !info.genders.includes(g);
+}
+
+/** 캐릭터 수의 칸 목록. 칸 = {id, kind, pool, owner}. owner = 캐릭터 번호(1 · 2) 또는 0(캐릭터 밖 - 따로 카드).
  *  pool '' = 모든 풀(서버가 여성 · 남성 세트를 겹침 없이 한 목록으로 준다).
- *  1인: 의상 · 자세 · 표정 · 배경. 2인: 캐릭터마다 의상 · 표정, 함께 = 연결 · 배경. */
+ *  1인: 의상 · 자세 · 자세 (2인 이상) · 표정 + 배경. 2인: 캐릭터마다 의상 · 표정 + 자세 (2인 이상) · 배경.
+ *  2인 이상 자세는 1명이어도 쓴다(상대는 이름 없이 - 사용자 11-20). 칸 id 'link' 는 두 경우 같다(바꿔도 남는다). */
 export function slotsFor(count) {
   const pool = '';
   if ((Number(count) || 1) < 2) {
     return [
       {id: 'o1', kind: 'outfit', pool, owner: 1},
       {id: 'pose', kind: 'event', pool, owner: 1},
+      {id: 'link', kind: 'link', pool, owner: 1},
       {id: 'e1', kind: 'expression', pool, owner: 1},
       {id: 'scene', kind: 'scene', pool, owner: 0},
     ];
@@ -77,17 +95,20 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   target    - 'char'(캐릭터 프롬프트 칸) | 'main'(메인에 다 싣는다)
  *   names     - [캐릭터1 글, 캐릭터2 글] (이름이나 직접 쓴 캐릭터 프롬프트)
  *   picks     - {칸 id: 태그 배열}
- *   variant   - {slotId, tags} 이면 그 칸만 이 태그로 바꿔 조립한다(비교 축의 한 장)
+ *   variant   - {slotId, tags, pool} 이면 그 칸만 이 태그로 바꿔 조립한다(비교 축의 한 장)
+ *   cast.linkPool - 2인 자세 칸에 든 세트의 풀(1명일 때 인원 태그를 정한다)
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
 export function assemble({cast, target = 'char', names = [], picks = {}, variant = null}) {
   const {count} = normalizeCast(cast);
-  const head = headFor(cast);
   const slots = slotsFor(count);
   const tagsOf = slot => {
     if (variant && variant.slotId === slot.id) return variant.tags || [];
     return picks[slot.id] || [];
   };
+  const linkTags = tagsOf({id: 'link'});
+  const linkPool = !linkTags.length ? '' : (variant && variant.slotId === 'link' ? variant.pool : cast && cast.linkPool);
+  const head = headFor(cast, linkPool || '');
   const nameOf = i => String(names[i] || '').trim();
   if (target === 'main') {
     const main = uniqueTags(joinTags([
@@ -131,7 +152,7 @@ export function variantLabel(tags) {
 export function buildItems({cast, target, names, picks, axis = null}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({cast, target, names, picks, variant: {slotId: axis.slotId, tags: set.tags}});
+      const {main, characters} = assemble({cast, target, names, picks, variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }

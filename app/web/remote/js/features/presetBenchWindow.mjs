@@ -19,8 +19,8 @@
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
-  MAX_CHARACTERS, normalizeCast, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-tx3';
+  MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
+} from './presetBenchModel.mjs?v=20261120-ui4';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -47,7 +47,9 @@ const MAX_ITEMS = 20;
 const PBW_CSS = `
 .pbw-window .dragpanel-body { display: flex; flex-direction: column; min-height: 0; padding: 0; font-size: 12px; }
 .pbw-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 216px minmax(0, 1fr); }
-.pbw-left { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+/* 왼쪽 열은 한 단계 어둡게, 캐릭터 · 칸 카드는 밝게 - 오른쪽 탐색과 갈린다(사용자 11-20 목업). */
+.pbw-left { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-glow); padding: 8px; display: flex; flex-direction: column; gap: 8px;
+  background: var(--bg-primary); }
 .pbw-right { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .pbw-ex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
 .pbw-rs { flex: 0 0 auto; border-top: 1px solid var(--border-dim); padding: 6px 8px; background: var(--bg-surface); max-height: 46%; overflow-y: auto; }
@@ -69,27 +71,52 @@ const PBW_CSS = `
 .pbw-seg { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 5px; overflow: hidden; }
 .pbw-seg button { border: 0; background: transparent; color: var(--text-dim); padding: 2px 8px; font-family: inherit; font-size: 11px; cursor: pointer; }
 .pbw-seg button.is-on { background: var(--bg-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
-.pbw-grp { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-.pbw-chead { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); margin: 2px 0 3px; }
-.pbw-subj { padding: 0 5px; border: 1px solid var(--border-dim); border-radius: 4px; font-size: 10.5px; color: var(--text-primary); }
+.pbw-chars { display: flex; flex-direction: column; gap: 8px; }
+.pbw-solos { display: flex; flex-direction: column; gap: 8px; }
+.pbw-ccard { background: var(--bg-card); border: 1px solid var(--border-dim); border-radius: 7px; overflow: hidden; }
+.pbw-chead { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600; color: var(--text-primary);
+  border-bottom: 1px solid var(--border-dim); }
+.pbw-ccard > .pbw-text { display: block; margin: 6px 8px; width: calc(100% - 16px); }
+.pbw-subj { padding: 0 5px; border: 1px solid var(--border-glow); border-radius: 4px; font-size: 10.5px; font-weight: 400; color: var(--text-primary); }
 .pbw-subj.is-guess { color: var(--text-dim); border-style: dashed; }
-.pbw-add { align-self: flex-start; font-size: 11px; padding: 2px 8px; }
+.pbw-addc { border: 1px dashed var(--border-glow); border-radius: 6px; background: transparent; color: var(--text-muted); padding: 4px;
+  font-family: inherit; font-size: 11px; cursor: pointer; }
+.pbw-addc:hover { border-color: var(--accent); color: var(--text-primary); }
 .pbw-pool { position: absolute; left: 3px; top: 3px; z-index: 1; padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px;
   background: rgba(0, 0, 0, 0.6); color: #fff; pointer-events: none; }
-.pbw-slot { border: 1px solid var(--border-dim); border-radius: 6px; padding: 4px 6px; cursor: pointer; }
-.pbw-slot.is-cur { border-color: var(--accent); }
-.pbw-slot.is-axis { background: var(--bg-hover); border-color: var(--accent); }
-.pbw-slot-head { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-dim); }
-.pbw-slot-x { margin-left: auto; border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px; }
+/* 칸 = 한 줄 [이름 | 고른 태그 | ×]. 빈 칸은 흐린 '+ 고르기' 라 채운 칸만 밝게 튄다.
+   지금 칸 = 옅은 보라 바탕 + 왼쪽 곧은 막대(둥근 모서리를 따라 휘는 강조는 쓰지 않는다). */
+.pbw-slot { position: relative; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 4px; align-items: start;
+  padding: 4px 8px; cursor: pointer; }
+.pbw-slot + .pbw-slot { border-top: 1px solid rgba(255,255,255,0.04); }
+.pbw-slot:hover { background: var(--bg-hover); }
+.pbw-slot.is-cur { background: rgba(124,106,239,0.16); }
+.pbw-slot.is-cur::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
+.pbw-slot-k { font-size: 11px; color: var(--text-muted); padding-top: 2px; line-height: 1.25; }
+.pbw-slot-k small { display: block; font-size: 10px; color: var(--text-dim); }
+.pbw-slot.is-cur .pbw-slot-k { color: var(--accent-light); }
+.pbw-ccard.is-solo .pbw-slot-k { color: var(--text-primary); font-weight: 600; }
+.pbw-ccard.is-solo .pbw-slot.is-cur .pbw-slot-k { color: var(--accent-light); }
+.pbw-slot-v { min-width: 0; }
+.pbw-slot-empty { display: inline-block; font-size: 11px; color: var(--text-dim); padding-top: 2px; }
+.pbw-slot.is-cur .pbw-slot-empty { color: var(--accent-light); }
+.pbw-lpool { display: inline-block; padding: 0 4px; margin: 2px 3px 0 0; border-radius: 3px; font-size: 10px; line-height: 16px;
+  background: rgba(124,106,239,0.24); color: var(--accent-light); vertical-align: top; }
+.pbw-warn { display: inline-block; padding: 0 4px; margin: 2px 3px 0 0; border-radius: 3px; font-size: 10px; line-height: 16px;
+  background: rgba(240,198,116,0.2); color: #f0c674; vertical-align: top; cursor: help; }
+.pbw-slot-x { border: 0; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 13px; line-height: 1; padding: 2px; }
 .pbw-slot-x:hover { color: var(--text-primary); }
 .pbw-chip { display: inline-block; max-width: 100%; padding: 0 5px; margin: 2px 3px 0 0; border: 1px solid var(--border-dim); border-radius: 4px;
   font-size: 11px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: top; cursor: pointer; }
 .pbw-chip:hover { border-color: var(--accent); }
 .pbw-cmp { color: var(--accent); border-color: var(--accent); cursor: default; }
-.pbw-go { margin-top: auto; padding: 6px; font-size: 13px; }
+/* 이 창의 주 동작 - 하나뿐인 채운 단추. */
+.pbw-btn.pbw-go { margin-top: auto; padding: 7px; font-size: 13px; font-weight: 600; background: var(--accent); border-color: var(--accent); color: #fff; }
+.pbw-btn.pbw-go:hover:not(:disabled) { background: var(--accent-glow); border-color: var(--accent-glow); }
 .pbw-note { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; background: var(--bg-hover); font-size: 11px; }
 .pbw-note a { color: var(--accent); cursor: pointer; }
-.pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; }
+/* 탐색 세 칸(대분류 | 소분류 · 시드 | 그림) 사이에 세로 선 - 상자는 씌우지 않는다. */
+.pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
 .pbw-cat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; padding: 3px 7px; border: 0; border-radius: 4px;
   color: var(--text-muted); font-size: 12px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
 .pbw-cat small { font-size: 10px; color: var(--text-dim); }
@@ -98,18 +125,26 @@ const PBW_CSS = `
 /* 고른 칸 표시는 곧은 막대로 - inset 그림자는 둥근 모서리를 따라 휘어 { 처럼 보인다(사용자 지시 2026-11-20). */
 .pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); }
 .pbw-cat.is-on::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--accent); }
-.pbw-sub { font-size: 10px; color: var(--text-dim); padding: 6px 5px 1px; letter-spacing: .02em; }
+/* 소분류 머리글이 항목보다 위로 읽히게 - 굵게 · 밝게 · 아래 선. */
+.pbw-sub { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 5px 3px; margin: 0 2px 2px; border-bottom: 1px solid var(--border-dim); }
 .pbw-sub:first-child { padding-top: 0; }
 .pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px 190px minmax(0, 1fr); gap: 8px; }
 .pbw-ex2.is-related { grid-template-columns: 124px 0 minmax(0, 1fr); }
-.pbw-seeds { min-height: 0; overflow-y: auto; }
+.pbw-seeds { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
+.pbw-ex2.is-related .pbw-seeds { border-right: 0; padding-right: 0; }
 .pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 12px; }
 /* 글자를 한 단계 밝게(사용자 지시 11-20) - 이름은 text-muted, 수는 한 단계 낮게 */
 .pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
 .pbw-seed.is-on span:last-child, .pbw-seed:hover span:last-child { color: inherit; }
 .pbw-seed span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbw-seed:hover { color: var(--text-primary); }
+.pbw-seed { position: relative; }
 .pbw-seed.is-on { background: var(--bg-hover); color: var(--text-primary); }
+.pbw-seed.is-on::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--accent); }
+.pbw-ex-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pbw-ex-own { color: var(--text-dim); }
+.pbw-ex-ctx { min-width: 0; color: var(--text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
 .pbw-grid-wrap { min-height: 0; overflow-y: auto; }
 .pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 .pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
@@ -260,7 +295,9 @@ export function createPresetBenchWindow({
   }
 
   const slots = () => slotsFor(st.count);
-  const castNow = () => ({count: st.count, genders: st.subjects.slice(0, st.count).map(row => row.gender)});
+  // linkPool = 2인 이상 자세 칸에 든 세트의 풀 - 캐릭터가 1명이면 맨 앞 인원 태그를 정한다(상대는 이름 없이).
+  const castNow = () => ({count: st.count, genders: st.subjects.slice(0, st.count).map(row => row.gender),
+    linkPool: st.picks.link?.pool || ''});
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
   const viewOf = id => (st.views[id] ||= {cat: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
@@ -282,15 +319,15 @@ export function createPresetBenchWindow({
         <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
         <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
           <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
-        <div data-role="chars"></div>
+        <div class="pbw-chars" data-role="chars"></div>
         <button type="button" class="pbw-btn is-primary pbw-go" data-act="go"></button>
       </div>
       <div class="pbw-right">
         <div class="pbw-ex">
           <div data-role="note"></div>
           <div data-role="band"></div>
-          <div class="pbw-row"><b data-role="ex-title" style="font-weight:600"></b>
-            <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색" style="flex:1;min-width:140px"></div>
+          <div class="pbw-ex-head"><b data-role="ex-title" style="font-weight:600;font-size:13px;white-space:nowrap"></b><span class="pbw-ex-ctx" data-role="ex-ctx"></span>
+            <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색"></div>
           <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div><div class="pbw-grid-wrap" data-role="grid"></div></div>
         </div>
         <div class="pbw-rs" data-role="results"></div>
@@ -456,18 +493,19 @@ export function createPresetBenchWindow({
   }
 
   // ---------------------------------------------------------------- 왼쪽 열
-  // 캐릭터마다 [머리(캐릭터 N · 성별 표지 · ×) + 이름 칸 + 그 캐릭터의 칸] 한 묶음, 끝에 '함께'(1명이면 '장면') 칸.
+  // 캐릭터마다 카드 하나 [머리(캐릭터 N · 성별 표지 · ×) + 이름 칸 + 그 캐릭터의 칸 줄]. 캐릭터 밖 칸(2명일 때 2인 이상 자세 ·
+  // 배경)은 칸 이름이 곧 카드 제목인 작은 카드로 따로 - 묶음 이름('함께')을 두지 않는다(사용자 11-20).
   // 이름 칸은 캐릭터 수가 바뀔 때만 새로 만든다(자동완성 붙이기 · 치는 중 초점을 지킨다) -
-  // 칸 목록은 renderSlots 가, 성별 표지는 renderSubjects 가 제자리만 다시 그린다.
+  // 칸 줄은 renderSlots 가, 성별 표지는 renderSubjects 가 제자리만 다시 그린다.
   function renderChars() {
     const box = $('chars');
     const count = st.count;
-    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-chead"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
-        ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
+    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard"><div class="pbw-chead"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
+        ${i > 0 ? `<button type="button" class="pbw-slot-x" style="margin-left:auto" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
-      <div data-slots="${i + 1}" style="display:flex;flex-direction:column;gap:6px;margin-top:6px"></div>`).join('') +
-      (count < MAX_CHARACTERS ? '<button type="button" class="pbw-btn pbw-add" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정, 함께 = 연결 · 배경으로 바뀝니다">+ 캐릭터 추가</button>' : '') +
-      `<div class="pbw-grp">${count > 1 ? '함께' : '장면'}</div><div data-slots="0" style="display:flex;flex-direction:column;gap:6px;margin-top:2px"></div>`;
+      <div data-slots="${i + 1}"></div></div>`).join('') +
+      (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
+      '<div class="pbw-solos" data-slots="0"></div>';
     box.querySelectorAll('textarea[data-name]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
     });
@@ -502,6 +540,7 @@ export function createPresetBenchWindow({
       if (serial !== subjectSerial[i]) return;   // 그사이 다시 쳤다
       st.subjects[i] = {gender: String(row.gender || ''), source: String(row.source || ''), name: String(row.name || '')};
       renderSubjects();
+      renderSlots();      // 2인 이상 자세의 성별 어긋남 표지
       renderPreview();
     }, delay);
   }
@@ -529,18 +568,32 @@ export function createPresetBenchWindow({
     const slotHtml = slot => {
       const pick = st.picks[slot.id];
       const axis = st.axis === slot.id;
+      const cur = slot.id === st.cur;
+      const label = slot.kind === 'link' ? '자세<small>2인 이상</small>' : esc(KIND_LABELS[slot.kind]);
+      let marks = '';
+      if (slot.kind === 'link' && pick?.tags?.length && LINK_POOLS[pick.pool]) {
+        marks += `<span class="pbw-lpool" title="${esc(pick.pool)} 세트">${LINK_POOLS[pick.pool].badge}</span>`;
+        // 캐릭터 1명이면 인원 태그는 이 세트의 풀을 따른다 - 캐릭터 성별과 어긋나면 알려 준다.
+        if (st.count === 1 && linkMismatch(st.subjects[0]?.gender, pick.pool)) {
+          marks += `<span class="pbw-warn" title="캐릭터 1 은 ${esc(st.subjects[0]?.gender || 'girl')} 인데 ${LINK_POOLS[pick.pool].badge} 세트 - 맨 앞 인원 태그는 세트를 따라 '${LINK_POOLS[pick.pool].head}'">성별 확인</span>`;
+        }
+      }
+      if (axis) marks += `<span class="pbw-chip pbw-cmp">비교 ${axisSets().length}</span>`;
       const chips = pick?.tags?.length
         ? pick.tags.map(tag => `<span class="pbw-chip" data-chip="${esc(tag)}" data-from="${slot.id}" title="${slot.kind === 'outfit' ? '관련 의상 보기' : '이 태그로 찾기'}">${esc(tag)}</span>`).join('')
-        : '<span class="pbw-dim pbw-sm">비어 있음</span>';
-      return `<div class="pbw-slot${slot.id === st.cur ? ' is-cur' : ''}${axis ? ' is-axis' : ''}" data-slot="${slot.id}">
-        <div class="pbw-slot-head"><span>${esc(KIND_LABELS[slot.kind])}</span>${axis ? `<span class="pbw-chip pbw-cmp">비교 ${axisSets().length}</span>` : ''}
-          <button type="button" class="pbw-slot-x" data-clear="${slot.id}" title="비우기" aria-label="비우기">×</button></div>
-        <div>${chips}</div></div>`;
+        : `<span class="pbw-slot-empty">${cur ? '고르는 중 →' : '+ 고르기'}</span>`;
+      const clear = pick?.tags?.length || axis
+        ? `<button type="button" class="pbw-slot-x" data-clear="${slot.id}" title="비우기" aria-label="비우기">×</button>` : '<span></span>';
+      return `<div class="pbw-slot${cur ? ' is-cur' : ''}${axis ? ' is-axis' : ''}" data-slot="${slot.id}">
+        <span class="pbw-slot-k">${label}</span><span class="pbw-slot-v">${marks}${chips}</span>${clear}</div>`;
     };
     panel.body.querySelectorAll('[data-slots]').forEach(holder => {
       const owner = Number(holder.dataset.slots);
-      // 1인은 자세가 캐릭터 몫이지만(owner 1) 이름 칸 바로 아래 한 줄로 이어 그린다 - 묶음이 하나뿐이다.
-      holder.innerHTML = list.filter(slot => slot.owner === owner).map(slotHtml).join('');
+      const mine = list.filter(slot => slot.owner === owner);
+      // 캐릭터 밖 칸은 칸마다 작은 카드(칸 이름 = 카드 제목).
+      holder.innerHTML = owner === 0
+        ? mine.map(slot => `<div class="pbw-ccard is-solo">${slotHtml(slot)}</div>`).join('')
+        : mine.map(slotHtml).join('');
     });
   }
 
@@ -607,8 +660,10 @@ export function createPresetBenchWindow({
     const slot = slotById(st.cur) || slots()[0];
     st.cur = slot.id;
     const view = viewOf(slot.id);
-    const owner = st.count > 1 && slot.owner > 0 ? `캐릭터 ${slot.owner} ` : '';
-    $('ex-title').textContent = `${owner}${KIND_LABELS[slot.kind]}`;
+    const owner = st.count > 1 && slot.owner > 0 ? `<span class="pbw-ex-own">캐릭터 ${slot.owner} ›</span> ` : '';
+    $('ex-title').innerHTML = `${owner}${esc(KIND_LABELS[slot.kind])}`;
+    const ctx = $('ex-ctx');
+    ctx.textContent = '';
     if (searchInput.value !== view.q && doc.activeElement !== searchInput) searchInput.value = view.q;
     const cats = $('cats');
     const seedsBox = $('seeds');
@@ -618,6 +673,7 @@ export function createPresetBenchWindow({
 
     if (view.mode === 'related') {
       cats.innerHTML = `<button type="button" class="pbw-cat is-on" data-act="related-back">← 분류로</button><span class="pbw-dim pbw-sm">'${esc(view.relatedTag)}' 관련</span>`;
+      ctx.textContent = `· '${view.relatedTag}' 관련 의상`;
       seedsBox.innerHTML = '';
       const data = view.related;
       if (!data) { grid.innerHTML = '<div class="pbw-empty">찾는 중…</div>'; return; }
@@ -667,6 +723,10 @@ export function createPresetBenchWindow({
     if (!view.seed || !seeds.some(seed => seed.seed === view.seed)) view.seed = seeds[0]?.seed || '';
     seedsBox.querySelectorAll('.pbw-seed').forEach(row => row.classList.toggle('is-on', row.dataset.seed === view.seed));
     if (!view.seed) { grid.innerHTML = ''; shownSets = new Map(); return; }
+    // 맥락 줄: '· 잠자기 sleeping' (세트 수는 세트를 받은 뒤)
+    const curSeed = seeds.find(seed => seed.seed === view.seed);
+    const seedName = curSeed?.ko && curSeed.ko !== view.seed ? `${curSeed.ko} ${view.seed}` : view.seed;
+    ctx.textContent = `· ${seedName}`;
     let sets;
     try {
       sets = await setsOf(slot.kind, slot.pool, view.seed);
@@ -677,6 +737,7 @@ export function createPresetBenchWindow({
     }
     if (serial !== searchSerial) return;
     shownSets = new Map(sets.map(set => [set.id, set]));
+    ctx.textContent = `· ${seedName} · ${sets.length}세트`;
     grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
   }
 
@@ -751,10 +812,9 @@ export function createPresetBenchWindow({
 
   function renderResults() {
     const box = $('results');
-    if (!st.runs.length) {
-      box.innerHTML = '<div class="pbw-dim pbw-sm" style="padding:8px 0;text-align:center">생성 결과는 여기에 쌓입니다 · 탐색 화면은 그대로 둡니다</div>';
-      return;
-    }
+    // 첫 생성 전에는 띠를 두지 않는다(안내 한 줄이 자리만 차지했다) - 생성하면 미리보기 위로 펼쳐진다.
+    box.hidden = !st.runs.length;
+    if (!st.runs.length) { box.innerHTML = ''; return; }
     const last = st.runs[st.runs.length - 1];
     const older = st.runs.slice(0, -1).reverse();
     const runHead = run => `<b style="font-weight:600">${esc(run.label)}</b><span class="pbw-dim">· ${run.items.length}장 · ${esc(run.base)}</span>`;
@@ -772,7 +832,7 @@ export function createPresetBenchWindow({
       const run = st.runs.find(r => r.id === st.pick[0]);
       const item = run?.items[st.pick[1]];
       if (run && item) {
-        if (run.axis && item.set) variant = {slotId: run.axis, tags: item.set.tags};
+        if (run.axis && item.set) variant = {slotId: run.axis, tags: item.set.tags, pool: item.set.pool};
         title = `고른 결과 · ${item.label}`;
       }
     }
@@ -799,7 +859,7 @@ export function createPresetBenchWindow({
     if (st.pick) {
       const run = st.runs.find(r => r.id === st.pick[0]);
       const item = run?.items[st.pick[1]];
-      if (run?.axis && item?.set) variant = {slotId: run.axis, tags: item.set.tags};
+      if (run?.axis && item?.set) variant = {slotId: run.axis, tags: item.set.tags, pool: item.set.pool};
     }
     const rows = previewRows({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant});
     return rows;

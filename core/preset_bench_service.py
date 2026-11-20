@@ -49,14 +49,9 @@ class PresetBenchService:
             states = json.loads((self.data_dir / "outfit_states.json").read_bytes())["by_set"]
             by_id = {}
             seeds = defaultdict(lambda: defaultdict(list))
-            slots = {}
-            slot_order = {}
             for pack_kind in ("outfit", "event", "expression", "scene"):
                 raw = (self.data_dir / f"{pack_kind}_presets.json").read_bytes()
                 pack = json.loads(raw)
-                families = ("event", "link") if pack_kind == "event" else (pack_kind,)
-                for family in families:
-                    slot_order[family] = tuple(pack["slots"])
                 if pack_kind == "outfit":
                     self._outfit_digest = hashlib.sha256(raw).hexdigest()
                     self._outfit_slots = pack["tag_slot"]
@@ -70,18 +65,16 @@ class PresetBenchService:
                         summary["states"] = states.get(row["id"], {})
                     by_id[row["id"]] = summary
                     seeds[kind, pool][seed].append(summary)
-                    slots[kind, seed] = pack["tag_slot"].get(seed, "other")
             for seed_rows in seeds.values():
                 for rows in seed_rows.values():
                     rows.sort(key=_order)
-            # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸과 별개인 손으로 고른 표다(11-20 v3).
+            # 탐색 분류(대분류 > 소분류 > 시드 · 게시물 수)는 빌더 칸(tag_slot)과 별개인 손으로 고른 표다.
+            # 갈래 다섯 모두 표가 있어야 한다(11-20 v3 + 의상).
             browse = json.loads((self.data_dir / BROWSE_TAXONOMY_NAME).read_bytes())
-            if browse.get("schema") != "naia.preset_browse_taxonomy.v1":
+            if browse.get("schema") != "naia.preset_browse_taxonomy.v1" or set(KINDS) - set(browse["families"]):
                 raise ValueError("Unknown preset browse taxonomy schema")
             self._browse = browse["families"]
             self._seeds = seeds
-            self._slots = slots
-            self._slot_order = slot_order
             self._by_id = by_id
 
     def _outfit_pack(self):
@@ -118,21 +111,10 @@ class PresetBenchService:
         return self._seeds[kind, pool]
 
     def catalog(self, kind, pool):
+        """대분류 > 소분류 > 시드(게시물 수 차례). 그 풀에 세트가 없는 시드 · 빈 소분류 · 빈 대분류는 뺀다."""
         seeds = self._pool(kind, pool)
         index, _ = self._thumbs()
-        if kind in self._browse:
-            return self._browse_catalog(kind, pool, seeds, index)
-        groups = defaultdict(list)
-        for seed, rows in sorted(seeds.items(), key=lambda item: _order(item[1][0])):
-            groups[self._slots[kind, seed]].append({
-                "seed": seed, "sets": len(rows), "with_thumb": sum(row["key"] in index for row in rows),
-            })
-        ordered = dict.fromkeys((*self._slot_order[kind], *groups))
-        return {"kind": kind, "pool": pool,
-                "groups": [{"slot": slot, "seeds": groups[slot]} for slot in ordered if slot in groups]}
 
-    def _browse_catalog(self, kind, pool, seeds, index):
-        """대분류 > 소분류 > 시드(게시물 수 차례). 그 풀에 세트가 없는 시드 · 빈 소분류 · 빈 대분류는 뺀다."""
         def entry(seed, posts):
             rows = seeds[seed]
             return {"seed": seed, "sets": len(rows), "with_thumb": sum(row["key"] in index for row in rows),
@@ -151,7 +133,7 @@ class PresetBenchService:
                                "seeds": [item for sub in subs for item in sub["seeds"]]})
         rest = sorted(set(seeds) - placed, key=lambda seed: _order(seeds[seed][0]))
         if rest:
-            items = [entry(seed, 0) for seed in rest]
+            items = [entry(seed, None) for seed in rest]
             groups.append({"slot": UNSORTED_LABEL, "label": UNSORTED_LABEL,
                            "subs": [{"name": UNSORTED_LABEL, "seeds": items}], "seeds": items})
         return {"kind": kind, "pool": pool, "groups": groups}

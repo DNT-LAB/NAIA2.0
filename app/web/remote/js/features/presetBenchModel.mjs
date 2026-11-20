@@ -122,21 +122,6 @@ export function buildItems({castId, target, names, picks, axis = null}) {
   return [{label: '한 장', main, characters, set: null}];
 }
 
-// 칸 이름(서버 slot 값) -> 화면 글. 의상 칸은 팩의 칸 코드다.
-const OUTFIT_SLOT_LABELS = {
-  OUTFIT: '전신', TOP: '상의', BOTTOM: '하의', HEAD: '머리', NECK: '목', ARMS: '팔 · 손',
-  LEGS: '다리', FEET: '발', UNDER: '속옷', WAIST: '허리', BODY: '몸', other: '기타',
-};
-const OUTFIT_SLOT_ORDER = ['OUTFIT', 'TOP', 'BOTTOM', 'HEAD', 'NECK', 'ARMS', 'LEGS', 'FEET', 'UNDER', 'WAIST', 'BODY'];
-
-export function categoryLabel(kind, slot) {
-  const text = String(slot || '');
-  if (kind === 'outfit') return OUTFIT_SLOT_LABELS[text] || text;
-  // 이벤트 갈래는 'action:손·팔 동작' · 'adult:행위·체위' - 성인 쪽은 표시를 붙인다.
-  const [lane, rest] = text.includes(':') ? text.split(/:(.*)/s) : ['', text];
-  return lane === 'adult' ? `성인 · ${rest}` : (rest || text);
-}
-
 /** Danbooru 게시물 수를 짧게 - 1.0M · 128k · 9.5k · 450. */
 export function formatPosts(n) {
   const v = Number(n) || 0;
@@ -144,15 +129,4 @@ export function formatPosts(n) {
   if (v >= 1e4) return `${Math.round(v / 1e3)}k`;
   if (v >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
   return String(v);
-}
-
-/** 카탈로그 그룹 차례 - 의상은 전신 · 상의 · 하의 … 먼저, 나머지는 서버 차례. */
-export function orderCategories(kind, groups) {
-  const list = Array.isArray(groups) ? groups.slice() : [];
-  if (kind !== 'outfit') return list;
-  const rank = slot => {
-    const i = OUTFIT_SLOT_ORDER.indexOf(slot);
-    return i < 0 ? OUTFIT_SLOT_ORDER.length : i;
-  };
-  return list.sort((a, b) => rank(a.slot) - rank(b.slot));
 }

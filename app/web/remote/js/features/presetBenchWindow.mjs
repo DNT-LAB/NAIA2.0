@@ -17,9 +17,8 @@
 
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
-  CASTS, DEFAULT_CAST, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, categoryLabel, orderCategories,
-  formatPosts,
-} from './presetBenchModel.mjs?v=20261120-tx1';
+  CASTS, DEFAULT_CAST, KIND_LABELS, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
+} from './presetBenchModel.mjs?v=20261120-tx2';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -89,8 +88,8 @@ const PBW_CSS = `
 .pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); box-shadow: inset 2px 0 0 var(--accent); }
 .pbw-sub { font-size: 10px; color: var(--text-dim); padding: 6px 5px 1px; letter-spacing: .02em; }
 .pbw-sub:first-child { padding-top: 0; }
-.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 112px 190px minmax(0, 1fr); gap: 8px; }
-.pbw-ex2.is-related { grid-template-columns: 112px 0 minmax(0, 1fr); }
+.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px 190px minmax(0, 1fr); gap: 8px; }
+.pbw-ex2.is-related { grid-template-columns: 124px 0 minmax(0, 1fr); }
 .pbw-seeds { min-height: 0; overflow-y: auto; }
 .pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-dim); font-size: 11px; }
 .pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; }
@@ -569,9 +568,10 @@ export function createPresetBenchWindow({
       return;
     }
     if (serial !== searchSerial) return;
-    const groups = orderCategories(slot.kind, catalog.groups);
+    // 대분류 차례 · 이름은 서버의 탐색 분류표 그대로(갈래 다섯 모두).
+    const groups = catalog.groups || [];
     if (!view.cat || !groups.some(group => group.slot === view.cat)) view.cat = groups[0]?.slot || '';
-    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || categoryLabel(slot.kind, group.slot))}</span><small>${(group.seeds || []).length}</small></button>`).join('');
+    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || group.slot)}</span><small>${(group.seeds || []).length}</small></button>`).join('');
 
     let seeds;
     if (view.mode === 'search') {
@@ -582,7 +582,7 @@ export function createPresetBenchWindow({
     } else {
       const group = groups.find(item => item.slot === view.cat);
       seeds = group?.seeds || [];
-      // 탐색 분류가 있는 갈래(자세 · 연결 · 표정 · 배경)는 소분류 머리글 + Danbooru 게시물 수, 의상은 예전대로 세트 수.
+      // 소분류 머리글 + Danbooru 게시물 수. 표에 아직 없는 시드('분류 전')는 posts 가 없어 세트 수를 보인다.
       const row = seed => {
         const shown = seed.posts != null ? formatPosts(seed.posts) : seed.sets;
         const tip = seed.posts != null ? `Danbooru 게시물 ${Number(seed.posts).toLocaleString()} · 세트 ${seed.sets}` : `세트 ${seed.sets}`;

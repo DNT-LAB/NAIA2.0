@@ -140,6 +140,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-lhead { display: flex; align-items: center; gap: 8px; }
 .pbw-lhead b { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .pbw-lhead .pbw-btn { margin-left: auto; }
+.pbw-basecur { flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbw-basecur b { font-weight: 600; color: var(--text-primary); }
 .pbw-right { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .pbw-ex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
 .pbw-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -163,9 +165,10 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-seg button.is-on { background: var(--bg-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
 .pbw-chars { display: flex; flex-direction: column; gap: 8px; }
 .pbw-solos { display: flex; flex-direction: column; gap: 8px; }
-.pbw-ccard { background: var(--bg-card); border: 1px solid var(--border-dim); border-radius: 7px; overflow: hidden; }
+/* 칸 테두리는 조금 밝게 - 칸 사이가 잘 갈리게(사용자 11-20). */
+.pbw-ccard { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.16); border-radius: 7px; overflow: hidden; }
 .pbw-chead { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600; color: var(--text-primary);
-  border-bottom: 1px solid var(--border-dim); }
+  border-bottom: 1px solid rgba(255,255,255,0.12); }
 .pbw-ccard > .pbw-text { display: block; margin: 6px 8px; width: calc(100% - 16px); }
 /* 캐릭터 프롬프트 칸 = 그 캐릭터를 고르는 중일 때만 네 줄(사용자 11-20) - 다른 칸을 고르면 한 줄로 돌아간다(rows 는 renderSlots). */
 .pbw-ccard > .pbw-text { line-height: 1.5; padding: 4px 6px; }
@@ -180,7 +183,7 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
    지금 칸 = 옅은 보라 바탕 + 왼쪽 곧은 막대(둥근 모서리를 따라 휘는 강조는 쓰지 않는다). */
 .pbw-slot { position: relative; display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 4px; align-items: start;
   padding: 4px 8px; cursor: pointer; }
-.pbw-slot + .pbw-slot { border-top: 1px solid rgba(255,255,255,0.04); }
+.pbw-slot + .pbw-slot { border-top: 1px solid rgba(255,255,255,0.10); }
 .pbw-slot:hover { background: var(--bg-hover); }
 .pbw-slot.is-cur { background: rgba(124,106,239,0.16); }
 .pbw-slot.is-cur::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
@@ -195,7 +198,12 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 /* 추가 프롬프트 - 캐릭터 카드의 표정 아래(그 캐릭터 몫) · 배경 아래 카드(메인 몫).
    기본은 접힌 한 줄(칸 줄과 같은 [이름 | 글 | ×]) - 누르면 펼치고(rows 4) 초점이 떠나면 다시 한 줄(사용자 11-20). */
 .pbw-extra { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 4px; align-items: start; padding: 3px 8px;
-  border-top: 1px solid rgba(255,255,255,0.04); }
+  border-top: 1px solid rgba(255,255,255,0.10); background: rgba(93,202,165,0.08); }
+.pbw-extra .pbw-slot-k { color: #7fd8b9; }
+.pbw-ccard.is-extra { border-color: rgba(93,202,165,0.35); }
+/* 2인 이상 자세 - 이름은 '자세' 한 줄, '2인 이상' 은 값 칸 앞 표지로(사용자 11-20 - 세로 자리를 아낀다). */
+.pbw-l2 { display: inline-block; padding: 0 4px; margin: 2px 4px 0 0; border-radius: 3px; font-size: 10px; line-height: 16px;
+  background: rgba(226,75,74,0.22); color: #f09595; vertical-align: top; }
 .pbw-extra .pbw-text { min-height: 0; resize: none; overflow: hidden; line-height: 1.45; padding: 1px 6px; border-color: transparent;
   background: transparent; cursor: text; }
 .pbw-extra .pbw-text:hover { border-color: var(--border-dim); }
@@ -203,7 +211,7 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-extra .pbw-text::placeholder { color: var(--text-dim); font-family: inherit; }
 .pbw-extra:not(.has-text) .pbw-slot-x { visibility: hidden; }
 .pbw-ccard.is-extra .pbw-extra { border-top: 0; }
-.pbw-ccard.is-extra .pbw-slot-k { color: var(--text-primary); font-weight: 600; }
+.pbw-ccard.is-extra .pbw-slot-k { color: #7fd8b9; font-weight: 600; }
 .pbw-slot-v { min-width: 0; }
 .pbw-slot-empty { display: inline-block; font-size: 11px; color: var(--text-dim); padding-top: 2px; }
 .pbw-slot.is-cur .pbw-slot-empty { color: var(--accent-light); }
@@ -544,7 +552,7 @@ export function createPresetBench({
   leftMount.hidden = true;
   leftMount.innerHTML = `
       <div class="pbw-left">
-        <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-base" data-act="base">프리셋 설정</button>
+        <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-base" data-act="base">프리셋 설정</button><span class="pbw-basecur" data-role="basecur"></span>
           <button type="button" class="pbw-btn" data-act="leave" title="메인 프롬프트로 돌아갑니다(Result 탭)">← 프롬프트</button></div>
         <div class="pbw-ledit">
           <div class="pbw-chars" data-role="chars"></div>
@@ -606,7 +614,13 @@ export function createPresetBench({
     const base = currentBase();
     baseCard.classList.toggle('is-on', st.baseOpen);
     baseCard.title = `기반 · ${st.base.mode === 'direct' ? '직접 설정' : '프리셋'} · ${base.label}\n${paramsSummary(base.params)}\n누르면 기반 설정을 엽니다`;
-    baseCard.setAttribute('aria-label', '프리셋 설정');   // 앱 툴팁이 title 을 옮기며 첫 값으로 박아 두는 것을 막는다
+    baseCard.setAttribute('aria-label', '프리셋 설정');
+    // 단추 오른쪽 미리보기 - '현재 : 직접 설정 모드' / '현재 : <프리셋 이름>'(길면 말줄임 · 전체는 툴팁).
+    const cur = $('basecur');
+    if (cur) {
+      cur.innerHTML = `현재 : <b>${esc(st.base.mode === 'direct' ? '직접 설정 모드' : base.label)}</b>`;
+      cur.title = `${base.label} · ${paramsSummary(base.params)}`;
+    }   // 앱 툴팁이 title 을 옮기며 첫 값으로 박아 두는 것을 막는다
   }
 
   async function loadBases() {
@@ -819,10 +833,10 @@ export function createPresetBench({
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
       <div data-slots="${i + 1}"></div>
-      ${extraBox(i, '추가', '+ 쓰기 - 이 캐릭터 끝에 더할 태그', st.extras[i])}</div>`).join('') +
+      ${extraBox(i, '추가', '+ 추가 프롬프트 - 이 캐릭터 끝에 더할 태그', st.extras[i])}</div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
       '<div class="pbw-solos" data-slots="0"></div>' +
-      `<div class="pbw-ccard is-solo is-extra">${extraBox('main', '추가<small>프롬프트</small>', '+ 쓰기 - 메인 프롬프트 끝에 더할 태그', st.extraMain)}</div>`;
+      `<div class="pbw-ccard is-solo is-extra">${extraBox('main', '추가', '+ 추가 프롬프트 - 메인 프롬프트 끝에 더할 태그', st.extraMain)}</div>`;
     qs('.pbw-left')?.classList.toggle('is-solo', count < 2);
     box.querySelectorAll('textarea[data-name], textarea[data-extra]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
@@ -942,8 +956,8 @@ export function createPresetBench({
       const pick = st.picks[slot.id];
       const axis = st.axis === slot.id;
       const cur = slot.id === st.cur;
-      const label = slot.kind === 'link' ? '자세<small>2인 이상</small>' : esc(KIND_LABELS[slot.kind]);
-      let marks = '';
+      const label = slot.kind === 'link' ? '자세' : esc(KIND_LABELS[slot.kind]);
+      let marks = slot.kind === 'link' ? '<span class="pbw-l2">2인 이상</span>' : '';
       if (slot.kind === 'link' && pick?.tags?.length && LINK_POOLS[pick.pool]) {
         marks += `<span class="pbw-lpool" title="${esc(pick.pool)} 세트">${LINK_POOLS[pick.pool].badge}</span>`;
         // 캐릭터 1명이면 인원 태그는 이 세트의 풀을 따른다 - 캐릭터 성별과 어긋나면 알려 준다.

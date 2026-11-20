@@ -17,7 +17,9 @@
 //   메인 화면의 현재 프리셋 · 세션 설정은 바꾸지 않는다 - 기반 값은 요청마다 서버가 overrides 로 싣는다.
 // - 조립 규칙(무엇을 메인 · 캐릭터 칸에 싣나)은 presetBenchModel.mjs 에 있다. 이 파일은 그리기 · 서버 왕복만 한다.
 // - 결과는 일반 생성처럼 결과 화면 · 히스토리에도 간다. 이 창은 image_meta 의 preset_bench_* 표식으로 제 것을 알아본다.
-// - 캐릭터 불러오기(사용자 11-20): 캐릭터 카드 머리를 누르면 고르기가 '캐릭터 N 고르기' [DB | 에셋 | REF] 로 바뀐다.
+// - 캐릭터 불러오기(사용자 11-20): 캐릭터 카드(머리 · 글 칸 - 누르거나 Tab 으로 들어오면)를 고르면 아래 고르기가
+//   '캐릭터 N 고르기' + [캐릭터 검색 | 에셋 | 캐릭터 레퍼런스] 한 줄 + 그 아래 검색칸으로 바뀐다(의상 · 자세 줄과 같은 규칙).
+//   캐릭터 검색은 Characters 창과 같다 - 같은 라우트 · 이름 · 한글 · 초성 · work: · 작품을 골라도 검색어는 남아 그 안에서 · ★.
 //   DB = Characters 창의 캐릭터(옷 태그는 뺀다 - 의상 칸이 따로) · 에셋 = 캐릭터 프롬프트 + UC (+ 그 그림을 REF 로) ·
 //   REF = 보관함 그림을 그 카드의 REF 줄에. REF 는 이 요청에만 실린다(세션 REF 창 · 목록은 안 바꾼다).
 //   NAI 의 Character Reference 는 그림 한 장 전체에 걸린다 - 2명이면 경고만 하고 나누지 않는다. 한 번에 4장까지.
@@ -49,10 +51,12 @@ const API = {
   historyImage: id => `/api/history/image/${encodeURIComponent(id)}`,
   // 캐릭터 불러오기 - Characters 창 · Assets V5 · REF 창의 라우트를 그대로(읽기만).
   dbGroups: gender => `/api/character-viewer/groups?offset=0&limit=5000${gender ? `&gender=${encodeURIComponent(gender)}` : ''}`,
-  dbList: (group, q, gender) => {
+  // Characters 창(characterWindow listParams)과 같은 꼴 - group · query(이름 · 한글 · 초성 · work:) · gender · favorites_only.
+  dbList: (group, q, gender, fav) => {
     const p = new URLSearchParams({offset: '0', limit: String(DB_LIST_LIMIT)});
     if (group && group !== '__ALL__') p.set('group', group);
     if (q) p.set('query', q);
+    if (fav) p.set('favorites_only', 'true');
     if (gender) p.append('gender', gender);
     return `/api/character-viewer/list?${p}`;
   },
@@ -312,16 +316,27 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-params input { width: 84px; }
 .pbw-params input.is-wide { width: 150px; }
 .pbw-band { padding: 6px 8px; border: 1px solid rgba(240,198,116,0.45); border-radius: 6px; font-size: 11px; display: flex; gap: 8px; align-items: center; }
-/* 캐릭터 불러오기 - 카드 머리를 누르면 고르기가 그 캐릭터로. 고르는 중인 카드 머리 = 칸과 같은 옅은 보라 + 곧은 막대. */
+/* 캐릭터 카드 = 칸 - 머리 · 글 칸을 누르면 고르기가 그 캐릭터로. 고르는 중 = 칸과 같은 옅은 보라 + 곧은 막대 + 테두리. */
 .pbw-ex-head { flex-wrap: wrap; }
 .pbw-chead[data-act="char-pick"] { cursor: pointer; position: relative; }
 .pbw-chead[data-act="char-pick"]:hover { background: var(--bg-hover); }
-.pbw-cpick { margin-left: auto; padding: 0 6px; border: 1px solid var(--border-dim); border-radius: 4px; font-size: 10.5px; font-weight: 400;
-  color: var(--text-muted); line-height: 17px; white-space: nowrap; }
-.pbw-chead:hover .pbw-cpick { border-color: var(--accent); color: var(--text-primary); }
+.pbw-chead > .pbw-gap { flex: 1 1 auto; }
+.pbw-cpick { display: none; font-size: 10.5px; font-weight: 400; color: var(--accent-light); white-space: nowrap; }
+.pbw-ccard.is-picking { border-color: var(--accent); }
 .pbw-ccard.is-picking > .pbw-chead { background: rgba(124,106,239,0.16); }
 .pbw-ccard.is-picking > .pbw-chead::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
-.pbw-ccard.is-picking .pbw-cpick { border-color: var(--accent); color: var(--accent-light); }
+.pbw-ccard.is-picking .pbw-cpick { display: inline; }
+/* 캐릭터 고르기 머리 = 제목 / 세 갈래 한 줄(폭 전체) / 검색칸(폭 전체) - 사용자 11-20 "검색은 토글 줄 아래로". */
+.pbw-ex-src:empty { display: none; }
+.pbw-ex-head.is-char { flex-direction: column; align-items: stretch; gap: 6px; }
+.pbw-ex-head.is-char .pbw-input { margin-left: 0; flex: none; width: 100%; min-width: 0; }
+.pbw-ex-src .pbw-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.pbw-ex-src .pbw-seg button { padding: 5px 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pbw-cats > .pbw-cfilter { display: flex; gap: 4px; align-items: center; flex: none; margin: 0 0 4px 2px; }
+.pbw-cats > .pbw-cfilter > .pbw-seg { margin: 0; }
+.pbw-fav { border: 1px solid var(--border-dim); border-radius: 5px; background: transparent; color: var(--text-dim); font-size: 11px;
+  padding: 2px 7px; cursor: pointer; font-family: inherit; }
+.pbw-fav.is-on { color: #f0c674; border-color: rgba(240,198,116,0.6); }
 .pbw-cmeta { padding: 0 8px; }
 .pbw-cmeta:empty { display: none; }
 .pbw-cfrom { display: flex; align-items: center; gap: 4px; min-width: 0; margin: -2px 0 5px; font-size: 10.5px; color: var(--text-dim); }
@@ -426,7 +441,7 @@ export function createPresetBench({
     cv: {
       src: ['db', 'asset', 'ref'].includes(saved.cv?.src) ? saved.cv.src : 'db',
       attach: saved.cv?.attach !== false,
-      db: {group: '__ALL__', gender: '', q: ''},
+      db: {group: '__ALL__', gender: '', q: '', fav: false},
       asset: {cat: 'v5', q: '', sel: ''},
       ref: {filter: 'all', cat: '', q: ''},
     },
@@ -507,7 +522,8 @@ export function createPresetBench({
         </div>
         <div class="pbw-pick">
           <div data-role="note"></div>
-          <div class="pbw-ex-head"><b data-role="ex-title" style="font-weight:600;font-size:13px;white-space:nowrap"></b>
+          <div class="pbw-ex-head" data-role="ex-head"><b data-role="ex-title" style="font-weight:600;font-size:13px;white-space:nowrap"></b>
+            <div class="pbw-ex-src" data-role="ex-src"></div>
             <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색"></div>
           <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div></div>
         </div>
@@ -762,9 +778,9 @@ export function createPresetBench({
   function renderChars() {
     const box = $('chars');
     const count = st.count;
-    // 머리 줄 전체가 '불러오기' 단추다(× 는 제 동작) - 누르면 아래 고르기가 그 캐릭터의 DB · 에셋 · REF 로 바뀐다.
-    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard" data-ccard="${i}"><div class="pbw-chead" data-act="char-pick" data-index="${i}" title="캐릭터 DB · 에셋 · REF 보관함에서 불러옵니다"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
-        <span class="pbw-cpick">⌕ 불러오기</span>
+    // 카드가 곧 칸이다 - 머리 · 글 칸을 누르면(글 칸은 Tab 초점도) 아래 고르기가 그 캐릭터의 캐릭터 검색 · 에셋 · 캐릭터 레퍼런스로.
+    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard" data-ccard="${i}"><div class="pbw-chead" data-act="char-pick" data-index="${i}" title="누르면 아래에서 캐릭터 검색 · 에셋 · 캐릭터 레퍼런스로 고릅니다"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
+        <span class="pbw-gap"></span><span class="pbw-cpick">고르는 중</span>
         ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
@@ -970,6 +986,19 @@ export function createPresetBench({
   // 지금 그리드에 보이는 세트(id -> 세트) - 카드 누르기 · 체크가 세트 요약을 찾는다.
   let shownSets = new Map();
 
+  // 캐릭터 카드를 고른다(머리 · 글 칸 · Tab) - 이미 고르는 중이면 아무것도 다시 그리지 않는다(치는 중 초점 · 스크롤을 지킨다).
+  function pickChar(i) {
+    const id = `char${i + 1}`;
+    if (!(i >= 0 && i < st.count) || st.cur === id) return;
+    st.cur = id;
+    st.baseOpen = false;
+    renderSlots();
+    renderOverlay();
+    renderBaseCard();
+    countSources();
+    void renderExplorer();
+  }
+
   async function renderExplorer() {
     if (/^char[12]$/.test(st.cur)) {
       if (charIndex() >= 0) { await renderCharExplorer(); return; }
@@ -982,6 +1011,8 @@ export function createPresetBench({
     $('ex-tools').innerHTML = '';
     const owner = st.count > 1 && slot.owner > 0 ? `<span class="pbw-ex-own">캐릭터 ${slot.owner} ›</span> ` : '';
     $('ex-title').innerHTML = `${owner}${esc(KIND_LABELS[slot.kind])} 고르기`;
+    $('ex-head').classList.remove('is-char');
+    $('ex-src').innerHTML = '';
     const ctx = $('ex-ctx');
     ctx.textContent = '';
     if (searchInput.value !== view.q && doc.activeElement !== searchInput) searchInput.value = view.q;
@@ -1184,8 +1215,12 @@ export function createPresetBench({
     const i = charIndex();
     if (i < 0) return;
     const n = value => (value === null || value === undefined ? '' : ` ${value}`);
-    const srcs = [['db', 'DB'], ['asset', `에셋${n(assetListPromise ? assetRows.length : null)}`], ['ref', `REF${n(refTotal)}`]];
-    $('ex-title').innerHTML = `캐릭터 ${i + 1} 고르기 <span class="pbw-seg" style="margin-left:4px;vertical-align:1px">${srcs.map(([key, label]) => `<button type="button" class="${st.cv.src === key ? 'is-on' : ''}" data-csrc="${key}">${esc(label)}</button>`).join('')}</span>`;
+    const srcs = [['db', '캐릭터 검색', 'Characters 창의 캐릭터 DB - 옷 태그는 뺍니다'],
+      ['asset', `에셋${n(assetListPromise ? assetRows.length : null)}`, 'Assets 의 캐릭터 에셋 - 프롬프트 + UC (+ 그림을 REF 로)'],
+      ['ref', `캐릭터 레퍼런스${n(refTotal)}`, 'REF 보관함의 그림 - 이 벤치 생성에만 실립니다']];
+    $('ex-head').classList.add('is-char');
+    $('ex-title').textContent = `캐릭터 ${i + 1} 고르기`;
+    $('ex-src').innerHTML = `<span class="pbw-seg">${srcs.map(([key, label, tip]) => `<button type="button" class="${st.cv.src === key ? 'is-on' : ''}" data-csrc="${key}" title="${esc(tip)}">${esc(label)}</button>`).join('')}</span>`;
   }
 
   async function renderCharExplorer() {
@@ -1216,13 +1251,14 @@ export function createPresetBench({
       if (serial !== searchSerial) return;
       if (!groups.some(g => g.key === db.group)) db.group = '__ALL__';
       const genders = [['', '전체'], ['girl', '여'], ['boy', '남']];
-      cats.innerHTML = `<span class="pbw-seg">${genders.map(([g, label]) => `<button type="button" class="${db.gender === g ? 'is-on' : ''}" data-cgender="${g}">${label}</button>`).join('')}</span>` +
+      cats.innerHTML = `<div class="pbw-cfilter"><span class="pbw-seg">${genders.map(([g, label]) => `<button type="button" class="${db.gender === g ? 'is-on' : ''}" data-cgender="${g}">${label}</button>`).join('')}</span>
+        <button type="button" class="pbw-fav${db.fav ? ' is-on' : ''}" data-cfav title="즐겨찾기만(Characters 창의 ★)">★</button></div>` +
         groups.map(g => `<button type="button" class="pbw-cat${g.key === db.group ? ' is-on' : ''}" data-cgroup="${esc(g.key)}" title="${esc(g.key)}"><span>${esc(dbGroupLabel(g.key))}</span><small>${formatPosts(g.count)}</small></button>`).join('');
       const q = db.q.trim();
       ctx.textContent = '찾는 중…';
       let rows;
       try {
-        rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}`, () => getJson(API.dbList(db.group, q, db.gender)).then(data => ({
+        rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}|${db.fav ? 1 : 0}`, () => getJson(API.dbList(db.group, q, db.gender, db.fav)).then(data => ({
           rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0)})));
       } catch (error) { fail(error); return; }
       if (serial !== searchSerial) return;
@@ -1239,7 +1275,8 @@ export function createPresetBench({
           : '<div class="pbw-th is-tall pbw-none">썸네일 없음</div>';
         return `<div class="pbw-card${mine === `${row.group}|${row.character}` ? ' is-sel' : ''}" data-cchar="${k}" data-zt="${esc(`${row.character} · ${dbGroupLabel(row.group)}`)}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
           ${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
-      }).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : '캐릭터가 없습니다'}</div>`;
+      }).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : db.fav ? '즐겨찾기한 캐릭터가 없습니다' : '캐릭터가 없습니다'}${
+        q && db.group !== '__ALL__' ? `<br><button type="button" class="pbw-btn" data-cgroup="__ALL__" style="margin-top:8px">전체 작품에서 찾기</button>` : ''}</div>`;
       return;
     }
 
@@ -1572,6 +1609,12 @@ export function createPresetBench({
   }
 
   // ---------------------------------------------------------------- 이벤트
+  // 캐릭터 글 칸에 Tab 으로 들어와도 그 캐릭터를 고른다(누르기와 같은 규칙).
+  listen('focusin', event => {
+    const area = event.target.closest?.('textarea[data-name]');
+    if (area && inside(area)) pickChar(Number(area.dataset.name));
+  });
+
   listen('click', event => {
     const t = event.target;
     const act = t.closest('[data-act]')?.dataset.act;
@@ -1583,13 +1626,7 @@ export function createPresetBench({
     if (act === 'char-add') { setCount(st.count + 1); return; }
     if (act === 'char-remove') { setCount(st.count - 1); return; }
     if (act === 'char-pick') {
-      st.cur = `char${Number(t.closest('[data-index]').dataset.index) + 1}`;
-      st.baseOpen = false;
-      renderSlots();
-      renderOverlay();
-      renderBaseCard();
-      countSources();
-      void renderExplorer();
+      pickChar(Number(t.closest('[data-index]').dataset.index));
       return;
     }
     if (act === 'load-x') {
@@ -1686,6 +1723,9 @@ export function createPresetBench({
     }
     const chip = t.closest('[data-chip]');
     if (chip) { st.note = ''; st.memo = null; renderNote(); void openRelated(chip.dataset.from, chip.dataset.chip); return; }
+    // 카드의 나머지 자리(글 칸 · 불러온 줄)도 그 캐릭터를 고른다 - 단추 · 칩 · 칸 줄은 위에서 제 일을 했다.
+    const ccard = t.closest('[data-ccard]');
+    if (ccard && !t.closest('[data-slots], button, a, [data-ref], .pbw-uc')) { pickChar(Number(ccard.dataset.ccard)); return; }
     const slotEl = t.closest('[data-slot]');
     if (slotEl) {
       st.cur = slotEl.dataset.slot;
@@ -1711,13 +1751,8 @@ export function createPresetBench({
       const cg = t.closest('[data-cgender]');
       if (cg) { st.cv.db.gender = cg.dataset.cgender; void renderExplorer(); return; }
       const cgroup = t.closest('[data-cgroup]');
-      if (cgroup) {
-        st.cv.db.group = cgroup.dataset.cgroup;
-        st.cv.db.q = '';
-        searchInput.value = '';
-        void renderExplorer();
-        return;
-      }
+      if (cgroup) { st.cv.db.group = cgroup.dataset.cgroup; void renderExplorer(); return; }
+      if (t.closest('[data-cfav]')) { st.cv.db.fav = !st.cv.db.fav; void renderExplorer(); return; }
       const cchar = t.closest('[data-cchar]');
       if (cchar) {
         const row = dbRows[Number(cchar.dataset.cchar)];
@@ -1818,7 +1853,9 @@ export function createPresetBench({
     if (t === searchInput) {
       win.clearTimeout(searchTimer);
       const q = t.value;
-      searchTimer = win.setTimeout(() => { void runSearch(q); }, 280);
+      // 캐릭터 검색은 Characters 창과 같은 150ms(가벼운 색인) - 칸 검색(세트 찾기)은 280ms.
+      const delay = charIndex() >= 0 && st.cv.src === 'db' ? 150 : 280;
+      searchTimer = win.setTimeout(() => { void runSearch(q); }, delay);
       return;
     }
     if (t.dataset.field) { st.base.direct[t.dataset.field] = t.value; persist(); return; }

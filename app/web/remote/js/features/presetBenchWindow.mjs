@@ -52,8 +52,8 @@ const API = {
   // 캐릭터 불러오기 - Characters 창 · Assets V5 · REF 창의 라우트를 그대로(읽기만).
   dbGroups: gender => `/api/character-viewer/groups?offset=0&limit=5000${gender ? `&gender=${encodeURIComponent(gender)}` : ''}`,
   // Characters 창(characterWindow listParams)과 같은 꼴 - group · query(이름 · 한글 · 초성 · work:) · gender · favorites_only.
-  dbList: (group, q, gender, fav) => {
-    const p = new URLSearchParams({offset: '0', limit: String(DB_LIST_LIMIT)});
+  dbList: (group, q, gender, fav, offset = 0) => {
+    const p = new URLSearchParams({offset: String(offset), limit: String(DB_LIST_LIMIT)});
     if (group && group !== '__ALL__') p.set('group', group);
     if (q) p.set('query', q);
     if (fav) p.set('favorites_only', 'true');
@@ -1345,6 +1345,9 @@ export function createPresetBench({
   let assetListPromise = null;
   let refTotal = null;
   let dbRows = [];                     // 지금 그림 칸의 캐릭터(카드 누르기가 찾는다)
+  // 지금 그린 DB 목록 - 끝까지 내리면 다음 300명을 받아 붙인다(사용자 11-20 '300 에서 더 못 내려감').
+  // entry = 캐시의 {rows, total} 그 자체라 붙인 줄은 같은 목록을 다시 열어도 남는다.
+  let dbView = null;                   // {entry, serial, i, mine, mixed, head}
   let dbGroupKo = {};
   let assetRows = [];
   let refRows = new Map();             // file_hash -> 보관함 항목
@@ -1445,23 +1448,17 @@ export function createPresetBench({
       let rows;
       try {
         rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}|${db.fav ? 1 : 0}`, () => getJson(API.dbList(db.group, q, db.gender, db.fav)).then(data => ({
-          rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0)})));
+          rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0), query: [db.group, q, db.gender, db.fav]})));
       } catch (error) { fail(error); return; }
       if (serial !== searchSerial) return;
       dbRows = rows.rows;
       // 여러 작품이 섞인 목록(전체 · etc · 검색)은 이름 옆에 작품을 흐리게 - 같은 이름(hoshino ai)을 가른다.
       const mixed = db.group === '__ALL__' || db.group === GROUP_ETC || Boolean(q);
-      const shown = rows.total > dbRows.length ? `${dbRows.length} / ${rows.total.toLocaleString()}명 - 검색으로 좁히세요` : `${rows.total.toLocaleString()}명`;
-      ctx.textContent = `${q ? `${db.group === '__ALL__' ? '' : `${dbGroupLabel(db.group)} 안 `}검색 '${q}'` : dbGroupLabel(db.group)} · ${shown} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
       const mine = st.loaded[i]?.src === 'db' ? st.loaded[i].key : '';
-      grid.innerHTML = dbRows.length ? `<div class="pbw-grid is-3">${dbRows.map((row, k) => {
-        const name = dbShortName(row.character, row.group);
-        const picture = row.has_thumbnail && row.thumbnail_url
-          ? `<img class="pbw-th is-tall" loading="lazy" src="${esc(row.thumbnail_url)}" alt="">`
-          : '<div class="pbw-th is-tall pbw-none">썸네일 없음</div>';
-        return `<div class="pbw-card${mine === `${row.group}|${row.character}` ? ' is-sel' : ''}" data-cchar="${k}" data-zt="${esc(`${row.character} · ${dbGroupLabel(row.group)}`)}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
-          ${playButton(`data-cplay="${k}"`, i)}${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
-      }).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : db.fav ? '즐겨찾기한 캐릭터가 없습니다' : '캐릭터가 없습니다'}${
+      dbView = {entry: rows, serial, i, mine, mixed,
+        head: `${q ? `${db.group === '__ALL__' ? '' : `${dbGroupLabel(db.group)} 안 `}검색 '${q}'` : dbGroupLabel(db.group)}`};
+      dbCtx();
+      grid.innerHTML = dbRows.length ? `<div class="pbw-grid is-3">${dbRows.map((row, k) => dbCardHtml(row, k)).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : db.fav ? '즐겨찾기한 캐릭터가 없습니다' : '캐릭터가 없습니다'}${
         q && db.group !== '__ALL__' ? `<br><button type="button" class="pbw-btn" data-cgroup="__ALL__" style="margin-top:8px">전체 작품에서 찾기</button>` : ''}</div>`;
       return;
     }
@@ -1545,6 +1542,48 @@ export function createPresetBench({
       ...ASSET_REF_DEFAULT, auto: true}) : null;
     return {text: detail.character_prompt, uc: detail.character_uc || '', label: name, ref};
   });
+
+  // DB 카드 한 장(처음 그릴 때와 아래에 붙일 때 같은 꼴).
+  function dbCardHtml(row, k) {
+    const {i, mine, mixed} = dbView;
+    const name = dbShortName(row.character, row.group);
+    const picture = row.has_thumbnail && row.thumbnail_url
+      ? `<img class="pbw-th is-tall" loading="lazy" src="${esc(row.thumbnail_url)}" alt="">`
+      : '<div class="pbw-th is-tall pbw-none">썸네일 없음</div>';
+    return `<div class="pbw-card${mine === `${row.group}|${row.character}` ? ' is-sel' : ''}" data-cchar="${k}" data-zt="${esc(`${row.character} · ${dbGroupLabel(row.group)}`)}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
+      ${playButton(`data-cplay="${k}"`, i)}${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
+  }
+  function dbCtx() {
+    const {entry, i, head} = dbView;
+    const loading = entry.loading;
+    const more = entry.total > entry.rows.length;
+    const shown = more ? `${entry.rows.length.toLocaleString()} / ${entry.total.toLocaleString()}명 - ${loading ? '더 받는 중…' : '끝까지 내리면 더 보입니다'}` : `${entry.total.toLocaleString()}명`;
+    $('ex-ctx').textContent = `${head} · ${shown} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
+  }
+  // 끝 가까이 내리면 다음 묶음을 받아 아래에 붙인다(다시 그리지 않는다 - 스크롤 자리를 지킨다).
+  async function loadMoreDb() {
+    const view = dbView;
+    if (!view || view.entry.loading || view.serial !== searchSerial || view.entry.rows.length >= view.entry.total) return;
+    const wrap = $('grid');
+    if (wrap.scrollTop + wrap.clientHeight < wrap.scrollHeight - 900) return;
+    view.entry.loading = true;          // 목록(캐시) 단위 - 같은 목록을 다시 그려도 같은 묶음을 두 번 받지 않는다
+    dbCtx();
+    const entry = view.entry;
+    const [group, q, gender, fav] = entry.query;
+    let data = null;
+    try { data = await getJson(API.dbList(group, q, gender, fav, entry.rows.length)); }
+    catch (error) { notify(`캐릭터를 더 받지 못했습니다: ${error.message}`, 'error'); }
+    entry.loading = false;
+    const items = Array.isArray(data?.items) ? data.items : [];
+    const from = entry.rows.length;
+    if (items.length) entry.rows.push(...items);
+    else if (data) entry.total = entry.rows.length;          // 서버가 더 줄 것이 없다 - 다시 묻지 않는다
+    if (dbView !== view || view.serial !== searchSerial) return;   // 그사이 다른 목록으로 갔다(붙인 줄은 캐시에 남는다)
+    dbRows = entry.rows;
+    wrap.querySelector('.pbw-grid.is-3')?.insertAdjacentHTML('beforeend', items.map((row, k) => dbCardHtml(row, from + k)).join(''));
+    dbCtx();
+    if (items.length) void loadMoreDb();                     // 화면이 아직 안 찼으면 이어서
+  }
 
   // 불러오기 - 앞서 에셋을 불러오며 저절로 붙은 REF 는 걷는다(다른 캐릭터의 그림이 남지 않게).
   function startLoad(i, loaded, text, uc) {
@@ -2425,6 +2464,7 @@ export function createPresetBench({
     new win.ResizeObserver(() => { fitResults(); placeUsed(); }).observe($('results'));
     new win.ResizeObserver(() => fitGridCols()).observe($('grid'));
   }
+  $('grid').addEventListener('scroll', () => { if (dbView && charIndex() >= 0 && st.cv.src === 'db') void loadMoreDb(); }, {passive: true});
   fitGridCols();
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)

@@ -610,6 +610,7 @@ def overview(catalog):
                          "Inspect CLI assets list or GET /api/agent/assets. Missing data pauses the task: ask about each item's source, size and destination; only then assets install <id> --approve-download <id>. Verify installation and resume the suspended step, not completed batch mutations.",
                          "Describe candidate IDs: inspect inputs, side effects, completion semantics and related source-only entries.",
                          "Call registered transports; use batch for multi-step workflows on one WebSocket session.",
+                         "Ready-made tag sets (outfit, pose, two-person, expression, background - the web /의상 · /자세 · /표정 · /배경 popup): CLI preset-sets kinds|categories|seeds|sets|search|text|random, or GET /api/presets/catalog, /api/presets/sets, /api/presets/search. Read-only; a set's prompt text is its tags followed by its add tags.",
                          "Inspect audit gaps, browser/shell-only surfaces and dynamic module state before concluding a feature is absent."]}
 
 

@@ -48,6 +48,25 @@ python NAIA_web_headless.py
   On headless Linux, run them under `xvfb-run` and pass `--no-sandbox` when running as root.
 - When adding or changing a launcher, keep all six `run_NAIA_*` launchers (`.bat`/`.command`/`.sh`) behaviorally aligned.
 
+## Agent CLI (`NAIA_cli.py`)
+
+- `NAIA_cli.py --help` and `capabilities overview` are the reference; every command prints one JSON object.
+- Preset sets (the web mini preset popup `/의상` `/자세` `/표정` `/배경`: outfit `의상`, pose `자세` = `event`, two-person `2인` = `link`, expression `표정`, background `배경` = `scene`) are read-only through `preset-sets`. It does not generate, spend Anlas or write user data. `presets` is something else: saved generation settings.
+
+```bash
+python NAIA_cli.py preset-sets kinds                                   # kinds with counts
+python NAIA_cli.py preset-sets categories --kind outfit               # categories > subcategories
+python NAIA_cli.py preset-sets seeds --kind outfit --category <name>  # seed tags (groups of sets), Korean names
+python NAIA_cli.py preset-sets sets --kind outfit --seed blazer       # sets: id, tags, add, text
+python NAIA_cli.py preset-sets search 교복 --kind outfit               # by English tag or Korean name
+python NAIA_cli.py preset-sets text --id <set id>                     # prompt text of one set
+python NAIA_cli.py preset-sets random --kind expression [--seed <seed> | --category <name>] [--random-seed 7]
+```
+
+- A set's `text` (its `tags`, then its `add` tags, comma separated) is what the popup inserts; put it into a prompt as is.
+- Rows with a non-empty `pool` belong to a separately listed pool. `search`, `seeds` and `random` skip them unless `--include-separate`, `--category <that category>` or `--pool <pool>` is given; pass the pool back with `--pool` when asking for `sets`.
+- The same data is served to a running app by `GET /api/presets/catalog`, `/api/presets/sets` and `/api/presets/search` (`call http:GET:/api/presets/...`).
+
 ## CI
 
 - `.github/workflows/ci.yml` runs on pushes to `future02`/`main` and on every PR: launcher syntax/line-ending checks, Electron main contract tests (Windows/macOS/Linux), remote-checkout-safe layout gates plus `tools/test_*.py` (Windows/Linux), and a Linux headless web smoke through `run_NAIA_web.sh`.

@@ -2,8 +2,16 @@
 
 Start with capabilities overview/search/describe/audit. call and batch invoke
 registered transports on a live backend, using that backend's state and credentials.
-Convenience commands (auth/presets/tags/random/generate) own a separate serverless
-session; they do not define the full feature boundary.
+Convenience commands (auth/presets/preset-sets/tags/random/generate) own a separate
+serverless session; they do not define the full feature boundary.
+
+preset-sets is the read-only browser for the web UI's /의상 · /자세 · /표정 · /배경 popup: ready-made tag sets
+(outfit, pose, two-person, expression, background). Typical flow:
+  preset-sets kinds -> categories --kind K -> seeds --kind K --category C
+  -> sets --kind K --seed S -> use a set's "text" in a prompt
+  (or: search <tag or Korean name>, text --id <set id>, random --kind K [--seed S]).
+It never generates, spends Anlas or writes user data. `presets` is a different thing:
+saved generation settings.
 """
 from __future__ import annotations
 
@@ -25,6 +33,19 @@ class CliError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+# Tag-set kinds of the preset catalog, in the web UI's tab order: kind -> (UI label, meaning).
+PRESET_SET_KINDS = {
+    "outfit": ("의상", "Outfit: clothing tags that are worn together"),
+    "event": ("자세", "Pose/action of one character"),
+    "link": ("2인", "Interaction between two characters"),
+    "expression": ("표정", "Facial expression"),
+    "scene": ("배경", "Background/scene"),
+}
+PRESET_SET_ACTIONS = ("kinds", "categories", "seeds", "sets", "search", "text", "random")
+_PRESET_SET_NEEDS = {"categories": ("kind",), "seeds": ("kind",), "sets": ("kind", "seed"),
+                     "search": ("query",), "text": ("id",), "random": ("kind",)}
 
 
 class JsonParser(argparse.ArgumentParser):
@@ -70,8 +91,24 @@ def parser() -> argparse.ArgumentParser:
     assets.add_argument("action", choices=["list", "install"], nargs="?", default="list")
     assets.add_argument("item", nargs="?", default="")
     assets.add_argument("--approve-download", help="Exact asset ID approved by the user; never infer consent from the original task")
-    presets = commands.add_parser("presets", help="List presets, or inspect one with --name")
+    presets = commands.add_parser("presets", help="List presets (saved generation settings), or inspect one with --name")
     presets.add_argument("--name")
+    preset_sets = commands.add_parser(
+        "preset-sets", help="Browse ready-made tag sets (outfit/pose/two-person/expression/background) and get "
+                            "prompt text for one; read-only. Not the generation settings of `presets`")
+    preset_sets.add_argument("action", choices=PRESET_SET_ACTIONS, nargs="?", default="kinds")
+    preset_sets.add_argument("query", nargs="?", default="", help="search: English tag or Korean name")
+    preset_sets.add_argument("--kind", choices=list(PRESET_SET_KINDS), help="Required except for kinds/search/text")
+    preset_sets.add_argument("--category", default="", help="Category name exactly as returned by categories")
+    preset_sets.add_argument("--subcategory", default="", help="Subcategory name exactly as returned by categories")
+    preset_sets.add_argument("--seed", default="", help="Seed tag naming a group of sets (from seeds/search); not an image seed")
+    preset_sets.add_argument("--pool", default="", help="Pool returned with a seed; empty = the normal merged pools")
+    preset_sets.add_argument("--id", default="", help="Set id (from sets/search) for text")
+    preset_sets.add_argument("--include-separate", action="store_true",
+                             help="search/seeds/random: also use the separately listed pools (rows whose pool is not empty)")
+    preset_sets.add_argument("--random-seed", type=int, help="random: make the pick repeatable")
+    preset_sets.add_argument("--limit", type=int, default=50)
+    preset_sets.add_argument("--offset", type=int, default=0)
     tags = commands.add_parser("tags", help="Search the existing English/Korean tag index")
     tags.add_argument("query")
     tags.add_argument("--limit", type=int, default=20)
@@ -108,7 +145,7 @@ def parse_args(argv=None):
         request = json.loads(raw)
     except (OSError, ValueError) as exc:
         raise CliError("invalid_request", "Cannot read JSON request") from exc
-    if not isinstance(request, dict) or request.get("command") not in {"auth", "models", "assets", "presets", "tags", "random", "generate", "capabilities", "call", "batch"}:
+    if not isinstance(request, dict) or request.get("command") not in {"auth", "models", "assets", "presets", "preset-sets", "tags", "random", "generate", "capabilities", "call", "batch"}:
         raise CliError("invalid_request", "Request must be an object with a supported command")
     tokens = []
     request = dict(request)
@@ -124,13 +161,15 @@ def parse_args(argv=None):
         tokens.extend([str(request.pop("action", "list")), str(request.pop("item", ""))])
     elif command == "call":
         tokens.append(str(request.pop("capability", "")))
+    elif command == "preset-sets":
+        tokens.extend([str(request.pop("action", "kinds")), str(request.pop("query", ""))])
     tag_query = None
     if command == "tags":
         tag_query = str(request.pop("query", ""))
     for key, value in request.items():
         if key == "input" and command in {"call", "batch"} and isinstance(value, (dict, list)):
             value = json.dumps(value, ensure_ascii=False)
-        if key in {"random", "dry_run", "details", "standalone"}:
+        if key in {"random", "dry_run", "details", "standalone", "include_separate"}:
             if not isinstance(value, bool):
                 raise CliError("invalid_request", f"{key} must be a JSON boolean")
             if value:
@@ -150,6 +189,14 @@ def parse_args(argv=None):
 def validate(args):
     if args.command == "tags" and not 1 <= args.limit <= 100:
         raise CliError("invalid_arguments", "--limit must be between 1 and 100")
+    if args.command == "preset-sets":
+        missing = [name for name in _PRESET_SET_NEEDS.get(args.action, ())
+                   if not str(getattr(args, name) or "").strip()]
+        if missing:
+            raise CliError("invalid_arguments", f"preset-sets {args.action} requires "
+                           + ", ".join("a query" if name == "query" else "--" + name for name in missing))
+        if not 1 <= args.limit <= 500 or args.offset < 0:
+            raise CliError("invalid_arguments", "--limit must be between 1 and 500 and --offset must not be negative")
     if args.command not in {"random", "generate"}:
         return
     if not args.ratings or set(args.ratings) - set("gsqe"):
@@ -344,6 +391,138 @@ def preset_summary(store, name, current):
             "summary": f"{'*' if name == current else '-'} {name}: model={model or 'inherited'}, size={size or 'inherited'}, prefix={label(prefix)}, postfix={label(postfix)}"}
 
 
+def set_prompt_text(row):
+    """Prompt text for one preset set: its tags, then the tags that go with it (add), without repeats.
+
+    Same rule as the web /의상 · /자세 · /표정 · /배경 popup (setPromptText in app/web/remote/js/features/presetMiniPopup.mjs).
+    """
+    out = []
+    for raw in [*(row.get("tags") or ()), *(row.get("add") or ())]:
+        tag = str(raw or "").strip()
+        if tag and tag not in out:
+            out.append(tag)
+    return ", ".join(out)
+
+
+def preset_sets(context, args):
+    """Read-only view of the preset bench catalog (same data as GET /api/presets/catalog|sets|search)."""
+    from core.preset_bench_service import APART_GROUPS, SEARCH_LIMIT, PresetBenchService, apart_pool
+
+    separate = {pool for pool, _ in APART_GROUPS}
+    # An absent thumbnail path: this command never opens, indexes or marks the installed image pack.
+    service = PresetBenchService(None, thumbs_path=Path(context.runtime_paths.user_root) / "preset-thumbs-not-used.json")
+    cache = {}
+
+    def names():
+        # Korean tag dictionary (the one `tags` searches). Missing dictionary = English only, not an error.
+        if "names" not in cache:
+            try:
+                from app.backend.server.autocomplete_commands import _ensure_kr_raw
+                raw = _ensure_kr_raw(context)
+            except Exception:
+                raw = None
+            cache["names"] = raw if isinstance(raw, dict) else {}
+        return cache["names"]
+
+    def summary(row):
+        return {"id": row["id"], "kind": row["kind"], "seed": row["seed"], "pool": row["pool"],
+                "separate_pool": apart_pool(row), "adult": bool(row["adult"]),
+                "tags": list(row["tags"]), "add": list(row["add"]), "text": set_prompt_text(row)}
+
+    def total(seeds):
+        return sum(seed["sets"] for seed in seeds)
+
+    def groups(translate=False, separate_too=False):
+        found = service.catalog(args.kind, args.pool, names() if translate else None)["groups"]
+        if args.category:
+            found = [group for group in found if group["slot"] == args.category]
+        elif not separate_too:
+            found = [group for group in found if not group.get("pool")]
+        rows = [(group, sub, seed) for group in found for sub in group["subs"]
+                if not args.subcategory or sub["name"] == args.subcategory for seed in sub["seeds"]]
+        if not rows and (args.category or args.subcategory):
+            raise CliError("preset_category_not_found",
+                           f"No such category/subcategory; run preset-sets categories --kind {args.kind}")
+        return rows
+
+    try:
+        if args.action == "kinds":
+            kinds = []
+            for kind, (label, about) in PRESET_SET_KINDS.items():
+                found = service.catalog(kind, "")["groups"]
+                kinds.append({"kind": kind, "label": label, "about": about, "categories": len(found),
+                              "seeds": sum(len(group["seeds"]) for group in found),
+                              "sets": sum(total(group["seeds"]) for group in found)})
+            return {"kinds": kinds, "read_only": True,
+                    "next": "preset-sets categories --kind <kind>; then seeds, sets. A set's text goes into a prompt as is."}
+        if args.action == "categories":
+            found = service.catalog(args.kind, args.pool)["groups"]
+            return {"kind": args.kind, "pool": args.pool, "categories": [
+                {"category": group["slot"], "pool": group.get("pool", ""), "separate": bool(group.get("pool")),
+                 "seeds": len(group["seeds"]), "sets": total(group["seeds"]),
+                 "subcategories": [{"name": sub["name"], "seeds": len(sub["seeds"]), "sets": total(sub["seeds"])}
+                                   for sub in group["subs"]]} for group in found],
+                "note": "separate = listed apart from the normal pools; pass its pool with --pool when asking for sets."}
+        if args.action == "seeds":
+            rows = groups(translate=True, separate_too=args.include_separate)
+            page = rows[args.offset:args.offset + args.limit]
+            return {"kind": args.kind, "total": len(rows), "offset": args.offset, "limit": args.limit,
+                    "next_offset": args.offset + args.limit if args.offset + args.limit < len(rows) else None,
+                    "seeds": [{"seed": seed["seed"], "ko": seed["ko"], "sets": seed["sets"], "posts": seed["posts"],
+                               "category": group["slot"], "subcategory": sub["name"],
+                               "pool": group.get("pool") or args.pool} for group, sub, seed in page]}
+        if args.action == "sets":
+            rows = service.sets(args.kind, args.pool, args.seed)["sets"]
+            if not rows:
+                raise CliError("preset_seed_not_found", "No sets for that kind/pool/seed; take seed and pool from seeds or search")
+            return {"kind": args.kind, "pool": args.pool, "seed": args.seed, "sets": [summary(row) for row in rows]}
+        if args.action == "search":
+            hits = service.search(args.query, args.kind, names())
+            found = {}
+            for hit in hits:
+                pool = hit["pool"] if hit["pool"] in separate else ""
+                if pool and not args.include_separate:
+                    continue
+                item = found.setdefault((hit["kind"], pool, hit["seed"]), {
+                    "kind": hit["kind"], "pool": pool, "seed": hit["seed"], "ko": hit["ko"],
+                    "matched": [], "matched_sets": 0, "set_ids": []})
+                item["matched_sets"] += 1
+                if hit["matched"] not in item["matched"]:
+                    item["matched"].append(hit["matched"])
+                if len(item["set_ids"]) < 5:
+                    item["set_ids"].append(hit["set_id"])
+            rows = list(found.values())
+            return {"query": args.query, "kind": args.kind, "total": len(rows), "offset": args.offset, "limit": args.limit,
+                    "seeds": rows[args.offset:args.offset + args.limit],
+                    # The service ranks, then keeps the best SEARCH_LIMIT sets: counts are lower bounds when truncated.
+                    "truncated": len(hits) >= SEARCH_LIMIT,
+                    "note": "Best match first. set_ids = first matching sets; use text --id, or sets --kind --seed --pool for all. "
+                            "truncated = more sets matched than were ranked; narrow the query or pass --kind."}
+        if args.action == "text":
+            return summary(service.set_info(args.id))
+        # random: every candidate set has the same chance.
+        picker = random.Random(args.random_seed)
+        if args.seed:
+            rows = service.sets(args.kind, args.pool, args.seed)["sets"]
+            if not rows:
+                raise CliError("preset_seed_not_found", "No sets for that kind/pool/seed; take seed and pool from seeds or search")
+            count = len(rows)
+        else:
+            candidates = groups(separate_too=args.include_separate)
+            count = sum(seed["sets"] for _, _, seed in candidates)
+            if not count:
+                raise CliError("preset_seed_not_found", "No sets to choose from")
+            group, _, seed = picker.choices(candidates, weights=[seed["sets"] for _, _, seed in candidates])[0]
+            rows = service.sets(args.kind, group.get("pool") or args.pool, seed["seed"])["sets"]
+        return {**summary(picker.choice(rows)), "candidates": count}
+    except CliError:
+        raise
+    except KeyError as exc:
+        raise CliError("preset_set_not_found", "Unknown preset set id; take ids from sets or search") from exc
+    except ValueError as exc:
+        raise CliError("invalid_arguments", str(exc)) from exc
+
+
 def generation_cost(context, params, mode):
     if mode != "NAI":
         return {"applicable": False, "reason": "Anlas applies only to NAI"}
@@ -358,6 +537,8 @@ def generation_cost(context, params, mode):
 
 
 def execute(context, source, args):
+    if args.command == "preset-sets":
+        return preset_sets(context, args)
     from core.prompt_engineering_settings import get_prompt_engineering_store
     store = get_prompt_engineering_store(context)
     if args.command == "auth":

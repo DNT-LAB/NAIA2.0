@@ -91,6 +91,22 @@ export const POSE_WEIGHT_WITH_LINK = 0.7;
 // 캐릭터의 기본 옷이 아니라 이 옷이라는 뜻(사용자 11-20).
 export const ALT_COSTUME_TAG = 'alternate costume';
 
+// 같은 시드의 형제 세트 가운데 이 세트에만 있는 태그(cape · pauldrons …)는 이 가중치로 싣는다 - 시드 태그가 그림을 다 가져가
+// 형제 세트끼리 구별이 안 되었다(사용자 11-20 armored dress 4세트). 1인 자세가 0.7 로 감싸일 때는 겹치지 않게 뺀다.
+export const DISTINCT_WEIGHT = 1.2;
+
+/** 형제 세트(같은 시드 목록) -> {common: 모두에 있는 태그, distinct: 세트 id -> 그 세트에만 있는 태그}. 하나뿐이면 둘 다 빈 값. */
+export function siblingTags(sets) {
+  const list = (sets || []).filter(set => set && Array.isArray(set.tags));
+  const distinct = new Map();
+  if (list.length < 2) return {common: [], distinct};
+  const count = new Map();
+  for (const set of list) for (const tag of new Set(set.tags)) count.set(tag, (count.get(tag) || 0) + 1);
+  const common = list[0].tags.filter(tag => count.get(tag) === list.length);
+  for (const set of list) distinct.set(set.id, set.tags.filter(tag => count.get(tag) === 1));
+  return {common, distinct};
+}
+
 /** 캐릭터 프롬프트 칸에 싣는 칸인가(target = 'char' 일 때). 1인의 자세는 캐릭터 몫이지만 메인에 둔다 -
  *  NAI 는 동작을 메인에 둘 때 더 잘 따른다(목업 3안 미리보기와 같다). */
 function goesToCharacter(slot) {
@@ -113,7 +129,8 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   extras    - [캐릭터1 추가 프롬프트, …] - 그 캐릭터 몫 끝(캐릭터 칸 · target 'main' 이면 메인)
  *   extraMain - 추가 프롬프트 - 메인 끝(기반 postfix 앞)
  *   known     - [캐릭터1 은 이름 있는 캐릭터인가, …] - 그 캐릭터의 의상 칸에 세트가 있으면 의상 뒤에 ALT_COSTUME_TAG.
- *   meta      - {칸 id: {add, adult}} - 고른 세트의 서버 요약에서(variant 면 variant.add · variant.adult).
+ *   meta      - {칸 id: {add, adult, distinct}} - 고른 세트의 서버 요약에서(variant 면 variant.add · variant.adult).
+ *               distinct = 형제 세트에 없는 이 세트만의 태그 - DISTINCT_WEIGHT 로 싣는다.
  *               add = 그 세트와 거의 늘 함께 나오는 몸 태그(penis 등) - 늘 **메인**에, 그 칸 태그 뒤에(사용자 11-20).
  *               adult = 성인 세트 - 하나라도 있으면 메인 인원 태그 뒤에 nsfw.
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
@@ -137,8 +154,11 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
   // 칸 한 개의 글 - 2인 자세가 있으면 1인 자세(event)는 POSE_WEIGHT_WITH_LINK 로 감싼다. 2인 자세는 늘 메인(goesToCharacter 밖).
   const costume = slot => (slot.kind === 'outfit' && slot.owner > 0 && known[slot.owner - 1] && tagsOf(slot).length ? ALT_COSTUME_TAG : '');
   const slotText = (slot, withAdds = false) => {
-    const text = joinTags([...tagsOf(slot), costume(slot), ...(withAdds ? addsOf(slot) : [])]);
-    return text && slot.kind === 'event' && linkTags.length ? `${POSE_WEIGHT_WITH_LINK}::${text}::` : text;
+    const wrapped = slot.kind === 'event' && linkTags.length > 0;
+    const distinct = new Set(wrapped ? [] : (metaOf(slot).distinct || []));
+    const tags = tagsOf(slot).map(tag => (distinct.has(tag) ? `${DISTINCT_WEIGHT}::${tag}::` : tag));
+    const text = joinTags([...tags, costume(slot), ...(withAdds ? addsOf(slot) : [])]);
+    return text && wrapped ? `${POSE_WEIGHT_WITH_LINK}::${text}::` : text;
   };
   if (target === 'main') {
     const main = uniqueTags(joinTags([
@@ -187,7 +207,7 @@ export function buildItems({cast, target, names, picks, axis = null, ucs = [], e
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
       const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta, known,
-        variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool, add: set.add || [], adult: !!set.adult}});
+        variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool, add: set.add || [], adult: !!set.adult, distinct: set.distinct || []}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }

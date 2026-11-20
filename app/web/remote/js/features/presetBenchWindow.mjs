@@ -27,8 +27,8 @@
 //   프롬프트 미리보기 줄 · 결과 머리 줄은 걷었다(자리를 그림에). Presets 는 Fn 메뉴에서 연다(탭 단추는 숨김).
 
 import {
-  MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-ac1';
+  MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts, siblingTags,
+} from './presetBenchModel.mjs?v=20261120-pl1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -302,9 +302,13 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-none { display: flex; align-items: center; justify-content: center; color: #777; font-size: 11px; }
 .pbw-cap { padding: 2px 5px 3px; font-size: 11px; color: var(--text-dim); line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.pbw-ck { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--border-dim);
-  background: rgba(12,12,18,0.85); color: var(--accent); font-size: 12px; line-height: 16px; text-align: center; cursor: pointer; }
-.pbw-ck.is-on { border-color: var(--accent); }
+/* 카드 오른쪽 위 ▶ = 지금 조합에서 그 칸만 이 세트로 바꿔 바로 1장(사용자 11-20 - '비교에 넣기' 체크를 걷었다). 칸은 안 바뀐다. */
+.pbw-play { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border-radius: 5px; border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(12,12,18,0.85); color: #eee; font-size: 11px; line-height: 22px; text-align: center; cursor: pointer; font-family: inherit; }
+.pbw-play:hover { border-color: #f0c674; color: #f0c674; }
+/* 형제 세트와 다른 태그 = 노랑(이 세트에만) · 흐림(일부와 겹침) - 모두 같은 태그는 머리 줄 '공통'으로(사용자 11-20). */
+.pbw-cap .pbw-u { color: #f0c674; }
+.pbw-common { color: var(--text-dim); }
 .pbw-empty { margin: auto; padding: 20px; text-align: center; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
 /* 생성 결과 열 - 닫지 않는다. 한 장 = 원본을 칸에 맞춰 크게, 비교 = 격자. 아래 줄 = 이전 생성(누르면 그 생성을 본다). */
 .pbw-rl { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg-surface);
@@ -578,7 +582,8 @@ export function createPresetBench({
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
   // 고른 세트의 덧붙는 몸 태그 · 성인 표식(서버 요약 add · adult) - 조립이 메인에 싣는다.
-  const picksMeta = () => Object.fromEntries(slots().map(slot => [slot.id, {add: st.picks[slot.id]?.add || [], adult: !!st.picks[slot.id]?.adult}]));
+  const picksMeta = () => Object.fromEntries(slots().map(slot => [slot.id, {add: st.picks[slot.id]?.add || [], adult: !!st.picks[slot.id]?.adult,
+    distinct: st.picks[slot.id]?.distinct || []}]));
   const viewOf = id => (st.views[id] ||= {cat: '', sub: '', pool: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
@@ -1085,17 +1090,29 @@ export function createPresetBench({
 
   // 기본 풀이 아닌 세트에 작은 표지(목록은 여성 · girl_boy 세트가 먼저 온다).
   const POOL_BADGES = {male: '남', girl_girl: '여여', boy_boy: '남남'};
-  function cardHtml(slot, set, {hit = false} = {}) {
+  // 형제 세트 표 - 같은 시드 목록을 그릴 때 세트마다 distinct(이 세트에만 있는 태그)를 달아 둔다(고르면 픽에 실려 가중치가 된다).
+  function markSiblings(sets) {
+    const info = siblingTags(sets);
+    for (const set of sets) set.distinct = info.distinct.get(set.id) || [];
+    return info;
+  }
+  const commonNote = info => (info.common.length ? ` · 공통: ${info.common.join(', ')}` : '');
+
+  function cardHtml(slot, set, {hit = false, common = null} = {}) {
     const selected = st.picks[slot.id]?.id === set.id;
     const badge = POOL_BADGES[set.pool] ? `<span class="pbw-pool" title="${esc(set.pool)} 세트">${POOL_BADGES[set.pool]}</span>` : '';
-    const checked = st.chk[slot.id]?.has(set.id);
     const tall = slot.kind === 'outfit' ? ' is-tall' : '';
+    // 형제 세트가 있으면 공통 태그는 빼고 다른 몫만 - 이 세트에만 있는 것은 노랑.
+    const shared = new Set(common || []);
+    const only = new Set(common ? set.distinct || [] : []);
+    const rest = (set.tags || []).filter(tag => !shared.has(tag));
+    const words = (rest.length ? rest : (set.tags || [])).map(tag => (only.has(tag) ? `<span class="pbw-u">${esc(tag)}</span>` : esc(tag))).join(', ');
     const picture = set.has_thumb
       ? `<img class="pbw-th${tall}" loading="lazy" src="${API.thumb(set.key)}" alt="">`
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
     return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" title="${esc((set.tags || []).join(', '))}">
-      <span class="pbw-ck${checked ? ' is-on' : ''}" data-check="${esc(set.id)}" role="checkbox" aria-checked="${checked ? 'true' : 'false'}" title="비교에 넣기">${checked ? '✓' : ''}</span>
-      ${badge}${picture}<div class="pbw-cap">${esc((set.tags || []).join(', '))}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
+      <button type="button" class="pbw-play" data-play="${esc(set.id)}" title="지금 조합에서 이 칸만 이 세트로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 세트로 1장 생성">▶</button>
+      ${badge}${picture}<div class="pbw-cap">${words}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
   }
 
   // 지금 그리드에 보이는 세트(id -> 세트) - 카드 누르기 · 체크가 세트 요약을 찾는다.
@@ -1222,8 +1239,9 @@ export function createPresetBench({
     }
     if (serial !== searchSerial) return;
     shownSets = new Map(sets.map(set => [set.id, set]));
-    ctx.textContent = `${seedName} · ${sets.length}세트`;
-    grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
+    const info = markSiblings(sets);
+    ctx.textContent = `${seedName} · ${sets.length}세트${commonNote(info)}`;
+    grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet, common: sets.length > 1 ? info.common : null})).join('')}</div>`;
   }
 
   // 대분류 전체 - 시드마다 세트를 받아(시드 하나 고를 때와 같은 캐시) 시드별 머리글 아래 나열한다.
@@ -1249,7 +1267,9 @@ export function createPresetBench({
       total += sets.length;
       sets.forEach(set => shownSets.set(set.id, set));
       const en = seed.ko && seed.ko !== seed.seed ? `<small>${esc(seed.seed)}</small>` : '';
-      return `<div class="pbw-sec">${esc(seed.ko || seed.seed)}${en} · ${sets.length}</div><div class="pbw-grid">${sets.map(set => cardHtml(slot, set)).join('')}</div>`;
+      const info = markSiblings(sets);
+      const note = info.common.length ? `<small class="pbw-common">공통: ${esc(info.common.join(', '))}</small>` : '';
+      return `<div class="pbw-sec">${esc(seed.ko || seed.seed)}${en} · ${sets.length}${note}</div><div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {common: sets.length > 1 ? info.common : null})).join('')}</div>`;
     }).join('') || '<div class="pbw-empty">세트가 없습니다</div>';
     ctx.textContent = `${label} · ${total}세트`;
   }
@@ -1655,13 +1675,23 @@ export function createPresetBench({
 
 
   // ---------------------------------------------------------------- 생성
-  async function generate() {
-    if (running()) return stop();
+  // play = {slotId, set} 이면 ▶ - 지금 조합에서 그 칸만 이 세트로 바꿔 1장(칸 · 비교는 그대로 · 그리는 중이어도 뒤에 쌓는다).
+  async function generate(play = null) {
+    if (!play && running()) return stop();
     const slotsNow = slots();
-    const axisSlot = slotById(st.axis);
+    const axisSlot = play ? null : slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({cast: castNow(), target: autoTarget(), names: st.names, picks: picksTags(), meta: picksMeta(), axis, ucs: st.ucs,
+    const picks = picksTags();
+    const meta = picksMeta();
+    const cast = castNow();
+    if (play) {
+      picks[play.slotId] = [...(play.set.tags || [])];
+      meta[play.slotId] = {add: play.set.add || [], adult: !!play.set.adult, distinct: play.set.distinct || []};
+      if (play.slotId === 'link') cast.linkPool = play.set.pool || '';
+    }
+    const items = buildItems({cast, target: autoTarget(), names: st.names, picks, meta, axis, ucs: st.ucs,
       extras: st.extras.slice(0, st.count), extraMain: st.extraMain, known: knownChars()});
+    if (play) Object.assign(items[0], {label: `▶ ${variantLabel(play.set.distinct?.length ? play.set.distinct : play.set.tags)}`, set: play.set});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
     const refs = activeRefs();
@@ -1685,10 +1715,10 @@ export function createPresetBench({
     const requestId = makeId();
     const run = {
       id: requestId, axis: axisSlot ? axisSlot.id : null,
-      label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : '한 장',
+      label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : play ? `${KIND_LABELS[slotById(play.slotId)?.kind] || ''} ▶` : '한 장',
       base: `${currentBase().label} · ${st.size}` + (refs.length ? ` · REF ${refs.length}` : ''),
       items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: '',
-        used: usedSnapshot(axisSlot ? axisSlot.id : null, item.set)})),
+        used: usedSnapshot(axisSlot ? axisSlot.id : play ? play.slotId : null, play ? {...play.set, ...placeOf(play.slotId)} : item.set)})),
     };
     void fillUsed(run);
     void slotsNow;
@@ -1750,7 +1780,7 @@ export function createPresetBench({
   function putIntoSlot(slotId, set) {
     const place = 'vpool' in set ? {vpool: set.vpool || '', cat: set.cat || ''} : placeOf(slotId);
     st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || '',
-      add: [...(set.add || [])], adult: !!set.adult, ...place};
+      add: [...(set.add || [])], adult: !!set.adult, distinct: [...(set.distinct || [])], ...place};
     persist();
   }
 
@@ -2092,22 +2122,10 @@ export function createPresetBench({
     }
     const seed = t.closest('[data-seed]');
     if (seed) { viewOf(st.cur).seed = seed.dataset.seed; viewOf(st.cur).hitSet = ''; void renderExplorer(); return; }
-    const check = t.closest('[data-check]');
-    if (check) {
-      const set = shownSets.get(check.dataset.check);
-      if (set) {
-        toggleCompare(st.cur, set);
-        // 탐색 칸은 다시 그리지 않는다(긴 목록의 스크롤 자리를 지킨다) - 체크 상자만 바꾼다.
-        const on = Boolean(st.chk[st.cur]?.has(set.id));
-        qsa(`.pbw-ck[data-check="${CSS.escape(set.id)}"]`).forEach(el => {
-          el.classList.toggle('is-on', on);
-          el.textContent = on ? '✓' : '';
-          el.setAttribute('aria-checked', on ? 'true' : 'false');
-        });
-        renderLeftControls();
-        renderSlots();
-        renderNote();
-      }
+    const play = t.closest('[data-play]');
+    if (play) {
+      const set = shownSets.get(play.dataset.play);
+      if (set && slotById(st.cur)) void generate({slotId: st.cur, set});
       return;
     }
     const card = t.closest('[data-set]');

@@ -300,14 +300,14 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-th { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #0c0c12; }
 .pbw-th.is-tall { aspect-ratio: 525 / 768; }
 .pbw-none { display: flex; align-items: center; justify-content: center; color: #777; font-size: 11px; }
-.pbw-cap { padding: 2px 5px 3px; font-size: 11px; color: var(--text-dim); line-height: 1.35;
+.pbw-cap { padding: 2px 5px 3px; font-size: 11px; color: rgba(255,255,255,0.68); line-height: 1.35;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* 카드 오른쪽 위 ▶ = 지금 조합에서 그 칸만 이 세트로 바꿔 바로 1장(사용자 11-20 - '비교에 넣기' 체크를 걷었다). 칸은 안 바뀐다. */
 .pbw-play { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; padding: 0; border-radius: 5px; border: 1px solid rgba(255,255,255,0.25);
   background: rgba(12,12,18,0.85); color: #eee; font-size: 11px; line-height: 22px; text-align: center; cursor: pointer; font-family: inherit; }
 .pbw-play:hover { border-color: #f0c674; color: #f0c674; }
-/* 형제 세트와 다른 태그 = 노랑(이 세트에만) · 흐림(일부와 겹침) - 모두 같은 태그는 머리 줄 '공통'으로(사용자 11-20). */
-.pbw-cap .pbw-u { color: #f0c674; }
+/* 형제 세트와 다른 태그 = 흰색 하나 - 이 세트에만 있는 것은 조금 더 밝게 · 일부와 겹치면 조금 어둡게 - 모두 같은 태그는 머리 줄 '공통'으로(사용자 11-20). */
+.pbw-cap .pbw-u { color: #fff; }
 .pbw-common { color: var(--text-dim); }
 .pbw-empty { margin: auto; padding: 20px; text-align: center; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
 /* 생성 결과 열 - 닫지 않는다. 한 장 = 원본을 칸에 맞춰 크게, 비교 = 격자. 아래 줄 = 이전 생성(누르면 그 생성을 본다). */
@@ -1102,7 +1102,7 @@ export function createPresetBench({
     const selected = st.picks[slot.id]?.id === set.id;
     const badge = POOL_BADGES[set.pool] ? `<span class="pbw-pool" title="${esc(set.pool)} 세트">${POOL_BADGES[set.pool]}</span>` : '';
     const tall = slot.kind === 'outfit' ? ' is-tall' : '';
-    // 형제 세트가 있으면 공통 태그는 빼고 다른 몫만 - 이 세트에만 있는 것은 노랑.
+    // 형제 세트가 있으면 공통 태그는 빼고 다른 몫만 - 이 세트에만 있는 것은 조금 더 밝은 흰색.
     const shared = new Set(common || []);
     const only = new Set(common ? set.distinct || [] : []);
     const rest = (set.tags || []).filter(tag => !shared.has(tag));

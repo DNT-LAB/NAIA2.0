@@ -12912,7 +12912,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-pl1')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-pl2')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -16590,7 +16590,7 @@ const PRESET_MINI_COMMANDS = [['의상', 'outfit'], ['자세', 'event'], ['표�
 let presetMini = null;
 function openPresetMini(ctx) {
   if (presetMini) return presetMini.open(ctx);
-  import('./js/features/presetMiniPopup.mjs?v=20261120-pm2')
+  import('./js/features/presetMiniPopup.mjs?v=20261120-pm3')
     .then(({createPresetMiniPopup}) => {
       presetMini ||= createPresetMiniPopup({document, window, showToast});
       presetMini.open(ctx);

@@ -8,7 +8,7 @@
  * 무작위 토큰(`preset:` · `&` 교차)은 남기지 않는다 — 들어가는 것은 늘 평범한 태그다.
  *
  * 목록 · 세트 · 썸네일 · 검색은 프리셋 벤치와 같은 라우트(/api/presets/*)를 쓴다. 형제 세트끼리 같은 태그는
- * 그림 밑 글에서 빼고 이 세트에만 있는 태그는 노랑(벤치 카드와 같은 규칙 - siblingTags).
+ * 그림 밑 글에서 빼고 이 세트에만 있는 태그는 조금 더 밝은 흰색(벤치 카드와 같은 규칙 - siblingTags).
  * - Esc · × = 닫고 캐럿으로 돌아간다. 바깥을 누르면 닫기만 한다(누른 곳의 초점을 뺏지 않는다).
  * - Esc · Enter 는 여기서 전파를 끊는다(Ctrl+Enter = Generate 가 버블 단계에 있다 - slashPopup 과 같다).
  * - CSS 는 이 모듈이 싣는다. ⚠️ CSS 템플릿 안에는 백틱을 쓰지 않는다.
@@ -50,9 +50,9 @@ const CSS = `
 .pmini-th { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #000; }
 .pmini-th.is-tall { aspect-ratio: 3 / 4; object-position: top; }
 .pmini-none { display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 10px; }
-.pmini-cap { padding: 2px 4px 3px; font-size: 9.5px; line-height: 1.3; color: var(--text-muted);
+.pmini-cap { padding: 2px 4px 3px; font-size: 9.5px; line-height: 1.3; color: rgba(255,255,255,0.68);
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-.pmini-cap .pmini-u { color: #ffd54f; }
+.pmini-cap .pmini-u { color: #fff; }
 .pmini-empty { padding: 14px 6px; color: var(--text-dim); text-align: center; }
 `;
 

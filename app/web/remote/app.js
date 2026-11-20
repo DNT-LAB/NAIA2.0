@@ -12912,7 +12912,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ex1')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-cp1')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -12923,6 +12923,7 @@ function loadPresetBench() {
           showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
           hideZoom: () => remoteController?.hideZoom?.(),
           getSessionParams: presetBenchSessionParams,
+          getApiMode: () => String(currentMode || modeSelect?.value || '').toUpperCase(),
           getParamChoices: () => ({model: selectChoices('pModel'), sampler: selectChoices('pSampler'), scheduler: selectChoices('pScheduler')}),
           getPresetSummaries: () => lastPromptEngineeringState?.preset_summaries || [],
           askText: (message, options) => showPromptDialog(message, options),

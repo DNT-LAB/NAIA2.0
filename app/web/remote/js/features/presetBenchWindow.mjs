@@ -153,9 +153,11 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-input, .pbw-select, .pbw-text { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-dim);
   border-radius: 5px; font-family: inherit; font-size: 12px; padding: 3px 6px; min-width: 0; }
 .pbw-text { width: 100%; box-sizing: border-box; resize: vertical; min-height: 26px; font-family: var(--font-mono); font-size: 11px; }
-.pbw-base { border: 1px solid var(--border-dim); border-radius: 6px; padding: 5px 7px; cursor: pointer; }
-.pbw-base:hover, .pbw-base.is-on { border-color: var(--accent); }
-.pbw-base-sum { font-size: 11px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 기반 = 머리 줄의 보라 [프리셋 설정] 단추(사용자 11-20 - 기반 카드를 걷어 아래 칸이 더 보이게). 기반 이름 · 요약은 툴팁. */
+.pbw-base { border: 1px solid var(--accent); border-radius: 6px; padding: 3px 10px; cursor: pointer; background: var(--accent); color: #fff;
+  font-family: inherit; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.pbw-base:hover { background: var(--accent-glow); border-color: var(--accent-glow); }
+.pbw-base.is-on { box-shadow: inset 0 0 0 2px rgba(255,255,255,0.55); }
 .pbw-seg { display: inline-flex; border: 1px solid var(--border-dim); border-radius: 5px; overflow: hidden; }
 .pbw-seg button { border: 0; background: transparent; color: var(--text-dim); padding: 2px 8px; font-family: inherit; font-size: 11px; cursor: pointer; }
 .pbw-seg button.is-on { background: var(--bg-hover); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
@@ -190,13 +192,18 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 /* 자세 (2인 이상) = 배경 위 붉은 카드(사용자 11-20 - 주로 NSFW 갈래라 눈에 띄게). 고르는 중이면 위 보라 규칙이 덧칠한다. */
 .pbw-ccard.is-link { background: rgba(226,75,74,0.10); border-color: rgba(226,75,74,0.5); }
 .pbw-ccard.is-link .pbw-slot-k, .pbw-ccard.is-link .pbw-slot-k small { color: #f09595; }
-/* 추가 프롬프트 - 캐릭터 카드의 표정 아래(그 캐릭터 몫) · 배경 아래 카드(메인 몫). */
-.pbw-extra { padding: 4px 8px 6px; border-top: 1px solid rgba(255,255,255,0.04); }
-.pbw-extra-k { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
-.pbw-extra-k > span { flex: 1 1 auto; }
-.pbw-extra .pbw-text { margin-top: 3px; line-height: 1.45; padding: 4px 6px; }
+/* 추가 프롬프트 - 캐릭터 카드의 표정 아래(그 캐릭터 몫) · 배경 아래 카드(메인 몫).
+   기본은 접힌 한 줄(칸 줄과 같은 [이름 | 글 | ×]) - 누르면 펼치고(rows 4) 초점이 떠나면 다시 한 줄(사용자 11-20). */
+.pbw-extra { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 4px; align-items: start; padding: 3px 8px;
+  border-top: 1px solid rgba(255,255,255,0.04); }
+.pbw-extra .pbw-text { min-height: 0; resize: none; overflow: hidden; line-height: 1.45; padding: 1px 6px; border-color: transparent;
+  background: transparent; cursor: text; }
+.pbw-extra .pbw-text:hover { border-color: var(--border-dim); }
+.pbw-extra .pbw-text:focus { overflow-y: auto; border-color: var(--accent); background: var(--bg-surface); }
+.pbw-extra .pbw-text::placeholder { color: var(--text-dim); font-family: inherit; }
+.pbw-extra:not(.has-text) .pbw-slot-x { visibility: hidden; }
 .pbw-ccard.is-extra .pbw-extra { border-top: 0; }
-.pbw-ccard.is-extra .pbw-extra-k { color: var(--text-primary); font-weight: 600; }
+.pbw-ccard.is-extra .pbw-slot-k { color: var(--text-primary); font-weight: 600; }
 .pbw-slot-v { min-width: 0; }
 .pbw-slot-empty { display: inline-block; font-size: 11px; color: var(--text-dim); padding-top: 2px; }
 .pbw-slot.is-cur .pbw-slot-empty { color: var(--accent-light); }
@@ -427,6 +434,7 @@ export function createPresetBench({
   // 기반 설정 판(사용자 11-20) - 메인 Params 탭의 지금 값 · 고를 목록(모델 · 샘플러 · 스케줄러) · PE 프리셋 요약(모델 배지 · 미리보기) ·
   // 이름 묻기(앱 표준 대화 상자). 없으면 빈 값 · 빈 목록 · 브라우저 prompt.
   getSessionParams = () => ({}),
+  getApiMode = () => 'NAI',             // 지금 API 모드(NAI · WEBUI · COMFYUI) - 캐릭터를 어디에 싣나를 정한다
   getParamChoices = () => ({}),
   getPresetSummaries = () => [],
   askText = null,
@@ -449,7 +457,6 @@ export function createPresetBench({
     count: normalizeCast({count: saved.count ?? (['gb', 'gg', 'bb'].includes(saved.castId) ? 2 : 1)}).count,
     // 캐릭터마다 서버가 정한 성별(저장하지 않는다 - 창을 열 때 글로 다시 묻는다).
     subjects: Array.from({length: MAX_CHARACTERS}, () => ({gender: '', source: '', name: ''})),
-    target: saved.target === 'main' ? 'main' : 'char',
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
     // 추가 프롬프트 - 캐릭터마다(그 캐릭터 몫 끝) · 메인(메인 끝).
     extras: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.extras?.[i] || '')),
@@ -506,7 +513,7 @@ export function createPresetBench({
   function persist() {
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
-        count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split, size: st.size,
+        count: st.count, names: st.names, picks: st.picks, split: st.split, size: st.size,
         extras: st.extras, extraMain: st.extraMain,
         ucs: st.ucs, loaded: st.loaded, refs: st.refs, cv: {src: st.cv.src, attach: st.cv.attach},
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
@@ -537,11 +544,9 @@ export function createPresetBench({
   leftMount.hidden = true;
   leftMount.innerHTML = `
       <div class="pbw-left">
-        <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-btn" data-act="leave" title="메인 프롬프트로 돌아갑니다(Result 탭)">← 프롬프트</button></div>
+        <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-base" data-act="base">프리셋 설정</button>
+          <button type="button" class="pbw-btn" data-act="leave" title="메인 프롬프트로 돌아갑니다(Result 탭)">← 프롬프트</button></div>
         <div class="pbw-ledit">
-          <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
-          <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
-            <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
           <div class="pbw-chars" data-role="chars"></div>
         </div>
         <div class="pbw-pick">
@@ -600,10 +605,8 @@ export function createPresetBench({
   function renderBaseCard() {
     const base = currentBase();
     baseCard.classList.toggle('is-on', st.baseOpen);
-    baseCard.innerHTML = `<div class="pbw-row"><span class="pbw-dim pbw-sm">기반 · ${st.base.mode === 'direct' ? '직접 설정' : '프리셋'}</span>
-      <span class="pbw-dim pbw-sm" style="margin-left:auto">설정 ›</span></div>
-      <div class="pbw-base-sum" title="${esc(base.label)}">${esc(base.label)}</div>
-      <div class="pbw-base-sum pbw-dim">${esc(paramsSummary(base.params))}</div>`;
+    baseCard.title = `기반 · ${st.base.mode === 'direct' ? '직접 설정' : '프리셋'} · ${base.label}\n${paramsSummary(base.params)}\n누르면 기반 설정을 엽니다`;
+    baseCard.setAttribute('aria-label', '프리셋 설정');   // 앱 툴팁이 title 을 옮기며 첫 값으로 박아 두는 것을 막는다
   }
 
   async function loadBases() {
@@ -801,9 +804,9 @@ export function createPresetBench({
   // 칸 줄은 renderSlots 가, 성별 표지는 renderSubjects 가 제자리만 다시 그린다.
   // 추가 프롬프트 칸 - key = 캐릭터 번호(0 · 1) 또는 'main'. 쓰는 대로 저장한다(생성 때 읽는다).
   function extraBox(key, label, hint, value) {
-    return `<div class="pbw-extra"><div class="pbw-extra-k"><span>${label}</span>
-        <button type="button" class="pbw-slot-x" data-act="extra-x" data-extra-key="${key}" title="비우기" aria-label="${label} 비우기">×</button></div>
-      <textarea class="pbw-text" rows="2" data-extra="${key}" placeholder="${hint}">${esc(value || '')}</textarea></div>`;
+    return `<div class="pbw-extra${value ? ' has-text' : ''}" data-extra-box="${key}"><span class="pbw-slot-k">${label}</span>
+      <textarea class="pbw-text" rows="1" data-extra="${key}" placeholder="${hint}">${esc(value || '')}</textarea>
+      <button type="button" class="pbw-slot-x" data-act="extra-x" data-extra-key="${key}" title="비우기" aria-label="추가 프롬프트 비우기">×</button></div>`;
   }
 
   function renderChars() {
@@ -816,10 +819,10 @@ export function createPresetBench({
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
       <div data-slots="${i + 1}"></div>
-      ${extraBox(i, '캐릭터 추가 프롬프트', '이 캐릭터에 더할 태그 - 캐릭터 칸 끝에', st.extras[i])}</div>`).join('') +
+      ${extraBox(i, '추가', '+ 쓰기 - 이 캐릭터 끝에 더할 태그', st.extras[i])}</div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
       '<div class="pbw-solos" data-slots="0"></div>' +
-      `<div class="pbw-ccard is-solo is-extra">${extraBox('main', '추가 프롬프트', '메인 프롬프트 끝에 더할 태그', st.extraMain)}</div>`;
+      `<div class="pbw-ccard is-solo is-extra">${extraBox('main', '추가<small>프롬프트</small>', '+ 쓰기 - 메인 프롬프트 끝에 더할 태그', st.extraMain)}</div>`;
     qs('.pbw-left')?.classList.toggle('is-solo', count < 2);
     box.querySelectorAll('textarea[data-name], textarea[data-extra]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
@@ -864,6 +867,13 @@ export function createPresetBench({
 
   // 기반 모델 - 기반에 없으면 세션 값(서버도 같은 순서로 정한다).
   function baseModel() { return String(currentBase().params?.model || sessionParams().model || ''); }
+
+  // 캐릭터를 어디에 싣나 - 고르지 않는다(사용자 11-20: "NAI 는 전부 캐릭터칸, 나머지는 메인으로 자동").
+  // NAI 라도 V3(NAID3 · nai-diffusion-3) 는 캐릭터 칸이 없어 메인으로(서버가 V3 + 캐릭터 칸을 409 로 막는다).
+  function autoTarget() {
+    if (String(getApiMode() || 'NAI').toUpperCase() !== 'NAI') return 'main';
+    return /naid3|diffusion-3|furry-3/i.test(baseModel()) ? 'main' : 'char';
+  }
 
   // 캐릭터 글 칸을 바꾼다(불러오기) - 치는 것과 같게 저장 · 성별 다시 묻기.
   function setCharText(i, text) {
@@ -969,7 +979,6 @@ export function createPresetBench({
   }
 
   function renderLeftControls() {
-    $('target').querySelectorAll('button').forEach(btn => btn.classList.toggle('is-on', btn.dataset.target === st.target));
     const n = st.axis ? axisSets().length : 1;
     goBtn.textContent = running() ? '■ 중지' : `▶ ${n}장 생성`;
     goBtn.title = running() ? '아직 대기 중인 생성을 큐에서 뺍니다(그리는 중인 한 장은 끝까지 갑니다)' : '기반 + 고른 칸으로 생성합니다';
@@ -1532,7 +1541,7 @@ export function createPresetBench({
     const slotsNow = slots();
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis, ucs: st.ucs,
+    const items = buildItems({cast: castNow(), target: autoTarget(), names: st.names, picks: picksTags(), axis, ucs: st.ucs,
       extras: st.extras.slice(0, st.count), extraMain: st.extraMain});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
@@ -1655,6 +1664,12 @@ export function createPresetBench({
   listen('focusin', event => {
     const area = event.target.closest?.('textarea[data-name]');
     if (area && inside(area)) pickChar(Number(area.dataset.name));
+    const extra = event.target.closest?.('textarea[data-extra]');
+    if (extra && inside(extra)) extra.rows = 4;          // 누르면 펼친다
+  });
+  listen('focusout', event => {
+    const extra = event.target.closest?.('textarea[data-extra]');
+    if (extra && inside(extra)) { extra.rows = 1; extra.scrollTop = 0; }    // 떠나면 다시 한 줄
   });
 
   listen('click', event => {
@@ -1671,7 +1686,7 @@ export function createPresetBench({
       const key = t.closest('[data-extra-key]').dataset.extraKey;
       if (key === 'main') st.extraMain = ''; else st.extras[Number(key)] = '';
       const area = qs(`textarea[data-extra="${key}"]`);
-      if (area) area.value = '';
+      if (area) { area.value = ''; area.closest('.pbw-extra')?.classList.remove('has-text'); }
       persist();
       return;
     }
@@ -1749,8 +1764,6 @@ export function createPresetBench({
     }
     if (act === 'export') { void exportDirect(false); return; }
 
-    const tg = t.closest('[data-target]');
-    if (tg) { st.target = tg.dataset.target; persist(); renderLeftControls(); return; }
     const mode = t.closest('[data-mode]');
     if (mode) {
       // 직접 설정으로 처음 넘어갈 때(저장본 없음 · 빈 값)는 지금 고른 프리셋의 값을 채워서 연다(사용자 11-20).
@@ -1893,6 +1906,7 @@ export function createPresetBench({
     const t = event.target;
     if (t.dataset.extra !== undefined) {
       if (t.dataset.extra === 'main') st.extraMain = t.value; else st.extras[Number(t.dataset.extra)] = t.value;
+      t.closest('.pbw-extra')?.classList.toggle('has-text', Boolean(t.value));
       persist();
       return;
     }

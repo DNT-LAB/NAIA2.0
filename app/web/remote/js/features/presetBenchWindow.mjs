@@ -245,7 +245,15 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-sub { font-size: 13px; font-weight: 600; color: var(--text-primary); padding: 3px 7px; margin: 8px 0 2px;
   border-radius: 4px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .pbw-sub:first-child { margin-top: 0; }
-.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; }
+.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 8px; }
+/* 고른 대분류 아래 소분류 나무(사용자 11-20) - 들여쓰기 + 왼쪽 가는 줄 · 글은 대분류보다 한 단계 작게. 누르면 그 소분류만. */
+.pbw-csubs { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 5px 9px; border-left: 1px solid rgba(255,255,255,0.14); flex: none; }
+.pbw-csub { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; margin-left: 5px; padding: 2px 7px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--text-muted); font-family: inherit; font-size: 12px; text-align: left; cursor: pointer; position: relative; }
+.pbw-csub small { font-size: 10px; color: var(--text-dim); }
+.pbw-csub:hover { color: var(--text-primary); }
+.pbw-csub.is-on { color: var(--text-primary); background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pbw-csub.is-on::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--accent); }
 .pbw-ex2.is-related { grid-template-columns: minmax(0, 1fr) 0; }
 .pbw-seeds { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
 .pbw-ex2.is-related .pbw-seeds { border-right: 0; padding-right: 0; }
@@ -549,7 +557,7 @@ export function createPresetBench({
     linkPool: st.picks.link?.pool || ''});
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
-  const viewOf = id => (st.views[id] ||= {cat: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
+  const viewOf = id => (st.views[id] ||= {cat: '', sub: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
   // 고르는 중인 캐릭터(0 · 1) - 칸을 고르는 중이면 -1.
@@ -1133,7 +1141,13 @@ export function createPresetBench({
     // 대분류 차례 · 이름은 서버의 탐색 분류표 그대로(갈래 다섯 모두).
     const groups = catalog.groups || [];
     if (!view.cat || !groups.some(group => group.slot === view.cat)) view.cat = groups[0]?.slot || '';
-    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || group.slot)}</span><small>${setTotal(group.seeds)}</small></button>`).join('');
+    const curGroup = groups.find(item => item.slot === view.cat);
+    if (view.sub && !(curGroup?.subs || []).some(sub => sub.name === view.sub)) view.sub = '';
+    // 고른 대분류(둘러보기 중) 아래에 소분류를 들여 나열한다 - 소분류가 둘 이상일 때만(하나뿐이면 대분류와 같다).
+    const subTree = group => (view.mode === 'browse' && group.slot === view.cat && (group.subs || []).length > 1
+      ? `<div class="pbw-csubs">${group.subs.map(sub => `<button type="button" class="pbw-csub${sub.name === view.sub ? ' is-on' : ''}" data-csub="${esc(sub.name)}"><span>${esc(sub.name)}</span><small>${setTotal(sub.seeds)}</small></button>`).join('')}</div>`
+      : '');
+    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || group.slot)}</span><small>${setTotal(group.seeds)}</small></button>${subTree(group)}`).join('');
 
     let seeds;
     if (view.mode === 'search') {
@@ -1142,21 +1156,25 @@ export function createPresetBench({
         ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched === hit.seed ? hit.seed : `${hit.seed} · 찾은 태그 ${hit.matched}`)}">${seedLabel(hit)}<span>${hit.count}</span></div>`).join('')
         : `<div class="pbw-empty">'${esc(view.q)}' 결과 없음</div>`;
     } else {
-      const group = groups.find(item => item.slot === view.cat);
-      seeds = group?.seeds || [];
+      const group = curGroup;
+      const sub = view.sub ? group.subs.find(item => item.name === view.sub) : null;
+      seeds = sub ? sub.seeds : (group?.seeds || []);
       // 소분류 머리글 + 오른쪽 수 = 고를 수 있는 세트 수(사용자 11-20 - 게시물 수는 툴팁으로).
       // 이름 = 한글 + 옆에 작은 영문 태그(사용자 11-20). 사전에 이름이 없으면 영문만.
       const row = seed => {
         const tip = seed.posts != null ? `세트 ${seed.sets} · Danbooru 게시물 ${Number(seed.posts).toLocaleString()}` : `세트 ${seed.sets}`;
         return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(`${seed.seed} · ${tip}`)}">${seedLabel(seed)}<span>${seed.sets}</span></div>`;
       };
-      // 맨 위 '전체' = 대분류를 누른 상태(그 대분류의 세트를 다 나열 - 사용자 11-20 "첫 그룹을 고르지 말고 전체").
-      const all = `<div class="pbw-seed is-all${view.seed ? '' : ' is-on'}" data-seed="" title="이 분류의 세트를 모두 나열합니다"><span>전체</span><span>${setTotal(seeds)}</span></div>`;
-      seedsBox.innerHTML = all + (group?.subs
-        ? group.subs.map(sub => `<div class="pbw-sub">${esc(sub.name)}</div>${sub.seeds.map(row).join('')}`).join('')
-        : seeds.map(row).join(''));
+      // 맨 위 줄 = 대분류(또는 고른 소분류)를 누른 상태 - 그 안의 세트를 다 나열(사용자 11-20 "첫 그룹을 고르지 말고 전체").
+      const all = `<div class="pbw-seed is-all${view.seed ? '' : ' is-on'}" data-seed="" title="이 분류의 세트를 모두 나열합니다"><span>${sub ? esc(sub.name) : '전체'}</span><span>${setTotal(seeds)}</span></div>`;
+      seedsBox.innerHTML = all + (sub
+        ? seeds.map(row).join('')
+        : group?.subs
+          ? group.subs.map(item => `<div class="pbw-sub">${esc(item.name)}</div>${item.seeds.map(row).join('')}`).join('')
+          : seeds.map(row).join(''));
       if (view.seed && !seeds.some(seed => seed.seed === view.seed)) view.seed = '';
-      if (!view.seed) { await renderCategorySets(slot, group, seeds, serial); return; }
+      const label = sub ? `${group?.label || ''} › ${sub.name}` : `${group?.label || ''} 전체`;
+      if (!view.seed) { await renderCategorySets(slot, label, seeds, serial); return; }
     }
     if (!view.seed || !seeds.some(seed => seed.seed === view.seed)) view.seed = seeds[0]?.seed || '';
     seedsBox.querySelectorAll('.pbw-seed').forEach(row => row.classList.toggle('is-on', row.dataset.seed === view.seed));
@@ -1180,10 +1198,10 @@ export function createPresetBench({
   }
 
   // 대분류 전체 - 시드마다 세트를 받아(시드 하나 고를 때와 같은 캐시) 시드별 머리글 아래 나열한다.
-  async function renderCategorySets(slot, group, seeds, serial) {
+  async function renderCategorySets(slot, label, seeds, serial) {
     const ctx = $('ex-ctx');
     const grid = $('grid');
-    ctx.textContent = `${group?.label || ''} 전체`;
+    ctx.textContent = label;
     grid.innerHTML = '<div class="pbw-empty">불러오는 중…</div>';
     let lists;
     try {
@@ -1204,7 +1222,7 @@ export function createPresetBench({
       const en = seed.ko && seed.ko !== seed.seed ? `<small>${esc(seed.seed)}</small>` : '';
       return `<div class="pbw-sec">${esc(seed.ko || seed.seed)}${en} · ${sets.length}</div><div class="pbw-grid">${sets.map(set => cardHtml(slot, set)).join('')}</div>`;
     }).join('') || '<div class="pbw-empty">세트가 없습니다</div>';
-    ctx.textContent = `${group?.label || ''} 전체 · ${total}세트`;
+    ctx.textContent = `${label} · ${total}세트`;
   }
 
   async function runSearch(q) {
@@ -1898,10 +1916,20 @@ export function createPresetBench({
       const rhash = t.closest('[data-rhash]');
       if (rhash) { toggleStorageRef(ci, rhash.dataset.rhash); return; }
     }
+    const csub = t.closest('[data-csub]');
+    if (csub) {
+      const view = viewOf(st.cur);
+      view.sub = view.sub === csub.dataset.csub ? '' : csub.dataset.csub;
+      view.seed = '';
+      view.hitSet = '';
+      void renderExplorer();
+      return;
+    }
     const cat = t.closest('[data-cat]');
     if (cat) {
       const view = viewOf(st.cur);
       view.cat = cat.dataset.cat;
+      view.sub = '';
       view.seed = '';
       view.mode = 'browse';
       view.q = '';

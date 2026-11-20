@@ -1460,7 +1460,7 @@ export function createPresetBench({
           ? `<img class="pbw-th is-tall" loading="lazy" src="${esc(row.thumbnail_url)}" alt="">`
           : '<div class="pbw-th is-tall pbw-none">썸네일 없음</div>';
         return `<div class="pbw-card${mine === `${row.group}|${row.character}` ? ' is-sel' : ''}" data-cchar="${k}" data-zt="${esc(`${row.character} · ${dbGroupLabel(row.group)}`)}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
-          ${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
+          ${playButton(`data-cplay="${k}"`, i)}${picture}<div class="pbw-cap">${esc(name)}${mixed ? ` <span class="pbw-dim">${esc(dbGroupLabel(row.group))}</span>` : ''} · ${formatPosts(row.count)}</div></div>`;
       }).join('')}</div>` : `<div class="pbw-empty">${q ? `'${esc(q)}' 결과 없음` : db.fav ? '즐겨찾기한 캐릭터가 없습니다' : '캐릭터가 없습니다'}${
         q && db.group !== '__ALL__' ? `<br><button type="button" class="pbw-btn" data-cgroup="__ALL__" style="margin-top:8px">전체 작품에서 찾기</button>` : ''}</div>`;
       return;
@@ -1490,7 +1490,7 @@ export function createPresetBench({
       const pics = [{hash: '', name: '대표', revision: detail.revision}, ...(detail.variations || []).map((v, k) => ({hash: v.hash, name: v.name || `변형 ${k + 1}`, revision: v.revision}))];
       ctx.textContent = `${assetName(row)} · 그림 ${pics.length} · 누르면 캐릭터 ${i + 1} 칸에(프롬프트 + UC)`;
       grid.innerHTML = `<div class="pbw-grid is-3">${pics.map(pic => `<div class="pbw-card" data-avar="${esc(pic.hash)}" data-aid="${esc(row.id)}" data-zt="${esc(`${assetName(row)} · ${pic.name}`)}" title="${esc(`${pic.name} - 누르면 캐릭터 ${i + 1} 칸에`)}">
-          <img class="pbw-th is-tall" loading="lazy" src="${esc(API.assetThumb(row.id, pic.hash, pic.revision))}" alt="">
+          ${playButton(`data-aplay="${esc(pic.hash)}" data-aid="${esc(row.id)}"`, i)}<img class="pbw-th is-tall" loading="lazy" src="${esc(API.assetThumb(row.id, pic.hash, pic.revision))}" alt="">
           <div class="pbw-cap">${esc(pic.name)}</div></div>`).join('')}</div>`;
       return;
     }
@@ -1518,6 +1518,33 @@ export function createPresetBench({
         <div class="pbw-cap">${esc(name)} · ${REF_TYPE_SHORT[s.reference_type] || ''} S ${s.strength ?? ''} F ${s.fidelity ?? ''}</div></div>`;
     }).join('')}</div>` : `<div class="pbw-empty">${box.q.trim() ? `'${esc(box.q)}' 결과 없음` : '보관함이 비었습니다 - REF 창에서 그림을 넣어 두세요'}</div>`;
   }
+
+  // 캐릭터 카드 ▶ (사용자 11-20) - 세트 카드의 ▶ 와 같다: 지금 조합에서 캐릭터 i 만 이 캐릭터로 바꿔 바로 1장(칸은 그대로).
+  const playButton = (attrs, i) => `<button type="button" class="pbw-play" ${attrs} title="지금 조합에서 캐릭터 ${i + 1} 만 이 캐릭터로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 캐릭터로 1장 생성">▶</button>`;
+  async function playChar(i, load) {
+    let char;
+    try { char = await load(); } catch (error) { notify(`캐릭터를 불러오지 못했습니다: ${error.message}`, 'error'); return; }
+    if (!String(char.text || '').trim()) { notify('이 캐릭터엔 프롬프트가 없습니다', 'info'); return; }
+    // 성별(맨 앞 인원 태그)은 칸에 넣을 때와 같은 길로 묻는다 - 모르면 girl.
+    let gender = '';
+    try { gender = String((await getJson(API.subject(char.text))).gender || ''); } catch (_) { /* girl 로 본다 */ }
+    void generate({char: {...char, index: i, gender}});
+  }
+  const playDb = (i, row) => playChar(i, async () => {
+    const data = await getJson(API.dbCharacter(row.group, row.character, ''));
+    return {text: data.prompt, uc: '', label: dbShortName(row.character, row.group)};
+  });
+  const playAsset = (i, id, variation) => playChar(i, async () => {
+    const detail = await getJson(API.assetDetail(id, variation));
+    const row = assetRows.find(item => item.id === id);
+    const name = row ? assetName(row) : (detail.display_name || id.slice(0, 8));
+    const pics = [{hash: '', revision: detail.revision}, ...(detail.variations || [])];
+    const at = Math.max(0, pics.findIndex(pic => pic.hash === variation));
+    // 'REF 로도' 가 켜져 있으면 불러올 때처럼 그 그림을 REF 로 - 이번 한 장에만.
+    const ref = st.cv.attach ? cleanRef({source: 'asset', id, variation, label: name, thumb: API.assetThumb(id, variation, pics[at]?.revision),
+      ...ASSET_REF_DEFAULT, auto: true}) : null;
+    return {text: detail.character_prompt, uc: detail.character_uc || '', label: name, ref};
+  });
 
   // 불러오기 - 앞서 에셋을 불러오며 저절로 붙은 REF 는 걷는다(다른 캐릭터의 그림이 남지 않게).
   function startLoad(i, loaded, text, uc) {
@@ -1676,25 +1703,42 @@ export function createPresetBench({
 
   // ---------------------------------------------------------------- 생성
   // play = {slotId, set} 이면 ▶ - 지금 조합에서 그 칸만 이 세트로 바꿔 1장(칸 · 비교는 그대로 · 그리는 중이어도 뒤에 쌓는다).
+  // play = {char: {index, text, uc, label, gender, ref?}} 이면 캐릭터 카드 ▶ - 캐릭터 index 만 이 캐릭터로 바꿔 1장.
   async function generate(play = null) {
     if (!play && running()) return stop();
+    const playSet = play?.set ? play : null;
+    const playChar = play?.char || null;
     const slotsNow = slots();
     const axisSlot = play ? null : slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
     const picks = picksTags();
     const meta = picksMeta();
     const cast = castNow();
-    if (play) {
-      picks[play.slotId] = [...(play.set.tags || [])];
-      meta[play.slotId] = {add: play.set.add || [], adult: !!play.set.adult, distinct: play.set.distinct || []};
-      if (play.slotId === 'link') cast.linkPool = play.set.pool || '';
+    if (playSet) {
+      picks[playSet.slotId] = [...(playSet.set.tags || [])];
+      meta[playSet.slotId] = {add: playSet.set.add || [], adult: !!playSet.set.adult, distinct: playSet.set.distinct || []};
+      if (playSet.slotId === 'link') cast.linkPool = playSet.set.pool || '';
     }
-    const items = buildItems({cast, target: autoTarget(), names: st.names, picks, meta, axis, ucs: st.ucs,
-      extras: st.extras.slice(0, st.count), extraMain: st.extraMain, known: knownChars()});
-    if (play) Object.assign(items[0], {label: `▶ ${variantLabel(play.set.distinct?.length ? play.set.distinct : play.set.tags)}`, set: play.set});
+    const names = st.names.slice();
+    const ucs = st.ucs.slice();
+    const known = knownChars();
+    if (playChar) {
+      names[playChar.index] = playChar.text;
+      ucs[playChar.index] = playChar.uc || '';
+      known[playChar.index] = true;
+      if (playChar.gender) cast.genders[playChar.index] = playChar.gender;
+    }
+    const items = buildItems({cast, target: autoTarget(), names, picks, meta, axis, ucs,
+      extras: st.extras.slice(0, st.count), extraMain: st.extraMain, known});
+    if (playSet) Object.assign(items[0], {label: `▶ ${variantLabel(playSet.set.distinct?.length ? playSet.set.distinct : playSet.set.tags)}`, set: playSet.set});
+    if (playChar) Object.assign(items[0], {label: `▶ ${playChar.label}`});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
-    const refs = activeRefs();
+    // 캐릭터 ▶ = 그 캐릭터 몫의 저절로 붙은 REF(앞서 불러온 에셋 그림)는 빼고, 이 캐릭터의 그림(REF 로도)만 - 이번 한 장에만.
+    const refs = playChar
+      ? st.refs.slice(0, st.count).flatMap((list, k) => (k === playChar.index
+        ? [...(list || []).filter(ref => !ref.auto), ...(playChar.ref ? [playChar.ref] : [])] : (list || [])))
+      : activeRefs();
     if (refs.length > MAX_REFS) { notify(`레퍼런스는 한 번에 ${MAX_REFS}장까지입니다 - 캐릭터 카드의 REF 줄에서 빼 주세요`, 'error'); return; }
     if (refs.length && crUnsupported(baseModel())) {
       notify(`기반 모델(${baseModel()})은 Character Reference 를 못 씁니다 - 기반 모델을 바꾸거나 REF 를 빼 주세요`, 'error');
@@ -1715,10 +1759,11 @@ export function createPresetBench({
     const requestId = makeId();
     const run = {
       id: requestId, axis: axisSlot ? axisSlot.id : null,
-      label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : play ? `${KIND_LABELS[slotById(play.slotId)?.kind] || ''} ▶` : '한 장',
+      label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : playSet ? `${KIND_LABELS[slotById(playSet.slotId)?.kind] || ''} ▶`
+        : playChar ? `캐릭터 ${playChar.index + 1} ▶` : '한 장',
       base: `${currentBase().label} · ${st.size}` + (refs.length ? ` · REF ${refs.length}` : ''),
       items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: '',
-        used: usedSnapshot(axisSlot ? axisSlot.id : play ? play.slotId : null, play ? {...play.set, ...placeOf(play.slotId)} : item.set)})),
+        used: usedSnapshot(axisSlot ? axisSlot.id : playSet ? playSet.slotId : null, playSet ? {...playSet.set, ...placeOf(playSet.slotId)} : item.set)})),
     };
     void fillUsed(run);
     void slotsNow;
@@ -2081,6 +2126,10 @@ export function createPresetBench({
       const cgroup = t.closest('[data-cgroup]');
       if (cgroup) { st.cv.db.group = cgroup.dataset.cgroup; void renderExplorer(); return; }
       if (t.closest('[data-cfav]')) { st.cv.db.fav = !st.cv.db.fav; void renderExplorer(); return; }
+      const cplay = t.closest('[data-cplay]');
+      if (cplay) { const row = dbRows[Number(cplay.dataset.cplay)]; if (row) void playDb(ci, row); return; }
+      const aplay = t.closest('[data-aplay]');
+      if (aplay) { void playAsset(ci, aplay.dataset.aid, aplay.dataset.aplay); return; }
       const cchar = t.closest('[data-cchar]');
       if (cchar) {
         const row = dbRows[Number(cchar.dataset.cchar)];

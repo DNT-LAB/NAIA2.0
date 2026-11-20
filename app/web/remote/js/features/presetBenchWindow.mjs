@@ -221,6 +221,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 /* 그림 칸 = 너비와 무관하게 한 줄 2장(사용자 11-20 - 스크롤당 볼 것이 많지 않다). */
 .pbw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
+/* 캐릭터 고르기(DB · 에셋 · REF)는 한 줄 3장(사용자 11-20) - 칸 고르기는 2장 그대로. */
+.pbw-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
 .pbw-card { position: relative; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-surface); }
 .pbw-card:hover { border-color: var(--accent); }
@@ -1242,7 +1244,7 @@ export function createPresetBench({
       const shown = rows.total > dbRows.length ? `${dbRows.length} / ${rows.total.toLocaleString()}명 - 검색으로 좁히세요` : `${rows.total.toLocaleString()}명`;
       ctx.textContent = `${q ? `${db.group === '__ALL__' ? '' : `${dbGroupLabel(db.group)} 안 `}검색 '${q}'` : dbGroupLabel(db.group)} · ${shown} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
       const mine = st.loaded[i]?.src === 'db' ? st.loaded[i].key : '';
-      grid.innerHTML = dbRows.length ? `<div class="pbw-grid">${dbRows.map((row, k) => {
+      grid.innerHTML = dbRows.length ? `<div class="pbw-grid is-3">${dbRows.map((row, k) => {
         const name = dbShortName(row.character, row.group);
         const picture = row.has_thumbnail && row.thumbnail_url
           ? `<img class="pbw-th is-tall" loading="lazy" src="${esc(row.thumbnail_url)}" alt="">`
@@ -1276,7 +1278,7 @@ export function createPresetBench({
       if (serial !== searchSerial) return;
       const pics = [{hash: '', name: '대표', revision: detail.revision}, ...(detail.variations || []).map((v, k) => ({hash: v.hash, name: v.name || `변형 ${k + 1}`, revision: v.revision}))];
       ctx.textContent = `${assetName(row)} · 그림 ${pics.length} · 누르면 캐릭터 ${i + 1} 칸에(프롬프트 + UC)`;
-      grid.innerHTML = `<div class="pbw-grid">${pics.map(pic => `<div class="pbw-card" data-avar="${esc(pic.hash)}" data-aid="${esc(row.id)}" data-zt="${esc(`${assetName(row)} · ${pic.name}`)}" title="${esc(`${pic.name} - 누르면 캐릭터 ${i + 1} 칸에`)}">
+      grid.innerHTML = `<div class="pbw-grid is-3">${pics.map(pic => `<div class="pbw-card" data-avar="${esc(pic.hash)}" data-aid="${esc(row.id)}" data-zt="${esc(`${assetName(row)} · ${pic.name}`)}" title="${esc(`${pic.name} - 누르면 캐릭터 ${i + 1} 칸에`)}">
           <img class="pbw-th is-tall" loading="lazy" src="${esc(API.assetThumb(row.id, pic.hash, pic.revision))}" alt="">
           <div class="pbw-cap">${esc(pic.name)}</div></div>`).join('')}</div>`;
       return;
@@ -1297,7 +1299,7 @@ export function createPresetBench({
     refRows = new Map(items.map(item => [item.file_hash, item]));
     ctx.textContent = `REF 보관함 · ${items.length}장`;
     const mine = new Set((st.refs[i] || []).filter(ref => ref.source === 'storage').map(ref => ref.file_hash));
-    grid.innerHTML = items.length ? `<div class="pbw-grid">${items.map(item => {
+    grid.innerHTML = items.length ? `<div class="pbw-grid is-3">${items.map(item => {
       const s = item.settings || {};
       const name = item.name || item.display_name || item.file_hash;
       return `<div class="pbw-card${mine.has(item.file_hash) ? ' is-sel' : ''}" data-rhash="${esc(item.file_hash)}" data-zt="${esc(name)}" title="${esc(`${name} · ${s.reference_type || ''} · Strength ${s.strength} · Fidelity ${s.fidelity}`)}">

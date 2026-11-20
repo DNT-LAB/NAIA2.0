@@ -56,15 +56,16 @@ export function linkMismatch(gender, pool) {
 
 /** 캐릭터 수의 칸 목록. 칸 = {id, kind, pool, owner}. owner = 캐릭터 번호(1 · 2) 또는 0(캐릭터 밖 - 따로 카드).
  *  pool '' = 모든 풀(서버가 여성 · 남성 세트를 겹침 없이 한 목록으로 준다).
- *  1인: 의상 · 자세 · 자세 (2인 이상) · 표정 + 배경. 2인: 캐릭터마다 의상 · 표정 + 자세 (2인 이상) · 배경.
- *  2인 이상 자세는 1명이어도 쓴다(상대는 이름 없이 - 사용자 11-20). 칸 id 'link' 는 두 경우 같다(바꿔도 남는다). */
+ *  1인: 의상 · 자세 · 표정 + 자세 (2인 이상) · 배경. 2인: 캐릭터마다 의상 · 표정 + 자세 (2인 이상) · 배경.
+ *  2인 이상 자세는 1명이어도 쓴다(상대는 이름 없이 - 사용자 11-20). 칸 id 'link' 는 두 경우 같다(바꿔도 남는다).
+ *  2인 이상 자세는 늘 캐릭터 밖(owner 0) - 배경 위 붉은 카드(사용자 11-20: 주로 NSFW 갈래라 눈에 띄게). */
 export function slotsFor(count) {
   const pool = '';
   if ((Number(count) || 1) < 2) {
     return [
       {id: 'o1', kind: 'outfit', pool, owner: 1},
       {id: 'pose', kind: 'event', pool, owner: 1},
-      {id: 'link', kind: 'link', pool, owner: 1},
+      {id: 'link', kind: 'link', pool, owner: 0},
       {id: 'e1', kind: 'expression', pool, owner: 1},
       {id: 'scene', kind: 'scene', pool, owner: 0},
     ];
@@ -102,9 +103,11 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   variant   - {slotId, tags, pool} 이면 그 칸만 이 태그로 바꿔 조립한다(비교 축의 한 장)
  *   cast.linkPool - 2인 자세 칸에 든 세트의 풀(1명일 때 인원 태그를 정한다)
  *   ucs       - [캐릭터1 UC, 캐릭터2 UC] (에셋에서 불러온 캐릭터 UC - 캐릭터 칸에만 실린다)
+ *   extras    - [캐릭터1 추가 프롬프트, …] - 그 캐릭터 몫 끝(캐릭터 칸 · target 'main' 이면 메인)
+ *   extraMain - 추가 프롬프트 - 메인 끝(기반 postfix 앞)
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
-export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = []}) {
+export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = [], extras = [], extraMain = ''}) {
   const {count} = normalizeCast(cast);
   const slots = slotsFor(count);
   const tagsOf = slot => {
@@ -115,6 +118,7 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
   const linkPool = !linkTags.length ? '' : (variant && variant.slotId === 'link' ? variant.pool : cast && cast.linkPool);
   const head = headFor(cast, linkPool || '');
   const nameOf = i => String(names[i] || '').trim();
+  const extraOf = i => String(extras[i] || '').trim();
   // 칸 한 개의 글 - 2인 자세가 있으면 1인 자세(event)는 POSE_WEIGHT_WITH_LINK 로 감싼다. 2인 자세는 늘 메인(goesToCharacter 밖).
   const slotText = slot => {
     const text = joinTags(tagsOf(slot));
@@ -125,13 +129,15 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
       head,
       ...Array.from({length: count}, (_, i) => nameOf(i)),
       ...slots.map(slotText),
+      ...Array.from({length: count}, (_, i) => extraOf(i)),
+      extraMain,
     ]));
     return {main, characters: []};
   }
-  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slotText)]));
+  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slotText), extraMain]));
   const characters = [];
   for (let i = 0; i < count; i += 1) {
-    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1).map(slotText)]);
+    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1).map(slotText), extraOf(i)]);
     characters.push({prompt, uc: String(ucs[i] || '').trim()});
   }
   // 캐릭터 칸이 전부 비면 싣지 않는다 - 빈 캐릭터 칸은 NAI 에 사람 하나를 더 그리라는 뜻이 될 수 있다.
@@ -139,12 +145,12 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
 }
 
 /** 미리보기 줄: 메인 · 캐릭터 N. 비교 축 칸은 `{의상 ×3}` 처럼 표시한다(axisCount > 1 이고 variant 가 없을 때). */
-export function previewRows({cast, target, names, picks, variant = null, axis = null, ucs = []}) {
+export function previewRows({cast, target, names, picks, variant = null, axis = null, ucs = [], extras = [], extraMain = ''}) {
   let shownPicks = picks;
   if (!variant && axis && axis.count > 1) {
     shownPicks = {...picks, [axis.slotId]: [`{${axis.label} ×${axis.count}}`]};
   }
-  const {main, characters} = assemble({cast, target, names, picks: shownPicks, variant, ucs});
+  const {main, characters} = assemble({cast, target, names, picks: shownPicks, variant, ucs, extras, extraMain});
   const rows = [{key: 'main', label: '메인', text: main}];
   characters.forEach((row, i) => rows.push({key: `c${i + 1}`, label: `캐릭터 ${i + 1}`, text: row.prompt}));
   return rows;
@@ -158,14 +164,15 @@ export function variantLabel(tags) {
 }
 
 /** 생성 요청의 items. 비교 축이 있으면 축 칸의 세트마다 한 장, 없으면 한 장. */
-export function buildItems({cast, target, names, picks, axis = null, ucs = []}) {
+export function buildItems({cast, target, names, picks, axis = null, ucs = [], extras = [], extraMain = ''}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({cast, target, names, picks, ucs, variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
+      const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain,
+        variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }
-  const {main, characters} = assemble({cast, target, names, picks, ucs});
+  const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain});
   return [{label: '한 장', main, characters, set: null}];
 }
 

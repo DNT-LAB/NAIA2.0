@@ -28,7 +28,7 @@
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-pw1';
+} from './presetBenchModel.mjs?v=20261120-ex1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -187,6 +187,16 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-slot.is-cur .pbw-slot-k { color: var(--accent-light); }
 .pbw-ccard.is-solo .pbw-slot-k { color: var(--text-primary); font-weight: 600; }
 .pbw-ccard.is-solo .pbw-slot.is-cur .pbw-slot-k { color: var(--accent-light); }
+/* 자세 (2인 이상) = 배경 위 붉은 카드(사용자 11-20 - 주로 NSFW 갈래라 눈에 띄게). 고르는 중이면 위 보라 규칙이 덧칠한다. */
+.pbw-ccard.is-link { background: rgba(226,75,74,0.10); border-color: rgba(226,75,74,0.5); }
+.pbw-ccard.is-link .pbw-slot-k, .pbw-ccard.is-link .pbw-slot-k small { color: #f09595; }
+/* 추가 프롬프트 - 캐릭터 카드의 표정 아래(그 캐릭터 몫) · 배경 아래 카드(메인 몫). */
+.pbw-extra { padding: 4px 8px 6px; border-top: 1px solid rgba(255,255,255,0.04); }
+.pbw-extra-k { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); }
+.pbw-extra-k > span { flex: 1 1 auto; }
+.pbw-extra .pbw-text { margin-top: 3px; line-height: 1.45; padding: 4px 6px; }
+.pbw-ccard.is-extra .pbw-extra { border-top: 0; }
+.pbw-ccard.is-extra .pbw-extra-k { color: var(--text-primary); font-weight: 600; }
 .pbw-slot-v { min-width: 0; }
 .pbw-slot-empty { display: inline-block; font-size: 11px; color: var(--text-dim); padding-top: 2px; }
 .pbw-slot.is-cur .pbw-slot-empty { color: var(--accent-light); }
@@ -441,6 +451,9 @@ export function createPresetBench({
     subjects: Array.from({length: MAX_CHARACTERS}, () => ({gender: '', source: '', name: ''})),
     target: saved.target === 'main' ? 'main' : 'char',
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
+    // 추가 프롬프트 - 캐릭터마다(그 캐릭터 몫 끝) · 메인(메인 끝).
+    extras: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.extras?.[i] || '')),
+    extraMain: String(saved.extraMain || ''),
     size: BENCH_SIZES.includes(saved.size) ? saved.size : DEFAULT_SIZE,     // 벤치 해상도(기반의 크기 대신)
     // 캐릭터마다 - 에셋에서 불러온 UC · 어디서 불러왔나(카드 아래 한 줄) · REF 줄.
     ucs: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.ucs?.[i] || '')),
@@ -494,6 +507,7 @@ export function createPresetBench({
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
         count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split, size: st.size,
+        extras: st.extras, extraMain: st.extraMain,
         ucs: st.ucs, loaded: st.loaded, refs: st.refs, cv: {src: st.cv.src, attach: st.cv.attach},
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
       }));
@@ -785,6 +799,13 @@ export function createPresetBench({
   // 배경)은 칸 이름이 곧 카드 제목인 작은 카드로 따로 - 묶음 이름('함께')을 두지 않는다(사용자 11-20).
   // 이름 칸은 캐릭터 수가 바뀔 때만 새로 만든다(자동완성 붙이기 · 치는 중 초점을 지킨다) -
   // 칸 줄은 renderSlots 가, 성별 표지는 renderSubjects 가 제자리만 다시 그린다.
+  // 추가 프롬프트 칸 - key = 캐릭터 번호(0 · 1) 또는 'main'. 쓰는 대로 저장한다(생성 때 읽는다).
+  function extraBox(key, label, hint, value) {
+    return `<div class="pbw-extra"><div class="pbw-extra-k"><span>${label}</span>
+        <button type="button" class="pbw-slot-x" data-act="extra-x" data-extra-key="${key}" title="비우기" aria-label="${label} 비우기">×</button></div>
+      <textarea class="pbw-text" rows="2" data-extra="${key}" placeholder="${hint}">${esc(value || '')}</textarea></div>`;
+  }
+
   function renderChars() {
     const box = $('chars');
     const count = st.count;
@@ -794,11 +815,13 @@ export function createPresetBench({
         ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
-      <div data-slots="${i + 1}"></div></div>`).join('') +
+      <div data-slots="${i + 1}"></div>
+      ${extraBox(i, '캐릭터 추가 프롬프트', '이 캐릭터에 더할 태그 - 캐릭터 칸 끝에', st.extras[i])}</div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
-      '<div class="pbw-solos" data-slots="0"></div>';
+      '<div class="pbw-solos" data-slots="0"></div>' +
+      `<div class="pbw-ccard is-solo is-extra">${extraBox('main', '추가 프롬프트', '메인 프롬프트 끝에 더할 태그', st.extraMain)}</div>`;
     qs('.pbw-left')?.classList.toggle('is-solo', count < 2);
-    box.querySelectorAll('textarea[data-name]').forEach(area => {
+    box.querySelectorAll('textarea[data-name], textarea[data-extra]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
     });
     renderSubjects();
@@ -940,7 +963,7 @@ export function createPresetBench({
       const mine = list.filter(slot => slot.owner === owner);
       // 캐릭터 밖 칸은 칸마다 작은 카드(칸 이름 = 카드 제목).
       holder.innerHTML = owner === 0
-        ? mine.map(slot => `<div class="pbw-ccard is-solo">${slotHtml(slot)}</div>`).join('')
+        ? mine.map(slot => `<div class="pbw-ccard is-solo${slot.kind === 'link' ? ' is-link' : ''}">${slotHtml(slot)}</div>`).join('')
         : mine.map(slotHtml).join('');
     });
   }
@@ -1509,7 +1532,8 @@ export function createPresetBench({
     const slotsNow = slots();
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis, ucs: st.ucs});
+    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis, ucs: st.ucs,
+      extras: st.extras.slice(0, st.count), extraMain: st.extraMain});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
     const refs = activeRefs();
@@ -1643,6 +1667,14 @@ export function createPresetBench({
     if (act === 'leave') { onLeave(); return; }
     if (act === 'char-add') { setCount(st.count + 1); return; }
     if (act === 'char-remove') { setCount(st.count - 1); return; }
+    if (act === 'extra-x') {
+      const key = t.closest('[data-extra-key]').dataset.extraKey;
+      if (key === 'main') st.extraMain = ''; else st.extras[Number(key)] = '';
+      const area = qs(`textarea[data-extra="${key}"]`);
+      if (area) area.value = '';
+      persist();
+      return;
+    }
     if (act === 'char-pick') {
       pickChar(Number(t.closest('[data-index]').dataset.index));
       return;
@@ -1743,7 +1775,7 @@ export function createPresetBench({
     if (chip) { st.note = ''; st.memo = null; renderNote(); void openRelated(chip.dataset.from, chip.dataset.chip); return; }
     // 카드의 나머지 자리(글 칸 · 불러온 줄)도 그 캐릭터를 고른다 - 단추 · 칩 · 칸 줄은 위에서 제 일을 했다.
     const ccard = t.closest('[data-ccard]');
-    if (ccard && !t.closest('[data-slots], button, a, [data-ref], .pbw-uc')) { pickChar(Number(ccard.dataset.ccard)); return; }
+    if (ccard && !t.closest('[data-slots], button, a, [data-ref], .pbw-uc, .pbw-extra')) { pickChar(Number(ccard.dataset.ccard)); return; }
     const slotEl = t.closest('[data-slot]');
     if (slotEl) {
       st.cur = slotEl.dataset.slot;
@@ -1859,6 +1891,11 @@ export function createPresetBench({
 
   listen('input', event => {
     const t = event.target;
+    if (t.dataset.extra !== undefined) {
+      if (t.dataset.extra === 'main') st.extraMain = t.value; else st.extras[Number(t.dataset.extra)] = t.value;
+      persist();
+      return;
+    }
     if (t.dataset.name !== undefined) {
       const i = Number(t.dataset.name);
       st.names[i] = t.value;

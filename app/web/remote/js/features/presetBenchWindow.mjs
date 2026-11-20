@@ -557,7 +557,7 @@ export function createPresetBench({
     linkPool: st.picks.link?.pool || ''});
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
-  const viewOf = id => (st.views[id] ||= {cat: '', sub: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
+  const viewOf = id => (st.views[id] ||= {cat: '', sub: '', pool: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
   // 고르는 중인 캐릭터(0 · 1) - 칸을 고르는 중이면 -1.
@@ -1143,6 +1143,9 @@ export function createPresetBench({
     if (!view.cat || !groups.some(group => group.slot === view.cat)) view.cat = groups[0]?.slot || '';
     const curGroup = groups.find(item => item.slot === view.cat);
     if (view.sub && !(curGroup?.subs || []).some(sub => sub.name === view.sub)) view.sub = '';
+    // 따로 뺀 풀의 대분류(2인 자세 '남남' - 사용자 11-20)는 그 풀로 세트를 받는다. 검색도 이 풀을 따른다.
+    if (view.mode === 'browse') view.pool = curGroup?.pool || '';
+    const pool = view.pool || slot.pool;
     // 고른 대분류(둘러보기 중) 아래에 소분류를 들여 나열한다 - 소분류가 둘 이상일 때만(하나뿐이면 대분류와 같다).
     const subTree = group => (view.mode === 'browse' && group.slot === view.cat && (group.subs || []).length > 1
       ? `<div class="pbw-csubs">${group.subs.map(sub => `<button type="button" class="pbw-csub${sub.name === view.sub ? ' is-on' : ''}" data-csub="${esc(sub.name)}"><span>${esc(sub.name)}</span><small>${setTotal(sub.seeds)}</small></button>`).join('')}</div>`
@@ -1174,7 +1177,7 @@ export function createPresetBench({
           : seeds.map(row).join(''));
       if (view.seed && !seeds.some(seed => seed.seed === view.seed)) view.seed = '';
       const label = sub ? `${group?.label || ''} › ${sub.name}` : `${group?.label || ''} 전체`;
-      if (!view.seed) { await renderCategorySets(slot, label, seeds, serial); return; }
+      if (!view.seed) { await renderCategorySets(slot, pool, label, seeds, serial); return; }
     }
     if (!view.seed || !seeds.some(seed => seed.seed === view.seed)) view.seed = seeds[0]?.seed || '';
     seedsBox.querySelectorAll('.pbw-seed').forEach(row => row.classList.toggle('is-on', row.dataset.seed === view.seed));
@@ -1185,7 +1188,7 @@ export function createPresetBench({
     ctx.textContent = seedName;
     let sets;
     try {
-      sets = await setsOf(slot.kind, slot.pool, view.seed);
+      sets = await setsOf(slot.kind, pool, view.seed);
     } catch (error) {
       if (serial !== searchSerial) return;
       grid.innerHTML = `<div class="pbw-empty">세트를 읽지 못했습니다: ${esc(error.message)}</div>`;
@@ -1198,14 +1201,14 @@ export function createPresetBench({
   }
 
   // 대분류 전체 - 시드마다 세트를 받아(시드 하나 고를 때와 같은 캐시) 시드별 머리글 아래 나열한다.
-  async function renderCategorySets(slot, label, seeds, serial) {
+  async function renderCategorySets(slot, pool, label, seeds, serial) {
     const ctx = $('ex-ctx');
     const grid = $('grid');
     ctx.textContent = label;
     grid.innerHTML = '<div class="pbw-empty">불러오는 중…</div>';
     let lists;
     try {
-      lists = await Promise.all(seeds.map(seed => setsOf(slot.kind, slot.pool, seed.seed)));
+      lists = await Promise.all(seeds.map(seed => setsOf(slot.kind, pool, seed.seed)));
     } catch (error) {
       if (serial !== searchSerial) return;
       grid.innerHTML = `<div class="pbw-empty">세트를 읽지 못했습니다: ${esc(error.message)}</div>`;
@@ -1244,10 +1247,14 @@ export function createPresetBench({
     } catch (error) {
       notify(`검색하지 못했습니다: ${error.message}`, 'error');
     }
+    // 따로 뺀 풀(남남)은 그 대분류를 보고 있을 때만 찾는다 - 다른 대분류에선 빼고, 거기선 그 풀만(사용자 11-20).
+    let apart = new Set();
+    try { apart = new Set(((await catalogOf(slot.kind, slot.pool)).groups || []).map(g => g.pool).filter(Boolean)); } catch (_) {}
     if (viewOf(slot.id).q !== q) return;      // 그사이 다시 쳤다
     const bySeed = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
       if (slot.pool && row.pool !== slot.pool) continue;   // 칸 pool '' = 모든 풀
+      if (view.pool ? row.pool !== view.pool : apart.has(row.pool)) continue;
       const hit = bySeed.get(row.seed) || {seed: row.seed, ko: row.ko || '', matched: row.matched, count: 0, first: row.set_id};
       hit.count += 1;
       bySeed.set(row.seed, hit);

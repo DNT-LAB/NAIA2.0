@@ -28,6 +28,9 @@ UNSORTED_LABEL = "분류 전"
 # 같은 시드 · 같은 태그 세트는 앞 풀 것 하나만 남긴다. 차례 = 여성(연결은 girl_boy) 먼저.
 ALL_POOLS = ""
 _POOL_PRIORITY = {"female": 0, "male": 1, "girl_boy": 0, "girl_girl": 1, "boy_boy": 2}
+# 모든 풀 목록에 섞지 않고 맨 끝 별도 대분류로 빼는 풀(사용자 11-20 - 남남은 싫어하는 사람이 많다).
+# 그 대분류의 소분류 = 탐색 분류표의 대분류 이름. 화면은 대분류의 `pool` 로 세트를 받는다.
+SEPARATE_POOLS = {"link": ("boy_boy", "남남")}
 _SUBJECTS = ("girl", "boy", "other")
 
 
@@ -128,7 +131,9 @@ class PresetBenchService:
                     rows.sort(key=_order)
             for kind in {kind for kind, _ in seeds}:
                 merged, seen = defaultdict(list), set()
-                pools = sorted((pool for k, pool in seeds if k == kind), key=lambda pool: _POOL_PRIORITY.get(pool, 9))
+                apart = SEPARATE_POOLS.get(kind, (None,))[0]
+                pools = sorted((pool for k, pool in seeds if k == kind and pool != apart),
+                               key=lambda pool: _POOL_PRIORITY.get(pool, 9))
                 for pool in pools:
                     for seed, rows in seeds[kind, pool].items():
                         for row in rows:
@@ -187,8 +192,8 @@ class PresetBenchService:
         seeds = self._pool(kind, pool)
         index, _ = self._thumbs()
 
-        def entry(seed, posts):
-            rows = seeds[seed]
+        def entry(seed, posts, source=seeds):
+            rows = source[seed]
             return {"seed": seed, "sets": len(rows), "with_thumb": sum(row["key"] in index for row in rows),
                     "posts": posts, "ko": korean_tag_name(_translation(translations, seed))}
 
@@ -208,6 +213,23 @@ class PresetBenchService:
             items = [entry(seed, None) for seed in rest]
             groups.append({"slot": UNSORTED_LABEL, "label": UNSORTED_LABEL,
                            "subs": [{"name": UNSORTED_LABEL, "seeds": items}], "seeds": items})
+        if pool == ALL_POOLS and kind in SEPARATE_POOLS:
+            apart, label = SEPARATE_POOLS[kind]
+            source = self._seeds.get((kind, apart), {})
+            subs, placed = [], set()
+            for category in self._browse[kind]:
+                tags = sorted(((tag, posts) for sub in category["subcategories"] for tag, posts in sub["tags"]
+                               if tag in source), key=lambda item: -(item[1] or 0))
+                items = [entry(tag, posts, source) for tag, posts in tags if tag not in placed]
+                placed.update(item["seed"] for item in items)
+                if items:
+                    subs.append({"name": category["category"], "seeds": items})
+            rest = sorted(set(source) - placed, key=lambda seed: _order(source[seed][0]))
+            if rest:
+                subs.append({"name": UNSORTED_LABEL, "seeds": [entry(seed, None, source) for seed in rest]})
+            if subs:
+                groups.append({"slot": label, "label": label, "pool": apart, "subs": subs,
+                               "seeds": [item for sub in subs for item in sub["seeds"]]})
         return {"kind": kind, "pool": pool, "groups": groups}
 
     def sets(self, kind, pool, seed):

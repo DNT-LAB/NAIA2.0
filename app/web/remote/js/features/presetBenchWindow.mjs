@@ -60,7 +60,17 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 #pbBlocks { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
 #pbBlocks[hidden] { display: none; }
 #presetBenchRoot { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
-.pbw-left { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 2px 2px 0; display: flex; flex-direction: column; gap: 8px; }
+/* 3단(사용자 11-20): 왼쪽 열 = 칸 편집(위 · 넘치면 스크롤) + 고르기(아래 · 열 높이의 절반 이상) + [N장 생성].
+   오른쪽 탭 = 그림 칸 | 끄는 경계 | 생성 결과(남는다 - 마지막 결과 크게 + 아래 줄에 이전 생성). */
+.pbw-left { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 2px 2px 0; display: flex; flex-direction: column; gap: 8px; }
+.pbw-ledit { flex: 0 1 auto; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
+.pbw-pick { flex: 1 0 50%; min-height: 0; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-dim); padding-top: 8px; }
+.pbw-main { flex: 1 1 auto; min-height: 0; display: flex; padding: 8px; }
+.pbw-gcol { flex: 0 0 45%; min-width: 220px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.pbw-split { flex: 0 0 11px; cursor: col-resize; position: relative; touch-action: none; }
+.pbw-split::after { content: ""; position: absolute; left: 5px; top: 0; bottom: 0; width: 1px; background: var(--border-dim); }
+.pbw-split:hover::after, .pbw-split.is-drag::after { left: 4px; width: 3px; background: var(--accent); }
+.pbw-rcol { flex: 1 1 0; min-width: 260px; min-height: 0; display: flex; flex-direction: column; }
 .pbw-lhead { display: flex; align-items: center; gap: 8px; }
 .pbw-lhead b { font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .pbw-lhead .pbw-btn { margin-left: auto; }
@@ -141,8 +151,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 /* 소분류 머리글이 항목보다 위로 읽히게 - 굵게 · 밝게 · 아래 선. */
 .pbw-sub { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 5px 3px; margin: 0 2px 2px; border-bottom: 1px solid var(--border-dim); }
 .pbw-sub:first-child { padding-top: 0; }
-.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px 190px minmax(0, 1fr); gap: 8px; }
-.pbw-ex2.is-related { grid-template-columns: 124px 0 minmax(0, 1fr); }
+.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 8px; }
+.pbw-ex2.is-related { grid-template-columns: minmax(0, 1fr) 0; }
 .pbw-seeds { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
 .pbw-ex2.is-related .pbw-seeds { border-right: 0; padding-right: 0; }
 .pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 12px; }
@@ -158,9 +168,10 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-ex-own { color: var(--text-dim); }
 .pbw-ex-ctx { min-width: 0; color: var(--text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
-.pbw-gcell { position: relative; min-width: 0; min-height: 0; }
-.pbw-grid-wrap { height: 100%; min-height: 0; overflow-y: auto; }
-.pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 140px)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
+.pbw-gcol .pbw-ex-ctx { font-size: 12px; color: var(--text-muted); }
+.pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+/* 그림 칸이 넓어진 만큼 카드도 키운다 - 칸 너비 500px 이면 한 줄 2장(약 240px). */
+.pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 .pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
 .pbw-card { position: relative; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-surface); }
 .pbw-card:hover { border-color: var(--accent); }
@@ -175,18 +186,23 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
   background: rgba(12,12,18,0.85); color: var(--accent); font-size: 12px; line-height: 16px; text-align: center; cursor: pointer; }
 .pbw-ck.is-on { border-color: var(--accent); }
 .pbw-empty { margin: auto; padding: 20px; text-align: center; color: var(--text-dim); font-size: 12px; line-height: 1.6; }
-/* 생성 결과 = 그림 칸 위에 잠깐 뜨는 판(사용자 11-20 - 결과 띠 회수). 분류 · 소분류 · 왼쪽은 그대로 보인다.
-   닫기 = × · Esc · 판 위 우클릭 · 왼쪽(또는 분류 · 소분류)을 누르기. */
-.pbw-rl { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; background: var(--bg-surface);
-  border: 1px solid var(--accent); border-radius: 6px; overflow: hidden; }
-.pbw-rl[hidden] { display: none; }
+/* 생성 결과 열 - 닫지 않는다. 한 장 = 원본을 칸에 맞춰 크게, 비교 = 격자. 아래 줄 = 이전 생성(누르면 그 생성을 본다). */
+.pbw-rl { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; background: var(--bg-surface);
+  border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; }
+.pbw-rl > .pbw-empty { margin: auto; }
+.pbw-rl-hist { flex: none; display: flex; gap: 4px; overflow-x: auto; padding: 6px 8px; border-top: 1px solid var(--border-dim); }
+.pbw-rl-h { position: relative; flex: 0 0 56px; height: 56px; padding: 0; border: 2px solid transparent; border-radius: 5px; overflow: hidden;
+  cursor: pointer; background: #0c0c12; }
+.pbw-rl-h:hover { border-color: var(--border-glow); }
+.pbw-rl-h.is-on { border-color: var(--accent); }
+.pbw-rl-h img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.pbw-rl-h .pbw-res-box { height: 100%; aspect-ratio: auto; }
+.pbw-rl-h span { position: absolute; right: 2px; bottom: 2px; padding: 0 3px; border-radius: 3px; font-size: 10px; line-height: 14px;
+  background: rgba(0, 0, 0, 0.65); color: #fff; }
 .pbw-rl-head { flex: none; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-bottom: 1px solid var(--border-dim); }
 .pbw-rl-head > .pbw-dim { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-rl-nav { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .pbw-rl-nav .pbw-btn { padding: 0 7px; font-size: 13px; line-height: 20px; }
-.pbw-rl-x { flex: none; width: 26px; height: 24px; border: 1px solid var(--border-dim); border-radius: 5px; background: transparent; color: var(--text-primary);
-  font-size: 15px; line-height: 1; cursor: pointer; }
-.pbw-rl-x:hover { border-color: var(--accent); }
 .pbw-rl-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; }
 .pbw-rl-body.is-one { display: flex; overflow: hidden; }
 .pbw-rl-one { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
@@ -340,8 +356,9 @@ export function createPresetBench({
     pick: null,           // [run id, item index]
     baseOpen: false,
     pvOpen: false,
-    resOpen: false,       // 결과 판이 그림 칸 위에 떠 있나
-    resRun: '',           // 판이 보여 주는 생성(run id) - ‹ › 로 앞선 생성을 넘겨 본다
+    resRun: '',           // 결과 열이 보여 주는 생성(run id) - 비면 마지막 생성
+    // 그림 칸 : 결과 열 너비(그림 칸 몫 0.25~0.75) - 경계를 끌어 바꾸고 기억한다. 두 번 누르면 0.45.
+    split: Math.min(0.75, Math.max(0.25, Number(saved.split) || 0.45)),
     base: {
       mode: saved.base?.mode === 'direct' ? 'direct' : 'preset',
       preset: String(saved.base?.preset || ''),
@@ -367,7 +384,7 @@ export function createPresetBench({
   function persist() {
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
-        count: st.count, target: st.target, names: st.names, picks: st.picks,
+        count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split,
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
       }));
     } catch (_) { /* 이번 실행만 */ }
@@ -394,22 +411,30 @@ export function createPresetBench({
   leftMount.innerHTML = `
       <div class="pbw-left">
         <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-btn" data-act="leave" title="메인 프롬프트로 돌아갑니다(Result 탭)">← 프롬프트</button></div>
-        <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
-        <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
-          <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
-        <div class="pbw-chars" data-role="chars"></div>
+        <div class="pbw-ledit">
+          <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
+          <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
+            <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
+          <div class="pbw-chars" data-role="chars"></div>
+        </div>
+        <div class="pbw-pick">
+          <div data-role="note"></div>
+          <div class="pbw-ex-head"><b data-role="ex-title" style="font-weight:600;font-size:13px;white-space:nowrap"></b>
+            <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색"></div>
+          <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div></div>
+        </div>
         <button type="button" class="pbw-btn is-primary pbw-go" data-act="go"></button>
       </div>`;
   rightMount.innerHTML = `
       <div class="pbw-right">
-        <div class="pbw-ex">
-          <div data-role="note"></div>
-          <div data-role="band"></div>
-          <div class="pbw-ex-head"><b data-role="ex-title" style="font-weight:600;font-size:13px;white-space:nowrap"></b><span class="pbw-ex-ctx" data-role="ex-ctx"></span>
-            <input class="pbw-input" data-role="search" placeholder="태그 · 한국어 이름 검색">
-            <button type="button" class="pbw-btn" data-act="res-open" data-role="res-open" hidden title="마지막 생성 결과를 다시 띄웁니다">결과</button></div>
-          <div class="pbw-ex2" data-role="ex2"><div class="pbw-cats" data-role="cats"></div><div class="pbw-seeds" data-role="seeds"></div>
-            <div class="pbw-gcell"><div class="pbw-grid-wrap" data-role="grid"></div><div class="pbw-rl" data-role="results" hidden></div></div></div>
+        <div class="pbw-main" data-role="main">
+          <div class="pbw-gcol" data-role="gcol">
+            <div data-role="band"></div>
+            <div class="pbw-ex-head"><span class="pbw-ex-ctx" data-role="ex-ctx"></span></div>
+            <div class="pbw-grid-wrap" data-role="grid"></div>
+          </div>
+          <div class="pbw-split" data-role="split" title="끌어서 너비 조정 · 두 번 누르면 처음대로"></div>
+          <div class="pbw-rcol"><div class="pbw-rl" data-role="results"></div></div>
         </div>
         <div data-role="overlay"></div>
       </div>
@@ -813,7 +838,7 @@ export function createPresetBench({
     st.cur = slot.id;
     const view = viewOf(slot.id);
     const owner = st.count > 1 && slot.owner > 0 ? `<span class="pbw-ex-own">캐릭터 ${slot.owner} ›</span> ` : '';
-    $('ex-title').innerHTML = `${owner}${esc(KIND_LABELS[slot.kind])}`;
+    $('ex-title').innerHTML = `${owner}${esc(KIND_LABELS[slot.kind])} 고르기`;
     const ctx = $('ex-ctx');
     ctx.textContent = '';
     if (searchInput.value !== view.q && doc.activeElement !== searchInput) searchInput.value = view.q;
@@ -825,7 +850,7 @@ export function createPresetBench({
 
     if (view.mode === 'related') {
       cats.innerHTML = `<button type="button" class="pbw-cat is-on" data-act="related-back">← 분류로</button><span class="pbw-dim pbw-sm">'${esc(view.relatedTag)}' 관련</span>`;
-      ctx.textContent = `· '${view.relatedTag}' 관련 의상`;
+      ctx.textContent = `'${view.relatedTag}' 관련 의상`;
       seedsBox.innerHTML = '';
       const data = view.related;
       if (!data) { grid.innerHTML = '<div class="pbw-empty">찾는 중…</div>'; return; }
@@ -878,7 +903,7 @@ export function createPresetBench({
     // 맥락 줄: '· 잠자기 sleeping' (세트 수는 세트를 받은 뒤)
     const curSeed = seeds.find(seed => seed.seed === view.seed);
     const seedName = curSeed?.ko && curSeed.ko !== view.seed ? `${curSeed.ko} ${view.seed}` : view.seed;
-    ctx.textContent = `· ${seedName}`;
+    ctx.textContent = seedName;
     let sets;
     try {
       sets = await setsOf(slot.kind, slot.pool, view.seed);
@@ -889,7 +914,7 @@ export function createPresetBench({
     }
     if (serial !== searchSerial) return;
     shownSets = new Map(sets.map(set => [set.id, set]));
-    ctx.textContent = `· ${seedName} · ${sets.length}세트`;
+    ctx.textContent = `${seedName} · ${sets.length}세트`;
     grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
   }
 
@@ -948,7 +973,7 @@ export function createPresetBench({
     if (st.cur === slotId && view.mode === 'related') await renderExplorer();
   }
 
-  // ---------------------------------------------------------------- 결과 판(그림 칸 위)
+  // ---------------------------------------------------------------- 결과 열(오른쪽 - 남는다)
   function resultCard(run, index) {
     const item = run.items[index];
     const picked = st.pick && st.pick[0] === run.id && st.pick[1] === index;
@@ -973,13 +998,23 @@ export function createPresetBench({
 
   const shownRun = () => st.runs.find(run => run.id === st.resRun) || st.runs[st.runs.length - 1] || null;
 
+  // 이전 생성 줄의 한 칸 - 그 생성의 첫 결과 그림 · 여러 장이면 장 수.
+  function historyCard(run, current) {
+    const item = run.items.find(row => row.status === 'done' && row.historyId) || run.items[0];
+    const picture = item?.status === 'done' && item.historyId
+      ? `<img loading="lazy" src="${API.historyThumb(item.historyId)}" alt="">`
+      : `<div class="pbw-res-box">${item?.status === 'pending' ? '…' : '×'}</div>`;
+    return `<button type="button" class="pbw-rl-h${run === current ? ' is-on' : ''}" data-act="res-go" data-run="${esc(run.id)}"
+      title="${esc(`${run.label} · ${run.items.length}장 · ${run.base}`)}">${picture}${run.items.length > 1 ? `<span>${run.items.length}</span>` : ''}</button>`;
+  }
+
   function renderResults() {
     const box = $('results');
-    const run = st.resOpen ? shownRun() : null;
-    // 닫은 뒤 다시 보는 길 - 맥락 줄 끝 '결과' 단추(생성한 적이 있을 때만).
-    $('res-open').hidden = !st.runs.length || Boolean(run);
-    if (!run) { box.hidden = true; box.innerHTML = ''; return; }
-    box.hidden = false;
+    const run = shownRun();
+    if (!run) {
+      box.innerHTML = '<div class="pbw-empty">[생성] 결과가 여기에 남습니다<br><span class="pbw-sm">그림 칸에서 2개 이상 체크하면 비교 생성 - 결과가 격자로 나옵니다</span></div>';
+      return;
+    }
     const at = st.runs.indexOf(run);
     const nav = st.runs.length > 1
       ? `<button type="button" class="pbw-btn" data-act="res-prev" title="앞선 생성"${at <= 0 ? ' disabled' : ''}>‹</button>
@@ -987,15 +1022,37 @@ export function createPresetBench({
          <button type="button" class="pbw-btn" data-act="res-next" title="다음 생성"${at >= st.runs.length - 1 ? ' disabled' : ''}>›</button>` : '';
     const one = run.items.length === 1;
     box.innerHTML = `<div class="pbw-rl-head"><b style="font-weight:600;white-space:nowrap">${esc(run.label)}</b><span class="pbw-dim pbw-sm">· ${run.items.length}장 · ${esc(run.base)}</span>
-        <span class="pbw-rl-nav">${nav}</span>
-        <button type="button" class="pbw-rl-x" data-act="res-close" title="닫기 (Esc · 우클릭)" aria-label="결과 닫기">×</button></div>
-      <div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run.items[0]) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>`;
+        <span class="pbw-rl-nav">${nav}</span></div>
+      <div class="pbw-rl-body${one ? ' is-one' : ''}">${one ? bigResult(run.items[0]) : `<div class="pbw-rgrid">${run.items.map((_, i) => resultCard(run, i)).join('')}</div>`}</div>
+      ${st.runs.length > 1 ? `<div class="pbw-rl-hist">${[...st.runs].reverse().map(row => historyCard(row, run)).join('')}</div>` : ''}`;
+    fitResults();
   }
 
-  // 닫으면 고른 결과도 풀린다 - 미리보기 줄이 지금 조합으로 돌아온다.
-  function closeResults() {
-    if (!st.resOpen) return;
-    st.resOpen = false;
+  // 비교 격자를 결과 열에 맞춘다 - 모든 장이 한눈에 들어오는 가장 큰 칸(3:4 + 이름 줄). 너무 작아지면(90px) 스크롤.
+  function fitResults() {
+    const body = $('results')?.querySelector('.pbw-rl-body');
+    const grid = body?.querySelector('.pbw-rgrid');
+    if (!grid || !body.clientWidth) return;
+    const count = grid.children.length;
+    const width = body.clientWidth - 16;
+    const height = body.clientHeight - 16;
+    const gap = 8;
+    const caption = 22;
+    let bestCols = 1;
+    let bestSize = 0;
+    for (let cols = 1; cols <= count; cols += 1) {
+      const rows = Math.ceil(count / cols);
+      const size = Math.min((width - gap * (cols - 1)) / cols, ((height - gap * (rows - 1)) / rows - caption) * 3 / 4);
+      if (size > bestSize) { bestSize = size; bestCols = cols; }
+    }
+    grid.style.gridTemplateColumns = `repeat(${bestCols}, ${Math.max(90, Math.floor(bestSize))}px)`;
+    grid.style.justifyContent = 'center';
+  }
+
+  // 다른 생성을 본다 - 고른 결과는 풀린다(미리보기 줄이 지금 조합으로 돌아온다).
+  function showRun(runId) {
+    if (!st.runs.some(run => run.id === runId)) return;
+    st.resRun = runId;
     const hadPick = Boolean(st.pick);
     st.pick = null;
     leaveCard();
@@ -1072,7 +1129,6 @@ export function createPresetBench({
     st.runs.push(run);
     if (st.runs.length > 30) st.runs.splice(0, st.runs.length - 30);
     st.pick = null;
-    st.resOpen = true;
     st.resRun = run.id;
     renderResults();
     renderLeftControls();
@@ -1163,20 +1219,10 @@ export function createPresetBench({
   listen('click', event => {
     const t = event.target;
     const act = t.closest('[data-act]')?.dataset.act;
-    // 왼쪽(또는 분류 · 소분류)을 누르면 결과 판을 닫고, 누른 일은 그대로 한다. [생성]/[중지] 는 판을 그대로 둔다.
-    if (st.resOpen && act !== 'go' && t.closest('.pbw-left, .pbw-cats, .pbw-seeds')) closeResults();
-    if (act === 'res-close') { closeResults(); return; }
-    if (act === 'res-open') { st.resOpen = true; st.resRun = st.runs[st.runs.length - 1]?.id || ''; renderResults(); return; }
+    if (act === 'res-go') { showRun(t.closest('[data-run]').dataset.run); return; }
     if (act === 'res-prev' || act === 'res-next') {
       const at = st.runs.indexOf(shownRun()) + (act === 'res-prev' ? -1 : 1);
-      if (st.runs[at]) {
-        st.resRun = st.runs[at].id;
-        const hadPick = Boolean(st.pick);
-        st.pick = null;
-        leaveCard();
-        renderResults();
-        if (hadPick) renderPreview();
-      }
+      if (st.runs[at]) showRun(st.runs[at].id);
       return;
     }
     if (act === 'base') { st.baseOpen = !st.baseOpen; renderAllBase(); return; }
@@ -1228,7 +1274,6 @@ export function createPresetBench({
         if (st.axis === run.axis) st.axis = null;
         st.cur = run.axis;
         st.memo = null;
-        st.resOpen = false;
         st.pick = null;
         leaveCard();
         st.note = `${esc(KIND_LABELS[slotById(run.axis).kind])} = '${esc(item.label)}' 로 고정 · 이제 다른 칸을 비교해 보세요`;
@@ -1370,7 +1415,6 @@ export function createPresetBench({
       return;
     }
     if (t === searchInput) {
-      closeResults();
       win.clearTimeout(searchTimer);
       const q = t.value;
       searchTimer = win.setTimeout(() => { void runSearch(q); }, 280);
@@ -1427,16 +1471,31 @@ export function createPresetBench({
   listen('mouseleave', leaveCard);
   listen('scroll', leaveCard, true);
 
-  // 결과 판 닫기 - 판 위 우클릭 · Esc(이 창 안에서 누른 것만 - 다른 창의 Esc 를 가로채지 않는다).
-  $('results').addEventListener('contextmenu', event => { event.preventDefault(); closeResults(); });
-  doc.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !st.resOpen || !active) return;
-    const target = event.target;
-    if (target !== doc.body && !inside(target)) return;
+  // 그림 칸 : 결과 열 경계 - 끌어서 너비를 바꾸고 기억한다(두 번 누르면 처음대로).
+  function applySplit() { $('gcol').style.flexBasis = `${Math.round(st.split * 1000) / 10}%`; }
+  const splitBar = $('split');
+  splitBar.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
     event.preventDefault();
-    event.stopPropagation();
-    closeResults();
-  }, true);
+    const rect = $('main').getBoundingClientRect();
+    const usable = Math.max(1, rect.width - 16 - splitBar.offsetWidth);
+    splitBar.setPointerCapture?.(event.pointerId);
+    splitBar.classList.add('is-drag');
+    const move = ev => { st.split = Math.min(0.75, Math.max(0.25, (ev.clientX - rect.left - 8) / usable)); applySplit(); };
+    const up = () => {
+      splitBar.classList.remove('is-drag');
+      splitBar.removeEventListener('pointermove', move);
+      splitBar.removeEventListener('pointerup', up);
+      splitBar.removeEventListener('pointercancel', up);
+      persist();
+    };
+    splitBar.addEventListener('pointermove', move);
+    splitBar.addEventListener('pointerup', up);
+    splitBar.addEventListener('pointercancel', up);
+  });
+  splitBar.addEventListener('dblclick', () => { st.split = 0.45; applySplit(); persist(); });
+  applySplit();
+  if (win.ResizeObserver) new win.ResizeObserver(() => fitResults()).observe($('results'));
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {
@@ -1471,7 +1530,7 @@ export function createPresetBench({
     active = want;
     leftMount.hidden = !want;
     if (want) void boot();
-    else { leaveCard(); closeResults(); }
+    else leaveCard();
     onVisibilityChange();
   }
 

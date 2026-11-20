@@ -630,6 +630,8 @@
           <!-- Assets 신 사양(V5) 캐릭터 제작: 일곱 블록 줄. Assets 창의 [신 사양] 탭이 떠 있는 동안만
                프롬프트 자리를 덮는다(모듈이 hidden 을 제어). 메인 프롬프트 글에는 쓰지 않는다. -->
           <div class="cb5-blocks" id="cbBlocks" hidden></div>
+          <!-- Presets 벤치: 오른쪽 Presets 탭이 떠 있는 동안 프롬프트 자리를 덮는 칸 편집(모듈이 hidden 을 제어). -->
+          <div id="pbBlocks" hidden></div>
           <!-- Tag search bar (reserved for future: event/outfit/preset) -->
           <div class="tag-search-bar" id="tagSearchBar" style="display:none">
             <input class="tag-search-input" id="tagSearchInput" type="text" placeholder="태그 검색 (한글/영문)..." autocomplete="off">
@@ -935,6 +937,9 @@
     </button>
     <button class="right-tab-btn" data-right-tab="charAssets" onclick="switchRightTab('charAssets')" role="tab" aria-selected="false">
       <span class="right-tab-icon">🧍</span><span>Assets</span>
+    </button>
+    <button class="right-tab-btn" data-right-tab="presets" onclick="switchRightTab('presets')" role="tab" aria-selected="false">
+      <span class="right-tab-icon">▤</span><span>Presets</span>
     </button>
     <button class="right-tab-btn" data-right-tab="danbooru" data-right-tab-hidden="true" onclick="switchRightTab('danbooru')" role="tab" aria-selected="false" aria-hidden="true" tabindex="-1" hidden>
       <span class="right-tab-icon">D</span><span>Danbooru</span>
@@ -1458,6 +1463,9 @@
     <div class="cb5-root" id="charBuilderV5Root" hidden></div>
   </div>
 
+  <div class="right-tab-pane" id="rightTabPresets" data-right-pane="presets" hidden role="tabpanel">
+    <div id="presetBenchRoot"></div>
+  </div>
   <div class="right-tab-pane" id="rightTabDanbooru" data-right-pane="danbooru" hidden role="tabpanel">
     <div id="danbooruTabRoot" class="danbooru-tab-root"></div>
   </div>

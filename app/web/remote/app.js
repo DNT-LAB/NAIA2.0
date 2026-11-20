@@ -1770,6 +1770,9 @@ async function draftPrepareEnter() {
   if (document.body.classList.contains('assets-v5-mode')) {
     return {ok: false, message: 'Assets 신 사양 제작 화면을 닫은 뒤 Draft 를 켜세요'};
   }
+  if (document.body.classList.contains('preset-bench-mode')) {
+    return {ok: false, message: 'Presets 탭을 떠난 뒤 Draft 를 켜세요'};
+  }
   if (interactivePanel?.isActive?.()) {
     interactivePanel.setActive(false);
     showToast('Draft 를 켜려고 Interactive 를 껐습니다', 'info');
@@ -5806,7 +5809,7 @@ const wsMessageHandlers = {
     if (characterAssetControl) characterAssetControl.handleGenerationError(m);
     characterBuilderV5Control?.handleGenerationError?.(m);
   },
-  preset_bench_generation_error: m => { presetBenchWindow?.handleGenerationError?.(m); },
+  preset_bench_generation_error: m => { presetBenchControl?.handleGenerationError?.(m); },
   comfyui_workflow_state: onComfyUiWorkflowState,
   mode_result: onModeResult,
   api_status: updateApiStatus,
@@ -6044,7 +6047,7 @@ function updateMeta(m) {
     characterAssetControl.handleResultMeta(m);
   }
   characterBuilderV5Control?.handleResultMeta?.(m);
-  presetBenchWindow?.handleResultMeta?.(m);
+  presetBenchControl?.handleResultMeta?.(m);
   if (resultEnhance) {
     resultEnhanceAssetRequestId += 1;
     resultEnhance.setCurrentMeta({
@@ -8577,6 +8580,8 @@ function switchRightTab(tabName, options = {}) {
   syncCharacterQuickPanelVisibility();
   // Assets 신 사양(V5)의 덮개도 탭을 따라 오르내린다 - Assets 를 떠나면 걷힌다.
   syncAssetsV5Mode(activeTab);
+  // Presets 벤치 덮개도 같다 - Presets 탭에서만 왼쪽 프롬프트 열을 덮는다.
+  syncPresetBenchMode(activeTab);
   return activeTab;
 }
 
@@ -10546,6 +10551,8 @@ function generateAction() {
   // **사람이 누른 길에만** 건다 - 자동 반복이 부르는 `send('generate')` 까지 가로채면
   // 시험 생성이 줄줄이 나간다. 덮개가 내려가 있으면 false 라 아래로 그대로 흐른다.
   if (characterBuilderV5Control?.generate?.()) return;
+  // Presets 탭(덮개)이 떠 있으면 Generate 단축키는 벤치의 [N장 생성 | 중지] 다 - 사람이 누른 길에만.
+  if (presetBenchControl?.generate?.()) return;
   if (virtualCharacterSession()) {
     // ⚠️ 도크의 [인페인트 생성] 과 **같은 함수**를 부른다. 예전에는 여기서 가드만
     //    빌려 쓰고 생성은 직접 불렀는데, 그러다 `flushTransforms()` 를 빠뜨려
@@ -12888,36 +12895,66 @@ function openArtistTagTool() {
     .finally(() => { artistTagWindowLoading = null; });
 }
 
-// [프롬프트 도구] > [Presets 벤치](사용자 지시 2026-11-19 · 목업 3안 수정판) - 세트를 골라 비교 생성하는 떠 있는 창.
-// 기반 프리셋은 이 창에서만 쓴다(서버가 요청마다 싣는다) - 메인 화면의 현재 프리셋 · 세션 설정은 그대로다.
-let presetBenchWindow = null;
-let presetBenchWindowLoading = null;
-function openPresetBenchTool() {
-  if (presetBenchWindow) {
-    presetBenchWindow.toggle();
-    return;
-  }
-  if (presetBenchWindowLoading) return;
-  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-rl')
-    .then(({createPresetBenchWindow}) => {
-      presetBenchWindow = createPresetBenchWindow({
-        document,
-        window,
-        escHtml,
-        bindTagAssist,
-        applyMainPrompt: text => applyPromptText(text),
-        notify: (msg, type) => showToast(msg, type),
-        showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
-        hideZoom: () => remoteController?.hideZoom?.(),
-        onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+// [Presets 벤치](사용자 지시 2026-11-19 · 11-20 "사이즈상 메인 UI 로") - 오른쪽 Presets 탭 + 왼쪽 프롬프트 열 덮개.
+// 기반 프리셋은 이 벤치에서만 쓴다(서버가 요청마다 싣는다) - 메인 화면의 현재 프리셋 · 세션 설정은 그대로다.
+// 덮개는 Assets 신 사양(syncAssetsV5Mode)과 같은 방식 - body.preset-bench-mode 가 프롬프트 · 아래 조작줄을 가린다.
+let presetBenchControl = null;
+let presetBenchLoading = null;
+let presetBenchFailed = false;
+function loadPresetBench() {
+  if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
+  if (!presetBenchLoading) {
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-tab1')
+      .then(({createPresetBench}) => {
+        presetBenchControl = createPresetBench({
+          document,
+          window,
+          escHtml,
+          bindTagAssist,
+          applyMainPrompt: text => applyPromptText(text),
+          notify: (msg, type) => showToast(msg, type),
+          showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
+          hideZoom: () => remoteController?.hideZoom?.(),
+          leftMount: document.getElementById('pbBlocks'),
+          rightMount: document.getElementById('presetBenchRoot'),
+          onLeave: () => switchRightTab('result'),
+          onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+        });
+        return presetBenchControl;
+      })
+      .catch(error => {
+        // 다시 부르지 않는다 - 탭을 열 때마다 실패를 되풀이하지 않게.
+        console.error('Failed to load preset bench', error);
+        presetBenchFailed = true;
+        showToast('Presets 벤치를 불러오지 못했습니다', 'error');
+        return null;
       });
-      presetBenchWindow.open();
-    })
-    .catch(error => {
-      console.error('Failed to open preset bench window', error);
-      showToast('Presets 벤치를 열지 못했습니다', 'error');
-    })
-    .finally(() => { presetBenchWindowLoading = null; });
+  }
+  return presetBenchLoading;
+}
+
+function syncPresetBenchMode(activeRightTab) {
+  const rightTab = activeRightTab
+    || document.querySelector('.right-tab-btn.active')?.dataset.rightTab || 'result';
+  const shown = rightTab === 'presets' && !isDetachedShell;
+  if (shown && !presetBenchControl && !presetBenchFailed) {
+    // 처음 들어올 때만 모듈을 받는다 - 받은 뒤 그때의 탭으로 다시 맞춘다(그사이 떠났으면 덮지 않는다).
+    void loadPresetBench().then(() => { if (presetBenchControl) syncPresetBenchMode(); });
+  }
+  const cover = shown && Boolean(presetBenchControl);
+  if (cover && !document.body.classList.contains('preset-bench-mode') && window.draftMode?.isActive?.()) {
+    void window.draftMode.exit({toast: 'Presets 탭을 열어 Draft 를 껐습니다'});
+  }
+  document.body.classList.toggle('preset-bench-mode', cover);
+  presetBenchControl?.setActive(cover);
+  // 덮개는 Prompt 탭 안에 있다 - 다른 탭(Params 등)을 보고 있었으면 안 보인다.
+  if (cover && activePromptTab !== 'prompt') switchTab('prompt');
+}
+
+// 런처 단추 = Presets 탭 열기 / 닫기(Result 로).
+function openPresetBenchTool() {
+  const onPresets = document.querySelector('.right-tab-btn.active')?.dataset.rightTab === 'presets';
+  switchRightTab(onPresets ? 'result' : 'presets');
 }
 
 function openDanbooruBrowserTool() {
@@ -12951,7 +12988,7 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261119-
       openArtistTags: openArtistTagTool,
       isArtistTagsOpen: () => Boolean(artistTagWindow && artistTagWindow.isOpen()),
       openPresetBench: openPresetBenchTool,
-      isPresetBenchOpen: () => Boolean(presetBenchWindow && presetBenchWindow.isOpen()),
+      isPresetBenchOpen: () => document.body.classList.contains('preset-bench-mode'),
       openWireFlow: () => { wireFlowReady.then(() => wireFlowControl?.toggle()); },
       isWireFlowOpen: () => Boolean(wireFlowControl?.isOpen()),
       isWireFlowOn: () => Boolean(wireFlowControl?.isModeOn()),

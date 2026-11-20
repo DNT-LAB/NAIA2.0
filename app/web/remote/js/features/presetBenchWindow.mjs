@@ -1,13 +1,14 @@
-// 프리셋 벤치 창(사용자 지시 2026-11-19 · 목업 3안 수정판 - "확정은 아니고 일단 이대로 구현").
+// 프리셋 벤치(사용자 지시 2026-11-19 · 11-20 "사이즈상 메인 UI 로" - 떠 있는 창을 걷고 메인 화면에 싣는다).
 //
-//   ┌ 왼쪽 좁은 열 ─────┐┌ 탐색(위) ───────────────────────────────┐
-//   │ 기반 요약 카드     ││ 칸 이름 · 풀 · [검색]                    │
-//   │ 넣을 곳            ││ 분류 칩 / seed 목록 | 세트 카드           │
-//   │ 캐릭터 글 · 성별   │├ 결과 띠(아래 붙박이) ─────────────────────┤
-//   │ 칸(의상·자세 …)    ││ 마지막 실행 · [이전 기록] · [이걸로 고정] │
-//   │ [N장 생성 | 중지]  │└──────────────────────────────────────────┘
-//   └───────────────────┘ 아래: 프롬프트 미리보기(접힘) · [복사] [메인 프롬프트로]
+//   ┌ 메인 왼쪽 열(#pbBlocks) ┐┌ 오른쪽 Presets 탭(#presetBenchRoot) ─────────────────┐
+//   │ Presets 벤치 [← 프롬프트]││ 칸 이름 · 맥락 · [검색] [결과]                          │
+//   │ 기반 요약 카드           ││ 대분류 | 소분류 · 시드 | 세트 카드(위에 결과 판이 뜬다) │
+//   │ 넣을 곳 · 캐릭터 카드    ││                                                         │
+//   │ [N장 생성 | 중지]        │├ 프롬프트 미리보기 · [복사] [메인 프롬프트로] ───────────┤
+//   └─────────────────────────┘└─────────────────────────────────────────────────────────┘
 //
+// - 덮개는 Assets 신 사양과 같은 방식이다: body.preset-bench-mode 가 메인 프롬프트 · 도구 줄 · 아래 조작줄을 가린다
+//   (값은 건드리지 않는다 - 클래스를 떼면 원래 화면이 그대로). 탭을 떠나면 덮개가 걷힌다(app.js syncPresetBenchMode).
 // - 인원은 고르지 않는다(사용자 11-20) - [+ 캐릭터 추가] / × 로 1 ~ 2명. 맨 앞 인원 태그(1girl · 1boy …)는
 //   캐릭터 글로 서버에 물어 정한다(이름 사전 gender · 글의 girl/boy 태그 · 모르면 girl). 목록은 여성 · 남성 세트를 한데 보인다.
 // - 카드 누르기 = 그 칸에 넣기 · 카드 오른쪽 위 상자 = 비교에 넣기. 한 칸에서 둘 이상 체크하면 그 칸이 '비교 축' 이다.
@@ -17,7 +18,6 @@
 // - 조립 규칙(무엇을 메인 · 캐릭터 칸에 싣나)은 presetBenchModel.mjs 에 있다. 이 파일은 그리기 · 서버 왕복만 한다.
 // - 결과는 일반 생성처럼 결과 화면 · 히스토리에도 간다. 이 창은 image_meta 의 preset_bench_* 표식으로 제 것을 알아본다.
 
-import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
 } from './presetBenchModel.mjs?v=20261120-ui4';
@@ -46,13 +46,25 @@ const PARAM_KEYS = ['model', 'width', 'height', 'steps', 'cfg_scale', 'cfg_resca
 const MAX_ITEMS = 20;
 
 const PBW_CSS = `
-.pbw-window .dragpanel-body { display: flex; flex-direction: column; min-height: 0; padding: 0; font-size: 12px; }
-/* 왼쪽 열 272px(사용자 11-20 - 긴 태그 칩이 잘렸다) · 그림 카드는 140px 까지만(크게 보기는 마우스를 올려서). */
-.pbw-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
-/* 왼쪽 열은 한 단계 어둡게, 캐릭터 · 칸 카드는 밝게 - 오른쪽 탐색과 갈린다(사용자 11-20 목업). */
-.pbw-left { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-glow); padding: 8px; display: flex; flex-direction: column; gap: 8px;
-  background: var(--bg-primary); }
-.pbw-right { min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* 메인 화면 덮개(사용자 11-20) - Assets 신 사양(body.assets-v5-mode)과 같은 자리를 가린다. 이 모드의 생성은 왼쪽 [N장 생성] 이라
+   아래 조작줄(Generate · Random · 해상도 · 옵션)도 통째로 걷는다. Ctrl+Enter 는 app.js generateAction 이 이 벤치로 돌린다. */
+body.preset-bench-mode #tabPrompt > .prompt-highlight-wrap,
+body.preset-bench-mode #tabPrompt > .section-label,
+body.preset-bench-mode #tabPrompt > #promptInpaintBadge,
+body.preset-bench-mode #iaBlocks,
+body.preset-bench-mode #cbBlocks,
+body.preset-bench-mode .prompt-inner > .tab-bar,
+body.preset-bench-mode .assistants-section,
+body.preset-bench-mode #moduleLauncher,
+body.preset-bench-mode .bottom-controls { display: none !important; }
+#pbBlocks { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
+#pbBlocks[hidden] { display: none; }
+#presetBenchRoot { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; font-size: 12px; }
+.pbw-left { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 2px 2px 0; display: flex; flex-direction: column; gap: 8px; }
+.pbw-lhead { display: flex; align-items: center; gap: 8px; }
+.pbw-lhead b { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.pbw-lhead .pbw-btn { margin-left: auto; }
+.pbw-right { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .pbw-ex { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; padding: 8px; gap: 6px; }
 .pbw-pv { flex: 0 0 auto; border-top: 1px solid var(--border-dim); padding: 5px 10px; }
 .pbw-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -242,7 +254,7 @@ function paramsSummary(params) {
   return parts.join(' · ');
 }
 
-export function createPresetBenchWindow({
+export function createPresetBench({
   document: doc,
   window: win = (typeof window !== 'undefined' ? window : null),
   fetch: fetchFn = win.fetch.bind(win),
@@ -257,6 +269,11 @@ export function createPresetBenchWindow({
   applyMainPrompt = null,
   notify = () => {},
   onVisibilityChange = () => {},
+  // 메인 화면의 두 자리 - 왼쪽 프롬프트 열 안(#pbBlocks) · 오른쪽 Presets 탭 안(#presetBenchRoot).
+  leftMount,
+  rightMount,
+  // [← 프롬프트] - 탭을 떠난다(app.js 가 덮개를 걷는다).
+  onLeave = () => {},
   storage = (() => { try { return win.localStorage; } catch (_) { return null; } })(),
 }) {
   ensureStyle(doc);
@@ -329,24 +346,24 @@ export function createPresetBenchWindow({
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
 
-  // ---------------------------------------------------------------- 창
-  const panel = createDraggablePanel({
-    document: doc, window: win, id: 'presetBenchWindow', title: 'Presets',
-    variant: 'em-overlay em-window pbw-window', storageKey: 'preset-bench',
-    width: 1060, height: 700, minWidth: 720, maxWidth: 1800, minHeight: 460, resizable: true,
-    escHtml,
-    onOpen: () => { void boot(); onVisibilityChange(); },
-    onClose: () => { leaveCard(); closeResults(); onVisibilityChange(); },
-  });
-  panel.body.innerHTML = `
-    <div class="pbw-cols">
+  // ---------------------------------------------------------------- 두 자리(왼쪽 덮개 · 오른쪽 탭)
+  let active = false;
+  const roots = [leftMount, rightMount];
+  const qs = selector => leftMount.querySelector(selector) || rightMount.querySelector(selector);
+  const qsa = selector => roots.flatMap(root => [...root.querySelectorAll(selector)]);
+  const listen = (type, handler, options) => roots.forEach(root => root.addEventListener(type, handler, options));
+  const inside = target => roots.some(root => root.contains(target));
+  leftMount.hidden = true;
+  leftMount.innerHTML = `
       <div class="pbw-left">
+        <div class="pbw-lhead"><b>Presets 벤치</b><button type="button" class="pbw-btn" data-act="leave" title="메인 프롬프트로 돌아갑니다(Result 탭)">← 프롬프트</button></div>
         <div class="pbw-base" data-act="base" title="기반 설정 열기"></div>
         <div class="pbw-row"><span class="pbw-dim pbw-sm">캐릭터 넣을 곳</span>
           <span class="pbw-seg" data-role="target"><button type="button" data-target="char">캐릭터칸</button><button type="button" data-target="main">메인</button></span></div>
         <div class="pbw-chars" data-role="chars"></div>
         <button type="button" class="pbw-btn is-primary pbw-go" data-act="go"></button>
-      </div>
+      </div>`;
+  rightMount.innerHTML = `
       <div class="pbw-right">
         <div class="pbw-ex">
           <div data-role="note"></div>
@@ -359,11 +376,10 @@ export function createPresetBenchWindow({
         </div>
         <div data-role="overlay"></div>
       </div>
-    </div>
-    <div class="pbw-pv" data-role="preview"></div>`;
-  const $ = role => panel.body.querySelector(`[data-role="${role}"]`);
-  const baseCard = panel.body.querySelector('[data-act="base"]');
-  const goBtn = panel.body.querySelector('[data-act="go"]');
+      <div class="pbw-pv" data-role="preview"></div>`;
+  const $ = role => qs(`[data-role="${role}"]`);
+  const baseCard = qs('[data-act="base"]');
+  const goBtn = qs('[data-act="go"]');
   const searchInput = $('search');
 
   async function getJson(url, options) {
@@ -540,7 +556,7 @@ export function createPresetBenchWindow({
 
   // 성별 표지: 'girl · 자동'(이름 사전) · 'boy · 태그'(글에 쓴 1boy) · 'girl · 기본'(모름 - girl 로 본다).
   function renderSubjects() {
-    panel.body.querySelectorAll('[data-subj]').forEach(el => {
+    qsa('[data-subj]').forEach(el => {
       const row = st.subjects[Number(el.dataset.subj)] || {};
       const gender = row.gender || 'girl';
       const how = row.source === 'character' ? '자동' : row.source === 'tags' ? '태그' : '기본';
@@ -613,7 +629,7 @@ export function createPresetBenchWindow({
       return `<div class="pbw-slot${cur ? ' is-cur' : ''}${axis ? ' is-axis' : ''}" data-slot="${slot.id}">
         <span class="pbw-slot-k">${label}</span><span class="pbw-slot-v">${marks}${chips}</span>${clear}</div>`;
     };
-    panel.body.querySelectorAll('[data-slots]').forEach(holder => {
+    qsa('[data-slots]').forEach(holder => {
       const owner = Number(holder.dataset.slots);
       const mine = list.filter(slot => slot.owner === owner);
       // 캐릭터 밖 칸은 칸마다 작은 카드(칸 이름 = 카드 제목).
@@ -660,7 +676,7 @@ export function createPresetBenchWindow({
   async function refreshThumbStatus() {
     try { thumbStatus = await getJson(API.thumbStatus); } catch (_) { thumbStatus = null; }
     renderBand();
-    if (thumbStatus?.downloading && panel.isOpen()) win.setTimeout(refreshThumbStatus, 2000);
+    if (thumbStatus?.downloading && active) win.setTimeout(refreshThumbStatus, 2000);
     else if (thumbStatus?.installed) { catalogCache.clear(); setsCache.clear(); }
   }
 
@@ -1034,7 +1050,7 @@ export function createPresetBenchWindow({
   }
 
   // ---------------------------------------------------------------- 이벤트
-  panel.body.addEventListener('click', event => {
+  listen('click', event => {
     const t = event.target;
     const act = t.closest('[data-act]')?.dataset.act;
     // 왼쪽(또는 분류 · 소분류)을 누르면 결과 판을 닫고, 누른 일은 그대로 한다. [생성]/[중지] 는 판을 그대로 둔다.
@@ -1056,6 +1072,7 @@ export function createPresetBenchWindow({
     if (act === 'base') { st.baseOpen = !st.baseOpen; renderAllBase(); return; }
     if (act === 'base-close') { st.baseOpen = false; renderAllBase(); return; }
     if (act === 'go') { void generate(); return; }
+    if (act === 'leave') { onLeave(); return; }
     if (act === 'char-add') { setCount(st.count + 1); return; }
     if (act === 'char-remove') { setCount(st.count - 1); return; }
     if (act === 'undo') {
@@ -1180,7 +1197,7 @@ export function createPresetBenchWindow({
         toggleCompare(st.cur, set);
         // 탐색 칸은 다시 그리지 않는다(긴 목록의 스크롤 자리를 지킨다) - 체크 상자만 바꾼다.
         const on = Boolean(st.chk[st.cur]?.has(set.id));
-        panel.body.querySelectorAll(`.pbw-ck[data-check="${CSS.escape(set.id)}"]`).forEach(el => {
+        qsa(`.pbw-ck[data-check="${CSS.escape(set.id)}"]`).forEach(el => {
           el.classList.toggle('is-on', on);
           el.textContent = on ? '✓' : '';
           el.setAttribute('aria-checked', on ? 'true' : 'false');
@@ -1195,7 +1212,7 @@ export function createPresetBenchWindow({
     const card = t.closest('[data-set]');
     if (card) {
       const set = shownSets.get(card.dataset.set);
-      if (set) { putIntoSlot(st.cur, set); renderSlots(); renderPreview(); panel.body.querySelectorAll('.pbw-card').forEach(el => el.classList.toggle('is-sel', el.dataset.set === set.id)); }
+      if (set) { putIntoSlot(st.cur, set); renderSlots(); renderPreview(); qsa('.pbw-card').forEach(el => el.classList.toggle('is-sel', el.dataset.set === set.id)); }
       return;
     }
     const res = t.closest('.pbw-rgrid .pbw-res');
@@ -1207,7 +1224,7 @@ export function createPresetBenchWindow({
     }
   });
 
-  panel.body.addEventListener('change', event => {
+  listen('change', event => {
     const t = event.target;
     if (t.dataset.role === 'base-preset') { st.base.preset = t.value; persist(); renderAllBase(); return; }
     if (t.dataset.role === 'direct-pick') {
@@ -1224,7 +1241,7 @@ export function createPresetBenchWindow({
     if (t.dataset.role === 'export-target') { st.exportTarget = t.value; renderOverlay(); return; }
   });
 
-  panel.body.addEventListener('input', event => {
+  listen('input', event => {
     const t = event.target;
     if (t.dataset.name !== undefined) {
       st.names[Number(t.dataset.name)] = t.value;
@@ -1263,7 +1280,7 @@ export function createPresetBenchWindow({
     if (hoverCard) { hoverCard = null; hideZoom(); }
   }
 
-  panel.body.addEventListener('mouseover', event => {
+  listen('mouseover', event => {
     const card = event.target?.closest?.('.pbw-card, .pbw-rgrid .pbw-res');
     if (card === hoverCard) return;
     leaveCard();
@@ -1272,10 +1289,10 @@ export function createPresetBenchWindow({
     hoverCard = card;
     hoverTimer = win.setTimeout(() => {
       hoverTimer = null;
-      if (hoverCard !== card || !panel.isOpen()) return;
+      if (hoverCard !== card || !active) return;
       if (card.classList.contains('pbw-res')) {
         const item = st.runs.find(run => run.id === card.dataset.run)?.items[Number(card.dataset.index)];
-        showZoom(card, {src, title: item?.label || '', note: ''}, panel.el.getBoundingClientRect());
+        showZoom(card, {src, title: item?.label || '', note: ''}, card.getBoundingClientRect());
         return;
       }
       const set = shownSets.get(card.dataset.set);
@@ -1284,19 +1301,18 @@ export function createPresetBenchWindow({
         src,
         title: (set?.tags || []).join(', '),
         note: [badge, set?.seed].filter(Boolean).join(' · '),
-      }, panel.el.getBoundingClientRect());
+      }, card.getBoundingClientRect());
     }, HOVER_DELAY_MS);
   });
-  panel.body.addEventListener('mouseleave', leaveCard);
-  panel.body.addEventListener('scroll', leaveCard, true);
-  panel.el.addEventListener('dragpanel-move', leaveCard);
+  listen('mouseleave', leaveCard);
+  listen('scroll', leaveCard, true);
 
   // 결과 판 닫기 - 판 위 우클릭 · Esc(이 창 안에서 누른 것만 - 다른 창의 Esc 를 가로채지 않는다).
   $('results').addEventListener('contextmenu', event => { event.preventDefault(); closeResults(); });
   doc.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !st.resOpen || !panel.isOpen()) return;
+    if (event.key !== 'Escape' || !st.resOpen || !active) return;
     const target = event.target;
-    if (target !== doc.body && !panel.el.contains(target)) return;
+    if (target !== doc.body && !inside(target)) return;
     event.preventDefault();
     event.stopPropagation();
     closeResults();
@@ -1312,7 +1328,7 @@ export function createPresetBenchWindow({
       item.status = 'done';
       item.historyId = String(meta.history_id || '');
     }
-    if (panel.isOpen()) { renderResults(); renderLeftControls(); }
+    if (active) { renderResults(); renderLeftControls(); }
     return true;
   }
 
@@ -1324,15 +1340,32 @@ export function createPresetBenchWindow({
       item.status = 'error';
       item.message = String(message.message || '실패');
     }
-    if (panel.isOpen()) { renderResults(); renderLeftControls(); }
+    if (active) { renderResults(); renderLeftControls(); }
+    return true;
+  }
+
+  // 탭에 들어오면 덮개를 올리고(왼쪽 칸) 처음이면 불러온다. 떠나면 결과 판 · 크게 보기를 걷는다.
+  function setActive(next) {
+    const want = Boolean(next);
+    if (want === active) return;
+    active = want;
+    leftMount.hidden = !want;
+    if (want) void boot();
+    else { leaveCard(); closeResults(); }
+    onVisibilityChange();
+  }
+
+  // Ctrl+Enter(app.js generateAction) - 덮개가 올라와 있으면 이 벤치의 [N장 생성 | 중지] 와 같다.
+  function generateFromShortcut() {
+    if (!active) return false;
+    void generate();
     return true;
   }
 
   return {
-    open: () => panel.open(),
-    close: () => panel.close(),
-    toggle: () => panel.toggle(),
-    isOpen: () => panel.isOpen(),
+    setActive,
+    isActive: () => active,
+    generate: generateFromShortcut,
     handleResultMeta,
     handleGenerationError,
   };

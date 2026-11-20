@@ -22,6 +22,11 @@ ROOT = Path(__file__).resolve().parents[1]
 _LOG = logging.getLogger(__name__)
 _FIELDS = ("id", "pool", "seed", "tags", "rank", "score", "layers", "support_by_rating", "side")
 BROWSE_TAXONOMY_NAME = "preset_browse_taxonomy.json"
+# 세트 id -> 거의 늘 함께 나오는 몸 태그(tools/build_preset_cooccur.py 가 굽는다 - 벤치가 메인에 싣는다).
+COOCCUR_NAME = "preset_cooccur.json"
+COOCCUR_SCHEMA = "naia.preset_cooccur.v1"
+# 성인 세트 = 근거 게시물의 절반 이상이 explicit - 벤치가 메인에 nsfw 를 붙인다(사용자 11-20).
+ADULT_EXPLICIT_SHARE = 0.5
 # 표에 아직 없는 시드(팩을 다시 구운 뒤 표를 안 고쳤을 때)가 숨지 않게 맨 끝에 모아 보인다.
 UNSORTED_LABEL = "분류 전"
 # 풀 "" = 그 갈래의 모든 풀을 한 목록으로(벤치에서 인원 선택을 없앴다 - 사용자 11-20).
@@ -41,6 +46,24 @@ _SUBJECTS = ("girl", "boy", "other")
 
 def _order(row):
     return min(row["rank"].values()), -max(row["score"].values()), row["id"]
+
+
+def is_adult(support_by_rating):
+    total = sum(support_by_rating.values())
+    return bool(total) and support_by_rating.get("e", 0) / total >= ADULT_EXPLICIT_SHARE
+
+
+def load_cooccur(path, pack_sha256):
+    """세트 id -> 덧붙일 몸 태그. 파일이 없거나 · 틀리거나 · 다른 팩으로 구운 것이면 빈 사전(기능만 꺼진다)."""
+    try:
+        data = json.loads(Path(path).read_bytes())
+    except (OSError, ValueError):
+        _LOG.info("Preset co-occurrence table unavailable")
+        return {}
+    if data.get("schema") != COOCCUR_SCHEMA or data.get("build", {}).get("event_presets_sha256") != pack_sha256:
+        _LOG.warning("Preset co-occurrence table does not match the event pack - ignored")
+        return {}
+    return {set_id: [str(tag) for tag in tags] for set_id, tags in (data.get("sets") or {}).items()}
 
 
 def is_apart(row):
@@ -121,18 +144,22 @@ class PresetBenchService:
             states = json.loads((self.data_dir / "outfit_states.json").read_bytes())["by_set"]
             by_id = {}
             seeds = defaultdict(lambda: defaultdict(list))
+            cooccur = {}
             for pack_kind in ("outfit", "event", "expression", "scene"):
                 raw = (self.data_dir / f"{pack_kind}_presets.json").read_bytes()
                 pack = json.loads(raw)
                 if pack_kind == "outfit":
                     self._outfit_digest = hashlib.sha256(raw).hexdigest()
                     self._outfit_slots = pack["tag_slot"]
+                if pack_kind == "event":
+                    cooccur = load_cooccur(self.data_dir / COOCCUR_NAME, hashlib.sha256(raw).hexdigest())
                 for row in pack["sets"]:
                     kind = "outfit" if pack_kind == "outfit" else row["family"]
                     pool, seed = row["pool"], row["seed"]
                     summary = {field: row[field] for field in _FIELDS}
                     head = head_for(kind, pool)
-                    summary.update(kind=kind, key=preset_thumb_key(kind, head, row["tags"]))
+                    summary.update(kind=kind, key=preset_thumb_key(kind, head, row["tags"]),
+                                   add=cooccur.get(row["id"], []), adult=is_adult(row["support_by_rating"]))
                     if kind == "outfit":
                         summary["states"] = states.get(row["id"], {})
                     by_id[row["id"]] = summary

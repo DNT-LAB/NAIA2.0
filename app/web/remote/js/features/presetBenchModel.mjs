@@ -80,6 +80,9 @@ export function slotsFor(count) {
   ];
 }
 
+// 성인 세트(근거 게시물의 절반 이상이 explicit - 서버 `adult`)가 하나라도 있으면 메인 인원 태그 바로 뒤에(사용자 11-20).
+export const NSFW_TAG = 'nsfw';
+
 // 1인 자세 + 2인 자세를 함께 고르면 2인 자세가 주인공이다 - 1인 자세는 이 가중치로 눌러 싣는다(사용자 11-20).
 // NAI 수치 가중치 꼴 `0.7::태그, 태그::`(벤치 생성은 NAI 만 받는다).
 export const POSE_WEIGHT_WITH_LINK = 0.7;
@@ -105,39 +108,49 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   ucs       - [캐릭터1 UC, 캐릭터2 UC] (에셋에서 불러온 캐릭터 UC - 캐릭터 칸에만 실린다)
  *   extras    - [캐릭터1 추가 프롬프트, …] - 그 캐릭터 몫 끝(캐릭터 칸 · target 'main' 이면 메인)
  *   extraMain - 추가 프롬프트 - 메인 끝(기반 postfix 앞)
+ *   meta      - {칸 id: {add, adult}} - 고른 세트의 서버 요약에서(variant 면 variant.add · variant.adult).
+ *               add = 그 세트와 거의 늘 함께 나오는 몸 태그(penis 등) - 늘 **메인**에, 그 칸 태그 뒤에(사용자 11-20).
+ *               adult = 성인 세트 - 하나라도 있으면 메인 인원 태그 뒤에 nsfw.
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
-export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = [], extras = [], extraMain = ''}) {
+export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = [], extras = [], extraMain = '', meta = {}}) {
   const {count} = normalizeCast(cast);
   const slots = slotsFor(count);
   const tagsOf = slot => {
     if (variant && variant.slotId === slot.id) return variant.tags || [];
     return picks[slot.id] || [];
   };
+  // 빈 칸의 meta 는 쓰지 않는다(지운 칸에 옛 표식이 남아도 무시).
+  const metaOf = slot => (tagsOf(slot).length ? ((variant && variant.slotId === slot.id ? variant : meta[slot.id]) || {}) : {});
+  const addsOf = slot => (Array.isArray(metaOf(slot).add) ? metaOf(slot).add : []);
+  const nsfw = slots.some(slot => metaOf(slot).adult) ? NSFW_TAG : '';
   const linkTags = tagsOf({id: 'link'});
   const linkPool = !linkTags.length ? '' : (variant && variant.slotId === 'link' ? variant.pool : cast && cast.linkPool);
   const head = headFor(cast, linkPool || '');
   const nameOf = i => String(names[i] || '').trim();
   const extraOf = i => String(extras[i] || '').trim();
   // 칸 한 개의 글 - 2인 자세가 있으면 1인 자세(event)는 POSE_WEIGHT_WITH_LINK 로 감싼다. 2인 자세는 늘 메인(goesToCharacter 밖).
-  const slotText = slot => {
-    const text = joinTags(tagsOf(slot));
+  const slotText = (slot, withAdds = false) => {
+    const text = joinTags([...tagsOf(slot), ...(withAdds ? addsOf(slot) : [])]);
     return text && slot.kind === 'event' && linkTags.length ? `${POSE_WEIGHT_WITH_LINK}::${text}::` : text;
   };
   if (target === 'main') {
     const main = uniqueTags(joinTags([
       head,
+      nsfw,
       ...Array.from({length: count}, (_, i) => nameOf(i)),
-      ...slots.map(slotText),
+      ...slots.map(slot => slotText(slot, true)),
       ...Array.from({length: count}, (_, i) => extraOf(i)),
       extraMain,
     ]));
     return {main, characters: []};
   }
-  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slotText), extraMain]));
+  // 캐릭터 칸으로 가는 세트의 덧붙는 몸 태그도 메인으로(상대 몸이라 캐릭터 몫이 아니다).
+  const main = uniqueTags(joinTags([head, nsfw, ...slots.filter(slot => !goesToCharacter(slot)).map(slot => slotText(slot, true)),
+    ...slots.filter(goesToCharacter).flatMap(addsOf), extraMain]));
   const characters = [];
   for (let i = 0; i < count; i += 1) {
-    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1).map(slotText), extraOf(i)]);
+    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1).map(slot => slotText(slot)), extraOf(i)]);
     characters.push({prompt, uc: String(ucs[i] || '').trim()});
   }
   // 캐릭터 칸이 전부 비면 싣지 않는다 - 빈 캐릭터 칸은 NAI 에 사람 하나를 더 그리라는 뜻이 될 수 있다.
@@ -164,15 +177,15 @@ export function variantLabel(tags) {
 }
 
 /** 생성 요청의 items. 비교 축이 있으면 축 칸의 세트마다 한 장, 없으면 한 장. */
-export function buildItems({cast, target, names, picks, axis = null, ucs = [], extras = [], extraMain = ''}) {
+export function buildItems({cast, target, names, picks, axis = null, ucs = [], extras = [], extraMain = '', meta = {}}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain,
-        variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
+      const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta,
+        variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool, add: set.add || [], adult: !!set.adult}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }
-  const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain});
+  const {main, characters} = assemble({cast, target, names, picks, ucs, extras, extraMain, meta});
   return [{label: '한 장', main, characters, set: null}];
 }
 

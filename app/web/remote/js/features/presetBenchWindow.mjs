@@ -28,7 +28,7 @@
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-ex1';
+} from './presetBenchModel.mjs?v=20261120-co1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -275,6 +275,9 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
 .pbw-gcol .pbw-ex-ctx { font-size: 12px; color: var(--text-muted); }
 .pbw-grid-wrap { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 4px; }
+/* 덧붙는 몸 태그(메인에 함께 싣는다 - 사용자 11-20) = 흐린 '+태그'. */
+.pbw-chip.pbw-add { opacity: 0.6; border-style: dashed; cursor: default; }
+.pbw-cap-add { color: var(--text-dim); }
 /* 가운데 그림 칸 스크롤바 = 잘 보이게(사용자 11-20). 세트가 수백이면 칸이 4만 px 라 막대가 10px 로 줄어 안 보였다 -
    막대 최소 높이 48px. scrollbar-color 를 주면 크로미움이 ::-webkit-scrollbar 를 통째로 무시하므로 쓰지 않는다. */
 .pbw-grid-wrap::-webkit-scrollbar { width: 10px; }
@@ -563,6 +566,8 @@ export function createPresetBench({
     linkPool: st.picks.link?.pool || ''});
   const slotById = id => slots().find(slot => slot.id === id) || null;
   const picksTags = () => Object.fromEntries(slots().map(slot => [slot.id, st.picks[slot.id]?.tags || []]));
+  // 고른 세트의 덧붙는 몸 태그 · 성인 표식(서버 요약 add · adult) - 조립이 메인에 싣는다.
+  const picksMeta = () => Object.fromEntries(slots().map(slot => [slot.id, {add: st.picks[slot.id]?.add || [], adult: !!st.picks[slot.id]?.adult}]));
   const viewOf = id => (st.views[id] ||= {cat: '', sub: '', pool: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
@@ -996,6 +1001,7 @@ export function createPresetBench({
       if (axis) marks += `<span class="pbw-chip pbw-cmp">비교 ${axisSets().length}</span>`;
       const chips = pick?.tags?.length
         ? pick.tags.map(tag => `<span class="pbw-chip" data-chip="${esc(tag)}" data-from="${slot.id}" title="${slot.kind === 'outfit' ? '관련 의상 보기' : '이 태그로 찾기'}">${esc(tag)}</span>`).join('')
+          + (pick.add || []).map(tag => `<span class="pbw-chip pbw-add" title="이 세트와 거의 늘 함께 나오는 태그 - 메인 프롬프트에 함께 싣는다">+${esc(tag)}</span>`).join('')
         : `<span class="pbw-slot-empty">${cur ? '고르는 중 →' : '+ 고르기'}</span>`;
       const clear = pick?.tags?.length || axis
         ? `<button type="button" class="pbw-slot-x" data-clear="${slot.id}" title="비우기" aria-label="비우기">×</button>` : '<span></span>';
@@ -1078,7 +1084,7 @@ export function createPresetBench({
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
     return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" title="${esc((set.tags || []).join(', '))}">
       <span class="pbw-ck${checked ? ' is-on' : ''}" data-check="${esc(set.id)}" role="checkbox" aria-checked="${checked ? 'true' : 'false'}" title="비교에 넣기">${checked ? '✓' : ''}</span>
-      ${badge}${picture}<div class="pbw-cap">${esc((set.tags || []).join(', '))}</div></div>`;
+      ${badge}${picture}<div class="pbw-cap">${esc((set.tags || []).join(', '))}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
   }
 
   // 지금 그리드에 보이는 세트(id -> 세트) - 카드 누르기 · 체크가 세트 요약을 찾는다.
@@ -1640,7 +1646,7 @@ export function createPresetBench({
     const slotsNow = slots();
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({cast: castNow(), target: autoTarget(), names: st.names, picks: picksTags(), axis, ucs: st.ucs,
+    const items = buildItems({cast: castNow(), target: autoTarget(), names: st.names, picks: picksTags(), meta: picksMeta(), axis, ucs: st.ucs,
       extras: st.extras.slice(0, st.count), extraMain: st.extraMain});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
     // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
@@ -1713,7 +1719,8 @@ export function createPresetBench({
 
   // ---------------------------------------------------------------- 칸 조작
   function putIntoSlot(slotId, set) {
-    st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || ''};
+    st.picks[slotId] = {id: set.id, tags: [...(set.tags || [])], key: set.key, has_thumb: !!set.has_thumb, seed: set.seed, pool: set.pool || '',
+      add: [...(set.add || [])], adult: !!set.adult};
     persist();
   }
 
@@ -1754,8 +1761,23 @@ export function createPresetBench({
       for (let i = 0; i < st.count; i += 1) refreshSubject(i, 0);
     }
     renderAll();
-    await Promise.all([loadBases(), refreshThumbStatus()]);
+    await Promise.all([loadBases(), refreshThumbStatus(), fillPickMeta()]);
     renderAllBase();
+  }
+
+  // 11-20 이전에 저장한 픽에는 add · adult 가 없다 - 그 세트의 요약을 다시 받아 채운다(실패하면 그대로).
+  async function fillPickMeta() {
+    const stale = slots().filter(slot => st.picks[slot.id]?.id && !('adult' in st.picks[slot.id]));
+    if (!stale.length) return;
+    await Promise.all(stale.map(async slot => {
+      const pick = st.picks[slot.id];
+      try {
+        const set = (await setsOf(slot.kind, pick.pool || slot.pool, pick.seed)).find(row => row.id === pick.id);
+        if (set && st.picks[slot.id] === pick) Object.assign(pick, {add: [...(set.add || [])], adult: !!set.adult});
+      } catch (_) { /* 다음에 고를 때 채워진다 */ }
+    }));
+    persist();
+    renderSlots();
   }
 
   // ---------------------------------------------------------------- 이벤트

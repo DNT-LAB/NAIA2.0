@@ -10,3 +10,5 @@ core/anima_engine/licenses/** -text
 # 부품 카탈로그는 빌더가 바이트로 대조한다(tools/build_character_parts.py --check). 체크아웃 때 줄바꿈이 CRLF 로
 # 바뀌면 내용이 같아도 늘 STALE 이 된다 - 변환하지 않는다.
 data/character_parts.json -text
+# data/preset_cooccur.json 이 이 파일의 sha256 으로 짝을 확인한다 - 줄바꿈 변환 금지
+data/event_presets.json -text

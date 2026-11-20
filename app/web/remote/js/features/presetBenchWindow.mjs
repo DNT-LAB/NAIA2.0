@@ -28,7 +28,7 @@
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-ref1';
+} from './presetBenchModel.mjs?v=20261120-pw1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -123,6 +123,14 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-left { flex: 1 1 auto; min-height: 0; overflow: hidden; padding: 0 2px 2px 0; display: flex; flex-direction: column; gap: 8px; }
 .pbw-ledit { flex: 0 1 auto; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 2px; }
 .pbw-pick { flex: 1 0 50%; min-height: 0; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-dim); padding-top: 8px; }
+/* 캐릭터 1명 = 칸 편집이 줄지 않고 다 보인다(고르기는 남는 자리 · 창이 아주 낮을 때만 편집이 스크롤). 2명부터 위 규칙(고르기 절반 이상 · 편집 스크롤).
+   스크롤이 생기면 오른쪽 막대를 흰색으로 - 아래에 칸이 더 있다는 표시(사용자 11-20). */
+.pbw-left.is-solo .pbw-pick { flex: 1 1 0; min-height: 200px; }
+.pbw-ledit { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.8) transparent; }
+.pbw-ledit::-webkit-scrollbar { width: 8px; }
+.pbw-ledit::-webkit-scrollbar-track { background: rgba(255,255,255,0.06); border-radius: 4px; }
+.pbw-ledit::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.8); border-radius: 4px; }
+.pbw-ledit::-webkit-scrollbar-thumb:hover { background: #fff; }
 .pbw-main { flex: 1 1 auto; min-height: 0; display: flex; padding: 8px; }
 .pbw-gcol { flex: 0 0 45%; min-width: 220px; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .pbw-split { flex: 0 0 11px; cursor: col-resize; position: relative; touch-action: none; }
@@ -157,8 +165,8 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-chead { display: flex; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600; color: var(--text-primary);
   border-bottom: 1px solid var(--border-dim); }
 .pbw-ccard > .pbw-text { display: block; margin: 6px 8px; width: calc(100% - 16px); }
-/* 캐릭터 프롬프트 칸 = 기본 네 줄(사용자 11-20 "너무 좁다") - 아래 모서리로 더 늘릴 수 있다. */
-.pbw-ccard > .pbw-text { min-height: 74px; line-height: 1.5; padding: 4px 6px; }
+/* 캐릭터 프롬프트 칸 = 그 캐릭터를 고르는 중일 때만 네 줄(사용자 11-20) - 다른 칸을 고르면 한 줄로 돌아간다(rows 는 renderSlots). */
+.pbw-ccard > .pbw-text { line-height: 1.5; padding: 4px 6px; }
 .pbw-subj { padding: 0 5px; border: 1px solid var(--border-glow); border-radius: 4px; font-size: 10.5px; font-weight: 400; color: var(--text-primary); }
 .pbw-subj.is-guess { color: var(--text-dim); border-style: dashed; }
 .pbw-addc { border: 1px dashed var(--border-glow); border-radius: 6px; background: transparent; color: var(--text-muted); padding: 4px;
@@ -784,11 +792,12 @@ export function createPresetBench({
     box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard" data-ccard="${i}"><div class="pbw-chead" data-act="char-pick" data-index="${i}" title="누르면 아래에서 캐릭터 검색 · 에셋 · 캐릭터 레퍼런스로 고릅니다"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
         <span class="pbw-gap"></span><span class="pbw-cpick">고르는 중</span>
         ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
-      <textarea class="pbw-text" rows="4" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
+      <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
       <div class="pbw-cmeta" data-cmeta="${i}"></div>
       <div data-slots="${i + 1}"></div></div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
       '<div class="pbw-solos" data-slots="0"></div>';
+    qs('.pbw-left')?.classList.toggle('is-solo', count < 2);
     box.querySelectorAll('textarea[data-name]').forEach(area => {
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
     });
@@ -918,7 +927,14 @@ export function createPresetBench({
       return `<div class="pbw-slot${cur ? ' is-cur' : ''}${axis ? ' is-axis' : ''}" data-slot="${slot.id}">
         <span class="pbw-slot-k">${label}</span><span class="pbw-slot-v">${marks}${chips}</span>${clear}</div>`;
     };
-    qsa('[data-ccard]').forEach(card => card.classList.toggle('is-picking', charIndex() === Number(card.dataset.ccard)));
+    qsa('[data-ccard]').forEach(card => {
+      const picking = charIndex() === Number(card.dataset.ccard);
+      card.classList.toggle('is-picking', picking);
+      const area = card.querySelector('textarea[data-name]');
+      const rows = picking ? 4 : 1;
+      // 손으로 늘린 높이(style.height)는 고르기가 바뀔 때 걷는다 - 줄 수 규칙이 다시 보이게.
+      if (area && area.rows !== rows) { area.rows = rows; area.style.height = ''; }
+    });
     qsa('[data-slots]').forEach(holder => {
       const owner = Number(holder.dataset.slots);
       const mine = list.filter(slot => slot.owner === owner);

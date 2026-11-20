@@ -79,6 +79,10 @@ export function slotsFor(count) {
   ];
 }
 
+// 1인 자세 + 2인 자세를 함께 고르면 2인 자세가 주인공이다 - 1인 자세는 이 가중치로 눌러 싣는다(사용자 11-20).
+// NAI 수치 가중치 꼴 `0.7::태그, 태그::`(벤치 생성은 NAI 만 받는다).
+export const POSE_WEIGHT_WITH_LINK = 0.7;
+
 /** 캐릭터 프롬프트 칸에 싣는 칸인가(target = 'char' 일 때). 1인의 자세는 캐릭터 몫이지만 메인에 둔다 -
  *  NAI 는 동작을 메인에 둘 때 더 잘 따른다(목업 3안 미리보기와 같다). */
 function goesToCharacter(slot) {
@@ -111,19 +115,23 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
   const linkPool = !linkTags.length ? '' : (variant && variant.slotId === 'link' ? variant.pool : cast && cast.linkPool);
   const head = headFor(cast, linkPool || '');
   const nameOf = i => String(names[i] || '').trim();
+  // 칸 한 개의 글 - 2인 자세가 있으면 1인 자세(event)는 POSE_WEIGHT_WITH_LINK 로 감싼다. 2인 자세는 늘 메인(goesToCharacter 밖).
+  const slotText = slot => {
+    const text = joinTags(tagsOf(slot));
+    return text && slot.kind === 'event' && linkTags.length ? `${POSE_WEIGHT_WITH_LINK}::${text}::` : text;
+  };
   if (target === 'main') {
     const main = uniqueTags(joinTags([
       head,
       ...Array.from({length: count}, (_, i) => nameOf(i)),
-      ...slots.map(slot => joinTags(tagsOf(slot))),
+      ...slots.map(slotText),
     ]));
     return {main, characters: []};
   }
-  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slot => joinTags(tagsOf(slot)))]));
+  const main = uniqueTags(joinTags([head, ...slots.filter(slot => !goesToCharacter(slot)).map(slotText)]));
   const characters = [];
   for (let i = 0; i < count; i += 1) {
-    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1)
-      .map(slot => joinTags(tagsOf(slot)))]);
+    const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1).map(slotText)]);
     characters.push({prompt, uc: String(ucs[i] || '').trim()});
   }
   // 캐릭터 칸이 전부 비면 싣지 않는다 - 빈 캐릭터 칸은 NAI 에 사람 하나를 더 그리라는 뜻이 될 수 있다.

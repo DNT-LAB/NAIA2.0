@@ -12898,7 +12898,7 @@ function openPresetBenchTool() {
     return;
   }
   if (presetBenchWindowLoading) return;
-  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ui4')
+  presetBenchWindowLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-zoom')
     .then(({createPresetBenchWindow}) => {
       presetBenchWindow = createPresetBenchWindow({
         document,
@@ -12907,6 +12907,8 @@ function openPresetBenchTool() {
         bindTagAssist,
         applyMainPrompt: text => applyPromptText(text),
         notify: (msg, type) => showToast(msg, type),
+        showZoom: (target, info, anchorRect) => remoteController?.showZoomBeside?.(target, info, anchorRect),
+        hideZoom: () => remoteController?.hideZoom?.(),
         onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
       });
       presetBenchWindow.open();

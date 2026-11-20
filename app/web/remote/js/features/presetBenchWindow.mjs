@@ -46,7 +46,8 @@ const MAX_ITEMS = 20;
 
 const PBW_CSS = `
 .pbw-window .dragpanel-body { display: flex; flex-direction: column; min-height: 0; padding: 0; font-size: 12px; }
-.pbw-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 216px minmax(0, 1fr); }
+/* 왼쪽 열 272px(사용자 11-20 - 긴 태그 칩이 잘렸다) · 그림 카드는 140px 까지만(크게 보기는 마우스를 올려서). */
+.pbw-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 272px minmax(0, 1fr); }
 /* 왼쪽 열은 한 단계 어둡게, 캐릭터 · 칸 카드는 밝게 - 오른쪽 탐색과 갈린다(사용자 11-20 목업). */
 .pbw-left { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-glow); padding: 8px; display: flex; flex-direction: column; gap: 8px;
   background: var(--bg-primary); }
@@ -146,7 +147,7 @@ const PBW_CSS = `
 .pbw-ex-ctx { min-width: 0; color: var(--text-dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-ex-head .pbw-input { margin-left: auto; flex: 0 1 220px; min-width: 120px; }
 .pbw-grid-wrap { min-height: 0; overflow-y: auto; }
-.pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
+.pbw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 140px)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 .pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
 .pbw-card { position: relative; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-surface); }
 .pbw-card:hover { border-color: var(--accent); }
@@ -227,6 +228,10 @@ export function createPresetBenchWindow({
   window: win = (typeof window !== 'undefined' ? window : null),
   fetch: fetchFn = win.fetch.bind(win),
   escHtml = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+  // 그림 카드에 마우스를 올리면 창 옆에 크게 - 아티스트 썸네일 · 아티스트 태그 관리 창과 같은 문
+  // (app.js 의 remoteController.showZoomBeside / hideZoom - 자리 규칙이 한 곳). 없으면 크게 보기 없이.
+  showZoom = null,
+  hideZoom = () => {},
   // 캐릭터 글 칸에 태그 자동완성을 붙인다(app.js bindTagAssist). 없으면 그냥 글 칸.
   bindTagAssist = null,
   // [메인 프롬프트로] - 가운데 몫을 메인 프롬프트 칸에 넣는다(app.js applyPromptText).
@@ -311,7 +316,7 @@ export function createPresetBenchWindow({
     width: 1060, height: 700, minWidth: 720, maxWidth: 1800, minHeight: 460, resizable: true,
     escHtml,
     onOpen: () => { void boot(); onVisibilityChange(); },
-    onClose: () => { onVisibilityChange(); },
+    onClose: () => { leaveCard(); onVisibilityChange(); },
   });
   panel.body.innerHTML = `
     <div class="pbw-cols">
@@ -1177,6 +1182,39 @@ export function createPresetBenchWindow({
     if (t.dataset.role === 'new-name') { st.newName = t.value; return; }
     if (t.dataset.role === 'export-name') { st.exportName = t.value; return; }
   });
+
+  // ---------------------------------------------------------------- 올리면 창 옆에 크게
+  const HOVER_DELAY_MS = 140;      // 리모컨 · 아티스트 태그 관리 창과 같은 뜸 - 지나가는 마우스에는 안 뜬다
+  let hoverCard = null;
+  let hoverTimer = null;
+
+  function leaveCard() {
+    if (hoverTimer) { win.clearTimeout(hoverTimer); hoverTimer = null; }
+    if (hoverCard) { hoverCard = null; hideZoom(); }
+  }
+
+  panel.body.addEventListener('mouseover', event => {
+    const card = event.target?.closest?.('.pbw-card');
+    if (card === hoverCard) return;
+    leaveCard();
+    const src = card?.querySelector('img.pbw-th')?.getAttribute('src');
+    if (!src || typeof showZoom !== 'function') return;     // '미생성' 칸은 띄울 것이 없다
+    hoverCard = card;
+    hoverTimer = win.setTimeout(() => {
+      hoverTimer = null;
+      if (hoverCard !== card || !panel.isOpen()) return;
+      const set = shownSets.get(card.dataset.set);
+      const badge = set ? (POOL_BADGES[set.pool] || (LINK_POOLS[set.pool]?.badge ?? '')) : '';
+      showZoom(card, {
+        src,
+        title: (set?.tags || []).join(', '),
+        note: [badge, set?.seed].filter(Boolean).join(' · '),
+      }, panel.el.getBoundingClientRect());
+    }, HOVER_DELAY_MS);
+  });
+  panel.body.addEventListener('mouseleave', leaveCard);
+  panel.body.addEventListener('scroll', leaveCard, true);
+  panel.el.addEventListener('dragpanel-move', leaveCard);
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {

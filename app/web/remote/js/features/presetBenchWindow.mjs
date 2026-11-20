@@ -233,23 +233,28 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 /* 탐색 세 칸(대분류 | 소분류 · 시드 | 그림) 사이에 세로 선 - 상자는 씌우지 않는다. */
 .pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
 .pbw-cat { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; padding: 3px 7px; border: 0; border-radius: 4px;
-  color: var(--text-muted); font-size: 12px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
-.pbw-cat small { font-size: 10px; color: var(--text-dim); }
+  color: var(--text-muted); font-size: 14px; cursor: pointer; background: transparent; font-family: inherit; text-align: left; }
+.pbw-cat small { font-size: 11px; color: var(--text-dim); }
 .pbw-cat:hover { color: var(--text-primary); }
 .pbw-cat { position: relative; }
 /* 고른 칸 표시는 곧은 막대로 - inset 그림자는 둥근 모서리를 따라 휘어 { 처럼 보인다(사용자 지시 2026-11-20). */
 .pbw-cat.is-on { color: var(--text-primary); background: var(--bg-hover); }
 .pbw-cat.is-on::before { content: ""; position: absolute; left: 0; top: 3px; bottom: 3px; width: 2px; background: var(--accent); }
 /* 소분류 머리글이 항목보다 위로 읽히게 - 굵게 · 밝게 · 아래 선. */
-.pbw-sub { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 8px 5px 3px; margin: 0 2px 2px; border-bottom: 1px solid var(--border-dim); }
-.pbw-sub:first-child { padding-top: 0; }
-.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 124px minmax(0, 1fr); gap: 8px; }
+/* 소분류 머리글 = 강조색 바탕 띠(사용자 11-20 - 하위 그룹이 한눈에). */
+.pbw-sub { font-size: 13px; font-weight: 600; color: var(--text-primary); padding: 3px 7px; margin: 8px 0 2px;
+  border-radius: 4px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pbw-sub:first-child { margin-top: 0; }
+.pbw-ex2 { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 8px; }
 .pbw-ex2.is-related { grid-template-columns: minmax(0, 1fr) 0; }
 .pbw-seeds { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
 .pbw-ex2.is-related .pbw-seeds { border-right: 0; padding-right: 0; }
-.pbw-seed { display: flex; justify-content: space-between; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer; color: var(--text-muted); font-size: 12px; }
-/* 글자를 한 단계 밝게(사용자 지시 11-20) - 이름은 text-muted, 수는 한 단계 낮게 */
-.pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.pbw-seed { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 2px 5px 2px 9px; border-radius: 4px; cursor: pointer;
+  color: var(--text-primary); font-size: 14px; }
+/* 한글 이름은 밝게 · 옆 영문 태그는 2px 작고 어둡게 · 오른쪽 수 = 고를 수 있는 세트 수(사용자 11-20). */
+.pbw-seed span:first-child small { margin-left: 5px; font-size: 12px; color: var(--text-dim); }
+.pbw-seed span:last-child { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.pbw-seed.is-all { font-weight: 600; margin-bottom: 2px; }
 .pbw-seed.is-on span:last-child, .pbw-seed:hover span:last-child { color: inherit; }
 .pbw-seed span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pbw-seed:hover { color: var(--text-primary); }
@@ -266,7 +271,11 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-content: start; grid-auto-rows: max-content; }
 /* 캐릭터 고르기(DB · 에셋 · REF)는 한 줄 3장(사용자 11-20) - 칸 고르기는 2장 그대로. */
 .pbw-grid.is-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.pbw-sec { font-size: 11px; color: var(--text-dim); margin: 6px 0 3px; }
+/* 판이 넓으면(크게 보기 너비 x 2.95 초과) 칸 고르기도 한 줄 3장(사용자 11-20) - 판 너비를 재서 붙인다(fitGridCols). */
+.pbw-grid-wrap.is-w3 .pbw-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pbw-sec { font-size: 12px; color: var(--text-muted); margin: 8px 0 3px; }
+.pbw-sec:first-child { margin-top: 0; }
+.pbw-sec small { margin-left: 4px; color: var(--text-dim); }
 .pbw-card { position: relative; border: 1px solid var(--border-dim); border-radius: 6px; overflow: hidden; cursor: pointer; background: var(--bg-surface); }
 .pbw-card:hover { border-color: var(--accent); }
 .pbw-card.is-sel { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -999,6 +1008,12 @@ export function createPresetBench({
   }
 
   // ---------------------------------------------------------------- 탐색
+  const setTotal = seeds => (seeds || []).reduce((sum, seed) => sum + Number(seed.sets || 0), 0);
+  // 시드 이름 칸 = 한글 + 작은 영문 태그(한글이 없으면 영문만).
+  const seedLabel = seed => (seed.ko && seed.ko !== seed.seed
+    ? `<span>${esc(seed.ko)}<small>${esc(seed.seed)}</small></span>`
+    : `<span>${esc(seed.seed)}</span>`);
+
   async function catalogOf(kind, pool) {
     const key = `${kind}|${pool}`;
     if (!catalogCache.has(key)) catalogCache.set(key, getJson(API.catalog(kind, pool)).catch(error => { catalogCache.delete(key); throw error; }));
@@ -1113,27 +1128,30 @@ export function createPresetBench({
     // 대분류 차례 · 이름은 서버의 탐색 분류표 그대로(갈래 다섯 모두).
     const groups = catalog.groups || [];
     if (!view.cat || !groups.some(group => group.slot === view.cat)) view.cat = groups[0]?.slot || '';
-    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || group.slot)}</span><small>${(group.seeds || []).length}</small></button>`).join('');
+    cats.innerHTML = groups.map(group => `<button type="button" class="pbw-cat${view.mode === 'browse' && group.slot === view.cat ? ' is-on' : ''}" data-cat="${esc(group.slot)}"><span>${esc(group.label || group.slot)}</span><small>${setTotal(group.seeds)}</small></button>`).join('');
 
     let seeds;
     if (view.mode === 'search') {
       seeds = view.hits;
       seedsBox.innerHTML = seeds.length
-        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched === hit.seed ? hit.seed : `${hit.seed} · 찾은 태그 ${hit.matched}`)}"><span>${esc(hit.ko || hit.seed)}</span><span>${hit.count}</span></div>`).join('')
+        ? `<div class="pbw-dim pbw-sm" style="padding:2px 5px">검색 '${esc(view.q)}' · ${seeds.length}</div>` + seeds.map(hit => `<div class="pbw-seed${hit.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(hit.seed)}" title="${esc(hit.matched === hit.seed ? hit.seed : `${hit.seed} · 찾은 태그 ${hit.matched}`)}">${seedLabel(hit)}<span>${hit.count}</span></div>`).join('')
         : `<div class="pbw-empty">'${esc(view.q)}' 결과 없음</div>`;
     } else {
       const group = groups.find(item => item.slot === view.cat);
       seeds = group?.seeds || [];
-      // 소분류 머리글 + Danbooru 게시물 수. 표에 아직 없는 시드('분류 전')는 posts 가 없어 세트 수를 보인다.
-      // 이름은 한글만(사용자 지시 11-20) - 영문 태그는 툴팁 첫 줄. 사전에 이름이 없으면 영문 그대로.
+      // 소분류 머리글 + 오른쪽 수 = 고를 수 있는 세트 수(사용자 11-20 - 게시물 수는 툴팁으로).
+      // 이름 = 한글 + 옆에 작은 영문 태그(사용자 11-20). 사전에 이름이 없으면 영문만.
       const row = seed => {
-        const shown = seed.posts != null ? formatPosts(seed.posts) : seed.sets;
-        const tip = seed.posts != null ? `Danbooru 게시물 ${Number(seed.posts).toLocaleString()} · 세트 ${seed.sets}` : `세트 ${seed.sets}`;
-        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(`${seed.seed} · ${tip}`)}"><span>${esc(seed.ko || seed.seed)}</span><span>${shown}</span></div>`;
+        const tip = seed.posts != null ? `세트 ${seed.sets} · Danbooru 게시물 ${Number(seed.posts).toLocaleString()}` : `세트 ${seed.sets}`;
+        return `<div class="pbw-seed${seed.seed === view.seed ? ' is-on' : ''}" data-seed="${esc(seed.seed)}" title="${esc(`${seed.seed} · ${tip}`)}">${seedLabel(seed)}<span>${seed.sets}</span></div>`;
       };
-      seedsBox.innerHTML = group?.subs
+      // 맨 위 '전체' = 대분류를 누른 상태(그 대분류의 세트를 다 나열 - 사용자 11-20 "첫 그룹을 고르지 말고 전체").
+      const all = `<div class="pbw-seed is-all${view.seed ? '' : ' is-on'}" data-seed="" title="이 분류의 세트를 모두 나열합니다"><span>전체</span><span>${setTotal(seeds)}</span></div>`;
+      seedsBox.innerHTML = all + (group?.subs
         ? group.subs.map(sub => `<div class="pbw-sub">${esc(sub.name)}</div>${sub.seeds.map(row).join('')}`).join('')
-        : seeds.map(row).join('');
+        : seeds.map(row).join(''));
+      if (view.seed && !seeds.some(seed => seed.seed === view.seed)) view.seed = '';
+      if (!view.seed) { await renderCategorySets(slot, group, seeds, serial); return; }
     }
     if (!view.seed || !seeds.some(seed => seed.seed === view.seed)) view.seed = seeds[0]?.seed || '';
     seedsBox.querySelectorAll('.pbw-seed').forEach(row => row.classList.toggle('is-on', row.dataset.seed === view.seed));
@@ -1154,6 +1172,34 @@ export function createPresetBench({
     shownSets = new Map(sets.map(set => [set.id, set]));
     ctx.textContent = `${seedName} · ${sets.length}세트`;
     grid.innerHTML = `<div class="pbw-grid">${sets.map(set => cardHtml(slot, set, {hit: set.id === view.hitSet})).join('')}</div>`;
+  }
+
+  // 대분류 전체 - 시드마다 세트를 받아(시드 하나 고를 때와 같은 캐시) 시드별 머리글 아래 나열한다.
+  async function renderCategorySets(slot, group, seeds, serial) {
+    const ctx = $('ex-ctx');
+    const grid = $('grid');
+    ctx.textContent = `${group?.label || ''} 전체`;
+    grid.innerHTML = '<div class="pbw-empty">불러오는 중…</div>';
+    let lists;
+    try {
+      lists = await Promise.all(seeds.map(seed => setsOf(slot.kind, slot.pool, seed.seed)));
+    } catch (error) {
+      if (serial !== searchSerial) return;
+      grid.innerHTML = `<div class="pbw-empty">세트를 읽지 못했습니다: ${esc(error.message)}</div>`;
+      return;
+    }
+    if (serial !== searchSerial) return;
+    shownSets = new Map();
+    let total = 0;
+    grid.innerHTML = seeds.map((seed, i) => {
+      const sets = lists[i] || [];
+      if (!sets.length) return '';
+      total += sets.length;
+      sets.forEach(set => shownSets.set(set.id, set));
+      const en = seed.ko && seed.ko !== seed.seed ? `<small>${esc(seed.seed)}</small>` : '';
+      return `<div class="pbw-sec">${esc(seed.ko || seed.seed)}${en} · ${sets.length}</div><div class="pbw-grid">${sets.map(set => cardHtml(slot, set)).join('')}</div>`;
+    }).join('') || '<div class="pbw-empty">세트가 없습니다</div>';
+    ctx.textContent = `${group?.label || ''} 전체 · ${total}세트`;
   }
 
   async function runSearch(q) {
@@ -1959,6 +2005,8 @@ export function createPresetBench({
   const HOVER_DELAY_MS = 140;      // 리모컨 · 아티스트 태그 관리 창과 같은 뜸 - 지나가는 마우스에는 안 뜬다
   let hoverCard = null;
   let hoverTimer = null;
+  // 크게 보기 상자 너비 = style.css .rctl-zoom (320px · 최대 42vw). 칸이 이보다 크면 크게 보기가 뜻이 없다.
+  const zoomWidth = () => Math.min(320, (win.innerWidth || 1600) * 0.42);
 
   function leaveCard() {
     if (hoverTimer) { win.clearTimeout(hoverTimer); hoverTimer = null; }
@@ -1971,6 +2019,8 @@ export function createPresetBench({
     leaveCard();
     const src = card?.querySelector('img')?.getAttribute('src');
     if (!src || typeof showZoom !== 'function') return;     // '미생성' 칸은 띄울 것이 없다
+    // 칸이 크게 보기보다 넓으면 띄우지 않는다(사용자 11-20 - 작게 겹쳐 가리기만 한다).
+    if (card.getBoundingClientRect().width >= zoomWidth()) return;
     hoverCard = card;
     hoverTimer = win.setTimeout(() => {
       hoverTimer = null;
@@ -2016,9 +2066,16 @@ export function createPresetBench({
   });
   splitBar.addEventListener('dblclick', () => { st.split = 0.45; applySplit(); persist(); });
   applySplit();
+  // 칸 고르기 그림 판 - 너비가 크게 보기 x 2.95 를 넘으면 한 줄 3장(사용자 11-20). 캐릭터 고르기(is-3)는 늘 3장.
+  function fitGridCols() {
+    const wrap = $('grid');
+    if (wrap) wrap.classList.toggle('is-w3', wrap.clientWidth > zoomWidth() * 2.95);
+  }
   if (win.ResizeObserver) {
     new win.ResizeObserver(() => fitResults()).observe($('results'));
+    new win.ResizeObserver(() => fitGridCols()).observe($('grid'));
   }
+  fitGridCols();
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {

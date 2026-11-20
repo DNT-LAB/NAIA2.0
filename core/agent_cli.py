@@ -477,13 +477,31 @@ def preset_sets(context, args):
                 raise CliError("preset_seed_not_found", "No sets for that kind/pool/seed; take seed and pool from seeds or search")
             return {"kind": args.kind, "pool": args.pool, "seed": args.seed, "sets": [summary(row) for row in rows]}
         if args.action == "search":
+            # --category / --subcategory 를 주면 그 분류의 시드만(따로 뺀 분류면 그 풀이 곧 허락이다 · Codex 리뷰 11-20).
+            allowed = None
+            if args.category or args.subcategory:
+                if not args.kind:
+                    raise CliError("invalid_arguments", "search --category needs --kind")
+                picked = [group for group in service.catalog(args.kind, "")["groups"]
+                          if not args.category or group["slot"] == args.category]
+                allowed = {(group.get("pool") or "", seed["seed"]) for group in picked for sub in group["subs"]
+                           if not args.subcategory or sub["name"] == args.subcategory for seed in sub["seeds"]}
+                if not allowed:
+                    raise CliError("preset_category_not_found",
+                                   f"No such category/subcategory; run preset-sets categories --kind {args.kind}")
             hits = service.search(args.query, args.kind, names())
             found = {}
             for hit in hits:
                 pool = hit["pool"] if hit["pool"] in separate else ""
+                if allowed is not None:
+                    if (pool, hit["seed"]) not in allowed:
+                        continue
+                    pool_ok = True
+                else:
+                    pool_ok = False
                 if args.pool in separate and pool != args.pool:
                     continue  # 별도 풀을 직접 말했으면 그 풀만
-                if pool and not args.include_separate and pool != args.pool:
+                if pool and not args.include_separate and pool != args.pool and not pool_ok:
                     continue
                 item = found.setdefault((hit["kind"], pool, hit["seed"]), {
                     "kind": hit["kind"], "pool": pool, "seed": hit["seed"], "ko": hit["ko"],

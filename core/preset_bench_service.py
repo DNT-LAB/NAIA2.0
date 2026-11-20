@@ -423,14 +423,15 @@ class PresetBenchService:
             raise KeyError(tag)
         index, _ = self._thumbs()
         self._load()
-        siblings = self._seeds.get(("outfit", pool), {})
+        # 형제 = 일반 그리드가 그리는 목록(합친 풀 '' 의 같은 시드 - slotsFor 의 pool '') - 같은 세트가 같은 가중치로 실린다.
+        siblings = self._seeds.get(("outfit", ""), {})
         for group in result["groups"]:
             group["sets"] = [self._related_row(row, index, siblings) for row in group["sets"]]
         return result
 
     def _related_row(self, row, index, siblings):
         """관련 의상 한 장 = 관련 행 그대로(rank · score 형식 유지) + 일반 목록의 생성 요약(add · adult)
-        + 일반 목록(같은 풀 · 같은 시드)과 같은 형제 기준 distinct(Codex 리뷰 11-20)."""
+        + 일반 그리드(합친 풀 · 같은 시드)와 같은 형제 기준 distinct(Codex 리뷰 11-20)."""
         base = self._by_id.get(row.get("id"))
         if base is None:
             return dict(row, has_thumb=row["key"] in index)

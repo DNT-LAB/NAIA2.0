@@ -151,7 +151,11 @@ class AgentPresetSetsContract(unittest.TestCase):
         self.assertIn(seed["pool"], {row["pool"] for row in wide["seeds"]})
         # 그 풀을 직접 말하면 --include-separate 없이도 나온다(Codex 리뷰 11-20)
         named = self.ok("search", tag, "--kind", "link", "--limit", "500", "--pool", seed["pool"])
-        self.assertIn(seed["pool"], {row["pool"] for row in named["seeds"]})
+        self.assertEqual({row["pool"] for row in named["seeds"]}, {seed["pool"]})
+        # 따로 뺀 분류를 --category 로 말해도 그 풀만 나온다
+        by_category = self.ok("search", tag, "--kind", "link", "--limit", "500", "--category", apart[0]["category"])
+        self.assertTrue(by_category["seeds"])
+        self.assertEqual({row["pool"] for row in by_category["seeds"]}, {apart[0]["pool"]})
         for index in range(8):
             self.assertEqual(self.ok("random", "--kind", "link", "--random-seed", str(index))["separate_pool"], "")
         picked = self.ok("random", "--kind", "link", "--category", apart[0]["category"])

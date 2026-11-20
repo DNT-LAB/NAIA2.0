@@ -2561,7 +2561,7 @@ export function createPresetBench({
     goneTimer = 0;
     let live;
     try { live = queueIds(await getJson(API.queueState)); }
-    catch (_) { if (waiting().some(item => item.goneAt)) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS); return; }
+    catch (_) { if (!goneTimer && waiting().some(item => item.goneAt)) goneTimer = win.setTimeout(sweepGone, QUEUE_GONE_MS); return; }
     const now = Date.now();
     const gone = waiting().filter(item => item.goneAt && !live.has(item.queueId) && now - item.goneAt >= QUEUE_GONE_MS);
     for (const item of gone) { item.status = 'cancelled'; item.message = '큐에서 빠짐'; }

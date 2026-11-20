@@ -25,6 +25,12 @@ BROWSE_TAXONOMY_NAME = "preset_browse_taxonomy.json"
 # 세트 id -> 거의 늘 함께 나오는 몸 태그(tools/build_preset_cooccur.py 가 굽는다 - 벤치가 메인에 싣는다).
 COOCCUR_NAME = "preset_cooccur.json"
 COOCCUR_SCHEMA = "naia.preset_cooccur.v1"
+# 의상 세트 id -> [이름 붙은 옷차림 태그, 비율](tools/build_preset_outfit_concepts.py 가 굽는다 - 검색 '교복' 이
+# school uniform · serafuku 비율이 높은 세트를 찾는다. 사용자 11-20).
+CONCEPTS_NAME = "preset_outfit_concepts.json"
+CONCEPTS_SCHEMA = "naia.preset_outfit_concepts.v1"
+# 검색 결과 차례 - 이름이 맞음 > 이름 붙은 옷차림 > 설명 · 키워드에만 나옴(사용자 11-20 '교복' 맨 위에 속바지).
+SEARCH_LIMIT = 200
 # 성인 세트 = 근거 게시물의 절반 이상이 explicit - 벤치가 메인에 nsfw 를 붙인다(사용자 11-20).
 ADULT_EXPLICIT_SHARE = 0.5
 # 표에 아직 없는 시드(팩을 다시 구운 뒤 표를 안 고쳤을 때)가 숨지 않게 맨 끝에 모아 보인다.
@@ -73,6 +79,19 @@ def load_cooccur(path, pack_sha256):
         return {}, frozenset()
     adds = {set_id: [str(tag) for tag in tags] for set_id, tags in (data.get("sets") or {}).items()}
     return adds, frozenset(str(set_id) for set_id in data.get("futanari") or ())
+
+
+def load_concepts(path, pack_sha256):
+    """의상 세트 id -> [(옷차림 태그, 비율)] (비율 높은 차례). 없거나 · 틀리거나 · 다른 팩으로 구운 것이면 빈 값."""
+    try:
+        data = json.loads(Path(path).read_bytes())
+    except (OSError, ValueError):
+        _LOG.info("Preset outfit concept table unavailable")
+        return {}
+    if data.get("schema") != CONCEPTS_SCHEMA or data.get("build", {}).get("outfit_presets_sha256") != pack_sha256:
+        _LOG.warning("Preset outfit concept table does not match the outfit pack - ignored")
+        return {}
+    return {str(set_id): [(str(tag), float(share)) for tag, share in rows] for set_id, rows in (data.get("sets") or {}).items()}
 
 
 def is_futa(row, futa_ids=frozenset()):
@@ -125,6 +144,30 @@ def korean_tag_name(record):
     return ""
 
 
+def _names(record):
+    """사전 항목의 이름 · 별칭(keywords_kr 의 <primary>:이름 · [이름] · 맨 키워드) - <라벨>(윗분류)은 이름이 아니다."""
+    out = []
+    for item in (x.strip() for x in str((record or {}).get("keywords_kr") or "").split(",")):
+        match = _PRIMARY_NAME.match(item)
+        if match:
+            out.append(match.group(1).strip())
+        elif item.startswith("[") and item.endswith("]"):
+            out.append(item.strip("[]").strip())
+        elif item and not item.startswith("<") and ":" not in item:
+            out.append(item)
+    return [name.casefold() for name in out if name]
+
+
+def _name_hit(query, tag, record):
+    return query in tag.casefold() or any(query in name for name in _names(record))
+
+
+def _text_hit(query, record):
+    record = record or {}
+    return (query in str(record.get("description") or record.get("desc") or "").casefold()
+            or query in str(record.get("keywords_kr") or "").casefold())
+
+
 def name_subject(text, find_by_tag):
     """캐릭터 칸 글 -> 인원 태그의 성별(girl · boy · other) · 근거.
 
@@ -173,6 +216,7 @@ class PresetBenchService:
                 if pack_kind == "outfit":
                     self._outfit_digest = hashlib.sha256(raw).hexdigest()
                     self._outfit_slots = pack["tag_slot"]
+                    self._concepts = load_concepts(self.data_dir / CONCEPTS_NAME, self._outfit_digest)
                 if pack_kind == "event":
                     cooccur, futa_ids = load_cooccur(self.data_dir / COOCCUR_NAME, hashlib.sha256(raw).hexdigest())
                 for row in pack["sets"]:
@@ -311,24 +355,48 @@ class PresetBenchService:
         if not query:
             return []
         self._load()
-        matches = []
         translations = translations or {}
+        concept_ok = {}
+
+        def concept_hit(tag):
+            if tag not in concept_ok:
+                record = _translation(translations, tag)
+                concept_ok[tag] = _name_hit(query, tag, record) or _text_hit(query, record)
+            return concept_ok[tag]
+
+        # 세트마다 (차례, 점수, 맞은 태그): 0 = 시드의 영문이나 한글 이름 · 별칭이 맞음(똑같으면 점수 2),
+        # 1 = 이름 붙은 옷차림(교복 -> school uniform · serafuku)이 이 세트에서 차지하는 비율, 또는 곁 태그의 이름이
+        #     맞음(점수 0.5 - '교복 재킷' blazer 를 곁들인 세트가 세라복 세트를 밀어내지 않게),
+        # 2 = 설명 · 키워드에만 나옴(속바지 '여학생 교복에서 흔히 보임').
+        found = []
         for row in self._by_id.values():
             if kind is not None and kind != row["kind"]:
                 continue
-            for tag in (row["seed"], *row["tags"]):
-                record = _translation(translations, tag)
-                if (query in tag.casefold()
-                        or query in str(record.get("description") or record.get("desc") or "").casefold()
-                        or query in str(record.get("keywords_kr") or "").casefold()):
-                    matches.append({"kind": row["kind"], "pool": apart_pool(row) or row["pool"],
-                                    "seed": row["seed"],
-                                    "set_id": row["id"], "matched": tag,
-                                    "ko": korean_tag_name(_translation(translations, row["seed"]))})
-                    break
-            if len(matches) == 200:
-                break
-        return matches
+            tags = (row["seed"], *row["tags"])
+            seed_record = _translation(translations, row["seed"])
+            hit = None
+            if _name_hit(query, row["seed"], seed_record):
+                exact = query in (row["seed"].casefold(), *_names(seed_record))
+                hit = (0, 2.0 if exact else 1.0, row["seed"])
+            if hit is None:
+                concept = next(((share, tag) for tag, share in self._concepts.get(row["id"], ()) if concept_hit(tag)), None)
+                other = next(((0.5, tag) for tag in row["tags"] if _name_hit(query, tag, _translation(translations, tag))), None)
+                best = max(filter(None, (concept, other)), default=None, key=lambda item: item[0])
+                hit = (1, *best) if best else None
+            if hit is None:
+                hit = next(((2, 0.0, tag) for tag in tags if _text_hit(query, _translation(translations, tag))), None)
+            if hit is not None:
+                found.append((row, *hit))
+        # 화면은 시드로 묶는다 - 묶음의 차례 = 가장 좋은 세트의 (차례, 점수) · 그다음 맞은 세트 수.
+        best, count = {}, defaultdict(int)
+        for row, tier, score, _ in found:
+            key = row["seed"]
+            count[key] += 1
+            best[key] = min(best.get(key, (9, 0.0)), (tier, -score))
+        found.sort(key=lambda item: (*best[item[0]["seed"]], -count[item[0]["seed"]], item[0]["seed"], item[1], -item[2]))
+        return [{"kind": row["kind"], "pool": apart_pool(row) or row["pool"], "seed": row["seed"],
+                 "set_id": row["id"], "matched": tag, "ko": korean_tag_name(_translation(translations, row["seed"]))}
+                for row, _, _, tag in found[:SEARCH_LIMIT]]
 
     def related(self, tag, pool, context):
         if pool not in POOLS:

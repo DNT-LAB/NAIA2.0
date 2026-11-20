@@ -150,6 +150,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "data/outfit_tag_index.json",
     "data/preset_browse_taxonomy.json",
     "data/preset_cooccur.json",
+    "data/preset_outfit_concepts.json",
     "data/character_preview_thumbs.json",
     # 캐릭터가 코퍼스에 처음 나타난 달(검색 탭 [최신] 토글). 도감에는 날짜가 없어
     # 태그 코퍼스에서 미리 뽑아 둔 요약이다 — 코퍼스 자체(1.4GB)는 런타임 다운로드고
@@ -207,6 +208,7 @@ ALLOWED_BOOTSTRAP_DATA_GLOBS = (
     "*/data/outfit_tag_index.json",
     "*/data/preset_browse_taxonomy.json",
     "*/data/preset_cooccur.json",
+    "*/data/preset_outfit_concepts.json",
     "*/data/character_preview_thumbs.json",
     "*/data/character_debut.json",
     "*/data/character_group_ko.json",

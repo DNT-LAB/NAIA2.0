@@ -7,7 +7,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from app.backend.server.install_manager_routes import runtime_install_manager
-from core.preset_bench_generation import DirectSettingsStore, export_direct_base, generation_commands, preset_bench_bases
+from core.preset_bench_generation import (
+    DirectSettingsStore, db_character_prompt, export_direct_base, generation_commands, preset_bench_bases,
+)
 from core.preset_bench_service import ALL_POOLS, PresetBenchService, name_subject
 
 
@@ -59,6 +61,13 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
         from app.backend.server.character_viewer_routes import character_viewer_service
 
         return await query(lambda: name_subject(text, character_viewer_service(session_context).find_by_tag))
+
+    # 캐릭터 DB 한 명 -> 벤치 캐릭터 칸 글(옷 태그 뺌). 목록 · 그룹 · 썸네일은 Characters 창 라우트를 그대로 쓴다.
+    @app.get("/api/presets/bench/db-character")
+    async def db_character(group: str = "", character: str = "", variant: str = ""):
+        from app.backend.server.character_viewer_routes import character_viewer_service
+
+        return await query(lambda: db_character_prompt(character_viewer_service(session_context), group, character, variant))
 
     @app.get("/api/presets/search")
     async def search(q: str, kind: str | None = None):
@@ -114,7 +123,10 @@ def register_preset_bench_routes(app: FastAPI, session_context, *, run_in_thread
 
         if session_context.get_api_mode() != "NAI":
             return JSONResponse({"error": "NAI 모드에서만 생성할 수 있습니다"}, status_code=409)
-        request_id, commands = await query(generation_commands, session_context, payload)
+        try:
+            request_id, commands = await query(generation_commands, session_context, payload)
+        except FileNotFoundError as exc:      # 레퍼런스 그림이 보관함 · 에셋에서 사라졌다
+            raise HTTPException(404, str(exc)) from exc
         service = generation_service(session_context)
         policy = access_policy(session_context)
         if policy.blocked or not service._credential_for_mode("NAI"):

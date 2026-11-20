@@ -12904,7 +12904,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-3col4')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-ref4')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,

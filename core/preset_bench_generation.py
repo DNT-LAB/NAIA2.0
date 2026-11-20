@@ -16,6 +16,11 @@ _PARAM_KEYS = ("model", "width", "height", "steps", "cfg_scale", "cfg_rescale", 
 _LIMITS = {"width": (64, 2048), "height": (64, 2048), "steps": (1, 50),
            "cfg_scale": (0, 30), "cfg_rescale": (0, 1)}
 _DIRECT_LOCK = threading.Lock()
+# 캐릭터 레퍼런스 - NAI 한 요청의 상한(Interactive 레퍼런스와 같은 4). 그림 한 장 전체에 걸린다(캐릭터별이 아니다).
+MAX_REFERENCES = 4
+_REFERENCE_SOURCES = ("storage", "asset")
+# REF 창(Character Reference 모듈)과 같은 셋 - 보관함 설정의 종류를 그대로 싣는다.
+_REFERENCE_TYPES = ("character&style", "character", "style")
 
 
 def _text(source, key):
@@ -178,6 +183,80 @@ def export_direct_base(context, payload):
         return store.export_preset(name, "NAI", data, overwrite=overwrite)
 
 
+def bench_reference_params(context, references, params):
+    """벤치 생성 한 번에만 싣는 Character Reference(세션 프레임 · REF 창 목록은 건드리지 않는다).
+
+    references = [{source: storage, file_hash} | {source: asset, id, variation}, + reference_type · strength · fidelity].
+    storage = REF 창 보관함 그림, asset = 캐릭터 에셋 그림(대표 또는 변형). 계약은 core/.claude/NAI_CHARACTER_CLAUDE.md §3:
+    image_data() 로 NAI 캔버스에 맞추고 · fidelity 는 반전(1 - x) · 0.05 양자화 · 지원 안 하는 모델은 조용히 빼지 않고 거부.
+    """
+    if references in (None, []):
+        return {}
+    if not isinstance(references, list) or not all(isinstance(ref, dict) for ref in references):
+        raise ValueError("references must be a list of objects")
+    if len(references) > MAX_REFERENCES:
+        raise ValueError(f"Character Reference is limited to {MAX_REFERENCES} images per request")
+    from PIL import Image
+
+    from core.nai_model_contract import resolve_nai_model_for_context
+
+    assets = context._character_asset_service()
+    model_key = assets._effective_model_key({"params": params})
+    spec = resolve_nai_model_for_context(context, model_key) if model_key else None
+    if spec is not None and not spec.supports_character_reference:
+        raise ValueError(f"Character Reference is not supported by the base model ({model_key})")
+    encoder = context._character_reference_service()
+    cache = assets._bench_reference_cache
+    out = {key: [] for key in (
+        "director_reference_descriptions", "director_reference_images", "director_reference_information_extracted",
+        "director_reference_strength_values", "director_reference_secondary_strength_values")}
+    for ref in references:
+        source = _text(ref, "source")
+        if source not in _REFERENCE_SOURCES:
+            raise ValueError(f"unknown reference source: {source}")
+        reference_type = (_text(ref, "reference_type") or "character&style").lower()
+        if reference_type not in _REFERENCE_TYPES:
+            raise ValueError(f"unknown Character Reference type: {reference_type}")
+        strength = assets._bench_reference_scale(ref.get("strength"), 1.0, "strength")
+        fidelity = assets._bench_reference_scale(ref.get("fidelity"), 0.8, "fidelity")
+        if source == "storage":
+            path = assets.reference_storage_path(_text(ref, "file_hash"))
+            if path is None:
+                raise FileNotFoundError("reference image not found in storage")
+        else:
+            path = assets.resolve_image_path(_text(ref, "id"), _text(ref, "variation"))
+        key = (str(path), path.stat().st_mtime_ns)
+        encoded = cache.get(key)
+        if encoded is None:
+            with Image.open(path) as opened:
+                opened.load()
+                encoded = encoder.image_data(opened)
+            if len(cache) > 8:
+                cache.clear()
+            cache[key] = encoded
+        out["director_reference_descriptions"].append(
+            {"caption": {"base_caption": reference_type, "char_captions": []}, "legacy_uc": False})
+        out["director_reference_images"].append(encoded)
+        out["director_reference_information_extracted"].append(1)
+        out["director_reference_strength_values"].append(strength)
+        out["director_reference_secondary_strength_values"].append(round((1.0 - fidelity) * 20) / 20.0)
+    return {**out, "controlnet_strength": 1, "inpaintImg2ImgStrength": 1, "normalize_reference_strength_multiple": True}
+
+
+def db_character_prompt(viewer, group, character, variant=""):
+    """캐릭터 DB 한 명을 벤치 캐릭터 칸 글로 - Characters 창과 같은 build_prompt 에서 옷 태그만 뺀다(의상 칸이 따로 있다).
+    코스프레 · 추가 프롬프트(Characters 창 설정)는 싣지 않는다."""
+    if not group or not character:
+        raise ValueError("group and character are required")
+    built = viewer.build_prompt(group, character, variant, {"cosplay_enabled": False, "character_extra": ""})
+    data = viewer._get_character(group, character)
+    _pc, _ch, attire = viewer._variant_items(data, viewer._resolve_variant(data, variant))
+    attire_tags = {viewer.TAG_REPLACE.get(entry.get("tag", ""), entry.get("tag", "")) for entry in attire or []}
+    tags = [tag.strip() for tag in str(built.get("character_prompt") or "").split(",")]
+    return {"prompt": ", ".join(tag for tag in tags if tag and tag not in attire_tags),
+            "gender": viewer.prompt_head(data), "removed": sorted(tag for tag in attire_tags if tag)}
+
+
 def generation_commands(context, payload):
     request_id = _text(payload, "request_id")
     items = payload.get("items")
@@ -194,6 +273,7 @@ def generation_commands(context, payload):
         base = direct_base(base)
     else:
         raise ValueError("Invalid base mode")
+    references = bench_reference_params(context, payload.get("references"), base["params"])
 
     commands = []
     for candidate, item in enumerate(items):
@@ -215,6 +295,8 @@ def generation_commands(context, payload):
             "_remote_queue_source": "Preset Bench", "_remote_queue_label": label,
             "preset_bench_request": True, "preset_bench_request_id": request_id,
             "preset_bench_candidate": candidate, "preset_bench_label": label,
+            # 레퍼런스가 있으면 director_* 가 실려 세션 CR 늦은 바인딩은 저절로 비켜난다(위 skip 표식은 없을 때의 격리).
+            **references,
         }
         commands.append({"type": "generate", "api_mode": "NAI", "overrides": overrides})
     return request_id, commands

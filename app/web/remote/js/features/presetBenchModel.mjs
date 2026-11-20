@@ -97,9 +97,10 @@ const uniqueTags = text => [...new Set(String(text || '').split(',').map(tag => 
  *   picks     - {칸 id: 태그 배열}
  *   variant   - {slotId, tags, pool} 이면 그 칸만 이 태그로 바꿔 조립한다(비교 축의 한 장)
  *   cast.linkPool - 2인 자세 칸에 든 세트의 풀(1명일 때 인원 태그를 정한다)
+ *   ucs       - [캐릭터1 UC, 캐릭터2 UC] (에셋에서 불러온 캐릭터 UC - 캐릭터 칸에만 실린다)
  * 반환 {main, characters: [{prompt, uc}]}. target 'main' 이면 characters 는 빈 목록.
  */
-export function assemble({cast, target = 'char', names = [], picks = {}, variant = null}) {
+export function assemble({cast, target = 'char', names = [], picks = {}, variant = null, ucs = []}) {
   const {count} = normalizeCast(cast);
   const slots = slotsFor(count);
   const tagsOf = slot => {
@@ -123,19 +124,19 @@ export function assemble({cast, target = 'char', names = [], picks = {}, variant
   for (let i = 0; i < count; i += 1) {
     const prompt = joinTags([nameOf(i), ...slots.filter(slot => goesToCharacter(slot) && slot.owner === i + 1)
       .map(slot => joinTags(tagsOf(slot)))]);
-    characters.push({prompt, uc: ''});
+    characters.push({prompt, uc: String(ucs[i] || '').trim()});
   }
   // 캐릭터 칸이 전부 비면 싣지 않는다 - 빈 캐릭터 칸은 NAI 에 사람 하나를 더 그리라는 뜻이 될 수 있다.
   return {main, characters: characters.some(row => row.prompt) ? characters : []};
 }
 
 /** 미리보기 줄: 메인 · 캐릭터 N. 비교 축 칸은 `{의상 ×3}` 처럼 표시한다(axisCount > 1 이고 variant 가 없을 때). */
-export function previewRows({cast, target, names, picks, variant = null, axis = null}) {
+export function previewRows({cast, target, names, picks, variant = null, axis = null, ucs = []}) {
   let shownPicks = picks;
   if (!variant && axis && axis.count > 1) {
     shownPicks = {...picks, [axis.slotId]: [`{${axis.label} ×${axis.count}}`]};
   }
-  const {main, characters} = assemble({cast, target, names, picks: shownPicks, variant});
+  const {main, characters} = assemble({cast, target, names, picks: shownPicks, variant, ucs});
   const rows = [{key: 'main', label: '메인', text: main}];
   characters.forEach((row, i) => rows.push({key: `c${i + 1}`, label: `캐릭터 ${i + 1}`, text: row.prompt}));
   return rows;
@@ -149,14 +150,14 @@ export function variantLabel(tags) {
 }
 
 /** 생성 요청의 items. 비교 축이 있으면 축 칸의 세트마다 한 장, 없으면 한 장. */
-export function buildItems({cast, target, names, picks, axis = null}) {
+export function buildItems({cast, target, names, picks, axis = null, ucs = []}) {
   if (axis && axis.sets && axis.sets.length > 1) {
     return axis.sets.map(set => {
-      const {main, characters} = assemble({cast, target, names, picks, variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
+      const {main, characters} = assemble({cast, target, names, picks, ucs, variant: {slotId: axis.slotId, tags: set.tags, pool: set.pool}});
       return {label: variantLabel(set.tags), main, characters, set};
     });
   }
-  const {main, characters} = assemble({cast, target, names, picks});
+  const {main, characters} = assemble({cast, target, names, picks, ucs});
   return [{label: '한 장', main, characters, set: null}];
 }
 

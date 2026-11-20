@@ -17,10 +17,14 @@
 //   메인 화면의 현재 프리셋 · 세션 설정은 바꾸지 않는다 - 기반 값은 요청마다 서버가 overrides 로 싣는다.
 // - 조립 규칙(무엇을 메인 · 캐릭터 칸에 싣나)은 presetBenchModel.mjs 에 있다. 이 파일은 그리기 · 서버 왕복만 한다.
 // - 결과는 일반 생성처럼 결과 화면 · 히스토리에도 간다. 이 창은 image_meta 의 preset_bench_* 표식으로 제 것을 알아본다.
+// - 캐릭터 불러오기(사용자 11-20): 캐릭터 카드 머리를 누르면 고르기가 '캐릭터 N 고르기' [DB | 에셋 | REF] 로 바뀐다.
+//   DB = Characters 창의 캐릭터(옷 태그는 뺀다 - 의상 칸이 따로) · 에셋 = 캐릭터 프롬프트 + UC (+ 그 그림을 REF 로) ·
+//   REF = 보관함 그림을 그 카드의 REF 줄에. REF 는 이 요청에만 실린다(세션 REF 창 · 목록은 안 바꾼다).
+//   NAI 의 Character Reference 는 그림 한 장 전체에 걸린다 - 2명이면 경고만 하고 나누지 않는다. 한 번에 4장까지.
 
 import {
   MAX_CHARACTERS, normalizeCast, KIND_LABELS, LINK_POOLS, linkMismatch, slotsFor, previewRows, buildItems, variantLabel, formatPosts,
-} from './presetBenchModel.mjs?v=20261120-ui4';
+} from './presetBenchModel.mjs?v=20261120-ref1';
 
 const STYLE_ID = 'pbw-style';
 const STORE_KEY = 'naia.presetBench.state';
@@ -41,7 +45,54 @@ const API = {
   queueAction: '/api/queue/action',
   historyThumb: id => `/api/history/thumb/${encodeURIComponent(id)}?size=320`,
   historyImage: id => `/api/history/image/${encodeURIComponent(id)}`,
+  // 캐릭터 불러오기 - Characters 창 · Assets V5 · REF 창의 라우트를 그대로(읽기만).
+  dbGroups: gender => `/api/character-viewer/groups?offset=0&limit=5000${gender ? `&gender=${encodeURIComponent(gender)}` : ''}`,
+  dbList: (group, q, gender) => {
+    const p = new URLSearchParams({offset: '0', limit: String(DB_LIST_LIMIT)});
+    if (group && group !== '__ALL__') p.set('group', group);
+    if (q) p.set('query', q);
+    if (gender) p.append('gender', gender);
+    return `/api/character-viewer/list?${p}`;
+  },
+  dbDetail: '/api/character-viewer/detail',
+  dbThumb: (group, character, variant) => `/api/character-viewer/thumbnail?${new URLSearchParams({group, character, variant, size: 'grid'})}`,
+  dbCharacter: (group, character, variant) => `/api/presets/bench/db-character?${new URLSearchParams({group, character, variant})}`,
+  assetList: '/api/character-asset/list',
+  assetDetail: (id, variation) => `/api/character-asset/detail?${new URLSearchParams({id, variation})}`,
+  assetThumb: (id, variation, rev) => `/api/character-asset/thumb?${new URLSearchParams({id, variation, size: 'grid', v: String(rev || '')})}`,
+  refLibrary: (filter, categoryId, q) => {
+    const p = new URLSearchParams({kind: 'character_reference', sort: 'recent', offset: '0', limit: '200', filter});
+    if (filter === 'category' && categoryId) p.set('category_id', categoryId);
+    if (q) p.set('q', q);
+    return `/api/ref-vibe/library?${p}`;
+  },
 };
+const DB_LIST_LIMIT = 300;
+const MAX_REFS = 4;
+const REF_TYPES = ['character&style', 'character', 'style'];
+const REF_TYPE_SHORT = {'character&style': 'C&S', character: 'C', style: 'S'};
+// 에셋 그림을 REF 로 붙일 때 - Assets V5 변형 벤치와 같은 기본값.
+const ASSET_REF_DEFAULT = {reference_type: 'character&style', strength: 0.8, fidelity: 0.9};
+const GROUP_ETC = '__ETC__';
+
+function cleanRef(raw) {
+  if (!raw || typeof raw !== 'object' || !['storage', 'asset'].includes(raw.source)) return null;
+  if (raw.source === 'storage' ? !raw.file_hash : !raw.id) return null;
+  const unit = (v, d) => (Number.isFinite(Number(v)) ? Math.min(1, Math.max(0, Number(v))) : d);
+  return {
+    source: raw.source, file_hash: String(raw.file_hash || ''), id: String(raw.id || ''), variation: String(raw.variation || ''),
+    label: String(raw.label || ''), thumb: String(raw.thumb || ''),
+    reference_type: REF_TYPES.includes(raw.reference_type) ? raw.reference_type : 'character&style',
+    strength: unit(raw.strength, 1), fidelity: unit(raw.fidelity, 0.8), auto: Boolean(raw.auto),
+  };
+}
+
+// 기반 모델이 Character Reference 를 못 쓰나(NAID4.5 · V5 만 쓴다). 모르는 이름(커스텀)은 서버가 정한다.
+function crUnsupported(model) {
+  const m = String(model || '').toLowerCase();
+  if (!m || m.includes('diffusion-4-5') || m.includes('diffusion-5') || m.includes('naid4.5') || m.includes('naid5')) return false;
+  return /^nai-diffusion|^naid[0-9]/.test(m);
+}
 const PARAM_KEYS = ['model', 'width', 'height', 'steps', 'cfg_scale', 'cfg_rescale', 'sampler', 'scheduler'];
 const MAX_ITEMS = 20;
 
@@ -265,6 +316,33 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-hl { color: var(--accent); }
 .pbw-pv-line { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pbw-band { padding: 6px 8px; border: 1px solid rgba(240,198,116,0.45); border-radius: 6px; font-size: 11px; display: flex; gap: 8px; align-items: center; }
+/* 캐릭터 불러오기 - 카드 머리를 누르면 고르기가 그 캐릭터로. 고르는 중인 카드 머리 = 칸과 같은 옅은 보라 + 곧은 막대. */
+.pbw-ex-head { flex-wrap: wrap; }
+.pbw-chead[data-act="char-pick"] { cursor: pointer; position: relative; }
+.pbw-chead[data-act="char-pick"]:hover { background: var(--bg-hover); }
+.pbw-cpick { margin-left: auto; padding: 0 6px; border: 1px solid var(--border-dim); border-radius: 4px; font-size: 10.5px; font-weight: 400;
+  color: var(--text-muted); line-height: 17px; white-space: nowrap; }
+.pbw-chead:hover .pbw-cpick { border-color: var(--accent); color: var(--text-primary); }
+.pbw-ccard.is-picking > .pbw-chead { background: rgba(124,106,239,0.16); }
+.pbw-ccard.is-picking > .pbw-chead::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); }
+.pbw-ccard.is-picking .pbw-cpick { border-color: var(--accent); color: var(--accent-light); }
+.pbw-cmeta { padding: 0 8px; }
+.pbw-cmeta:empty { display: none; }
+.pbw-cfrom { display: flex; align-items: center; gap: 4px; min-width: 0; margin: -2px 0 5px; font-size: 10.5px; color: var(--text-dim); }
+.pbw-cfrom > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pbw-uc { flex: none; padding: 0 4px; border: 1px solid var(--border-dim); border-radius: 3px; color: var(--text-muted); cursor: help; }
+.pbw-crefs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 0 0 5px; }
+.pbw-crefs-k { flex: none; width: 28px; font-size: 10.5px; color: var(--text-muted); }
+.pbw-ref { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 1px 1px 1px 1px; border: 1px solid var(--border-dim);
+  border-radius: 4px; font-size: 10.5px; color: var(--text-primary); white-space: nowrap; }
+.pbw-ref img { width: 22px; height: 22px; object-fit: cover; border-radius: 3px; background: #0c0c12; }
+.pbw-ref .pbw-slot-x { font-size: 12px; padding: 0 3px; }
+.pbw-cwarn { margin: 0 0 5px; font-size: 10.5px; line-height: 1.4; color: #f0c674; }
+.pbw-attach { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; cursor: pointer; }
+.pbw-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; }
+.pbw-tools:empty { display: none; }
+.pbw-hint { padding: 3px 5px; font-size: 11px; line-height: 1.5; color: var(--text-dim); }
+.pbw-cats > .pbw-seg { flex: none; align-self: flex-start; margin: 0 0 4px 2px; }
 `;
 
 function ensureStyle(doc) {
@@ -345,6 +423,18 @@ export function createPresetBench({
     subjects: Array.from({length: MAX_CHARACTERS}, () => ({gender: '', source: '', name: ''})),
     target: saved.target === 'main' ? 'main' : 'char',
     names: Array.isArray(saved.names) ? saved.names.slice(0, 2).map(String) : ['', ''],
+    // 캐릭터마다 - 에셋에서 불러온 UC · 어디서 불러왔나(카드 아래 한 줄) · REF 줄.
+    ucs: Array.from({length: MAX_CHARACTERS}, (_, i) => String(saved.ucs?.[i] || '')),
+    loaded: Array.from({length: MAX_CHARACTERS}, (_, i) => (saved.loaded?.[i]?.label ? {src: String(saved.loaded[i].src || ''), label: String(saved.loaded[i].label)} : null)),
+    refs: Array.from({length: MAX_CHARACTERS}, (_, i) => (Array.isArray(saved.refs?.[i]) ? saved.refs[i].map(cleanRef).filter(Boolean) : [])),
+    // 캐릭터 고르기(st.cur = 'char1' · 'char2') - 출처 · 에셋 그림을 REF 로도 붙이나 · 출처마다 탐색 자리.
+    cv: {
+      src: ['db', 'asset', 'ref'].includes(saved.cv?.src) ? saved.cv.src : 'db',
+      attach: saved.cv?.attach !== false,
+      db: {group: '__ALL__', gender: '', q: '', sel: null},
+      asset: {cat: 'v5', q: '', sel: ''},
+      ref: {filter: 'all', cat: '', q: ''},
+    },
     picks: saved.picks && typeof saved.picks === 'object' ? saved.picks : {},   // 칸 id -> 세트 요약
     cur: 'o1',
     views: {},            // 칸 id -> {cat, seed, mode: browse|search|related, q, hits, related, relatedTag}
@@ -385,6 +475,7 @@ export function createPresetBench({
     try {
       storage?.setItem(STORE_KEY, JSON.stringify({
         count: st.count, target: st.target, names: st.names, picks: st.picks, split: st.split,
+        ucs: st.ucs, loaded: st.loaded, refs: st.refs, cv: {src: st.cv.src, attach: st.cv.attach},
         base: {mode: st.base.mode, preset: st.base.preset, directName: st.base.directName, directFrom: st.base.directFrom, direct: st.base.direct},
       }));
     } catch (_) { /* 이번 실행만 */ }
@@ -399,6 +490,9 @@ export function createPresetBench({
   const viewOf = id => (st.views[id] ||= {cat: '', seed: '', mode: 'browse', q: '', hits: [], related: null, relatedTag: '', hitSet: ''});
   const axisSets = () => (st.axis && st.chk[st.axis] ? [...st.chk[st.axis].values()] : []);
   const running = () => st.runs.some(run => run.items.some(item => item.status === 'pending'));
+  // 고르는 중인 캐릭터(0 · 1) - 칸을 고르는 중이면 -1.
+  const charIndex = () => (/^char[12]$/.test(st.cur) && Number(st.cur.slice(4)) <= st.count ? Number(st.cur.slice(4)) - 1 : -1);
+  const activeRefs = () => st.refs.slice(0, st.count).flat();
 
   // ---------------------------------------------------------------- 두 자리(왼쪽 덮개 · 오른쪽 탭)
   let active = false;
@@ -430,7 +524,7 @@ export function createPresetBench({
         <div class="pbw-main" data-role="main">
           <div class="pbw-gcol" data-role="gcol">
             <div data-role="band"></div>
-            <div class="pbw-ex-head"><span class="pbw-ex-ctx" data-role="ex-ctx"></span></div>
+            <div class="pbw-ex-head"><span class="pbw-ex-ctx" data-role="ex-ctx"></span><span class="pbw-tools" data-role="ex-tools"></span></div>
             <div class="pbw-grid-wrap" data-role="grid"></div>
           </div>
           <div class="pbw-split" data-role="split" title="끌어서 너비 조정 · 두 번 누르면 처음대로"></div>
@@ -667,6 +761,7 @@ export function createPresetBench({
     renderBaseCard();
     renderOverlay();
     renderPreview();
+    renderCharMeta();
   }
 
   // ---------------------------------------------------------------- 왼쪽 열
@@ -677,9 +772,12 @@ export function createPresetBench({
   function renderChars() {
     const box = $('chars');
     const count = st.count;
-    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard"><div class="pbw-chead"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
-        ${i > 0 ? `<button type="button" class="pbw-slot-x" style="margin-left:auto" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
+    // 머리 줄 전체가 '불러오기' 단추다(× 는 제 동작) - 누르면 아래 고르기가 그 캐릭터의 DB · 에셋 · REF 로 바뀐다.
+    box.innerHTML = Array.from({length: count}, (_, i) => `<div class="pbw-ccard" data-ccard="${i}"><div class="pbw-chead" data-act="char-pick" data-index="${i}" title="캐릭터 DB · 에셋 · REF 보관함에서 불러옵니다"><span>캐릭터 ${i + 1}</span><span class="pbw-subj" data-subj="${i}"></span>
+        <span class="pbw-cpick">⌕ 불러오기</span>
+        ${i > 0 ? `<button type="button" class="pbw-slot-x" data-act="char-remove" data-index="${i}" title="캐릭터 ${i + 1} 빼기" aria-label="캐릭터 ${i + 1} 빼기">×</button>` : ''}</div>
       <textarea class="pbw-text" rows="1" data-name="${i}" placeholder="캐릭터 이름 또는 프롬프트">${esc(st.names[i] || '')}</textarea>
+      <div class="pbw-cmeta" data-cmeta="${i}"></div>
       <div data-slots="${i + 1}"></div></div>`).join('') +
       (count < MAX_CHARACTERS ? '<button type="button" class="pbw-addc" data-act="char-add" title="둘째 캐릭터를 넣습니다 - 칸이 캐릭터마다 의상 · 표정으로 바뀌고 1인 자세는 빠집니다">+ 캐릭터 추가</button>' : '') +
       '<div class="pbw-solos" data-slots="0"></div>';
@@ -687,6 +785,52 @@ export function createPresetBench({
       if (typeof bindTagAssist === 'function') bindTagAssist(area, {});
     });
     renderSubjects();
+    renderCharMeta();
+  }
+
+  // 카드 아래 두 줄 - '불러온 것 · DB 블루 아카이브 › mika · 기본' [UC] [×] · REF 줄(그림 · 종류 · S · F · ×) + 경고.
+  function renderCharMeta() {
+    const total = activeRefs().length;
+    const model = baseModel();
+    // 경고는 REF 가 있는 첫 카드에만 한 번(REF 는 그림 전체 몫이라 카드마다 되풀이하지 않는다).
+    const warnAt = st.refs.slice(0, st.count).findIndex(list => list.length);
+    qsa('[data-cmeta]').forEach(box => {
+      const i = Number(box.dataset.cmeta);
+      const loaded = st.loaded[i];
+      const uc = st.ucs[i];
+      const refs = st.refs[i] || [];
+      let html = '';
+      if (loaded || uc) {
+        html += `<div class="pbw-cfrom"><span title="${esc(loaded?.label || '')}">${loaded ? `불러온 것 · ${esc(loaded.label)}` : ''}</span>
+          ${uc ? `<span class="pbw-uc" title="${esc(`캐릭터 UC(캐릭터 칸에 실립니다): ${uc}`)}">UC</span>` : ''}
+          <button type="button" class="pbw-slot-x" data-act="load-x" data-index="${i}" title="불러온 표시 · UC 를 지웁니다(글은 그대로)" aria-label="불러온 표시 지우기">×</button></div>`;
+      }
+      if (refs.length) {
+        html += `<div class="pbw-crefs"><span class="pbw-crefs-k">REF</span>${refs.map((ref, j) => {
+          const tip = `${ref.label || ''} · ${ref.reference_type} · Strength ${ref.strength} · Fidelity ${ref.fidelity}${ref.auto ? ' · 에셋 그림' : ''}`;
+          return `<span class="pbw-ref" title="${esc(tip)}">${ref.thumb ? `<img src="${esc(ref.thumb)}" alt="">` : ''}<span>${REF_TYPE_SHORT[ref.reference_type] || ''} · S ${ref.strength} · F ${ref.fidelity}</span>
+            <button type="button" class="pbw-slot-x" data-act="ref-x" data-index="${i}" data-ref="${j}" title="이 REF 빼기" aria-label="REF 빼기">×</button></span>`;
+        }).join('')}</div>`;
+        const warns = [];
+        if (i !== warnAt) { box.innerHTML = html; return; }
+        if (st.count > 1) warns.push('레퍼런스는 그림 전체에 걸립니다(NAI 제약) - 캐릭터별로 나뉘지 않습니다');
+        if (total > MAX_REFS) warns.push(`레퍼런스는 한 번에 ${MAX_REFS}장까지 - 지금 ${total}장이라 생성이 막힙니다`);
+        if (crUnsupported(model)) warns.push(`기반 모델(${model})은 Character Reference 를 못 씁니다 - 생성이 막힙니다`);
+        html += warns.map(text => `<div class="pbw-cwarn">${esc(text)}</div>`).join('');
+      }
+      box.innerHTML = html;
+    });
+  }
+
+  // 기반 모델 - 기반에 없으면 세션 값(서버도 같은 순서로 정한다).
+  function baseModel() { return String(currentBase().params?.model || sessionParams().model || ''); }
+
+  // 캐릭터 글 칸을 바꾼다(불러오기) - 치는 것과 같게 저장 · 성별 다시 묻기.
+  function setCharText(i, text) {
+    st.names[i] = String(text || '');
+    const area = qs(`textarea[data-name="${i}"]`);
+    if (area) area.value = st.names[i];
+    refreshSubject(i, 0);
   }
 
   // 성별 표지: 'girl · 자동'(이름 사전) · 'boy · 태그'(글에 쓴 1boy) · 'girl · 기본'(모름 - girl 로 본다).
@@ -728,13 +872,16 @@ export function createPresetBench({
     if (st.count < 2) {
       st.names[1] = '';
       st.subjects[1] = {gender: '', source: '', name: ''};
+      st.ucs[1] = '';
+      st.loaded[1] = null;
+      st.refs[1] = [];
     }
     const keep = new Set(slots().map(slot => slot.id));
     for (const bag of [st.picks, st.chk, st.views]) for (const id of Object.keys(bag)) if (!keep.has(id)) delete bag[id];
     if (st.axis && !keep.has(st.axis)) st.axis = null;
     if (st.memo && !keep.has(st.memo.slotId)) { st.memo = null; st.note = ''; }
     st.pick = null;
-    if (!keep.has(st.cur)) st.cur = 'o1';
+    if (!keep.has(st.cur) && charIndex() < 0) st.cur = 'o1';
     persist();
     renderChars();
     renderAll();
@@ -764,6 +911,7 @@ export function createPresetBench({
       return `<div class="pbw-slot${cur ? ' is-cur' : ''}${axis ? ' is-axis' : ''}" data-slot="${slot.id}">
         <span class="pbw-slot-k">${label}</span><span class="pbw-slot-v">${marks}${chips}</span>${clear}</div>`;
     };
+    qsa('[data-ccard]').forEach(card => card.classList.toggle('is-picking', charIndex() === Number(card.dataset.ccard)));
     qsa('[data-slots]').forEach(holder => {
       const owner = Number(holder.dataset.slots);
       const mine = list.filter(slot => slot.owner === owner);
@@ -834,9 +982,15 @@ export function createPresetBench({
   let shownSets = new Map();
 
   async function renderExplorer() {
+    if (/^char[12]$/.test(st.cur)) {
+      if (charIndex() >= 0) { await renderCharExplorer(); return; }
+      st.cur = 'o1';
+    }
     const slot = slotById(st.cur) || slots()[0];
     st.cur = slot.id;
     const view = viewOf(slot.id);
+    searchInput.placeholder = '태그 · 한국어 이름 검색';
+    $('ex-tools').innerHTML = '';
     const owner = st.count > 1 && slot.owner > 0 ? `<span class="pbw-ex-own">캐릭터 ${slot.owner} ›</span> ` : '';
     $('ex-title').innerHTML = `${owner}${esc(KIND_LABELS[slot.kind])} 고르기`;
     const ctx = $('ex-ctx');
@@ -919,6 +1073,13 @@ export function createPresetBench({
   }
 
   async function runSearch(q) {
+    if (charIndex() >= 0) {
+      const box = st.cv[st.cv.src];
+      box.q = q;
+      if (st.cv.src === 'db') box.sel = null;
+      await renderExplorer();
+      return;
+    }
     const slot = slotById(st.cur);
     if (!slot) return;
     const view = viewOf(slot.id);
@@ -971,6 +1132,263 @@ export function createPresetBench({
       notify(error.status === 404 ? `'${tag}' 의 관련 의상 정보가 없습니다` : `관련 의상을 읽지 못했습니다: ${error.message}`, error.status === 404 ? 'info' : 'error');
     }
     if (st.cur === slotId && view.mode === 'related') await renderExplorer();
+  }
+
+  // ---------------------------------------------------------------- 캐릭터 고르기(DB · 에셋 · REF)
+  const dbGroupsCache = new Map();     // 성별 -> 그룹 목록(All · original · etc · 작품)
+  const dbListCache = new Map();       // 그룹|검색|성별 -> 캐릭터 줄
+  const dbDetailCache = new Map();     // 그룹|캐릭터 -> 상세(변형 목록)
+  let assetListPromise = null;
+  let refTotal = null;
+  let dbRows = [];                     // 지금 소분류 열의 캐릭터 줄(누르기가 찾는다)
+  let dbGroupKo = {};
+  let assetRows = [];
+  let refRows = new Map();             // file_hash -> 보관함 항목
+
+  const cached = (map, key, load) => {
+    if (!map.has(key)) {
+      if (map.size > 40) map.delete(map.keys().next().value);
+      map.set(key, load().catch(error => { map.delete(key); throw error; }));
+    }
+    return map.get(key);
+  };
+  const dbGroupLabel = key => (key === '__ALL__' ? '전체' : key === GROUP_ETC ? 'etc' : (dbGroupKo[key] || key));
+  // 'mika (blue archive)' 처럼 작품 이름이 붙은 캐릭터는 이름만 - 툴팁에 전체 이름.
+  const dbShortName = (character, group) => {
+    const name = String(character || '').replace(/_/g, ' ');
+    const tail = ` (${String(group || '')})`.toLowerCase();
+    return group && name.toLowerCase().endsWith(tail) && name.length > tail.length ? name.slice(0, -tail.length) : name;
+  };
+  const assetName = row => row.display_name || `(이름 없음) ${String(row.id).slice(0, 8)}`;
+
+  async function dbGroupsOf(gender) {
+    return cached(dbGroupsCache, gender, async () => {
+      const data = await getJson(API.dbGroups(gender));
+      const items = Array.isArray(data.items) ? data.items : [];
+      items.forEach(g => { if (g?.ko) dbGroupKo[g.key] = String(g.ko); });
+      // Characters 창과 같은 차례 - All · original · etc(1명짜리 작품) · 작품(인원 순). 고른 성별이 0명인 작품은 감춘다.
+      const size = g => Number(g.total ?? g.count ?? 0);
+      const all = items.filter(g => g.key === '__ALL__');
+      const pinned = items.filter(g => g.key === 'original');
+      const singles = items.filter(g => g.key !== '__ALL__' && g.key !== 'original' && size(g) === 1);
+      const etcCount = singles.reduce((sum, g) => sum + Number(g.count || 0), 0);
+      const rest = items.filter(g => g.key !== '__ALL__' && g.key !== 'original' && size(g) > 1 && Number(g.count || 0) > 0)
+        .sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+      return [...all, ...pinned, ...(singles.length ? [{key: GROUP_ETC, count: etcCount}] : []), ...rest];
+    });
+  }
+  function assetListOf(fresh = false) {
+    if (fresh || !assetListPromise) {
+      assetListPromise = getJson(API.assetList).then(data => (Array.isArray(data.characters) ? data.characters : []))
+        .catch(error => { assetListPromise = null; throw error; });
+    }
+    return assetListPromise;
+  }
+
+  // 출처 단추의 수(에셋 N · REF N) - 처음 열 때 한 번 센다.
+  function countSources() {
+    assetListOf().then(rows => { assetRows = rows; renderCharTitle(); }).catch(() => {});
+    if (refTotal === null) {
+      getJson(API.refLibrary('all', '', '')).then(data => { refTotal = Number(data.total || 0); renderCharTitle(); }).catch(() => {});
+    }
+  }
+
+  function renderCharTitle() {
+    const i = charIndex();
+    if (i < 0) return;
+    const n = value => (value === null || value === undefined ? '' : ` ${value}`);
+    const srcs = [['db', 'DB'], ['asset', `에셋${n(assetListPromise ? assetRows.length : null)}`], ['ref', `REF${n(refTotal)}`]];
+    $('ex-title').innerHTML = `캐릭터 ${i + 1} 고르기 <span class="pbw-seg" style="margin-left:4px;vertical-align:1px">${srcs.map(([key, label]) => `<button type="button" class="${st.cv.src === key ? 'is-on' : ''}" data-csrc="${key}">${esc(label)}</button>`).join('')}</span>`;
+  }
+
+  async function renderCharExplorer() {
+    const i = charIndex();
+    const src = st.cv.src;
+    const serial = ++searchSerial;
+    shownSets = new Map();
+    $('ex2').classList.remove('is-related');
+    renderCharTitle();
+    searchInput.placeholder = src === 'db' ? '이름 · 한글 · 초성 · work:작품' : src === 'asset' ? '에셋 이름' : '보관함 이름';
+    if (doc.activeElement !== searchInput && searchInput.value !== st.cv[src].q) searchInput.value = st.cv[src].q;
+    const cats = $('cats');
+    const seedsBox = $('seeds');
+    const grid = $('grid');
+    const ctx = $('ex-ctx');
+    const tools = $('ex-tools');
+    tools.innerHTML = '';
+    const fail = error => { if (serial === searchSerial) grid.innerHTML = `<div class="pbw-empty">읽지 못했습니다: ${esc(error.message)}</div>`; };
+
+    if (src === 'db') {
+      const db = st.cv.db;
+      let groups;
+      try { groups = await dbGroupsOf(db.gender); } catch (error) { fail(error); return; }
+      if (serial !== searchSerial) return;
+      if (!groups.some(g => g.key === db.group)) db.group = '__ALL__';
+      const genders = [['', '전체'], ['girl', '여'], ['boy', '남']];
+      cats.innerHTML = `<span class="pbw-seg">${genders.map(([g, label]) => `<button type="button" class="${db.gender === g ? 'is-on' : ''}" data-cgender="${g}">${label}</button>`).join('')}</span>` +
+        groups.map(g => `<button type="button" class="pbw-cat${g.key === db.group ? ' is-on' : ''}" data-cgroup="${esc(g.key)}" title="${esc(g.key)}"><span>${esc(dbGroupLabel(g.key))}</span><small>${formatPosts(g.count)}</small></button>`).join('');
+      const q = db.q.trim();
+      seedsBox.innerHTML = '<div class="pbw-hint">찾는 중…</div>';
+      let rows;
+      try {
+        rows = await cached(dbListCache, `${db.group}|${q}|${db.gender}`, () => getJson(API.dbList(db.group, q, db.gender)).then(data => ({
+          rows: Array.isArray(data.items) ? data.items : [], total: Number(data.total || 0)})));
+      } catch (error) { fail(error); return; }
+      if (serial !== searchSerial) return;
+      dbRows = rows.rows;
+      // 여러 작품이 섞인 목록(전체 · etc · 검색)은 이름 옆에 작품을 흐리게 - 같은 이름(hoshino ai)을 가른다.
+      const mixed = db.group === '__ALL__' || db.group === GROUP_ETC || Boolean(q);
+      const more = rows.total > dbRows.length ? `<div class="pbw-hint">${dbRows.length} / ${rows.total.toLocaleString()} - 검색으로 좁히세요</div>` : '';
+      if (!db.sel || !dbRows.some(row => row.group === db.sel.group && row.character === db.sel.character)) {
+        db.sel = dbRows[0] ? {group: dbRows[0].group, character: dbRows[0].character} : null;
+      }
+      seedsBox.innerHTML = (q ? `<div class="pbw-hint">검색 '${esc(q)}' · ${rows.total.toLocaleString()}</div>` : '') + (dbRows.length
+        ? dbRows.map((row, k) => `<div class="pbw-seed${db.sel && row.group === db.sel.group && row.character === db.sel.character ? ' is-on' : ''}" data-cchar="${k}" title="${esc(`${row.character} · ${dbGroupLabel(row.group)} · 데이터 ${Number(row.count || 0).toLocaleString()}장`)}"><span>${esc(dbShortName(row.character, row.group))}${mixed ? ` <small class="pbw-dim">${esc(dbGroupLabel(row.group))}</small>` : ''}</span><span>${formatPosts(row.count)}</span></div>`).join('') + more
+        : '<div class="pbw-empty">캐릭터가 없습니다</div>');
+      if (!db.sel) { grid.innerHTML = ''; ctx.textContent = ''; return; }
+      const sel = db.sel;
+      ctx.textContent = `${dbGroupLabel(sel.group)} › ${dbShortName(sel.character, sel.group)}`;
+      let detail;
+      try {
+        detail = await cached(dbDetailCache, `${sel.group}|${sel.character}`, () => sendJson(API.dbDetail, 'POST', {group: sel.group, character: sel.character, variant: ''}));
+      } catch (error) { fail(error); return; }
+      if (serial !== searchSerial) return;
+      const variants = Array.isArray(detail.variants) && detail.variants.length ? detail.variants : [{label: '', name: 'Default', rows: detail.count}];
+      ctx.textContent = `${dbGroupLabel(sel.group)} › ${dbShortName(sel.character, sel.group)} · 변형 ${variants.length} · 누르면 캐릭터 ${i + 1} 칸에(옷 태그는 뺍니다)`;
+      const fallback = detail.default_thumbnail_url || '';
+      grid.innerHTML = `<div class="pbw-grid">${variants.map(v => {
+        const name = v.label ? String(v.name || v.label).replace(/_/g, ' ') : '기본';
+        return `<div class="pbw-card" data-cvar="${esc(v.label || '')}" data-cvname="${esc(name)}" data-zt="${esc(`${sel.character} · ${name}`)}" title="${esc(`${name} · 데이터 ${Number(v.rows || 0).toLocaleString()}장 - 누르면 캐릭터 ${i + 1} 칸에`)}">
+          <img class="pbw-th is-tall" loading="lazy" src="${esc(API.dbThumb(sel.group, sel.character, v.label || ''))}" alt=""${fallback ? ` onerror="this.onerror=null;this.src='${esc(fallback)}'"` : ''}>
+          <div class="pbw-cap">${esc(name)} · ${formatPosts(v.rows)}</div></div>`;
+      }).join('')}</div>`;
+      return;
+    }
+
+    if (src === 'asset') {
+      const box = st.cv.asset;
+      try { assetRows = await assetListOf(); } catch (error) { fail(error); return; }
+      if (serial !== searchSerial) return;
+      renderCharTitle();
+      const specs = [['v5', '신 사양 V5'], ['legacy', '구 사양']];
+      const ofSpec = spec => assetRows.filter(row => (row.spec === 'legacy' ? 'legacy' : 'v5') === spec);
+      cats.innerHTML = specs.map(([key, label]) => `<button type="button" class="pbw-cat${box.cat === key ? ' is-on' : ''}" data-acat="${key}"><span>${label}</span><small>${ofSpec(key).length}</small></button>`).join('');
+      const q = box.q.trim().toLowerCase();
+      const rows = ofSpec(box.cat).filter(row => !q || assetName(row).toLowerCase().includes(q) || String(row.id).includes(q));
+      if (!rows.some(row => row.id === box.sel)) box.sel = rows[0]?.id || '';
+      seedsBox.innerHTML = rows.length
+        ? rows.map(row => `<div class="pbw-seed${row.id === box.sel ? ' is-on' : ''}" data-aid="${esc(row.id)}" title="${esc(`${assetName(row)} · 그림 ${Number(row.variation_count || 0) + 1}장`)}"><span>${esc(assetName(row))}</span><span>${Number(row.variation_count || 0) + 1}</span></div>`).join('')
+        : `<div class="pbw-empty">${q ? `'${esc(box.q)}' 결과 없음` : '에셋이 없습니다'}</div>`;
+      tools.innerHTML = `<label class="pbw-attach" title="에셋을 불러올 때 그 그림을 캐릭터 레퍼런스(S ${ASSET_REF_DEFAULT.strength} · F ${ASSET_REF_DEFAULT.fidelity})로도 붙입니다"><input type="checkbox" data-role="attach"${st.cv.attach ? ' checked' : ''}> 그림을 REF 로도</label>`;
+      const row = rows.find(item => item.id === box.sel);
+      if (!row) { grid.innerHTML = ''; ctx.textContent = ''; return; }
+      ctx.textContent = assetName(row);
+      let detail;
+      try { detail = await getJson(API.assetDetail(row.id, '')); } catch (error) { fail(error); return; }
+      if (serial !== searchSerial) return;
+      const pics = [{hash: '', name: '대표', revision: detail.revision}, ...(detail.variations || []).map((v, k) => ({hash: v.hash, name: v.name || `변형 ${k + 1}`, revision: v.revision}))];
+      ctx.textContent = `${assetName(row)} · 그림 ${pics.length} · 누르면 캐릭터 ${i + 1} 칸에(프롬프트 + UC)`;
+      grid.innerHTML = `<div class="pbw-grid">${pics.map(pic => `<div class="pbw-card" data-avar="${esc(pic.hash)}" data-aid="${esc(row.id)}" data-zt="${esc(`${assetName(row)} · ${pic.name}`)}" title="${esc(`${pic.name} - 누르면 캐릭터 ${i + 1} 칸에`)}">
+          <img class="pbw-th is-tall" loading="lazy" src="${esc(API.assetThumb(row.id, pic.hash, pic.revision))}" alt="">
+          <div class="pbw-cap">${esc(pic.name)}</div></div>`).join('')}</div>`;
+      return;
+    }
+
+    // REF 보관함
+    const box = st.cv.ref;
+    let data;
+    try { data = await getJson(API.refLibrary(box.filter, box.cat, box.q.trim())); } catch (error) { fail(error); return; }
+    if (serial !== searchSerial) return;
+    const counts = data.counts || {};
+    if (box.filter === 'all' && !box.q.trim()) { refTotal = Number(data.total || 0); renderCharTitle(); }
+    const catRows = [['all', '', '전체', counts.all], ['favorite', '', '즐겨찾기', counts.favorite], ['uncategorized', '', '미분류', counts.uncategorized],
+      ...(Array.isArray(data.categories) ? data.categories : []).map(g => ['category', g.id, g.name, counts.categories?.[g.id]])];
+    cats.innerHTML = catRows.map(([filter, id, label, count]) => `<button type="button" class="pbw-cat${box.filter === filter && box.cat === id ? ' is-on' : ''}" data-rcat="${filter}" data-rid="${esc(id)}"><span>${esc(label)}</span><small>${Number(count || 0)}</small></button>`).join('');
+    seedsBox.innerHTML = `<div class="pbw-hint">그림을 누르면 캐릭터 ${i + 1} 의 REF 줄에 붙습니다 - 다시 누르면 뺍니다.<br>종류 · Strength · Fidelity 는 보관함 설정 그대로.<br>REF 는 이 벤치 생성에만 실립니다.</div>`;
+    const items = Array.isArray(data.items) ? data.items.filter(item => item.has_image !== false) : [];
+    refRows = new Map(items.map(item => [item.file_hash, item]));
+    ctx.textContent = `REF 보관함 · ${items.length}장`;
+    const mine = new Set((st.refs[i] || []).filter(ref => ref.source === 'storage').map(ref => ref.file_hash));
+    grid.innerHTML = items.length ? `<div class="pbw-grid">${items.map(item => {
+      const s = item.settings || {};
+      const name = item.name || item.display_name || item.file_hash;
+      return `<div class="pbw-card${mine.has(item.file_hash) ? ' is-sel' : ''}" data-rhash="${esc(item.file_hash)}" data-zt="${esc(name)}" title="${esc(`${name} · ${s.reference_type || ''} · Strength ${s.strength} · Fidelity ${s.fidelity}`)}">
+        <img class="pbw-th" loading="lazy" src="${esc(item.thumbnail_url || '')}" alt="">
+        <div class="pbw-cap">${esc(name)} · ${REF_TYPE_SHORT[s.reference_type] || ''} S ${s.strength ?? ''} F ${s.fidelity ?? ''}</div></div>`;
+    }).join('')}</div>` : `<div class="pbw-empty">${box.q.trim() ? `'${esc(box.q)}' 결과 없음` : '보관함이 비었습니다 - REF 창에서 그림을 넣어 두세요'}</div>`;
+  }
+
+  // 불러오기 - 앞서 에셋을 불러오며 저절로 붙은 REF 는 걷는다(다른 캐릭터의 그림이 남지 않게).
+  function startLoad(i, loaded, text, uc) {
+    setCharText(i, text);
+    st.ucs[i] = String(uc || '');
+    st.loaded[i] = loaded;
+    st.refs[i] = (st.refs[i] || []).filter(ref => !ref.auto);
+  }
+  function afterLoad() {
+    persist();
+    renderCharMeta();
+    renderPreview();
+  }
+
+  async function loadDb(i, group, character, variant, variantName) {
+    try {
+      const data = await getJson(API.dbCharacter(group, character, variant));
+      startLoad(i, {src: 'db', label: `DB ${dbGroupLabel(group)} › ${dbShortName(character, group)} · ${variantName}`}, data.prompt, '');
+      afterLoad();
+      const removed = Array.isArray(data.removed) ? data.removed : [];
+      notify(removed.length ? `캐릭터 ${i + 1} 에 넣었습니다 - 옷 태그 ${removed.length}개(${removed.slice(0, 3).join(', ')}${removed.length > 3 ? ' …' : ''})는 뺐습니다` : `캐릭터 ${i + 1} 에 넣었습니다`, 'success');
+    } catch (error) {
+      notify(`캐릭터를 불러오지 못했습니다: ${error.message}`, 'error');
+    }
+  }
+
+  async function loadAsset(i, id, variation) {
+    const row = assetRows.find(item => item.id === id);
+    try {
+      const detail = await getJson(API.assetDetail(id, variation));
+      const pics = [{hash: '', revision: detail.revision}, ...(detail.variations || [])];
+      const at = Math.max(0, pics.findIndex(pic => pic.hash === variation));
+      const picName = variation ? (pics[at]?.name || `변형 ${at}`) : '대표';
+      const name = row ? assetName(row) : (detail.display_name || id.slice(0, 8));
+      startLoad(i, {src: 'asset', label: `에셋 ${name} · ${picName}`}, detail.character_prompt, detail.character_uc);
+      let attached = false;
+      if (st.cv.attach) {
+        if (activeRefs().length >= MAX_REFS) {
+          notify(`레퍼런스는 한 번에 ${MAX_REFS}장까지라 그림은 붙이지 않았습니다`, 'info');
+        } else {
+          st.refs[i].push(cleanRef({source: 'asset', id, variation, label: `${name} · ${picName}`, thumb: API.assetThumb(id, variation, pics[at]?.revision),
+            ...ASSET_REF_DEFAULT, auto: true}));
+          attached = true;
+        }
+      }
+      afterLoad();
+      if (!String(detail.character_prompt || '').trim()) notify('이 에셋엔 캐릭터 프롬프트가 없습니다', 'info');
+      else notify(`캐릭터 ${i + 1} 에 넣었습니다${detail.character_uc ? ' · UC 포함' : ''}${attached ? ' · 그림을 REF 로' : ''}`, 'success');
+    } catch (error) {
+      notify(`에셋을 불러오지 못했습니다: ${error.message}`, 'error');
+    }
+  }
+
+  // 보관함 그림 하나를 그 캐릭터의 REF 줄에 넣거나 뺀다. 고르기 칸은 다시 그리지 않는다(스크롤 자리를 지킨다).
+  function toggleStorageRef(i, hash) {
+    const item = refRows.get(hash);
+    const list = st.refs[i] || (st.refs[i] = []);
+    const at = list.findIndex(ref => ref.source === 'storage' && ref.file_hash === hash);
+    if (at >= 0) {
+      list.splice(at, 1);
+    } else {
+      if (!item) return;
+      if (activeRefs().length >= MAX_REFS) { notify(`레퍼런스는 한 번에 ${MAX_REFS}장까지입니다`, 'error'); return; }
+      const s = item.settings || {};
+      list.push(cleanRef({source: 'storage', file_hash: hash, label: item.name || item.display_name || hash, thumb: item.thumbnail_url,
+        reference_type: s.reference_type, strength: s.strength, fidelity: s.fidelity}));
+    }
+    const on = at < 0;
+    qsa(`.pbw-card[data-rhash="${CSS.escape(hash)}"]`).forEach(el => el.classList.toggle('is-sel', on));
+    persist();
+    renderCharMeta();
+    renderPreview();
   }
 
   // ---------------------------------------------------------------- 결과 열(오른쪽 - 남는다)
@@ -1075,7 +1493,7 @@ export function createPresetBench({
     }
     const axisSlot = slotById(st.axis);
     const rows = previewRows({
-      cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant,
+      cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant, ucs: st.ucs,
       axis: axisSlot ? {slotId: axisSlot.id, label: KIND_LABELS[axisSlot.kind], count: axisSets().length} : null,
     });
     const base = currentBase();
@@ -1083,8 +1501,12 @@ export function createPresetBench({
     const back = `<span class="pbw-src">[${esc(base.short)} 뒤]</span>`;
     const hl = text => esc(text).replace(/\{[^}]*×\d+\}/g, m => `<span class="pbw-hl">${m}</span>`);
     const mainHtml = [front, hl(rows[0].text), back].filter(Boolean).join(', ');
+    const ucLines = st.target === 'char' ? rows.slice(1).map((row, i) => (st.ucs[i] ? {label: `UC ${i + 1}`, html: esc(st.ucs[i])} : null)).filter(Boolean) : [];
+    const refs = activeRefs();
     const lines = [{label: '메인', html: mainHtml}, ...rows.slice(1).map(row => ({label: row.label, html: hl(row.text) || '<span class="pbw-src">(비어 있음)</span>'})),
-      {label: '네거티브', html: `<span class="pbw-src">[${esc(base.short)} 네거티브]</span>`}];
+      ...ucLines,
+      {label: '네거티브', html: `<span class="pbw-src">[${esc(base.short)} 네거티브]</span>`},
+      ...(refs.length ? [{label: 'REF', html: esc(refs.map(ref => `${ref.label || ref.file_hash || ref.id} (${REF_TYPE_SHORT[ref.reference_type]} S ${ref.strength} F ${ref.fidelity})`).join(' · '))}] : [])];
     box.innerHTML = `<div class="pbw-row"><a data-act="pv" style="cursor:pointer">${st.pvOpen ? '▾' : '▸'} <b style="font-weight:600">${esc(title)}</b></a>
       ${st.pvOpen ? '' : `<span class="pbw-pp pbw-dim pbw-pv-line">${mainHtml}</span>`}
       <span class="pbw-row" style="margin-left:auto"><button type="button" class="pbw-btn" data-act="copy">복사</button><button type="button" class="pbw-btn" data-act="to-main" title="가운데 몫(기반 앞뒤 제외)을 메인 프롬프트 칸에 넣습니다">메인 프롬프트로</button></span></div>` +
@@ -1098,7 +1520,7 @@ export function createPresetBench({
       const item = run?.items[st.pick[1]];
       if (run?.axis && item?.set) variant = {slotId: run.axis, tags: item.set.tags, pool: item.set.pool};
     }
-    const rows = previewRows({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant});
+    const rows = previewRows({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), variant, ucs: st.ucs});
     return rows;
   }
 
@@ -1108,8 +1530,19 @@ export function createPresetBench({
     const slotsNow = slots();
     const axisSlot = slotById(st.axis);
     const axis = axisSlot ? {slotId: axisSlot.id, sets: axisSets()} : null;
-    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis});
+    const items = buildItems({cast: castNow(), target: st.target, names: st.names, picks: picksTags(), axis, ucs: st.ucs});
     if (items.length > MAX_ITEMS) { notify(`한 번에 ${MAX_ITEMS}장까지입니다 - 비교 체크를 줄여 주세요`, 'error'); return; }
+    // REF 는 조용히 빼지 않는다 - 못 싣는 경우는 보내기 전에 막는다(서버도 같은 이유로 거부한다).
+    const refs = activeRefs();
+    if (refs.length > MAX_REFS) { notify(`레퍼런스는 한 번에 ${MAX_REFS}장까지입니다 - 캐릭터 카드의 REF 줄에서 빼 주세요`, 'error'); return; }
+    if (refs.length && crUnsupported(baseModel())) {
+      notify(`기반 모델(${baseModel()})은 Character Reference 를 못 씁니다 - 기반 모델을 바꾸거나 REF 를 빼 주세요`, 'error');
+      return;
+    }
+    const references = refs.map(ref => ({
+      source: ref.source, ...(ref.source === 'storage' ? {file_hash: ref.file_hash} : {id: ref.id, variation: ref.variation}),
+      reference_type: ref.reference_type, strength: ref.strength, fidelity: ref.fidelity,
+    }));
     let base;
     if (st.base.mode === 'direct') {
       base = {mode: 'direct', ...st.base.direct};
@@ -1122,7 +1555,7 @@ export function createPresetBench({
     const run = {
       id: requestId, axis: axisSlot ? axisSlot.id : null,
       label: axisSlot ? `${KIND_LABELS[axisSlot.kind]} 비교` : '한 장',
-      base: currentBase().label,
+      base: currentBase().label + (refs.length ? ` · REF ${refs.length}` : ''),
       items: items.map(item => ({label: item.label, set: item.set, status: 'pending', historyId: '', queueId: '', message: ''})),
     };
     void slotsNow;
@@ -1135,7 +1568,7 @@ export function createPresetBench({
     renderPreview();
     try {
       const data = await sendJson(API.generate, 'POST', {
-        request_id: requestId, base,
+        request_id: requestId, base, references,
         items: items.map(item => ({label: item.label, main: item.main, characters: item.characters})),
       });
       (data.requests || []).forEach(row => {
@@ -1195,6 +1628,7 @@ export function createPresetBench({
     renderBaseCard();
     renderLeftControls();
     renderSlots();
+    renderCharMeta();
     renderNote();
     renderBand();
     void renderExplorer();
@@ -1231,6 +1665,33 @@ export function createPresetBench({
     if (act === 'leave') { onLeave(); return; }
     if (act === 'char-add') { setCount(st.count + 1); return; }
     if (act === 'char-remove') { setCount(st.count - 1); return; }
+    if (act === 'char-pick') {
+      st.cur = `char${Number(t.closest('[data-index]').dataset.index) + 1}`;
+      st.baseOpen = false;
+      renderSlots();
+      renderOverlay();
+      renderBaseCard();
+      countSources();
+      void renderExplorer();
+      return;
+    }
+    if (act === 'load-x') {
+      const i = Number(t.closest('[data-index]').dataset.index);
+      st.loaded[i] = null;
+      st.ucs[i] = '';
+      afterLoad();
+      return;
+    }
+    if (act === 'ref-x') {
+      const el = t.closest('[data-ref]');
+      const i = Number(el.dataset.index);
+      const [gone] = (st.refs[i] || []).splice(Number(el.dataset.ref), 1);
+      if (gone?.source === 'storage') qsa(`.pbw-card[data-rhash="${CSS.escape(gone.file_hash)}"]`).forEach(card => card.classList.remove('is-sel'));
+      persist();
+      renderCharMeta();
+      renderPreview();
+      return;
+    }
     if (act === 'undo') {
       if (st.memo) {
         if (st.axis) delete st.chk[st.axis];
@@ -1335,6 +1796,42 @@ export function createPresetBench({
       void renderExplorer();
       return;
     }
+    // 캐릭터 고르기(DB · 에셋 · REF)
+    const ci = charIndex();
+    if (ci >= 0) {
+      const csrc = t.closest('[data-csrc]');
+      if (csrc) {
+        st.cv.src = csrc.dataset.csrc;
+        if (st.cv.src === 'asset') assetListOf(true).catch(() => {});      // 에셋 창에서 새로 만든 것이 보이게
+        persist();
+        searchInput.value = st.cv[st.cv.src].q;
+        void renderExplorer();
+        return;
+      }
+      const cg = t.closest('[data-cgender]');
+      if (cg) { st.cv.db.gender = cg.dataset.cgender; st.cv.db.sel = null; void renderExplorer(); return; }
+      const cgroup = t.closest('[data-cgroup]');
+      if (cgroup) { st.cv.db.group = cgroup.dataset.cgroup; st.cv.db.sel = null; void renderExplorer(); return; }
+      const cchar = t.closest('[data-cchar]');
+      if (cchar) {
+        const row = dbRows[Number(cchar.dataset.cchar)];
+        if (row) st.cv.db.sel = {group: row.group, character: row.character};
+        void renderExplorer();
+        return;
+      }
+      const cvar = t.closest('[data-cvar]');
+      if (cvar && st.cv.db.sel) { void loadDb(ci, st.cv.db.sel.group, st.cv.db.sel.character, cvar.dataset.cvar, cvar.dataset.cvname || '기본'); return; }
+      const acat = t.closest('[data-acat]');
+      if (acat) { st.cv.asset.cat = acat.dataset.acat; st.cv.asset.sel = ''; void renderExplorer(); return; }
+      const avar = t.closest('[data-avar]');
+      if (avar) { void loadAsset(ci, avar.dataset.aid, avar.dataset.avar); return; }
+      const aid = t.closest('[data-aid]');
+      if (aid) { st.cv.asset.sel = aid.dataset.aid; void renderExplorer(); return; }
+      const rcat = t.closest('[data-rcat]');
+      if (rcat) { st.cv.ref.filter = rcat.dataset.rcat; st.cv.ref.cat = rcat.dataset.rid || ''; void renderExplorer(); return; }
+      const rhash = t.closest('[data-rhash]');
+      if (rhash) { toggleStorageRef(ci, rhash.dataset.rhash); return; }
+    }
     const cat = t.closest('[data-cat]');
     if (cat) {
       const view = viewOf(st.cur);
@@ -1402,13 +1899,17 @@ export function createPresetBench({
       return;
     }
     if (t.dataset.role === 'export-target') { st.exportTarget = t.value; return; }
+    if (t.dataset.role === 'attach') { st.cv.attach = t.checked; persist(); return; }
     if (t.dataset.param) { setDirectParam(t); return; }
   });
 
   listen('input', event => {
     const t = event.target;
     if (t.dataset.name !== undefined) {
-      st.names[Number(t.dataset.name)] = t.value;
+      const i = Number(t.dataset.name);
+      st.names[i] = t.value;
+      // 글을 다 지우면 불러온 표시 · UC 도 걷는다(REF 줄은 따로 뺀다).
+      if (!t.value.trim() && (st.loaded[i] || st.ucs[i])) { st.loaded[i] = null; st.ucs[i] = ''; renderCharMeta(); }
       persist();
       renderPreview();
       refreshSubject(Number(t.dataset.name));
@@ -1463,7 +1964,7 @@ export function createPresetBench({
       const badge = set ? (POOL_BADGES[set.pool] || (LINK_POOLS[set.pool]?.badge ?? '')) : '';
       showZoom(card, {
         src,
-        title: (set?.tags || []).join(', '),
+        title: set ? (set.tags || []).join(', ') : (card.dataset.zt || ''),
         note: [badge, set?.seed].filter(Boolean).join(' · '),
       }, card.getBoundingClientRect());
     }, HOVER_DELAY_MS);

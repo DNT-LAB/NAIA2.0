@@ -250,6 +250,7 @@ class HeadlessResultStore:
         # payload from remote_params instead of resurrecting a stale enabled/disabled state.
         params.pop("webui_custom_payload", None)
         params.pop("webui_custom_payload_enabled", None)
+        params.pop("webui_custom_payload_disabled", None)
         # NOTE: input image/mask bytes (image_bytes/mask_bytes/init_image_bytes/...) are KEPT here
         # on purpose. "큐 앞/뒤에 추가 → 원본 프롬프트 유지"(queue_mode='original') replays the stored
         # params directly, and APIService picks img2img/inpaint from those byte fields. Stripping them
@@ -488,6 +489,18 @@ class HeadlessResultStore:
         # 기본은 전부 - 36장에서 자르면 이 LoRA 로 만든 그림이 많을 때 '다른 그림' 이 통째로 사라졌다(Codex 09-30).
         # 세션 히스토리가 곧 상한(max_items)이다.
         return rows if limit is None else rows[:max(1, int(limit))]
+
+    def webui_lora_candidates(self, name: str) -> list[dict]:
+        prefix = f"<lora:{name}:".casefold()
+        with self._mutation_lock:
+            items = list(self._items)
+        rows = []
+        for item in items:
+            url = f"/api/history/thumb/{item.history_id}"
+            prompt = str(item.generation_params.get("input") or "")
+            rows.append({"history_id": item.history_id, "thumb_url": url, "zoom_url": url + "?size=640",
+                         "used": prefix in prompt.casefold()})
+        return sorted(rows, key=lambda row: row["used"], reverse=True)
 
     def get_item(self, history_id: str) -> HeadlessHistoryItem | None:
         history_id = str(history_id or "")

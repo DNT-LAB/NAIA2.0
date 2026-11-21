@@ -847,6 +847,10 @@ class HeadlessGenerationService:
 
             processor = WildcardProcessor(wildcard_manager)
 
+            restore_network_tokens = None
+            if params.get("api_mode", getattr(self.context, "current_api_mode", "")) == "WEBUI":
+                from core.webui_prompt_tokens import protect_webui_tokens
+                text, restore_network_tokens = protect_webui_tokens(text)
             negative = str(params.get("negative_prompt") or "")
             cleaned_tags: list[str] = []
             # lora:예약어 줄이 든 조각은 줄마다 - 여기서 개행을 먼저 지우면 뒤의 API 정리가 되살리지 못한다(Codex 09-30)
@@ -870,7 +874,10 @@ class HeadlessGenerationService:
                 prompt_context.global_append_tags.clear()
 
             expanded_text = ", ".join(result_parts) if result_parts else text
-            if expanded_text != text:
+            if restore_network_tokens:
+                expanded_text = restore_network_tokens(expanded_text)
+                negative = restore_network_tokens(negative)
+            if expanded_text != params["input"]:
                 params["input"] = expanded_text
             params["negative_prompt"] = negative
         except Exception as exc:  # pragma: no cover - defensive

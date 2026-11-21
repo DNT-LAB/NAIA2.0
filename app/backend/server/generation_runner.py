@@ -72,6 +72,7 @@ AUTO_GENERATE_DROPPED_PARAM_KEYS = {
     # ignored — dropping it lets each iteration re-merge the CURRENT remote_params value.
     "webui_custom_payload",
     "webui_custom_payload_enabled",
+    "webui_custom_payload_disabled",
 }
 
 # Auto Gen continuation 에서 overrides 로 핀하면 안 되는 라이브 PARAMS 의 예외(전용 로직이 관리).

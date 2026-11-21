@@ -12,6 +12,9 @@ from core.safe_json_file import backup_path, read_json_safely, write_json_safely
 # ANIMA = 관리형 ANIMA 엔진을 고른 COMFYUI 의 프리셋 색인(아래 prompt_engineering_mode_of - 사용자 지정 09-30)
 PROMPT_ENGINEERING_PRESET_MODES = ("NAI", "WEBUI", "COMFYUI", "ANIMA")
 PRESET_RUNTIME_STATE_KEYS = frozenset({
+    "webui_custom_payload",
+    "webui_custom_payload_enabled",
+    "webui_custom_payload_disabled",
     "random_resolution",
     "auto_fit_resolution",
 })

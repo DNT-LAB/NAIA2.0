@@ -36,6 +36,7 @@ from app.backend.server.generation_runner import ensure_generation_runner
 from app.backend.server.install_manager_routes import register_install_manager_routes
 from app.backend.server.module_storage_routes import register_module_storage_routes
 from app.backend.server.nai_model_routes import register_nai_model_routes
+from app.backend.server.webui_routes import register_webui_routes
 from app.backend.server.character_instant_routes import register_character_instant_routes
 from app.backend.server.boost_v2_routes import register_boost_v2_routes
 from app.backend.server.anima_engine_routes import register_anima_engine_routes
@@ -224,6 +225,7 @@ def register_headless_routes(
     register_extension_install_routes(app, context, run_in_thread=run_in_thread)
     register_boost_v2_routes(app, context, run_in_thread=run_in_thread)
     register_anima_engine_routes(app, context, run_in_thread=run_in_thread)
+    register_webui_routes(app, context, run_in_thread=run_in_thread)
     register_comfyui_server_log_routes(app, context, run_in_thread=run_in_thread)
     register_assist_v2_routes(app, context, run_in_thread=run_in_thread,
                               clients=clients, start_generation_runner=ensure_generation_runner,

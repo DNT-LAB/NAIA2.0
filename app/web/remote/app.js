@@ -3046,9 +3046,23 @@ import('./js/features/animaSetupPanel.mjs?v=20261001-gpu-probe')
 // ANIMA 전용 도구 > LoRA 창(09-27, 사용자 지정: COMFYUI 전용 도구 자리에 [해상도 프리셋 · LoRA]).
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
+let webuiLoraPanel = null;
+import('./js/features/webuiLoraPanel.mjs?v=20261121-win')
+  .then(({createWebuiLoraPanel}) => {
+    webuiLoraPanel = createWebuiLoraPanel({
+      document, window, promptEdit, showToast,
+      onStateChange: () => moduleLauncherControl?.updateState(),
+      zoom: {
+        show: (target, info, rect) => remoteController?.showZoomBeside?.(target, info, rect),
+        hide: () => remoteController?.hideZoom?.(),
+      },
+    });
+    webuiLoraPanel.setMode(currentMode || modeSelect?.value || '');
+  })
+  .catch(error => console.error('Failed to initialize WEBUI LoRA panel', error));
 let animaLoraPanel = null;
 // 카드 -> 적용 순서 끌어다 놓기(09-30)는 리모컨 · 그룹 창과 **같은** 끌기 중개자다 - 주소(쿼리까지)가 같아야 한 인스턴스다.
-Promise.all([import('./js/features/animaLoraPanel.mjs?v=20260930-lorafold'),
+Promise.all([import('./js/features/animaLoraPanel.mjs?v=20261121-win'),
   import('./js/features/dragBroker.mjs?v=20260919-strip')])
   .then(([{createAnimaLoraPanel}, {dragBrokerFor}]) => {
     animaLoraPanel = createAnimaLoraPanel({
@@ -7054,6 +7068,7 @@ function updateParams(m) {
   $('comfyuiParams').style.display = mode === 'COMFYUI' ? '' : 'none';
   if (animaLoraPanel) animaLoraPanel.setMode(mode);   // 관리형 ANIMA 인지 확인 — 런처가 ANIMA 전용 도구를 보일지 정한다
   syncAnimaModelManageButton();                        // Model 줄 [Manage] — 관리형 ANIMA 일 때만
+  webuiLoraPanel?.setMode(mode);
   if (
     (mode === 'WEBUI' || mode === 'COMFYUI')
     && ('resolution_preset_enabled' in m || 'resolution_preset' in m)
@@ -7166,16 +7181,22 @@ function updateParams(m) {
     if ('webui_custom_payload' in m) {
       _webuiCustomPayloadApplied = m.webui_custom_payload || '';
       const customPayloadEl = $('pWebuiCustomPayload');
-      const cpPopup = $('webuiCustomPayloadPopup');
-      const cpOpen = cpPopup && cpPopup.classList.contains('open');
+      const cpOpen = !!webuiPayloadEditor?.isOpen();
       if (customPayloadEl && !cpOpen) customPayloadEl.value = _webuiCustomPayloadApplied;
+    }
+    if ('webui_custom_payload_disabled' in m) {
+      const value = m.webui_custom_payload_disabled;
+      try {
+        const names = typeof value === 'string' ? JSON.parse(value) : value;
+        _webuiCustomDisabled = Array.isArray(names) ? names : [];
+      } catch { _webuiCustomDisabled = []; }
     }
     const customPayloadCb = $('pWebuiCustomEnable');
     if (customPayloadCb && 'webui_custom_payload_enabled' in m) {
       customPayloadCb.checked = (m.webui_custom_payload_enabled === true || String(m.webui_custom_payload_enabled).toLowerCase() === 'true');
     }
     updateWebuiCustomPayloadIndicator();
-    validateWebuiCustomPayload();
+
     if ('hires_preset_swap' in m) {
       _hiresPresetSwapValue = String(m.hires_preset_swap || '').trim();
       _hiresPresetSwapValueKnown = true;
@@ -7837,125 +7858,61 @@ function setSamplingMode(mode) {
 // _webuiCustomPayloadApplied mirrors the last applied/known value (from the schema) so the
 // editor can load it on open and the Edit button can show an applied indicator.
 let _webuiCustomPayloadApplied = '';
+let _webuiCustomDisabled = [];
+let webuiPayloadEditor;
 
 function setWebuiCustomPayloadEnabled(on) {
   setParam('webui_custom_payload_enabled', String(!!on));
   updateWebuiCustomPayloadIndicator();
 }
 
-function openWebuiCustomPayloadEditor() {
-  const popup = $('webuiCustomPayloadPopup');
-  const el = $('pWebuiCustomPayload');
-  if (!popup || !el) return;
-  el.value = _webuiCustomPayloadApplied;   // load the applied value; discard any stale draft
-  popup.classList.add('open');
-  validateWebuiCustomPayload();
-  try { el.focus(); } catch (e) {}
+async function openWebuiCustomPayloadEditor() {
+  // 떠 있는 창(draggablePanel) - 생성하는 동안 옆에 열어 두고 고칠 수 있다(사용자 지시 2026-11-21).
+  const {createPayloadEditor} = await import('./js/features/webuiCustomPayload.mjs?v=20261121-win');
+  webuiPayloadEditor ??= createPayloadEditor({
+    onClose: () => $('pWebuiCustomEditBtn')?.focus(),
+    save(canonical, disabled, count) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      showToast('WS 연결이 끊겨 적용할 수 없습니다.', 'error');
+      return;
+    }
+    setParam('webui_custom_payload_disabled', JSON.stringify(disabled));
+    setParam('webui_custom_payload', canonical);
+    _webuiCustomPayloadApplied = canonical;
+    _webuiCustomDisabled = disabled;
+    updateWebuiCustomPayloadIndicator();
+    showToast(canonical ? `적용됨 · 스크립트 ${count}개(꺼짐 ${disabled.length})` : 'Custom Payload를 비웠습니다.', 'success');
+  }});
+  return webuiPayloadEditor.open(_webuiCustomPayloadApplied, _webuiCustomDisabled);
 }
 
 function closeWebuiCustomPayloadEditor() {
-  const popup = $('webuiCustomPayloadPopup');
-  if (popup) popup.classList.remove('open');
-  const btn = $('pWebuiCustomEditBtn');
-  if (btn) { try { btn.focus(); } catch (e) {} }
-}
-
-// If the user pasted a FULL WEBUI generation payload (top-level "alwayson_scripts"), return just
-// the alwayson_scripts object pretty-printed; otherwise null (already a fragment, or unparseable).
-// Mirrors Dev0714's converter — keep only the extension block, drop prompt/seed/width/etc.
-function reduceToAlwaysonScripts(text) {
-  const txt = (text || '').trim();
-  if (!txt) return null;
-  try {
-    const obj = JSON.parse(txt);
-    if (obj && typeof obj === 'object' && !Array.isArray(obj)
-        && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object'
-        && !Array.isArray(obj.alwayson_scripts)) {
-      return JSON.stringify(obj.alwayson_scripts, null, 2);
-    }
-  } catch (e) {}
-  return null;
-}
-
-function applyWebuiCustomPayload() {
-  const el = $('pWebuiCustomPayload');
-  if (!el) return;
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    showToast('WS 연결이 끊겨 적용할 수 없습니다.', 'error');
-    return;
-  }
-  // Paste-a-full-payload convenience: reduce the editor to just its alwayson_scripts block so the
-  // stored remote_param (and the next view) is the clean fragment, not the whole payload.
-  const original = el.value.trim();
-  const reduced = reduceToAlwaysonScripts(el.value);
-  const wasReduced = reduced !== null && reduced !== original;
-  if (reduced !== null) el.value = reduced;
-  const info = validateWebuiCustomPayload();
-  setParam('webui_custom_payload', el.value);
-  _webuiCustomPayloadApplied = el.value;
-  updateWebuiCustomPayloadIndicator();
-  const txt = (el.value || '').trim();
-  if (!txt) {
-    showToast('Custom Payload를 비웠습니다.', 'success');
-  } else if (info.valid) {
-    showToast(wasReduced
-      ? `전체 payload에서 alwayson_scripts ${info.count}개 추출·적용됨`
-      : `Custom Payload 적용됨 · alwayson 스크립트 ${info.count}개`, 'success');
-  } else {
-    // Backend _apply_custom_api_params runs _intelligent_json_corrector at generation time, so
-    // an imperfect paste is still usable — commit it, but don't call it valid.
-    showToast('적용됨 — JSON 형식 오류라 생성 시 자동 교정을 시도합니다.', 'warning');
-  }
+  webuiPayloadEditor?.close();   // 창의 onClose 가 Edit 단추로 초점을 돌린다
 }
 
 function onWebuiCustomPayloadInput() {
-  validateWebuiCustomPayload();
+  webuiPayloadEditor?.input();
 }
 
-function validateWebuiCustomPayload() {
-  const hint = $('webuiCustomPayloadHint');
-  const el = $('pWebuiCustomPayload');
-  if (!el) return { valid: true, count: 0 };
-  const txt = (el.value || '').trim();
-  if (!txt) {
-    if (hint) { hint.textContent = ''; hint.className = 'webui-custom-payload-hint'; }
-    return { valid: true, count: 0 };
-  }
-  try {
-    const obj = JSON.parse(txt);
-    const block = (obj && typeof obj === 'object' && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object')
-      ? obj.alwayson_scripts : obj;
-    const n = (block && typeof block === 'object' && !Array.isArray(block)) ? Object.keys(block).length : 0;
-    if (hint) { hint.textContent = `유효한 JSON · alwayson 스크립트 ${n}개`; hint.className = 'webui-custom-payload-hint ok'; }
-    return { valid: true, count: n };
-  } catch (e) {
-    if (hint) { hint.textContent = 'JSON 형식 오류 — 생성 시 자동 교정을 시도합니다'; hint.className = 'webui-custom-payload-hint warn'; }
-    return { valid: false, count: 0 };
-  }
+function applyWebuiCustomPayload(previewOnly = false) {
+  return webuiPayloadEditor?.apply(previewOnly);
 }
 
 function updateWebuiCustomPayloadIndicator() {
   const btn = $('pWebuiCustomEditBtn');
   if (!btn) return;
-  const txt = (_webuiCustomPayloadApplied || '').trim();
-  if (!txt) {
-    btn.textContent = 'Edit';
-    btn.classList.remove('has-payload');
-    btn.removeAttribute('title');
-    return;
+  const enabled = $('pWebuiCustomEnable').checked;
+  let label = 'off';
+  if (enabled) {
+    try {
+      const data = JSON.parse(_webuiCustomPayloadApplied || '{}');
+      // 실제로 나가는 개수 - 검사 표에서 끈 스크립트는 세지 않는다
+      const off = new Set((_webuiCustomDisabled || []).map(name => String(name).toLowerCase()));
+      label = Object.keys(data.alwayson_scripts ?? data).filter(name => !off.has(name.toLowerCase())).length;
+    } catch { label = '!'; }
   }
-  try {
-    const obj = JSON.parse(txt);
-    const block = (obj && typeof obj === 'object' && obj.alwayson_scripts && typeof obj.alwayson_scripts === 'object')
-      ? obj.alwayson_scripts : obj;
-    const n = (block && typeof block === 'object' && !Array.isArray(block)) ? Object.keys(block).length : 0;
-    btn.textContent = `Edit · ${n}`;
-    btn.title = `적용된 alwayson 스크립트 ${n}개`;
-  } catch (e) {
-    btn.textContent = 'Edit · !';
-    btn.title = '적용된 payload가 JSON 형식 오류 — 생성 시 자동 교정을 시도합니다';
-  }
-  btn.classList.add('has-payload');
+  btn.textContent = `Edit · ${label}`;
+  btn.classList.toggle('has-payload', enabled && !!_webuiCustomPayloadApplied);
 }
 
 
@@ -8379,7 +8336,10 @@ function applyPromptFields(prompt, negative, {authored = false} = {}) {
 // ---- Prompt syntax highlight (main prompt only) ----
 let currentMode = '';
 let viewpointControl = null;   // 구도 / 시점 제어 창(openViewpointControlTool) - 모드가 바뀌면 다시 그린다
-function updatePromptHighlight() { if (promptHighlighter) promptHighlighter.update(); }
+function updatePromptHighlight() {
+  if (promptHighlighter) promptHighlighter.update();
+  webuiLoraPanel?.syncDock();
+}
 function syncPromptHighlight() { if (promptHighlighter) promptHighlighter.syncScroll(); }
 function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.applyState(); }
 
@@ -11334,6 +11294,8 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
+  if (mode === 'WEBUI' && animaLoraPanel?.isOpen()) animaLoraPanel.close();
+  webuiLoraPanel?.setMode(mode);
   // 모드가 바뀌면 해상도 선택지가 통째로 달라진다 - 앞 모드의 값은 둘 다 무효다.
   autoResDetectedLabel = null;
   dispatchedResolutionLabel = null;
@@ -13001,7 +12963,7 @@ function openDanbooruBrowserTool() {
   });
 }
 
-const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261119-pb1')
+const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261121-webui-lora')
   .then(({createModuleLauncher}) => {
     moduleLauncherControl = createModuleLauncher({
       document,
@@ -13033,6 +12995,8 @@ const moduleLauncherReady = import('./js/features/moduleLauncher.mjs?v=20261119-
       naiToolUnsupported: moduleId => naiModelToolUnsupported(moduleId),
       // ANIMA 관리형 엔진이면 COMFYUI 전용 도구 대신 ANIMA 전용 도구[해상도 프리셋 · LoRA](09-27)
       isAnimaManaged: () => Boolean(animaLoraPanel?.isManaged()),
+      openWebuiLora: () => webuiLoraPanel?.toggle(),
+      isWebuiLoraOpen: () => Boolean(webuiLoraPanel?.isOpen()),
       openAnimaLora: () => animaLoraPanel?.toggle(),
       isAnimaLoraOpen: () => Boolean(animaLoraPanel?.isOpen()),
       // 모듈이 아닌 단축키 - Ctrl+Q = Tag Filter(Quick 단추와 같은 입구 · 다시 누르면 닫힌다, 사용자 지정 2026-09-29).

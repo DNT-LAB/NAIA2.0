@@ -120,6 +120,13 @@ const MODULE_REGISTRY = {
     modes: ['WEBUI'],
     presetMode: 'WEBUI',
   },
+  webui_lora: {
+    label: 'LoRA',
+    title: 'LoRA · WEBUI',
+    category: 'webui_tools',
+    action: 'webui_lora',
+    modes: ['WEBUI'],
+  },
   webui_hiresfix_assist: {
     label: 'Hiresfix Assist',
     title: 'WEBUI Hiresfix Assist',
@@ -268,7 +275,7 @@ const CATEGORY_REGISTRY = [
     id: 'webui_tools',
     label: 'WEBUI 전용 도구',
     title: 'WEBUI 전용 도구',
-    moduleIds: ['webui_hiresfix_assist', 'webui_resolution_preset'],
+    moduleIds: ['webui_hiresfix_assist', 'webui_resolution_preset', 'webui_lora'],
   },
   {
     id: 'comfyui_tools',
@@ -326,6 +333,8 @@ export function createModuleLauncher({
   isWindowModuleOpen = () => false,
   // ANIMA 관리형 엔진인가 · LoRA 창 열기 · 열려 있나(09-27).
   isAnimaManaged = () => false,
+  openWebuiLora = null,
+  isWebuiLoraOpen = () => false,
   openAnimaLora = null,
   isAnimaLoraOpen = () => false,
   // 모듈이 아닌 단축키 {글자: 동작} - Ctrl+Q = Tag Filter(09-29). 표의 모듈 글자와 겹치면 모듈이 이긴다.
@@ -636,6 +645,8 @@ export function createModuleLauncher({
       uploadComfyUiFreeWorkflow?.();
     } else if (config.action === 'comfyui_open_web') {
       openComfyUiWeb?.();
+    } else if (config.action === 'webui_lora') {
+      openWebuiLora?.();
     } else if (config.action === 'anima_lora') {
       openAnimaLora?.();
     } else {
@@ -729,6 +740,7 @@ export function createModuleLauncher({
     if (MODULE_REGISTRY[moduleId]?.action === 'artist_tags') return Boolean(isArtistTagsOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'preset_bench') return Boolean(isPresetBenchOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'wire_flow') return Boolean(isWireFlowOpen());
+    if (MODULE_REGISTRY[moduleId]?.action === 'webui_lora') return Boolean(isWebuiLoraOpen());
     if (MODULE_REGISTRY[moduleId]?.action === 'anima_lora') return Boolean(isAnimaLoraOpen());
     if (isWindowModuleOpen(moduleId)) return true;
     return isModulePopupOpen() && getCurrentModuleId() === moduleId;

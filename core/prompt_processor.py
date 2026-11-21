@@ -7,6 +7,7 @@ from typing import Dict, Any
 from core.anima_artist_tags import add_anima_artist_at, artist_names
 from core.prompt_category_annotation import build_annotated_main_tags
 from core.prompt_context import PromptContext
+from core.webui_prompt_tokens import WEBUI_NETWORK_TOKEN, protect_webui_tokens
 from core.safe_console import safe_print
 from core.seam_observer import seam_observer  # 관측 전용(기본 OFF) 파이프라인 seam 계측
 from core.wildcard_processor import WildcardProcessor, split_tags_smart # 이전 단계에서 생성
@@ -337,14 +338,19 @@ def _get_random_prompt_weight_raw(app_context, settings: Dict[str, Any], *, allo
     return raw
 
 
-def _source_sentence(context: PromptContext) -> str:
+def _source_sentence(context: PromptContext, *, webui=False) -> str:
     """source_row['sentence'] — 태그 뒤의 자연어 문장(Assist 결과의 '태그들, 문장'). 없으면 ''."""
     row = getattr(context, 'source_row', None)
     try:
         value = row.get('sentence') if row is not None else None
     except Exception:
         return ''
-    return ' '.join(value.split()) if isinstance(value, str) else ''
+    if not isinstance(value, str):
+        return ''
+    if webui:
+        text, restore = protect_webui_tokens(value)
+        return restore(_escape_parens_in_content(' '.join(text.split())))
+    return ' '.join(value.split())
 
 
 def _source_rating_tags(context: PromptContext) -> list[str]:
@@ -375,7 +381,7 @@ def _protected_key(tag: str) -> str:
     return value.replace("_", " ")
 
 
-def _protect_draft(context):
+def _protect_draft(context, *, webui=False):
     row = context.source_row
     protected = row.get("draft_protected") if row is not None else None
     if protected is None:
@@ -386,7 +392,7 @@ def _protect_draft(context):
     for tag in context.main_tags:
         key = _protected_key(tag)
         if key in keys:
-            if key in seen:
+            if key in seen and not (webui and WEBUI_NETWORK_TOKEN.search(tag)):
                 continue
             seen.add(key)
         kept.append(tag)
@@ -408,7 +414,7 @@ def _staging_extra_key(tag: str) -> str:
     return text if any(m in text for m in ('__', '<', '$', '{')) else ' '.join(text.replace('_', ' ').split())
 
 
-def _apply_staging_extra(context: PromptContext, expand) -> PromptContext:
+def _apply_staging_extra(context: PromptContext, expand, *, webui=False) -> PromptContext:
     """source_row['staging_extra'] — S · 조합 창의 추가 프롬프트(core/event_map/extra_prompt.py · 사용자 지시 2026-10-19).
 
     PE(post_processing) **뒤**에 메인 끝으로 붙인다: 사용자가 쓴 글이라 Auto Hide · remove_* 에 지워지지 않는다.
@@ -427,7 +433,7 @@ def _apply_staging_extra(context: PromptContext, expand) -> PromptContext:
                + list(context.postfix_tags) if isinstance(t, str)}
     fresh = []
     for tag in value:
-        if isinstance(tag, str) and tag.strip() and _staging_extra_key(tag) not in present:
+        if isinstance(tag, str) and tag.strip() and (_staging_extra_key(tag) not in present or (webui and WEBUI_NETWORK_TOKEN.search(tag))):
             present.add(_staging_extra_key(tag))
             fresh.append(tag.strip())
     if not fresh:
@@ -439,7 +445,7 @@ def _apply_staging_extra(context: PromptContext, expand) -> PromptContext:
     seen = {_staging_extra_key(t) for t in list(context.prefix_tags) + list(context.main_tags)
             + list(context.postfix_tags) if isinstance(t, str)}
     for tag in expanded:
-        if isinstance(tag, str) and tag.strip() and _staging_extra_key(tag) not in seen:
+        if isinstance(tag, str) and tag.strip() and (_staging_extra_key(tag) not in seen or (webui and WEBUI_NETWORK_TOKEN.search(tag))):
             seen.add(_staging_extra_key(tag))
             context.main_tags.append(tag.strip())
     return context
@@ -473,10 +479,10 @@ def _wrap_unweighted_main_tag_runs(tags: list, first_non_hash: int, weighted_ind
     return len(runs)
 
 
-def _escape_main_tags_parens(tags: list, weighted: set):
+def _escape_main_tags_parens(tags: list, weighted: set, network_indices=()):
     """main_tags 리터럴 괄호를 in-place 이스케이프. weighted 인덱스의 가중치 구문은 보존."""
     for i, tag in enumerate(tags):
-        if tag.startswith('#'):
+        if tag.startswith('#') or i in network_indices:
             continue
 
         if i in weighted:
@@ -550,8 +556,9 @@ class PromptProcessor:
 
 
         _main_before = len(context.main_tags or [])
+        webui = _is_webui_weight_mode(self.app_context, context.settings)
         context = _apply_staging_extra(
-            context, lambda tags: self.wildcard_processor.expand_tags(tags, context, location='main'))
+            context, lambda tags: self.wildcard_processor.expand_tags(tags, context, location='main'), webui=webui)
         if len(context.main_tags or []) != _main_before:   # 붙인 것이 있을 때만 - 없으면 트레이스 단계를 늘리지 않는다
             tracer.record('staging_extra', context)
 
@@ -567,7 +574,7 @@ class PromptProcessor:
         tracer.record('after_wildcard', context)
 
         context = self._run_hooks('final_hookpoint', context)
-        _protect_draft(context)
+        _protect_draft(context, webui=webui)
         tracer.record('final_hookpoint', context)
 
         # Boost v2 접지 스냅샷: 모든 훅(조건부 after_wildcard 포함) 이후, 최종 포맷(인물수→prefix 이동)
@@ -803,7 +810,8 @@ class PromptProcessor:
         # 이 작업은 다른 모든 처리보다 먼저 수행되어야 합니다.
         if context.global_append_tags:
             context.main_tags.extend(context.global_append_tags)
-        _protect_draft(context)  # Final append tags must not reintroduce protected duplicates.
+        is_webui_weight_mode = _is_webui_weight_mode(self.app_context, context.settings)
+        _protect_draft(context, webui=is_webui_weight_mode)  # Final append tags must not reintroduce protected duplicates.
 
         # 인물 태그 세트 — 모듈 상수(PERSON_TAG_SETS/ALL_PERSON_TAGS)를 쓴다.
         person_sets = PERSON_TAG_SETS
@@ -883,12 +891,15 @@ class PromptProcessor:
 
         # 4-0b. non-NAI 모드: main_tags 리터럴 괄호 이스케이프 (인덱스 기반)
         if not is_nai:
-            _escape_main_tags_parens(context.main_tags, weighted_indices)
+            network_indices = {
+                i for i, tag in enumerate(context.main_tags) if WEBUI_NETWORK_TOKEN.search(tag)
+            } if is_webui_weight_mode else set()
+            weighted_indices.update(network_indices)
+            _escape_main_tags_parens(context.main_tags, weighted_indices, network_indices)
 
         # 4-1. 인원수 태그 배치 (ANIMA 모드 고려)
         is_anima_mode = _is_comfyui_anima_mode(self.app_context, context.settings)
         is_comfyui = self.app_context.current_api_mode == 'COMFYUI'
-        is_webui_weight_mode = _is_webui_weight_mode(self.app_context, context.settings)
         apply_prompt_weight = is_webui_weight_mode or is_comfyui
         raw_prompt_weight = _get_random_prompt_weight_raw(
             self.app_context,
@@ -1015,12 +1026,13 @@ class PromptProcessor:
         present = {t.strip().lower() for t in context.prefix_tags + context.main_tags + context.postfix_tags
                    if isinstance(t, str)}
         for tag in _source_rating_tags(context):
-            if tag.lower() not in present:
-                context.main_tags.append(tag if is_nai else _escape_parens_in_content(tag))
+            network = is_webui_weight_mode and WEBUI_NETWORK_TOKEN.search(tag)
+            if network or tag.lower() not in present:
+                context.main_tags.append(tag if is_nai or network else _escape_parens_in_content(tag))
                 present.add(tag.lower())
-        sentence = _source_sentence(context)
+        sentence = _source_sentence(context, webui=is_webui_weight_mode)
         if sentence:
-            context.main_tags.append(sentence if is_nai else _escape_parens_in_content(sentence))
+            context.main_tags.append(sentence if is_nai or is_webui_weight_mode else _escape_parens_in_content(sentence))
 
         draft_extra = context.source_row.get('draft_extra', '') if draft else ''
         extra_marker = "\x00NAIA_DRAFT_EXTRA\x00"

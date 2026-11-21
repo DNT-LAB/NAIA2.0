@@ -1,5 +1,7 @@
 import requests
 from core.generation_access_policy import generation_operation
+from core.webui_prompt_tokens import protect_webui_tokens
+from core.webui_custom_payload import disabled_script_names, normalize_custom_payload
 import zipfile
 import io, time, re, json
 import socket
@@ -741,6 +743,9 @@ class APIService:
                 전달되면 NAI generate-image-stream(SSE)을 사용해 중간 이미지를 받습니다.
                 워커 스레드에서 호출되므로 스레드 안전하게 처리해야 함
         """
+        restore_network_tokens = None
+        if parameters.get('api_mode') == 'WEBUI' and isinstance(parameters.get('input'), str):
+            parameters['input'], restore_network_tokens = protect_webui_tokens(parameters['input'])
         # E621 template lines are separators. Keep other ingress cleanup unchanged.
         if parameters.get("_remote_queue_source") == "E621":
             from core.e621_prompt_composer import clean_prompt
@@ -850,6 +855,8 @@ class APIService:
                 print(f"   - Steps: {parameters.get('steps', 'default')}")
                 print(f"   - 정리된 프롬프트: '{cleaned_tags_prompt[:100]}...'")
 
+        if restore_network_tokens:
+            parameters['input'] = restore_network_tokens(parameters['input'])
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
 
         if (
@@ -2252,10 +2259,10 @@ class APIService:
             # NAI 경로의 use_custom_api_params와 분리된 키라 WEBUI payload가 NAI 생성으로 새지 않는다.
             # 값은 remote_params 경유(_normalized_params 병합)라 모든 생성 경로
             # (수동/랜덤/auto-gen 연속/Event Preset/Studio/Result Enhance)에 동일하게 적용된다.
-            if params.get('webui_custom_payload_enabled'):
-                webui_custom = str(params.get('webui_custom_payload') or '').strip()
-                if webui_custom:
-                    self._apply_custom_api_params(payload, {'custom_api_params': webui_custom})
+            if self._coerce_bool_param(params.get('webui_custom_payload_enabled'), False):
+                error = self._apply_custom_api_params(payload, params)
+                if error:
+                    return error
 
             print(f"📤 WEBUI API 요청 페이로드 요약:")
             print(f"   - 엔드포인트: {api_endpoint}")
@@ -2318,51 +2325,36 @@ class APIService:
             else:
                 raise Exception("응답에서 이미지를 찾을 수 없습니다.")
 
+        except requests.HTTPError as exc:
+            response = exc.response
+            if response is None:
+                return {'status': 'error', 'message': str(exc)}
+            try:
+                body = response.json()
+            except ValueError:
+                body = None
+            detail = body.get('detail') if isinstance(body, dict) else None
+            message = f"WEBUI {response.status_code}: {detail or response.text[:300]}"
+            # A1111 = "always on script X not found" · Forge Neo = "Script 'X' not found" (실측 2026-11-21)
+            if response.status_code == 422 and 'not found' in message.casefold() and 'script' in message.casefold():
+                message += " — Custom Payload 에서 그 스크립트를 끄세요."
+            return {'status': 'error', 'message': message}
         except Exception as e:
-            print(f"❌ WEBUI API 호출 중 예외 발생: {e}")
             return {'status': 'error', 'message': str(e)}
 
-    def _apply_custom_api_params(self, payload: dict, params: dict) -> None:
-        """
-        커스텀 API 파라미터를 처리하고 payload에 적용합니다.
-        더욱 강력해진 단일 파서 함수를 사용하여 안정성을 높였습니다.
-        """
-        custom_params_text = params.get('custom_api_params', '').strip()
-        if not custom_params_text:
-            return
-
-        # alwayson_scripts 초기화
-        if 'alwayson_scripts' not in payload:
-            payload['alwayson_scripts'] = {}
-
+    def _apply_custom_api_params(self, payload: dict, params: dict):
+        result = normalize_custom_payload(params.get('webui_custom_payload', params.get('custom_api_params', '')))
+        if not result['ok']:
+            issue = next(item for item in result['issues'] if item['level'] == 'error')
+            label = f"{issue['script']}: " if issue['script'] else ""
+            return {'status': 'error', 'message': f"Custom Payload 오류: {label}{issue['message']}"}
         try:
-            # 1. 원본 텍스트로 바로 파싱 시도
-            custom_params = json.loads(custom_params_text)
-        except json.JSONDecodeError:
-            # 2. 파싱 실패 시, 지능형 자동 수정 함수 호출
-            print("⚠️ JSON 파싱 실패. 자동 수정 시도...")
-            corrected_text = self._intelligent_json_corrector(custom_params_text)
-            try:
-                # 수정된 텍스트로 다시 파싱
-                custom_params = json.loads(corrected_text)
-            except json.JSONDecodeError as e:
-                # 최종 실패
-                print(f"❌ Custom API 파라미터를 적용할 수 없습니다. 자동 수정 후에도 오류가 발생했습니다.")
-                print(f"   오류 내용: {e}")
-                print(f"   수정 시도한 텍스트: {corrected_text[:200]}...") # 디버깅을 위해 일부 출력
-                return
-
-        # 성공적으로 파싱된 경우 payload에 업데이트.
-        # 두 가지 붙여넣기 형태를 모두 허용한다:
-        #   1) alwayson_scripts 조각만:  {"ControlNet": {"args": [...]}}
-        #   2) WEBUI 생성 결과의 전체 payload:  {"prompt": ..., "alwayson_scripts": {...}}
-        # 후자(전체 payload를 그대로 붙여넣은 경우)는 alwayson_scripts 블록만 취한다.
-        # NAIA가 prompt/seed/해상도 등을 소유하므로 top-level 필드는 덮어쓰지 않는다.
-        if isinstance(custom_params, dict):
-            nested = custom_params.get('alwayson_scripts')
-            fragment = nested if isinstance(nested, dict) else custom_params
-            payload['alwayson_scripts'].update(fragment)
-            print(f"✅ Custom API 파라미터 적용됨: {len(fragment)}개 스크립트")
+            disabled = {name.casefold() for name in disabled_script_names(params.get('webui_custom_payload_disabled', []))}
+        except ValueError as exc:
+            return {'status': 'error', 'message': f"Custom Payload 오류: {exc}"}
+        enabled = {name: script for name, script in result['scripts'].items() if name.casefold() not in disabled}
+        if enabled:
+            payload.setdefault('alwayson_scripts', {}).update(enabled)
 
     def _intelligent_json_corrector(self, text: str) -> str:
         """

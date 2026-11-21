@@ -4,7 +4,8 @@
 //   (스키마는 복잡한 걸 보이지 않고 트리거 워드가 있으면 알려 준다) ③ 썸네일 채우기 = [히스토리](09-29 사용자 지정 -
 //   Artist Thumbnail 의 조합 저장처럼 생성 히스토리에서 고른다, 이 LoRA 를 켜고 만든 그림이 앞). PNG 칸 · 후보에 올리면
 //   크게 본다 - Artist Thumbnail(리모컨)의 확대 보기를 그대로 빌린다(zoom.show · zoom.hide, 창 옆 같은 자리 규칙).
-// 창은 Memo 처럼 Tag Search 의 뼈대(tagsearch-*)를 입는다 — 컴팩트 팝업 규약(Memo · Tagger).
+// 창은 떠 있는 창(draggablePanel - 끌기 · 크기 · 접기 · 자리 기억)이다(사용자 지시 2026-11-21: Custom Payload · LoRA 창은
+//   전부 Draggable Window). 본문 칸은 Tag Search 의 부품(tagsearch-input · tagsearch-act 등)을 그대로 입는다.
 // 관리형 여부(COMFYUI 모드 + comfyui_engine 'managed' + 설치 준비됨)도 여기서 판단해 런처에 알린다(isManaged).
 // 계약 = docs/ANIMA_MANAGED_ENGINE_CONTRACT_2026_09_27.md §3.3 · §8.3 · §8.4:
 //   GET /loras -> {available: [{name, size, source, conflict, triggers, thumb}], chain, warnings}
@@ -22,6 +23,9 @@
 //   엔진(ComfyUI)은 Windows 에서 역슬래시 이름을 쓰는데, 바꾸는 것은 서버가 그래프에 적을 때 한 번뿐이다(profile.py).
 // 끌어다 놓기(09-30 사용자 지정: Artist Thumbnail 처럼) - 카드를 적용 순서에 놓으면 그 자리에 넣고, 체인 줄(번호 · 이름)을
 //   끌면 순서를 바꾼다. 끌기는 창을 건너는 유일한 길인 dragBroker(포인터 + 유령, HTML5 끌기 아님)를 app.js 가 넘긴다.
+
+// 다른 창과 같은 URL(?v=)로 불러온다(다르면 창끼리 겹침 순서가 깨진다).
+import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
 const API = '/api/anima-engine';
 const STYLE_ID = 'animaLoraStyle';
@@ -42,8 +46,11 @@ const ZOOM_DELAY_MS = 140;           // 리모컨 확대 보기와 같다 - 훑�
 const ALL = '';                      // 카테고리 '전체'(기본)
 const TOP = '.';                     // 하위 폴더 밖(LoRA 폴더 바로 아래) - 이름 조각에 '.' 은 없다(서버 resolve_lora 가 거절)
 const STYLE = `
-.anima-lora-popup { width: min(700px, calc(100vw - 16px)); height: min(600px, calc(100vh - 16px)); }
-.anima-lora-popup .alr-headbtn { height: 22px; padding: 0 8px; font-size: 10px; flex: none; }
+.dragpanel.anima-lora-win .dragpanel-body { padding: 0; gap: 0; overflow: hidden; }
+.dragpanel.anima-lora-win .dragpanel-slot { justify-content: flex-end; gap: 4px; }
+.dragpanel.anima-lora-win .tagsearch-status { margin-right: auto; }
+.anima-lora-popup { position: relative; flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.anima-lora-win .alr-headbtn { height: 22px; padding: 0 8px; font-size: 10px; flex: none; }
 /* 왼쪽 = 카테고리(하위 폴더) · 오른쪽 = 보기(적용 순서 + 찾기 + 카드). 폴더 칸은 깊이만큼 들여 쓴다. */
 .anima-lora-popup .alr-body { flex: 1; min-height: 0; display: flex; }
 .anima-lora-popup .alr-cats { flex: none; width: 148px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px;
@@ -58,7 +65,8 @@ const STYLE = `
 .anima-lora-popup .alr-cat-n { flex: none; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
 .anima-lora-popup .alr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* 적용 순서 = 끌어다 놓는 자리. 머리줄 위에 놓아도 맨 앞으로 들어간다. 넣을 자리는 줄 위/아래 선으로 보인다. */
-.anima-lora-popup .alr-chainbox { flex: none; display: flex; flex-direction: column; min-height: 0; }
+/* 창을 줄여도 카드 칸이 남게 적용 순서는 본문의 절반까지만(넘치면 .alr-chain 이 스크롤) - Codex 재리뷰 11-21 MEDIUM */
+.anima-lora-popup .alr-chainbox { flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 50%; }
 .anima-lora-popup .alr-chainbox.is-drop-hover { background: rgba(124,106,239,0.07);
   box-shadow: inset 0 0 0 1px rgba(124,106,239,0.55); }
 .anima-lora-popup .alr-chainbox.is-drop-hover .alr-item.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
@@ -170,8 +178,8 @@ const STYLE = `
 .anima-lora-popup .alr-error { font-size: 10px; color: #f07070; line-height: 1.5; }
 .anima-lora-popup .alr-link { background: none; border: 0; padding: 0; color: var(--accent-glow); cursor: pointer; font-size: inherit; }
 .anima-lora-popup .alr-link:hover { text-decoration: underline; }
-/* [히스토리] - 창 몸통을 덮는 판(머리줄은 남긴다). 창이 overflow:hidden 이라 모서리가 따라 깎인다. */
-.anima-lora-popup .alr-pick { position: absolute; left: 0; right: 0; bottom: 0; top: 33px; z-index: 2;
+/* [히스토리] - 창 몸통을 덮는 판(머리줄은 창의 것이라 그대로 남는다). 창이 overflow:hidden 이라 모서리가 따라 깎인다. */
+.anima-lora-popup .alr-pick { position: absolute; left: 0; right: 0; bottom: 0; top: 0; z-index: 2;
   display: flex; flex-direction: column; background: rgba(15,15,23,0.99); }
 .anima-lora-popup .alr-pick[hidden] { display: none; }
 .anima-lora-popup .alr-pick-head { display: flex; align-items: center; gap: 6px; padding: 5px 8px 5px 10px; min-width: 0;
@@ -201,7 +209,9 @@ const STYLE = `
 `;
 
 export function createAnimaLoraPanel({ document, window: win = window, fetch: fetchFn = win.fetch.bind(win),
-  onOpenSetup = () => {}, onStateChange = () => {}, zoom = {}, broker = null }) {
+  onOpenSetup = () => {}, onStateChange = () => {}, zoom = {}, broker = null,
+  // 떠 있는 창 공장 - node 시험은 가짜 껍데기를 넣는다(진짜 창은 진짜 DOM 이 필요하다)
+  createPanel = options => createDraggablePanel({ document, window: win, ...options }) }) {
   let mode = '';
   let managed = false;       // 관리형 + 준비됨 — 런처가 ANIMA 전용 도구를 보일지 여기로 묻는다
   let checkedAt = 0;
@@ -215,8 +225,8 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   let flashText = '';
   let flashTimer = 0;
   let pngTarget = '';        // 파일 고르기 창을 연 카드의 LoRA 이름
+  let shell = null;          // 떠 있는 창(머리줄 · 끌기 · 크기 · 접기) - popup 은 그 안의 본문
   let popup = null;
-  let onResize = null;
   let dock = null;           // 프롬프트 밑 LoRA 줄 - 켜진 관리형 체인이 있을 때만 보인다
   let dockFolded = readDockFold();   // 그 줄을 머리(LoRA 켜짐 수 · [편집])만 남기고 접었는가
   let dragging = false;      // 강도 슬라이더를 끄는 중 - 그동안 줄을 다시 그리지 않는다(손잡이가 사라진다)
@@ -240,7 +250,8 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   const fmtStrength = value => (Number.isFinite(Number(value)) ? Number(value).toFixed(2) : '1.00');
   const shownStrength = item => (wheelEdits.has(item.name) ? wheelEdits.get(item.name) : item.strength);
   const fmtSize = bytes => (Number(bytes) >= 1048576 ? `${Math.round(Number(bytes) / 1048576)}MB` : `${Math.max(1, Math.round((Number(bytes) || 0) / 1024))}KB`);
-  const pick = selector => (popup ? popup.querySelector(selector) : null);
+  // 머리줄의 칸(개수 · 폴더 열기 · ↻)도 찾도록 창 전체에서 찾는다
+  const pick = selector => (shell?.el ? shell.el.querySelector(selector) : null);
   const thumbUrl = item => `${API}/loras/thumb?name=${encodeURIComponent(item.name)}&v=${encodeURIComponent(item.thumb.version ?? '')}`;
   // 이름 = LoRA 폴더 기준 상대 경로(슬래시). 폴더 = 마지막 / 앞, 보이는 이름 = 그 뒤(확장자 뺌)
   const folderOf = name => { const s = String(name || ''); const at = s.lastIndexOf('/'); return at < 0 ? '' : s.slice(0, at); };
@@ -805,8 +816,6 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       el.innerHTML = '';
       return;
     }
-    const head = pick('.tagsearch-head');
-    if (head?.offsetHeight) el.style.top = `${head.offsetHeight}px`;
     el.innerHTML = `<div class="alr-pick-head">PNG 고르기 · <b title="${esc(picker.name)}">${esc(shortName(picker.name))}</b>
         <button type="button" class="tagsearch-x" data-lora-pickclose aria-label="닫기">&times;</button></div>
       <div class="alr-pick-body">${pickerHtml()}</div>`;
@@ -889,7 +898,7 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       zoomShown = true;
       // 그림을 받은 뒤에 그리는 것은 확대 보기(리모컨 showZoom)가 한다 - 걷으면(zoom.hide) 받는 중인 것도 버린다
       zoom.show?.(target, { src: target.getAttribute('data-lora-zoom'), title: target.getAttribute('data-lora-zoom-title') || '',
-        note: target.getAttribute('data-lora-zoom-note') || '' }, popup.getBoundingClientRect());
+        note: target.getAttribute('data-lora-zoom-note') || '' }, (shell?.el || popup).getBoundingClientRect());
     }, ZOOM_DELAY_MS);
   }
 
@@ -900,43 +909,29 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
 
   // ---- 창 ----
 
-  // Memo · Tag Search 와 같은 자리(결과 이미지 영역 좌하단) — 스테이지 안으로 실측해서 가둔다.
-  function position() {
-    if (!popup) return;
-    const margin = 10;
-    const pw = popup.offsetWidth || 700;
-    const ph = popup.offsetHeight || 600;
-    const host = document.getElementById('resultViewer')
-      || document.getElementById('rightTabResult')
-      || document.querySelector('.right-tab-pane.active');
-    const rect = host ? host.getBoundingClientRect() : null;
-    let left;
-    let top;
-    if (rect && rect.width > pw + margin * 2 && rect.height > ph + margin * 2) {
-      left = rect.left + margin;
-      top = rect.bottom - ph - margin;
-    } else {
-      left = margin;
-      top = win.innerHeight - ph - margin;
-    }
-    left = Math.max(margin, Math.min(left, win.innerWidth - pw - margin));
-    top = Math.max(margin, Math.min(top, win.innerHeight - ph - margin));
-    popup.style.left = `${Math.round(left)}px`;
-    popup.style.top = `${Math.round(top)}px`;
-  }
-
   function build() {
+    const vw = win.innerWidth || 1280;
+    const vh = win.innerHeight || 800;
+    shell = createPanel({
+      title: 'LoRA · ANIMA',
+      variant: 'anima-lora-win',
+      storageKey: 'anima-lora',
+      width: Math.max(380, Math.min(700, vw - 16)),
+      minWidth: 380,
+      maxWidth: 1000,
+      height: Math.max(260, Math.min(600, vh - 70)),
+      minHeight: 240,
+      resizable: true,
+      escHtml: esc,
+      onClose: closed,
+    });
+    shell.slot.innerHTML = `
+      <span class="tagsearch-status"></span>
+      <button type="button" class="tagsearch-act alr-headbtn" data-lora-act="folder" title="LoRA 폴더를 탐색기로 엽니다">폴더 열기</button>
+      <button type="button" class="tagsearch-act alr-headbtn" data-lora-act="reload" title="LoRA 폴더를 다시 읽습니다">↻</button>`;
     popup = document.createElement('div');
-    // Tag Search 의 뼈대를 그대로 쓴다(Memo 와 같은 규약). anima-lora-popup 은 크기 · 칸만 손보는 갈고리다.
-    popup.className = 'tagsearch-popup anima-lora-popup';
+    popup.className = 'anima-lora-popup';
     popup.innerHTML = `
-      <div class="tagsearch-head">
-        <span class="tagsearch-title">LoRA · ANIMA</span>
-        <span class="tagsearch-status"></span>
-        <button type="button" class="tagsearch-act alr-headbtn" data-lora-act="folder" title="LoRA 폴더를 탐색기로 엽니다">폴더 열기</button>
-        <button type="button" class="tagsearch-act alr-headbtn" data-lora-act="reload" title="LoRA 폴더를 다시 읽습니다">↻</button>
-        <button type="button" class="tagsearch-x" data-lora-act="close" aria-label="닫기">&times;</button>
-      </div>
       <div class="alr-body">
         <nav class="alr-cats" aria-label="LoRA 폴더"></nav>
         <div class="alr-main">
@@ -955,15 +950,16 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
       <div class="alr-pick" role="dialog" aria-label="히스토리에서 PNG 고르기" hidden></div>
       <input type="file" accept="image/png" data-lora-file hidden>
     `;
-    document.body.appendChild(popup);
-    listen(popup);
+    shell.body.appendChild(popup);
+    // 머리줄 단추도 같은 조작이라 창 전체를 듣는다(본문만 들으면 폴더 열기 · ↻ 가 죽는다)
+    listen(shell.el);
     popup.addEventListener('pointerdown', onArm);
     popup.addEventListener('dragover', onDragOver);
     popup.addEventListener('dragleave', onDragLeave);
     popup.addEventListener('drop', onDrop);
     popup.addEventListener('pointerover', onZoomOver);
     popup.addEventListener('pointerout', onZoomOut);
-    popup.addEventListener('keydown', event => {
+    shell.el.addEventListener('keydown', event => {
       // 예약어 칸 - Enter = 저장, Esc = 그 칸만 그만둔다(창은 그대로)
       const kwInput = event.target?.closest?.('[data-lora-kwinput]');
       if (kwInput && (event.key === 'Enter' || event.key === 'Escape')) {
@@ -1011,17 +1007,20 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   }
 
   function isOpen() {
-    return Boolean(popup) && popup.style.display !== 'none';
+    return Boolean(shell?.isOpen());
   }
 
   function open() {
-    if (!popup) build();
-    popup.style.display = 'flex';
+    if (!shell) build();
+    if (isOpen()) {
+      // 이미 떠 있다([편집] 등) - 접혀 있으면 펴고 앞으로. 목록은 열 때 받았다
+      if (shell.isCollapsed?.()) shell.expand?.();
+      shell.raise?.();
+      return;
+    }
+    shell.open();
+    shell.bringIntoView?.();
     render();
-    onResize = () => position();
-    win.addEventListener('resize', onResize);
-    position();
-    win.requestAnimationFrame?.(() => position());
     onStateChange();
     // 목록은 열 때마다 다시 받는다 — 다른 기기에서 바꿨거나 폴더에 파일을 넣었을 수 있다.
     if (isManaged()) load();
@@ -1029,16 +1028,19 @@ export function createAnimaLoraPanel({ document, window: win = window, fetch: fe
   }
 
   function close() {
-    if (!isOpen()) return;
+    if (isOpen()) shell.close();
+  }
+
+  // 창이 닫힌 뒤의 정리 - × · Esc · 런처 · 모드 전환 모두 여기로 온다(창의 onClose)
+  function closed() {
     closePicker();
     hideZoom();
-    if (onResize) { win.removeEventListener('resize', onResize); onResize = null; }
-    popup.style.display = 'none';
     onStateChange();
   }
 
+  // 런처 단추: 떠 있고 펴져 있으면 닫고, 접혀 있으면 편다
   function toggle() {
-    if (isOpen()) close();
+    if (isOpen() && !shell.isCollapsed?.()) close();
     else open();
   }
 

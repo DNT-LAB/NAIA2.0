@@ -400,6 +400,9 @@ class HeadlessRemoteStateService:
 
     @staticmethod
     def coerce_remote_param(key: str, value: Any) -> Any:
+        if key == "webui_custom_payload_disabled":
+            from core.webui_custom_payload import disabled_script_names
+            return disabled_script_names(value)
         if key in REMOTE_BOOLEAN_PARAMS:
             return HeadlessRemoteStateService.coerce_bool(value)
         if key in REMOTE_INT_PARAMS:

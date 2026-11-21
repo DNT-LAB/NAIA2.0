@@ -345,26 +345,27 @@
 </div>
 
 <!-- WEBUI Custom Payload Editor -->
-<div class="module-popup module-popup-webui-custom" id="webuiCustomPayloadPopup" role="dialog" aria-labelledby="webuiCustomPayloadTitle" aria-modal="false">
-  <div class="module-popup-header">
-    <span class="module-popup-title" id="webuiCustomPayloadTitle">Custom Payload — alwayson_scripts</span>
-    <div class="module-popup-actions">
-      <button class="history-close" aria-label="닫기" onclick="closeWebuiCustomPayloadEditor()">&times;</button>
-    </div>
-  </div>
-  <div class="module-popup-body webui-custom-payload-popbody">
-    <div class="webui-custom-payload-guide">WEBUI 생성 결과의 <strong>alwayson_scripts</strong> JSON을 붙여넣으세요. 예: <code>{"ControlNet": {"args": [ ... ]}}</code> — 생성 payload 전체를 붙여넣어도 alwayson_scripts만 사용합니다. <strong>Apply</strong>를 눌러야 적용됩니다.</div>
+<!-- Custom Payload 본문 - 처음 열 때 떠 있는 창(draggablePanel)으로 옮겨 담는다(webuiCustomPayload.mjs · 사용자 지시 2026-11-21) -->
+<!-- ⚠️ style.css 의 .webui-custom-payload-popbody{display:flex} 가 [hidden] 을 이긴다 - 창에 담기 전까지는 인라인으로 숨긴다 -->
+<div class="webui-custom-payload-popbody" id="webuiCustomPayloadPopup" hidden style="display:none">
+    <div class="webui-custom-payload-guide">WEBUI 생성 결과의 <strong>alwayson_scripts</strong> JSON을 붙여넣으세요. 예: <code>{"ControlNet": {"args": []}}</code> — 생성 payload 전체를 붙여넣어도 alwayson_scripts만 사용합니다. <strong>Apply</strong>를 눌러야 적용됩니다.</div>
     <textarea id="pWebuiCustomPayload" class="webui-custom-payload-text mod-textarea" spellcheck="false"
-              placeholder='{"ControlNet": {"args": [ ... ]}}'
+              placeholder='{"ControlNet": {"args": []}}'
               oninput="onWebuiCustomPayloadInput()"></textarea>
+    <div id="webuiPayloadReview">
+      <table id="webuiPayloadTable" hidden>
+        <thead><tr><th>사용</th><th>스크립트</th><th>WebUI 확인</th><th>args 수</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div id="webuiPayloadIssues" aria-live="polite"></div>
+    </div>
     <div class="webui-custom-payload-footer">
-      <span class="webui-custom-payload-hint" id="webuiCustomPayloadHint"></span>
+      <button type="button" class="mod-btn-secondary" onclick="applyWebuiCustomPayload(true)">정본으로 보기</button>
       <div class="webui-custom-payload-actions">
         <button type="button" class="mod-btn-secondary" onclick="closeWebuiCustomPayloadEditor()">Cancel</button>
         <button type="button" class="mod-btn-secondary mod-btn-secondary--accent" onclick="applyWebuiCustomPayload()">Apply</button>
       </div>
     </div>
-  </div>
 </div>
 
 <!-- Refine (심층검색) is now a tab of the module popup (#refineView) — see refinePanel.mjs -->
@@ -763,7 +764,7 @@
               <div class="param-row webui-custom-payload-row">
                 <span class="param-label" title="WEBUI 확장(ControlNet/ADetailer 등)의 alwayson_scripts를 매 생성에 주입합니다. Edit로 payload를 붙여넣고 Apply 하세요.">Custom Payload</span>
                 <div class="webui-custom-payload-ctl">
-                  <button type="button" class="webui-custom-payload-edit" id="pWebuiCustomEditBtn" onclick="openWebuiCustomPayloadEditor()">Edit</button>
+                  <button type="button" class="webui-custom-payload-edit" id="pWebuiCustomEditBtn" onclick="openWebuiCustomPayloadEditor()">Edit · off</button>
                   <input type="checkbox" class="param-check" id="pWebuiCustomEnable" onchange="setWebuiCustomPayloadEnabled(this.checked)">
                 </div>
               </div>
@@ -1655,6 +1656,6 @@ function openInSystemBrowser() {
   <button type="button" class="mobile-remote-item" data-mobile-remote="artists" data-label="Artists"><span class="mobile-remote-icon" aria-hidden="true">&#127912;</span>Artists</button>
   <button type="button" class="mobile-remote-item is-pending" hidden data-mobile-remote="metadata" data-label="Metadata"><span class="mobile-remote-icon" aria-hidden="true">&#128221;</span>Metadata<span class="mobile-remote-note">준비 중</span></button>
 </div>
-<script src="app.js?v=20261119-v5cr"></script>
+<script src="app.js?v=20261121-webui-win"></script>
 </body>
 </html>

@@ -281,26 +281,25 @@ export function initDraftMode({
     const tags = (snap?.derived?.gray || []).filter(g => !g.dropped && !g.pe_hidden).map(g => g.tag);
     peekEl.textContent = tags.length ? tags.join(', ') : '들어간 태그가 없습니다';
     peekEl.hidden = false;
+    // 메인 프롬프트 영역(host) 안에만 띄운다(사용자 지시 11-21 - 판 바깥 오른쪽 결과 화면 위에 뜨던 것).
+    // 단추 바로 위 · 오른쪽 끝을 단추 오른쪽 끝에 맞춘다. 단추 위가 모자라면 아래로 밀려 단추를 덮고(마우스는 막지 않는다),
+    // 영역 높이로도 모자라면 그 높이에서 자르고 끝을 흐린다.
     const r = drawnBtnEl.getBoundingClientRect();
-    const w = Math.min(420, window.innerWidth - 16);
+    const box = (host || board).getBoundingClientRect();
+    const PAD = 6;
+    const left0 = Math.max(box.left, 0) + PAD;
+    const right0 = Math.min(box.right, window.innerWidth) - PAD;
+    const top0 = Math.max(box.top, 0) + PAD;
+    const bottom0 = Math.min(box.bottom, window.innerHeight) - PAD;
+    const w = Math.max(120, Math.min(420, right0 - left0));
     peekEl.style.width = `${w}px`;
+    peekEl.style.maxHeight = 'none';
     const h = peekEl.offsetHeight;
-    // 왼쪽 판 바깥 오른쪽(결과 화면 위)에 - 판 안에 띄우면 칩을 가린다(사용자 지시 11-07). 판 옆 E · S · A 탭도 비켜 간다.
-    // 아래 끝을 단추 아래 끝에 맞춘다. 오른쪽에 자리가 없으면(좁은 화면) 단추 위로.
-    const panel = board.closest('.control-panel')?.getBoundingClientRect();
-    let edge = panel ? panel.right : 0;
-    document.querySelectorAll('.em-tab').forEach(tab => {
-      const t = tab.getBoundingClientRect();
-      if (t.width && t.left < edge + 8 && t.right > edge - 8) edge = Math.max(edge, t.right);
-    });
-    if (panel && edge + 12 + w <= window.innerWidth - 8) {
-      peekEl.style.left = `${edge + 12}px`;
-      peekEl.style.top = `${Math.max(8, Math.min(r.bottom - h, window.innerHeight - h - 8))}px`;
-      return;
-    }
-    peekEl.style.left = `${Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8))}px`;
-    const top = r.top - h - 8 >= 8 ? r.top - h - 8 : Math.min(r.bottom + 8, window.innerHeight - h - 8);
-    peekEl.style.top = `${Math.max(8, top)}px`;
+    peekEl.style.left = `${Math.max(left0, Math.min(r.right - w, right0 - w))}px`;
+    const hh = Math.max(0, Math.min(h, bottom0 - top0));
+    peekEl.style.maxHeight = `${hh}px`;
+    peekEl.style.top = `${Math.max(top0, Math.min(r.top - 6 - hh, bottom0 - hh))}px`;
+    peekEl.classList.toggle('is-clipped', h > hh);
   }
   function hidePeek() { peekEl.hidden = true; clearTimeout(peekTimer); peekTimer = 0; }
   // DR Random 을 **눌렀을 때** 뽑힌 글을 잠깐(1초) 보여 준다(사용자 지시 11-12). Auto Gen 이 매 장 뽑는 것에는 띄우지 않는다 -

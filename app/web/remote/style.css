@@ -34429,6 +34429,8 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   word-break: break-word;
 }
 .dr-drawn-peek[hidden] { display: none; }
+/* 메인 프롬프트 영역 높이로도 모자라 잘렸다(11-21) - 끝을 흐려 뒤가 더 있음을 보인다 */
+.dr-drawn-peek.is-clipped { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent); }
 /* 뽑힌 결과 창 - 들어간 태그 위 · 늘어나는 틈 · 맨 아래 '숨겨진 태그:' 한 줄(PE 가 지운 것) */
 .dragpanel.drw .drw-body { flex: 1 0 auto; }
 .drw-hidden {

@@ -49,6 +49,14 @@
       "summary": "조건에 따라 프롬프트를 구성하는 방법을 살펴봅니다.",
       "keywords": "조건 태그 문법",
       "file": "conditional-prompt.html"
+    },
+    {
+      "id": "my-style-guide",
+      "category": "1. NAIA 소개",
+      "title": "[NAI] 나만의 스타일 만들어보기",
+      "summary": "그림체는 어떻게 구울 수 있는가 ?",
+      "keywords": "",
+      "file": "my-style-guide.html"
     }
   ]
 }

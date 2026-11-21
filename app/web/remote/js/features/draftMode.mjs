@@ -20,7 +20,7 @@
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm10';
-import { initDraftChipCard } from './draftChipCard.mjs?v=20261120-pm2';
+import { initDraftChipCard } from './draftChipCard.mjs?v=20261121-rv1';
 import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm9';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
@@ -36,6 +36,7 @@ export function initDraftMode({
   setPeField = () => {},         // (key, text, seenPreset) => void · 못 보내면 던진다
   getPePreset = () => '',        // () => string - 지금 PE 프리셋 이름(보고 친 프리셋의 도장용)
   bindTagAssist = null,          // Extra 칸의 일반 자동완성
+  dismissTagAssist = null,       // (textarea) => 그 칸의 자동완성 · 태그 정보 판을 닫는다. 떠 있던 게 있었으면 true
   attachHighlight = null,        // prefix / postfix 패널의 색칠(PE 칸과 같은 하이라이터) - 없어도 칸은 그대로 동작한다
   isAutocompleteEnabled = () => true,
   applyServerPrompt = () => {},  // (prompt, source) => void - 숨긴 #promptEdit 를 서버 확정 글로
@@ -291,7 +292,9 @@ export function initDraftMode({
     const right0 = Math.min(box.right, window.innerWidth) - PAD;
     const top0 = Math.max(box.top, 0) + PAD;
     const bottom0 = Math.min(box.bottom, window.innerHeight) - PAD;
-    const w = Math.max(120, Math.min(420, right0 - left0));
+    const w = Math.min(420, right0 - left0);
+    // 영역이 화면 밖이거나 너무 작으면 띄우지 않는다 - 밖으로 삐져나가느니 안 보이는 게 맞다(Codex 리뷰 11-21)
+    if (w < 80 || bottom0 - top0 < 40) { hidePeek(); return; }
     peekEl.style.width = `${w}px`;
     peekEl.style.maxHeight = 'none';
     const h = peekEl.offsetHeight;
@@ -319,6 +322,8 @@ export function initDraftMode({
   }
   drawnBtnEl.addEventListener('mouseenter', () => { clearTimeout(peekTimer); peekTimer = 0; showPeek(); });
   drawnBtnEl.addEventListener('mouseleave', hidePeek);
+  // 떠 있는 동안 판 · 왼쪽 칸이 굴러가면 단추를 따라간다(body 고정이라 옛 자리에 남았다 - Codex 리뷰 11-21)
+  window.addEventListener('scroll', () => { if (!peekEl.hidden) showPeek(); }, { capture: true, passive: true });
   drawnBtnEl.addEventListener('click', hidePeek);
 
   // ---- 칸 높이 손잡이(사용자 지시 11-07) ----
@@ -1301,6 +1306,8 @@ export function initDraftMode({
     const ta = peTexts[key];
     openPe = null;
     if (pePlaceRaf) { cancelAnimationFrame(pePlaceRaf); pePlaceRaf = 0; }
+    // 이 칸의 자동완성을 먼저 끝낸다 - 남은 후보가 저장을 마친 감춘 칸에 들어가지 않게(Codex 리뷰 11-21)
+    if (dismissTagAssist) { try { dismissTagAssist(ta); } catch (_) {} }
     commitPeText(ta);
     if (panel.contains(document.activeElement)) {
       peSuppressBlur = true;
@@ -1380,6 +1387,12 @@ export function initDraftMode({
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !openPe) return;
     if (event.defaultPrevented) return;   // 칸의 자동완성이 Esc 로 목록을 닫았다 - 패널은 다음 Esc 에
+    // 목록을 불러오는 중(후보 0개 · 'Loading…')이면 칸은 Esc 를 안 받는다 - 여기서 목록만 닫는다(Codex 리뷰 11-21)
+    const tip = document.getElementById('tagTooltip');
+    if (tip?.classList.contains('open') && tip.classList.contains('ac-mode') && dismissTagAssist?.(peTexts[openPe])) {
+      event.preventDefault();
+      return;
+    }
     const t = event.target;
     if (!(pePanels[openPe].contains(t) || bandEls[openPe].contains(t) || t === document.body)) return;
     event.preventDefault();

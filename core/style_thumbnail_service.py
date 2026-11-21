@@ -311,10 +311,14 @@ class StyleThumbnailService:
         for key, info in self.categories().items():
             if not isinstance(info, dict):
                 continue
-            single = {str(tag) for section in info.get("sections", []) if isinstance(section, dict) and section.get("single")
-                      for tag in section.get("tags", [])}
+            # 소제목은 목록일 때만(category_payload 와 같은 규칙) - 소제목에만 있는 태그도 최상위 태그 뒤에 찾는다(Codex 리뷰 11-21)
+            sections = [section for section in info.get("sections") if isinstance(section, dict)] \
+                if isinstance(info.get("sections"), list) else []
+            tag_lists = [info.get("tags")] + [section.get("tags") for section in sections]
+            single = {str(tag) for section in sections if section.get("single")
+                      for tag in (section.get("tags") if isinstance(section.get("tags"), list) else [])}
             seen, items = set(), []
-            for tag in (str(tag) for tag in info.get("tags", [])):
+            for tag in (str(tag) for tags in tag_lists if isinstance(tags, list) for tag in tags):
                 if tag in seen or not tag.strip() or tag not in thumbnail_data or not hit(tag):
                     continue
                 seen.add(tag)

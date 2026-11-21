@@ -4213,9 +4213,22 @@ export function createTagAssistController({
     if (!tagLookupReadOnly) lastLookupTag = '';
   }
 
+  /** 칸의 주인이 칸을 감출 때 - 그 칸의 자동완성 목록 · 태그 정보 판 · 기다리는 요청을 지금 끝낸다(Draft PE 패널 · Codex 리뷰 11-21:
+   *  패널을 닫은 뒤 남은 후보를 누르면 저장을 마친 감춘 칸에 들어갔다). 떠 있던 것이 있었으면 true. 다른 칸 것 · 슬래시 목록은 두고 false. */
+  function dismissFor(textarea) {
+    if (!tagTooltip || !textarea || acTarget !== textarea || slashEntry) return false;
+    const wasOpen = tagTooltip.classList.contains('open');
+    window.clearTimeout(tagLookupTimer);
+    hideAutocomplete();
+    tagTooltip.classList.remove('open');
+    lastLookupTag = '';
+    return wasOpen;
+  }
+
   return {
     bindDefaultTextareas,
     bindTagAssist,
+    dismissFor,
     refreshAutocompleteSetting,
     openSlashCommandByName,
     bindTagChipInfoHover,

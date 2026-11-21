@@ -1726,7 +1726,7 @@ function syncPermanentExcludeField(text) {
 }
 // Draft Mode(사용자 구상 2026-11-07) - 투명 BG 옆 [Draft]. 메인 칸을 포함 · 제외 · Extra 칩 판으로 바꾼다. 상태 · 셈 · 뽑기는
 // 서버(/api/event-map/draft*)가 하고, 판은 서버가 보낸 스냅숏을 그린다. 메인 칸 글은 서버가 확정한 글로 늘 맞춘다(재검수 C3).
-import('./js/features/draftMode.mjs?v=20261121-peac')
+import('./js/features/draftMode.mjs?v=20261121-rv1')
   .then(({initDraftMode}) => {
     window.draftMode = initDraftMode({
       host: promptEdit ? promptEdit.closest('.prompt-highlight-wrap') : null,
@@ -1739,6 +1739,7 @@ import('./js/features/draftMode.mjs?v=20261121-peac')
       },
       getPePreset: () => slashPeState().preset || '',
       bindTagAssist: (textarea, options) => bindTagAssist(textarea, options),
+      dismissTagAssist: textarea => !!tagAssist?.dismissFor?.(textarea),
       attachHighlight: (textarea, overlay) => attachPromptHighlight(textarea, overlay, {palette: 'pe'}),
       isAutocompleteEnabled: () => tagAutocompleteEnabled(),
       // 인페인트 세션이 입력창을 쥐고 있으면 쓰지 않는다 - 세션을 닫을 때 원본(promptBeforeInpaint)이 돌아온다.
@@ -8493,7 +8494,7 @@ let thumbWindow = null;
 let thumbWindowReady = null;
 function ensureThumbWindow() {
   if (!thumbWindowReady) {
-    thumbWindowReady = import('./js/features/thumbWindow.mjs?v=20261121-search')
+    thumbWindowReady = import('./js/features/thumbWindow.mjs?v=20261121-rv1')
       .then(({createThumbWindow}) => {
         thumbWindow = createThumbWindow({document, window, escHtml, showToast});
         return thumbWindow;
@@ -16690,7 +16691,7 @@ $('acTouchPlacement')?.addEventListener('click', event => {
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261120-pm2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261121-rv1')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

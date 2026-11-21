@@ -115,7 +115,13 @@ export function createThumbWindow({
     clearTimeout(searchTimer);
     hidePeek();
     const q = query();
-    if (!q) { searchSeq++; found = null; paintCats(); paintGrid(); return; }
+    // 검색어가 바뀐 순간 앞 결과는 버린다 - 응답 전에 +1/+2 를 바꾸면 앞 카드를 새 검색어 제목으로 다시 그렸고,
+    // 앞 요청의 늦은 실패가 새 검색의 상태 줄을 덮었다(Codex 리뷰 11-21)
+    searchSeq++;
+    found = null;
+    if (!q) { paintCats(); paintGrid(); return; }
+    const grid = el('[data-thw-grid]');
+    if (grid) grid.innerHTML = '';
     setStatus('찾는 중…', 'busy');
     searchTimer = setTimeout(() => void runSearch(q), 180);
   }
@@ -133,7 +139,7 @@ export function createThumbWindow({
       const grid = el('[data-thw-grid]');
       if (grid) grid.scrollTop = 0;
     } catch (error) {
-      if (mine !== searchSeq) return;
+      if (mine !== searchSeq || query() !== q) return;
       setStatus(`찾지 못했습니다: ${error.message || ''}`, 'error');
     }
   }
@@ -223,7 +229,12 @@ export function createThumbWindow({
     active = key;
     paintCats();
     const mine = ++seq;
-    if (!cache.has(key)) setStatus('불러오는 중…', 'busy');
+    if (!cache.has(key)) {
+      // 앞 격자(검색 결과 등)를 바로 비운다 - 남겨 두면 분류가 오기 전까지 기준 그림을 잃은 카드의 A|B 가 눌렸다(Codex 리뷰 11-21)
+      const grid = el('[data-thw-grid]');
+      if (grid) grid.innerHTML = '';
+      setStatus('불러오는 중…', 'busy');
+    }
     try {
       await loadCategory(key);
       if (mine !== seq) return;

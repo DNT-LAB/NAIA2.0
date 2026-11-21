@@ -267,6 +267,11 @@ export function createWebuiLoraPanel({document, window: win, promptEdit, showToa
     if ('add' in d) {
       const input = b.closest('article').querySelector('[data-default]');
       if (!input.value || !input.validity.valid) return;
+      // `<lora:이름:강도>` 를 깨는 글자 - 넣으면 뒤 글이 프롬프트로 새고 Forge 도 이 이름을 못 읽는다(Codex 리뷰 11-21).
+      if (/[:<>\r\n]/.test(entry.name)) {
+        showToast('이 LoRA 는 파일 이름에 : < > 가 있어 넣을 수 없습니다. 파일 이름을 바꿔 주세요.', 'error');
+        return;
+      }
       const text = insertToken(promptEdit.value, entry.name, Number(input.value));
       if (text === promptEdit.value) showToast('이미 들어 있습니다', 'info');
       else setPrompt(text);

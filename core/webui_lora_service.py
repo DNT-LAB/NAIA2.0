@@ -69,7 +69,9 @@ def _common_folder(parents):
             for ancestor in (folder, *folder.parents):
                 if ancestor.name.casefold() == "lora":
                     return ancestor
-            return folder if folder.name and len(set(parents)) > 1 else None
+            # `lora` 조상이 없으면(루트가 둘 · 이름이 다름) 공통 조상은 사용자 폴더 위일 수 있다 - 폴더 표시는
+            # 바로 위 폴더 이름만 쓴다(경로 조각이 원격 화면으로 나가지 않게 · Fable 리뷰 11-21).
+            return None
     return None
 
 
@@ -148,9 +150,10 @@ class WebuiLoraService:
 
     def _meta(self):
         try:
-            return json.loads((self.save / "webui_lora_meta.json").read_text(encoding="utf-8"))
-        except FileNotFoundError:
+            data = json.loads((self.save / "webui_lora_meta.json").read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):   # 깨진 파일 = 설정 없음(목록 전체가 500 이던 것 · Fable 리뷰 11-21)
             return {}
+        return data if isinstance(data, dict) else {}
 
     def _png(self, name):
         key = hashlib.sha256(name.encode("utf-8")).hexdigest()

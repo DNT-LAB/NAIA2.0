@@ -34,14 +34,15 @@ def normalize_custom_payload(text: str) -> dict:
     if not text:
         # 빈 칸 = payload 를 비운 것이다. 오류가 아니다(비우려고 Apply 하는 길 · 켜 둔 채 비어 있어도 생성은 그대로).
         return result()
-    if re.search(r"\{\s*(?:…|\.\.\.)\s*\}", text):
-        issue("error", "생략 기호가 들어 있어 설정이 잘렸습니다. WebUI 에서 다시 복사하세요.")
-        return result()
     # Preserve ordinary JSON strings, including apostrophes and quoted prose.
     try:
         try:
             block = json.loads(text, parse_constant=_invalid_constant)
         except json.JSONDecodeError:
+            # 잘린 복사본(`{...}`)은 JSON 으로 안 읽힐 때만 본다 - 문자열 값 안의 `{...}` 는 정상이다(Fable 리뷰 11-21).
+            if re.search(r"\{\s*(?:…|\.\.\.)\s*\}", text):
+                issue("error", "생략 기호가 들어 있어 설정이 잘렸습니다. WebUI 에서 다시 복사하세요.")
+                return result()
             clean = _QUOTED.sub(_straight_quotes, text)
             if clean.startswith('"'):
                 clean = "{" + clean + "}"

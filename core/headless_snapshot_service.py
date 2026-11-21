@@ -305,7 +305,9 @@ class HeadlessSnapshotService:
                         preset["module_settings"] = copy.deepcopy(pe_store.state()["settings"])
                     if main_wanted:
                         main = context._prompt_engineering_service()._capture_main_settings()
-                        main = {key: value for key, value in main.items() if not key.startswith("web_session_")}
+                        # Custom Payload(webui_custom_payload*)는 세션 전역 - 적용 때도 벗겨지니 담지 않는다(리뷰 11-21).
+                        main = {key: value for key, value in main.items()
+                                if not key.startswith(("web_session_", "webui_custom_payload"))}
                         for key in snapshot_defaults()["extra_main_keys"]:
                             if key in context.remote_params:
                                 main[key] = context.remote_params[key]

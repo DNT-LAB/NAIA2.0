@@ -1001,6 +1001,9 @@ class HeadlessPromptEngineeringService:
             name = str(state.get("current_preset") or "")
             if key in PRESET_RUNTIME_STATE_KEYS and not is_snapshot_preset_name(name):
                 return ""
+            # Custom Payload 는 Snapshot 에도 싣지 않는다(적용 때 벗겨지는 죽은 사본 · 리뷰 11-21).
+            if key.startswith("webui_custom_payload"):
+                return ""
             if is_snapshot_preset_name(name) and key.startswith("web_session_"):
                 return ""
             # 고른 프리셋이 없거나 '랜덤' 자리면 반영할 대상이 없다.

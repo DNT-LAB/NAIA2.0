@@ -3047,7 +3047,7 @@ import('./js/features/animaSetupPanel.mjs?v=20261001-gpu-probe')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let webuiLoraPanel = null;
-import('./js/features/webuiLoraPanel.mjs?v=20261121-nodock')
+import('./js/features/webuiLoraPanel.mjs?v=20261121-review')
   .then(({createWebuiLoraPanel}) => {
     webuiLoraPanel = createWebuiLoraPanel({
       document, window, promptEdit, showToast,
@@ -7876,8 +7876,12 @@ async function openWebuiCustomPayloadEditor() {
       showToast('WS 연결이 끊겨 적용할 수 없습니다.', 'error');
       return;
     }
-    setParam('webui_custom_payload_disabled', JSON.stringify(disabled));
+    // 두 키는 WS 두 번으로 나간다 - 그 사이에 Auto Gen 이 설정을 읽어도 옛 설정 · 새 설정 어느 쪽에서든 꺼 둔
+    // 스크립트는 나가지 않도록 꺼짐 목록을 옛것∪새것으로 먼저 넓히고, payload 를 바꾼 뒤 새 목록으로 좁힌다(Codex 리뷰 11-21).
+    const widened = [...new Map([..._webuiCustomDisabled, ...disabled].map(n => [String(n).toLowerCase(), n])).values()];
+    setParam('webui_custom_payload_disabled', JSON.stringify(widened));
     setParam('webui_custom_payload', canonical);
+    setParam('webui_custom_payload_disabled', JSON.stringify(disabled));
     _webuiCustomPayloadApplied = canonical;
     _webuiCustomDisabled = disabled;
     updateWebuiCustomPayloadIndicator();
@@ -7905,11 +7909,14 @@ function updateWebuiCustomPayloadIndicator() {
   let label = 'off';
   if (enabled) {
     try {
-      const data = JSON.parse(_webuiCustomPayloadApplied || '{}');
+      // 옛 빌드가 저장한 바깥 괄호 없는 조각("ADetailer": {...})도 서버는 받아 보낸다 - 같은 식으로 세어 본다.
+      const raw = (_webuiCustomPayloadApplied || '').trim() || '{}';
+      let data;
+      try { data = JSON.parse(raw); } catch (err) { if (raw.startsWith('"')) data = JSON.parse(`{${raw}}`); else throw err; }
       // 실제로 나가는 개수 - 검사 표에서 끈 스크립트는 세지 않는다
       const off = new Set((_webuiCustomDisabled || []).map(name => String(name).toLowerCase()));
       label = Object.keys(data.alwayson_scripts ?? data).filter(name => !off.has(name.toLowerCase())).length;
-    } catch { label = '!'; }
+    } catch { label = 'on'; }   // 셀 수 없을 뿐 - 맞는지는 Apply 검사 · 생성이 말한다
   }
   btn.textContent = `Edit · ${label}`;
   btn.classList.toggle('has-payload', enabled && !!_webuiCustomPayloadApplied);
@@ -11499,7 +11506,8 @@ function onModeResult(m) {
 function showToast(msg, type, showConfigure) {
   if (toastTimer) clearTimeout(toastTimer);
   if (showConfigure) {
-    toastEl.innerHTML = `${msg} — <a href="#" onclick="openApiPopup();return false" style="color:inherit;text-decoration:underline">Configure</a>`;
+    // 문구는 글자로만 - 서버 오류(Forge 422 detail · 응답 본문)가 실려 온다. HTML 은 Configure 링크뿐(리뷰 11-21).
+    toastEl.innerHTML = `${escHtml(String(msg ?? ''))} — <a href="#" onclick="openApiPopup();return false" style="color:inherit;text-decoration:underline">Configure</a>`;
   } else {
     toastEl.textContent = msg;
   }

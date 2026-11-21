@@ -2250,6 +2250,9 @@ export function createTagAssistController({
 
   function applyAutocompleteResult(m) {
     const q = lastAcQuery;
+    // 기다리는 질의가 없다 = 목록을 닫았다. 보낸 질의는 늘 비어 있지 않다('$' 만 쳐도 '$') - 빈 질의의 늦은 답이
+    // 닫은 목록을 다시 열었다(청크 '$' · Draft PE 패널을 닫은 뒤 - Codex 재리뷰 11-21)
+    if (!q) return false;
     const isTranslatedResponse = Object.prototype.hasOwnProperty.call(m || {}, 'translated_query');
     const wcSpec = q && q.startsWith('__') ? wildcardAutocompleteSpec(q) : null;
     // dep_master 는 클라이언트측으로 렌더되므로 백엔드 응답 매칭 대상이 아니다.
@@ -2619,12 +2622,14 @@ export function createTagAssistController({
     const info = getActiveTokenInfo(target);
     if (!info) return false;
     const caretOffset = Math.max(0, (target?.selectionStart || 0) - info.start);
+    const dismissedAt = acDismissSeq;
     const result = await panel.getClothesRandomAutocompleteSelection(lastAcQuery || info.stripped, {
       context: {...presetEventContext},
       caretOffset,
       search: presetEventSearch,
       limit: 500,
     });
+    if (dismissedAt !== acDismissSeq) return false;   // 기다리는 사이 칸의 주인이 칸을 감췄다(dismissFor) - 감춘 칸에 넣지 않는다
     if (!result?.ok || !result.token) {
       showToast?.(result?.message || 'No random Clothes candidates.', 'warning');
       return false;
@@ -4215,8 +4220,10 @@ export function createTagAssistController({
 
   /** 칸의 주인이 칸을 감출 때 - 그 칸의 자동완성 목록 · 태그 정보 판 · 기다리는 요청을 지금 끝낸다(Draft PE 패널 · Codex 리뷰 11-21:
    *  패널을 닫은 뒤 남은 후보를 누르면 저장을 마친 감춘 칸에 들어갔다). 떠 있던 것이 있었으면 true. 다른 칸 것 · 슬래시 목록은 두고 false. */
+  let acDismissSeq = 0;
   function dismissFor(textarea) {
     if (!tagTooltip || !textarea || acTarget !== textarea || slashEntry) return false;
+    acDismissSeq += 1;                    // 기다리는 비동기 고르기(옷 무작위)를 무효로
     const wasOpen = tagTooltip.classList.contains('open');
     window.clearTimeout(tagLookupTimer);
     hideAutocomplete();

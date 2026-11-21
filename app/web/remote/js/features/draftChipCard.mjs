@@ -13,7 +13,7 @@
  *  · 자리 = #tagTooltip 이 뜨는 결과 화면 왼쪽 위. '남은 태그' 창(.drf-win)이 열려 있으면 그 창의 오른쪽.
  */
 
-import { ratingCountsHtml } from './tagAssist.mjs?v=20261121-rv1';
+import { ratingCountsHtml } from './tagAssist.mjs?v=20261121-rv2';
 import { normalizePromptTag, recommendRowsHtml } from './tagRecommendRows.mjs?v=20260927-nohint2';
 
 const MAX_COUNT_TAGS = 160;     // 서버 한도(/draft/counts)

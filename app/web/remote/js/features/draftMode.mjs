@@ -20,7 +20,7 @@
 
 import { createDraggablePanel } from './draggablePanel.mjs?v=20260926-childalign';
 import { initDraftTagFinder } from './draftTagFinder.mjs?v=20261113-perm10';
-import { initDraftChipCard } from './draftChipCard.mjs?v=20261121-rv1';
+import { initDraftChipCard } from './draftChipCard.mjs?v=20261121-rv2';
 import { initDraftPermExclude } from './draftPermExclude.mjs?v=20261113-perm9';
 
 const RATING_LABEL = { g: 'rating:general', s: 'rating:sensitive', q: 'rating:questionable', e: 'rating:explicit' };
@@ -323,7 +323,11 @@ export function initDraftMode({
   drawnBtnEl.addEventListener('mouseenter', () => { clearTimeout(peekTimer); peekTimer = 0; showPeek(); });
   drawnBtnEl.addEventListener('mouseleave', hidePeek);
   // 떠 있는 동안 판 · 왼쪽 칸이 굴러가면 단추를 따라간다(body 고정이라 옛 자리에 남았다 - Codex 리뷰 11-21)
-  window.addEventListener('scroll', () => { if (!peekEl.hidden) showPeek(); }, { capture: true, passive: true });
+  // 크기가 바뀔 때도(창 · 메인 프롬프트 영역 - Codex 재리뷰 11-21)
+  const replacePeek = () => { if (!peekEl.hidden) showPeek(); };
+  window.addEventListener('scroll', replacePeek, { capture: true, passive: true });
+  window.addEventListener('resize', replacePeek);
+  if (typeof ResizeObserver !== 'undefined' && host) new ResizeObserver(replacePeek).observe(host);
   drawnBtnEl.addEventListener('click', hidePeek);
 
   // ---- 칸 높이 손잡이(사용자 지시 11-07) ----

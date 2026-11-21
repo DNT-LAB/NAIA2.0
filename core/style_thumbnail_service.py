@@ -285,6 +285,45 @@ class StyleThumbnailService:
             "tags": [self._tag_item(tag, thumbnail_data) for tag in tags],
         }
 
+    def search(self, query: str, translations: dict[str, Any] | None = None) -> dict[str, Any]:
+        """모든 분류에서 태그를 찾아 분류별로 묶는다(사용자 지시 2026-11-21 - 보고 있는 분류에서만 찾던 것).
+
+        맞춤 = 영문 태그(밑줄 = 빈칸) · 번들 설명(desc) · 한국어 태그 사전의 keywords_kr / description(이미 읽어 둔 것만).
+        같은 태그가 두 분류에 있으면 두 묶음에 다 나온다. 묶음 차례 = 분류 목록 차례 · 태그 차례 = 그 분류 안의 차례.
+        """
+        q = " ".join(str(query or "").replace("_", " ").casefold().split())
+        if not q:
+            return {"query": "", "groups": [], "total": 0}
+        thumbnail_data = self.thumbnails()
+        descriptions = self.metadata().get("descriptions", {})
+        descriptions = descriptions if isinstance(descriptions, dict) else {}
+        translations = translations if isinstance(translations, dict) else {}
+
+        def hit(tag: str) -> bool:
+            if q in tag.replace("_", " ").casefold():
+                return True
+            record = translations.get(tag.casefold().replace("\\(", "(").replace("\\)", ")"), {})
+            record = record if isinstance(record, dict) else {}
+            texts = (descriptions.get(tag), record.get("keywords_kr"), record.get("description"))
+            return any(q in str(text).casefold() for text in texts if text)
+
+        groups = []
+        for key, info in self.categories().items():
+            if not isinstance(info, dict):
+                continue
+            single = {str(tag) for section in info.get("sections", []) if isinstance(section, dict) and section.get("single")
+                      for tag in section.get("tags", [])}
+            seen, items = set(), []
+            for tag in (str(tag) for tag in info.get("tags", [])):
+                if tag in seen or not tag.strip() or tag not in thumbnail_data or not hit(tag):
+                    continue
+                seen.add(tag)
+                items.append({**self._tag_item(tag, thumbnail_data), "single": tag in single})
+            if items:
+                groups.append({"key": str(key), "name": str(info.get("name") or key), "base": str(info.get("base") or ""),
+                               "tags": items})
+        return {"query": q, "groups": groups, "total": sum(len(group["tags"]) for group in groups)}
+
     def _tag_item(self, tag: str, thumbnail_data: dict[str, str]) -> dict[str, Any]:
         """카드 한 장. 빼기 그림(`__minus__:<태그>` · UC 2.5 없으면 UC 1)이 번들에 있으면 그 주소와 라벨도 싣는다 -
         큰 그림 세 장이 변형 묶음 없이도 뜬다(2026-10-26)."""

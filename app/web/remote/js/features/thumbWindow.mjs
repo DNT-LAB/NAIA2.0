@@ -28,6 +28,10 @@ export function createThumbWindow({
   let active = '';                    // 지금 분류 키
   const cache = new Map();            // 분류 키 -> 분류 응답
   let seq = 0;
+  // 검색 = 모든 분류에서 찾아 분류별로 묶는다(사용자 지시 2026-11-21 - 보고 있는 분류에서만 찾던 것). 칸이 비면 분류 보기.
+  let found = null;                   // /api/thumb/search 응답 {query, groups:[{key, name, base, tags}], total}
+  let searchSeq = 0;
+  let searchTimer = 0;
   const escAttr = value => escHtml(String(value ?? '')).replace(/"/g, '&quot;');
   // 썸네일 값 [+1 | +2](사용자 지시 2026-10-26) - 기본 +2(간이 딱 맞다 - 사용자). 고른 값은 이 브라우저에 기억한다.
   const POS_KEY = 'naia.thumbWindow.pos';
@@ -65,7 +69,7 @@ export function createThumbWindow({
       + `<nav class="thw-cats" data-thw-cats aria-label="스타일 분류"></nav>`
       + `<section class="thw-main"><div class="thw-status" data-thw-status>불러오는 중…</div>`
       + `<div class="thw-grid" data-thw-grid></div></section></div>`;
-    panel.slot.addEventListener('input', event => { if (event.target.closest('[data-thw-q]')) paintGrid(); });
+    panel.slot.addEventListener('input', event => { if (event.target.closest('[data-thw-q]')) scheduleSearch(); });
     panel.body.addEventListener('click', onClick);
     panel.body.addEventListener('contextmenu', onContextMenu);
     panel.body.addEventListener('mouseover', onPeekOver);
@@ -107,6 +111,42 @@ export function createThumbWindow({
     return data;
   }
 
+  function scheduleSearch() {
+    clearTimeout(searchTimer);
+    hidePeek();
+    const q = query();
+    if (!q) { searchSeq++; found = null; paintCats(); paintGrid(); return; }
+    setStatus('찾는 중…', 'busy');
+    searchTimer = setTimeout(() => void runSearch(q), 180);
+  }
+
+  async function runSearch(q) {
+    const mine = ++searchSeq;
+    try {
+      const response = await fetch(`/api/thumb/search?q=${encodeURIComponent(q)}`, {cache: 'no-store'});
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      if (mine !== searchSeq || query() !== q) return;      // 그사이 다시 쳤다
+      found = data;
+      paintCats();
+      paintGrid();
+      const grid = el('[data-thw-grid]');
+      if (grid) grid.scrollTop = 0;
+    } catch (error) {
+      if (mine !== searchSeq) return;
+      setStatus(`찾지 못했습니다: ${error.message || ''}`, 'error');
+    }
+  }
+
+  /** 카드가 속한 분류의 자료 - 검색 중이면 검색 묶음, 아니면 지금 분류(큰 그림 · A|B 가 기준 · 빼기 그림을 여기서 읽는다). */
+  function dataOf(key) {
+    if (found && key) {
+      const group = (found.groups || []).find(item => item.key === key);
+      if (group) return group;
+    }
+    return cache.get(key || active);
+  }
+
   // ── 그리기 ────────────────────────────────────────────────────────────────
   function setStatus(text, tone = '') {
     const node = el('[data-thw-status]');
@@ -118,13 +158,15 @@ export function createThumbWindow({
   function paintCats() {
     const nav = el('[data-thw-cats]');
     if (!nav || !state) return;
-    nav.innerHTML = (state.categories || []).map(cat => `<button type="button" class="thw-cat${cat.key === active ? ' is-on' : ''}"`
+    // 검색 중에는 고른 분류를 칠하지 않는다(결과가 여러 분류에 걸친다) - 분류를 누르면 검색을 비우고 그 분류로.
+    const searching = !!query();
+    nav.innerHTML = (state.categories || []).map(cat => `<button type="button" class="thw-cat${!searching && cat.key === active ? ' is-on' : ''}"`
       + ` data-thw-cat="${escAttr(cat.key)}" data-naia-title="${escAttr(cat.description || cat.name)}">`
       + `<span>${escHtml(cat.name)}</span><span class="thw-n">${Number(cat.available || 0)}</span></button>`).join('');
   }
 
-  function card(tag, url, single, weight = 1) {
-    return `<article class="thw-card" data-thw-tag="${escAttr(tag)}">`
+  function card(tag, url, single, weight = 1, key = '') {
+    return `<article class="thw-card" data-thw-tag="${escAttr(tag)}"${key ? ` data-thw-key="${escAttr(key)}"` : ''}>`
       // 그림 = 마우스를 올리면 큰 그림 세 장(-1 | 0 | 1) · 이름 = 복사(툴팁에 전체 이름) - 사용자 지시 2026-10-26.
       + `<img loading="lazy" decoding="async" src="${escAttr(url)}" alt="${escAttr(tag)}" data-thw-peek="${escAttr(tag)}"`
       + `${single ? ' data-thw-single="1"' : ` data-thw-w="${weight}"`}>`
@@ -136,29 +178,43 @@ export function createThumbWindow({
       + `</div></article>`;
   }
 
+  // +2 를 골랐어도 POS 2 그림이 없는 태그(단일 등)는 +1 그림 그대로 - 카드에 실제 가중치를 적어 미리보기 라벨이 따른다.
+  const shownOf = item => (posWeight === 2 && item.pos2_url ? [item.pos2_url, 2] : [item.image_url, 1]);
+
+  /** 검색 결과 = 분류별 묶음(머리글 = 분류 이름 · 수). 카드는 자기 분류 키를 단다. */
+  function paintFound(grid) {
+    const groups = found?.groups || [];
+    grid.innerHTML = groups.map(group => `<div class="thw-sec">${escHtml(group.name)} · ${group.tags.length}</div>`
+      + `<div class="thw-cards">${group.tags.map(item => {
+        const [url, weight] = shownOf(item);
+        return card(item.tag, url, item.single, weight, group.key);
+      }).join('')}</div>`).join('') || `<div class="thw-empty">'${escHtml(query())}' - 맞는 태그가 없습니다</div>`;
+    setStatus(`검색 '${query()}' · ${Number(found?.total || 0)}개${groups.length ? ` · 분류 ${groups.length}` : ''}`);
+  }
+
   function paintGrid() {
     const grid = el('[data-thw-grid]');
+    if (grid && query()) {
+      if (found) paintFound(grid);
+      return;
+    }
     const data = cache.get(active);
     if (!grid || !data) return;
-    const q = query();
-    // +2 를 골랐어도 POS 2 그림이 없는 태그(단일 등)는 +1 그림 그대로 - 카드에 실제 가중치를 적어 미리보기 라벨이 따른다.
-    const shownOf = item => (posWeight === 2 && item.pos2_url ? [item.pos2_url, 2] : [item.image_url, 1]);
     const urls = new Map((data.tags || []).map(item => [item.tag, shownOf(item)]));
-    const match = tag => !q || tag.toLowerCase().includes(q);
     // 소제목이 있는 분류(Novel AI 공식)는 묶음별로, 없으면 한 덩어리로.
     const groups = data.sections?.length
       ? data.sections.map(sec => ({name: sec.name, single: sec.single, tags: sec.tags}))
       : [{name: '', single: false, tags: (data.tags || []).map(item => item.tag)}];
     let shown = 0;
     grid.innerHTML = groups.map(group => {
-      const tags = group.tags.filter(match);
+      const tags = group.tags;
       shown += tags.length;
       if (!tags.length) return '';
       const head = group.name ? `<div class="thw-sec">${escHtml(group.name)} · ${tags.length}</div>` : '';
       return head + `<div class="thw-cards">${tags.map(tag => card(tag, urls.get(tag)?.[0] || '', group.single, urls.get(tag)?.[1] || 1)).join('')}</div>`;
     }).join('') || `<div class="thw-empty">맞는 태그가 없습니다</div>`;
     const base = state?.bases?.[data.base]?.name;
-    setStatus(`${data.name} · ${shown}${q ? ` / ${(data.tags || []).length}` : ''}개${base ? ` · 기준: ${base}` : ''}`);
+    setStatus(`${data.name} · ${shown}개${base ? ` · 기준: ${base}` : ''}`);
   }
 
   async function select(key) {
@@ -192,11 +248,16 @@ export function createThumbWindow({
 
   function onClick(event) {
     const cat = event.target.closest('[data-thw-cat]');
-    if (cat) { void select(cat.dataset.thwCat); return; }
+    if (cat) {
+      const box = el('[data-thw-q]');
+      if (box?.value) { box.value = ''; clearTimeout(searchTimer); searchSeq++; found = null; }
+      void select(cat.dataset.thwCat);
+      return;
+    }
     const copy = event.target.closest('[data-thw-copy]');
     if (copy) { void copyTag(copy.dataset.thwCopy); return; }
     const ab = event.target.closest('[data-thw-ab]');
-    if (ab) void openAb(ab.dataset.thwAb);
+    if (ab) void openAb(ab.dataset.thwAb, ab.closest('[data-thw-key]')?.dataset.thwKey || '');
   }
 
   // ── 큰 그림 세 장(마우스를 올리면) ─────────────────────────────────────────
@@ -245,7 +306,7 @@ export function createThumbWindow({
   async function showPeek(img) {
     const tag = img.dataset.thwPeek;
     peekTag = tag;
-    const data = cache.get(active);
+    const data = dataOf(img.closest('[data-thw-key]')?.dataset.thwKey || '');
     const base = data?.base || '';
     const gt = state?.bases?.[base]?.gt_url || '';
     const pos1 = img.getAttribute('src') || '';
@@ -451,10 +512,10 @@ export function createThumbWindow({
     abPaint();
   }
 
-  async function openAb(tag) {
+  async function openAb(tag, key = '') {
     hidePeek();
     abClose();
-    const base = cache.get(active)?.base || '';
+    const base = dataOf(key)?.base || '';
     const pop = {tag, base, data: null, steps: [], idx: 0, el: null, poll: 0, seq: ++abSeq, dl: null, dlError: ''};
     ab = pop;
     pop.el = abFrame(tag, base);

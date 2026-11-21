@@ -562,6 +562,7 @@
       "legacy_dependency": "legacy_compat",
       "routes": [
         {"method": "GET", "path": "/api/thumb/state", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/thumb/search", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/thumb/category/{category_key}", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/thumb/image", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/thumb/variants", "smoke": "asset_runtime"},

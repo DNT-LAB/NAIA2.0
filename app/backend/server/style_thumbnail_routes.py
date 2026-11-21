@@ -64,6 +64,17 @@ def register_style_thumbnail_routes(
         except Exception as exc:
             return JSONResponse({"error": f"Thumb state failed: {exc}"}, status_code=500)
 
+    # 모든 분류에서 찾기(2026-11-21). 한국어 사전은 이미 읽어 둔 것만 쓴다(프리셋 벤치 검색과 같은 약속 - 여기서 읽지 않는다).
+    @app.get("/api/thumb/search")
+    async def api_thumb_search(q: str = ""):
+        try:
+            return await run_in_thread(style_thumbnail_service(session_context).search, q,
+                                       getattr(session_context, "kr_tags_raw", None))
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"error": f"Thumb search failed: {exc}"}, status_code=500)
+
     @app.get("/api/thumb/category/{category_key}")
     async def api_thumb_category(category_key: str):
         try:

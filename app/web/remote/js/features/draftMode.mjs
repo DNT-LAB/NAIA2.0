@@ -450,6 +450,9 @@ export function initDraftMode({
     inputs[zone] = { input, counting };
   });
   if (bindTagAssist) { try { bindTagAssist(extraEl, {}); } catch (_) {} }
+  // prefix / postfix 편집 칸도 메인 프롬프트와 같은 자동완성(사용자 지시 11-21). 우클릭은 지금처럼 브라우저 메뉴 -
+  // 덩어리 메뉴는 판 바깥(body)에 떠서 누르는 순간 패널이 닫힌다.
+  if (bindTagAssist) PE_KEYS.forEach(key => { try { bindTagAssist(peTexts[key], { disableChunkBridge: true }); } catch (_) {} });
 
   // ---- 뽑힌 결과 창 ----
   const drawnEl = document.createElement('div');
@@ -1370,10 +1373,13 @@ export function initDraftMode({
     if (!openPe) return;
     const t = event.target;
     if (pePanels[openPe].contains(t) || bandEls[openPe].contains(t)) return;
+    // 자동완성 목록(body 직속 #tagTooltip)은 패널의 일부다 - 후보를 누르는 순간 패널이 닫혀 감춘 칸에 들어갔다
+    if (t?.closest?.('#tagTooltip')) return;
     closePePanel();
   }, true);
   document.addEventListener('keydown', event => {
     if (event.key !== 'Escape' || !openPe) return;
+    if (event.defaultPrevented) return;   // 칸의 자동완성이 Esc 로 목록을 닫았다 - 패널은 다음 Esc 에
     const t = event.target;
     if (!(pePanels[openPe].contains(t) || bandEls[openPe].contains(t) || t === document.body)) return;
     event.preventDefault();

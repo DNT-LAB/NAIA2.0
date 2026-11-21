@@ -2,7 +2,6 @@
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
 
 const API = '/api/webui/loras';
-const FOLD = 'naia.webuiLoraDock.folded';
 const FAVORITES = Symbol('favorites');
 
 const STYLE = `
@@ -10,14 +9,14 @@ const STYLE = `
 .dragpanel.webui-lora-win .dragpanel-slot {justify-content:flex-end;gap:4px}
 .dragpanel.webui-lora-win .tagsearch-status {margin-right:auto;color:var(--text-dim);font-size:11px}
 .webui-lora-popup {position:relative;flex:1 1 auto;min-height:0;display:flex;flex-direction:column}
-.webui-lora-popup [hidden],.webui-lora-dock[hidden] {display:none!important}
-.webui-lora-win .tagsearch-act,.webui-lora-dock button {height:22px;padding:0 8px;font-size:11px}
+.webui-lora-popup [hidden] {display:none!important}
+.webui-lora-win .tagsearch-act {height:22px;padding:0 8px;font-size:11px}
 .wlr-body {flex:1;display:flex;min-height:0}
 .wlr-folders {width:120px;box-sizing:border-box;flex:none;overflow:auto;padding:5px 0;border-right:1px solid var(--border-dim)}
 .wlr-folders button {width:100%;display:flex;gap:5px;padding:5px 7px 5px calc(8px + var(--depth,0)*10px);
   border:0;background:transparent;color:var(--text-muted);text-align:left;font-size:11px;cursor:pointer}
 .wlr-folders button[aria-pressed=true],.wlr-folders button:hover {color:var(--text-primary);background:rgba(96,120,255,.16)}
-.wlr-folders span,.wlr-name,.wlr-token {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wlr-folders span,.wlr-name {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .wlr-folders small {margin-left:auto;color:var(--text-dim)}
 .wlr-main {min-width:0;flex:1;display:flex;flex-direction:column}
 .wlr-main .tagsearch-input {height:26px}
@@ -47,14 +46,6 @@ const STYLE = `
 .wlr-history h4 {margin:5px 0;font-size:11px;color:var(--text-muted)}
 .wlr-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(65px,1fr));gap:5px}
 .wlr-grid button {aspect-ratio:1;padding:0;background:none;border:1px solid var(--border-dim);border-radius:4px;overflow:hidden;cursor:pointer}
-.webui-lora-dock {align-self:stretch;pointer-events:auto;max-height:104px;overflow:auto;display:grid;gap:3px;
-  margin-bottom:2px;padding-bottom:5px;border-bottom:1px solid var(--border-dim)}
-.wlr-dock-head,.wlr-row {display:flex;align-items:center;gap:6px;min-width:0;color:var(--text-muted);font-size:11px}
-.wlr-dock-head button:first-child {margin-right:auto;background:none;border:0;color:var(--text-muted);cursor:pointer}
-.wlr-token {flex:1;font:11px var(--font-editor);color:var(--text-primary)}
-.wlr-row input[type=range] {width:28%;min-width:32px;margin:0;accent-color:var(--accent)}
-.prompt-highlight-wrap.has-webui-lora-dock .prompt-edit,.prompt-highlight-wrap.has-webui-lora-dock .prompt-highlight {
-  padding-bottom:calc(66px + var(--webui-lora-dock-h,0px))}
 `;
 
 function esc(value) {
@@ -74,20 +65,15 @@ export function insertToken(text, name, strength) {
   return text + separator + `<lora:${name}:${strength}>`;
 }
 
-export function editToken(text, token, weight) {
-  if (text.slice(token.index, token.index + token.raw.length) !== token.raw) return text;
-  const replacement = weight == null ? '' : token.raw.slice(0, -(token.weight.length + 1)) + weight + '>';
-  return text.slice(0, token.index) + replacement + text.slice(token.index + token.raw.length);
-}
-
 export function createWebuiLoraPanel({document, window: win, promptEdit, showToast, zoom, onStateChange,
   createPanel = options => createDraggablePanel({document, window: win, ...options})}) {
   // shell = 떠 있는 창(머리줄 · 끌기 · 크기 · 접기 · 자리 기억) · popup = 그 안의 본문
-  let mode = '', shell, popup, dock, folded = false;
+  // 프롬프트 밑 강도 줄은 두지 않는다(11-21 사용자 결정) - WEBUI 는 <lora:이름:강도> 글자가 곧 상태라
+  // 프롬프트에서 숫자를 고치면 된다. 이 창은 찾기 · 미리보기 · 트리거 · 넣기만 한다.
+  let mode = '', shell, popup;
   let entries = [], category = '', picker = null, revision = 0;
-  let dockText = null, tokens = [], zoomTimer, zoomTarget, zoomShown = false;
+  let zoomTimer, zoomTarget, zoomShown = false;
   let writes = Promise.resolve();
-  try { folded = win.localStorage.getItem(FOLD) === '1'; } catch {}
   const style = document.createElement('style');
   style.textContent = STYLE;
   document.head.appendChild(style);
@@ -124,64 +110,6 @@ export function createWebuiLoraPanel({document, window: win, promptEdit, showToa
     }
     promptEdit.value = text;
     promptEdit.dispatchEvent(new Event('input', {bubbles:true}));
-  }
-
-  function syncDock(force = false) {
-    const text = mode === 'WEBUI' ? promptEdit.value : '';
-    if (!force && dockText === text) return;
-    dockText = text;
-    tokens = promptTokens(text);
-    if (!dock && !tokens.length) return;
-    if (!dock) {
-      const footer = document.getElementById('promptTokenFooter');
-      if (!footer) return;
-      dock = document.createElement('div');
-      dock.className = 'webui-lora-dock';
-      dock.id = 'webuiLoraDock';
-      footer.prepend(dock);
-      dock.addEventListener('click', e => {
-        const button = e.target.closest('button');
-        if (!button) return;
-        if (button.hasAttribute('data-edit')) return open();
-        if (button.hasAttribute('data-fold')) {
-          folded = !folded;
-          try { win.localStorage.setItem(FOLD, folded ? '1' : '0'); } catch {}
-          syncDock(true);
-          dock.querySelector('[data-fold]').focus();
-        } else if (button.hasAttribute('data-remove')) changeWeight(button, null);
-      });
-      dock.addEventListener('input', e => {
-        if (e.target.type === 'range') e.target.closest('.wlr-row').querySelector('.wlr-number').value = e.target.value;
-      });
-      dock.addEventListener('change', e => {
-        if (e.target.matches('input')) changeWeight(e.target, e.target.value);
-      });
-    }
-    dock.hidden = !tokens.length;
-    const wrap = dock.closest('.prompt-highlight-wrap');
-    wrap?.classList.toggle('has-webui-lora-dock', !dock.hidden);
-    if (dock.hidden) { dock.replaceChildren(); return; }
-    dock.innerHTML = `<div class="wlr-dock-head"><button data-fold aria-expanded="${!folded}">${folded ? '▸' : '▾'} LoRA ${tokens.length}</button>
-      <button class="tagsearch-act" data-edit>편집</button></div>` + (folded ? '' : tokens.map((t,i) =>
-      `<div class="wlr-row" data-index="${i}"><span class="wlr-token" title="${esc(t.raw)}">${esc(t.raw)}</span>
-        <input type="range" min="0" max="2" step="0.05" aria-label="${esc(t.name)} 강도" value="${t.weight}">
-        <input class="wlr-number" type="number" min="-2" max="2" step="any" aria-label="강도 입력" value="${t.weight}">
-        <button class="tagsearch-x" data-remove aria-label="${esc(t.name)} 제거">×</button></div>`).join(''));
-    wrap?.style.setProperty('--webui-lora-dock-h', `${dock.offsetHeight + 2}px`);
-  }
-
-  function changeWeight(control, value) {
-    if (dockText !== promptEdit.value) return syncDock(true);
-    if (value !== null && (value === '' || !control.validity.valid)) {
-      showToast('강도는 -2 ~ 2 사이로 적어 주세요.', 'error');
-      syncDock(true);
-      return;
-    }
-    const index = Number(control.closest('.wlr-row').dataset.index);
-    const token = tokens[index];
-    const refocus = value !== null && document.activeElement === control;
-    setPrompt(editToken(promptEdit.value, token, value));
-    if (refocus) dock.querySelector(`[data-index="${index}"] input[type="${control.type}"]`)?.focus();
   }
 
   function folders() {
@@ -429,9 +357,8 @@ export function createWebuiLoraPanel({document, window: win, promptEdit, showToa
   function setMode(next) {
     mode = next;
     if (mode !== 'WEBUI') close();
-    syncDock();
   }
   // 런처 단추: 떠 있고 펴져 있으면 닫고, 접혀 있으면 편다.
   const toggle = () => isOpen() && !shell.isCollapsed?.() ? close() : open();
-  return {open, close, toggle, isOpen, syncDock, setMode};
+  return {open, close, toggle, isOpen, setMode};
 }

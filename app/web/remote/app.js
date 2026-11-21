@@ -3047,7 +3047,7 @@ import('./js/features/animaSetupPanel.mjs?v=20261001-gpu-probe')
 // 관리형 여부도 이 패널이 상태를 물어 안다 — 런처는 isManaged() 로 COMFYUI 도구 대신 ANIMA 도구를 보인다.
 // 모드는 params 적용부가 setMode 로 알려 준다.
 let webuiLoraPanel = null;
-import('./js/features/webuiLoraPanel.mjs?v=20261121-win')
+import('./js/features/webuiLoraPanel.mjs?v=20261121-nodock')
   .then(({createWebuiLoraPanel}) => {
     webuiLoraPanel = createWebuiLoraPanel({
       document, window, promptEdit, showToast,
@@ -8338,7 +8338,6 @@ let currentMode = '';
 let viewpointControl = null;   // 구도 / 시점 제어 창(openViewpointControlTool) - 모드가 바뀌면 다시 그린다
 function updatePromptHighlight() {
   if (promptHighlighter) promptHighlighter.update();
-  webuiLoraPanel?.syncDock();
 }
 function syncPromptHighlight() { if (promptHighlighter) promptHighlighter.syncScroll(); }
 function applyPromptHighlightState() { if (promptHighlighter) promptHighlighter.applyState(); }

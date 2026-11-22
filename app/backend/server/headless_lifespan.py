@@ -103,9 +103,22 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
         if pack_task is None or pack_task.done():
             context.headless_character_pack_autostart_task = asyncio.create_task(
                 _after_startup_gate(gate, _run_character_pack_autostart, context, run_in_thread))
+        # 출력 이미지 색인(core/output_index) - 다른 예열과 같은 게이트 뒤에 작업 스레드 하나를 띄운다(시작 경로에서 읽지 않는다).
+        index_task = getattr(context, "headless_output_index_start_task", None)
+        if index_task is None or index_task.done():
+            context.headless_output_index_start_task = asyncio.create_task(
+                _after_startup_gate(gate, _run_output_index_start, context, run_in_thread))
         try:
             yield
         finally:
+            _cancel_task(getattr(context, "headless_output_index_start_task", None))
+            try:
+                # stop() also closes the service, so a start() still queued in a worker thread becomes a no-op.
+                from core.output_index.service import output_index_service
+
+                await run_in_thread(output_index_service(context).stop, 5.0)
+            except Exception as exc:
+                print(f"Headless Remote: output index stop failed - {ascii(str(exc))}", flush=True)
             # 예열이 안 끝난 채 닫혀도 0.9ms 를 남기지 않는다 - waiter 가 첫 실행 전에 취소되면 그 finally 도 안 돈다.
             _cancel_task(getattr(context, "headless_switch_interval_restore_task", None))
             restore_switch_interval()
@@ -150,6 +163,15 @@ def create_headless_lifespan(context: WebSessionContext, *, run_in_thread: RunIn
 def _cancel_task(task) -> None:
     if task is not None and not task.done():
         task.cancel()
+
+
+async def _run_output_index_start(context: WebSessionContext, run_in_thread: RunInThread) -> None:
+    try:
+        from core.output_index.service import output_index_service
+
+        await run_in_thread(output_index_service(context).start)
+    except Exception as exc:
+        print(f"Headless Remote: output index start failed - {ascii(str(exc))}", flush=True)
 
 
 async def _run_random_warmup(context: WebSessionContext, run_in_thread: RunInThread) -> None:

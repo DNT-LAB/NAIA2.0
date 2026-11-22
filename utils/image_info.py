@@ -8,6 +8,7 @@ import io
 from typing import Dict, Any, List, Optional, Set, Union
 from PIL import Image
 from pathlib import Path
+from types import SimpleNamespace
 try:
     import piexif
     import piexif.helper
@@ -15,6 +16,33 @@ try:
 except ImportError:
     PIEXIF_AVAILABLE = False
     print("Warning: piexif not available, EXIF metadata extraction limited")
+
+
+def _wrapped_png_texts(text: str) -> Optional[dict]:
+    if not text.lstrip().startswith("{"):
+        return None
+    try:
+        chunks = json.loads(text).get("naia_png_text")
+    except (ValueError, RecursionError):
+        return None
+    return chunks if isinstance(chunks, dict) else None
+
+
+def _decode_sub_ifd_comment(raw: bytes) -> str:
+    prefix, data = raw[:8], raw[8:]
+    # piexif defaults to UTF-16BE, but NAIA writes its wrapper as UTF-16LE.
+    # Restrict the override to that wrapper so existing WebUI files are unchanged.
+    if prefix == b"UNICODE\0" and data.startswith(b"{\0"):
+        candidate = data.decode("utf-16le", errors="replace")
+        if _wrapped_png_texts(candidate) is not None:
+            return candidate
+    if PIEXIF_AVAILABLE:
+        return piexif.helper.UserComment.load(raw)
+    encoding = {b"ASCII\0\0\0": "ascii", b"JIS\0\0\0\0\0": "shift_jis",
+                b"UNICODE\0": "utf-16be"}.get(prefix)
+    if not encoding:
+        raise ValueError("unknown EXIF UserComment prefix")
+    return data.decode(encoding, errors="replace")
 
 
 class ImageMetadataExtractor:
@@ -78,61 +106,22 @@ class ImageMetadataExtractor:
             else:
                 img = image_path
 
-            # NovelAI 메타데이터도 포함
-            result = {}
             info = img.info or {}
-
-            # img.info의 모든 필드를 먼저 수집
-            if hasattr(img, 'info') and info:
-                result.update(info)
-            
-            # 1. parameters 필드 확인 (Stable Diffusion WebUI) - 우선순위 높음
-            graph_sampler = None
-            if any(key in info for key in ('prompt', 'workflow', 'workflow_api')):
-                parsed = ImageMetadataExtractor._parse_comfyui_metadata(info, img)
-                if parsed:
-                    result.update(parsed)
-                    graph_sampler = (parsed.get('parameters') or {}).get('sampler')
-
-            if any(key in info for key in ('naia_generation_params', 'naia_prompt_context', 'naia_api_metadata')):
-                parsed = ImageMetadataExtractor._parse_naia_metadata(info, img)
-                if parsed:
-                    result.update(parsed)
-                    # 관리형 ANIMA 의 Euler + SPD - 그래프가 SPD 를 켠 채 돌았으면(euler_spd) NAIA 청크의 'euler'
-                    # (SPD 가 늘 켜져 있던 v2.0.67 이하)로 덮지 않는다. 다시 생성이 SPD 를 잃지 않게(Codex 리뷰 2026-11-06).
-                    merged = result.get('parameters')
-                    if graph_sampler == 'euler_spd' and isinstance(merged, dict):
-                        for key in ('sampler', 'sampler_name'):
-                            if merged.get(key) == 'euler':
-                                merged[key] = 'euler_spd'
-
-            if 'parameters' in info:
-                parsed = ImageMetadataExtractor._parse_parameters(info['parameters'])
-                if parsed:
-                    result.update(parsed)
-            
-            # 2. EXIF 데이터 확인 (WebUI JPEG/PNG)
+            # PIL can discover post-IDAT chunks while getexif() loads a PNG.
+            # Only Comment/comment were consulted after that load in the original.
+            initial = dict(info)
+            size = getattr(img, 'size', None)
+            exif_text = None
             if 'exif' in info or hasattr(img, 'getexif'):
-                exif_data = ImageMetadataExtractor._extract_from_exif(img)
-                if exif_data:
-                    result.update(exif_data)
-            
-            # 3. Comment 필드 확인 (NovelAI 등)
-            if 'Comment' in info:
-                parsed = ImageMetadataExtractor._parse_comment(info['Comment'])
-                if parsed:
-                    result.update(parsed)
-            
-            # 4. GIF comment field
-            if 'comment' in info:
-                comment = info['comment']
-                if isinstance(comment, bytes):
-                    comment = comment.decode('utf8', errors="ignore")
-                if comment:
-                    parsed = ImageMetadataExtractor._parse_parameters(comment)
-                    if parsed:
-                        result.update(parsed)
-            
+                exif_text = ImageMetadataExtractor._read_exif_text(img)
+            if any(initial.get(k) is not info.get(k) for k in ('Comment', 'comment')):
+                early = {k: v for k, v in initial.items() if k not in ('Comment', 'comment')}
+                result = initial
+                result.update(parse_metadata_texts(early, exif_text, size) or {})
+                _merge_comments(result, info)
+            else:
+                result = parse_metadata_texts(initial, exif_text, size) or {}
+
             # 5. Stealth PNG 확인
             if img.mode == 'RGBA':
                 stealth_data = ImageMetadataExtractor._read_stealth_pnginfo(img)
@@ -830,11 +819,19 @@ class ImageMetadataExtractor:
     @staticmethod
     def _extract_from_exif(img: Image.Image) -> Optional[Dict[str, Any]]:
         """EXIF 데이터에서 메타데이터 추출 - WebUI 호환"""
+        text = ImageMetadataExtractor._read_exif_text(img)
+        return parse_metadata_texts({}, text, img.size) if text else None
+
+    @staticmethod
+    def _read_exif_text(img: Image.Image) -> Optional[str]:
         try:
             # WebUI style EXIF extraction
             if PIEXIF_AVAILABLE and hasattr(img, 'info') and 'exif' in img.info:
                 exif_data = img.info['exif']
                 try:
+                    if exif_data.startswith((b"II*\0", b"MM\0*")):
+                        # WebP stores a bare TIFF; piexif also accepts the EXIF envelope.
+                        exif_data = b"Exif\0\0" + exif_data
                     exif = piexif.load(exif_data)
                     user_comment = (exif or {}).get("Exif", {}).get(piexif.ExifIFD.UserComment, b'')
                     
@@ -842,7 +839,7 @@ class ImageMetadataExtractor:
                         geninfo = None
                         try:
                             # Try piexif.helper first (AUTOMATIC1111 standard)
-                            geninfo = piexif.helper.UserComment.load(user_comment)
+                            geninfo = _decode_sub_ifd_comment(user_comment)
                         except ValueError:
                             # Fallback: UTF-8 decoding
                             try:
@@ -855,7 +852,7 @@ class ImageMetadataExtractor:
                         
                         if geninfo:
                             # Parse WebUI format parameters
-                            return ImageMetadataExtractor._parse_parameters(geninfo)
+                            return geninfo
                             
                 except Exception as e:
                     print(f"EXIF piexif parsing error: {e}")
@@ -877,17 +874,25 @@ class ImageMetadataExtractor:
                                 comment_text = user_comment
                             
                             if comment_text and comment_text.strip():
-                                return ImageMetadataExtractor._parse_parameters(comment_text)
+                                return comment_text
                         except Exception as e:
                             print(f"EXIF UserComment extraction failed: {e}")
                 
+                if 0x8769 in exif:
+                    user_comment = exif.get_ifd(0x8769).get(0x9286)
+                    if isinstance(user_comment, bytes) and user_comment:
+                        try:
+                            return _decode_sub_ifd_comment(user_comment)
+                        except ValueError:
+                            pass
+
                 # Check other EXIF tags
                 for tag_id, value in exif.items():
                     if isinstance(value, bytes):
                         try:
                             decoded = value.decode('utf-8', errors='ignore')
                             if 'prompt' in decoded.lower() or 'negative' in decoded.lower():
-                                return ImageMetadataExtractor._parse_parameters(decoded)
+                                return decoded
                         except:
                             continue
             
@@ -1056,6 +1061,53 @@ class ImageMetadataExtractor:
             return 'comfyui'
 
         return 'unknown'
+
+
+def parse_metadata_texts(
+    texts: dict[str, str], exif_user_comment: str | None = None,
+    size: tuple[int, int] | None = None,
+) -> dict | None:
+    """Interpret raw header fields in extractor precedence order; never inspect pixels."""
+    parser = ImageMetadataExtractor
+    if exif_user_comment:
+        wrapped = _wrapped_png_texts(exif_user_comment)
+        if wrapped is not None:
+            texts = {**wrapped, **texts}
+            exif_user_comment = None
+    result = dict(texts)
+    image = SimpleNamespace(size=size, width=size[0], height=size[1]) if size else None
+    graph_sampler = None
+    if any(key in texts for key in ('prompt', 'workflow', 'workflow_api')):
+        parsed = parser._parse_comfyui_metadata(texts, image)
+        if parsed:
+            result.update(parsed)
+            graph_sampler = (parsed.get('parameters') or {}).get('sampler')
+    if any(key in texts for key in ('naia_generation_params', 'naia_prompt_context', 'naia_api_metadata')):
+        parsed = parser._parse_naia_metadata(texts, image)
+        if parsed:
+            result.update(parsed)
+            # Older NAIA chunks say Euler even when the graph ran with SPD.
+            merged = result.get('parameters')
+            if graph_sampler == 'euler_spd' and isinstance(merged, dict):
+                for key in ('sampler', 'sampler_name'):
+                    if merged.get(key) == 'euler':
+                        merged[key] = 'euler_spd'
+    if 'parameters' in texts:
+        result.update(parser._parse_parameters(texts['parameters']) or {})
+    if exif_user_comment:
+        result.update(parser._parse_parameters(exif_user_comment) or {})
+    _merge_comments(result, texts)
+    return result or None
+
+
+def _merge_comments(result: dict, info: dict) -> None:
+    if 'Comment' in info:
+        result.update(ImageMetadataExtractor._parse_comment(info['Comment']) or {})
+    comment = info.get('comment')
+    if isinstance(comment, bytes):  # PIL GIF info retains the original binary field.
+        comment = comment.decode('utf8', errors='ignore')
+    if comment:
+        result.update(ImageMetadataExtractor._parse_parameters(comment) or {})
 
 
 def json_safe_generation_params(value: Any, _depth: int = 0) -> Any:

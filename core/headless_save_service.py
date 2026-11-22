@@ -397,6 +397,7 @@ class HeadlessSaveService:
                 context.result_store.mark_saved(item, target)
             else:
                 shutil.copy2(str(src), str(target))
+            self._note_index_saved(target)
             self._remember_quicksave(item, target)
             return {"ok": True, "path": str(target), "mode": mode,
                     "directory": str(directory)}
@@ -414,13 +415,23 @@ class HeadlessSaveService:
         stem = Path(str(getattr(item, "filename", "") or "image")).stem or "image"
         target = directory / self.quicksave_filename(stem + extension)
         if save_as_webp:
-            target.write_bytes(item.webp_bytes)
+            from core.output_index.webp_exif import webp_bytes_for_disk
+
+            target.write_bytes(webp_bytes_for_disk(item))
         else:
             png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
             target.write_bytes(png_bytes)
+        self._note_index_saved(target)
         self._remember_quicksave(item, target)
         return {"ok": True, "path": str(target), "mode": "write",
                 "directory": str(directory)}
+
+    def _note_index_saved(self, target: Path) -> None:
+        try:
+            from core.output_index.service import output_index_service
+            output_index_service(self.context).note_saved(target)
+        except Exception:
+            pass
 
     def _remember_quicksave(self, item: Any, target: Path) -> None:
         """이 항목을 어디에 빠른 저장했는지 기억한다(중복 저장/재이동 방지)."""
@@ -653,10 +664,13 @@ class HeadlessSaveService:
         filename = self.next_save_filename(item, extension)
         target = self.unique_output_path(directory / filename)
         if save_as_webp:
-            target.write_bytes(item.webp_bytes)
+            from core.output_index.webp_exif import webp_bytes_for_disk
+
+            target.write_bytes(webp_bytes_for_disk(item))
         else:
             png_bytes, _ = result_images.history_item_png_payload(item, label=item.filename)
             target.write_bytes(png_bytes)
+        self._note_index_saved(target)
         context.result_store.mark_saved(item, target)
         context.save_remote_ui_state()
         return target

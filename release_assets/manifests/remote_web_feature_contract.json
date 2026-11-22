@@ -32,6 +32,7 @@
     "app/backend/server/params_workflow_routes.py",
     "app/backend/server/prompt_engineering_filter_routes.py",
     "app/backend/server/prompt_tools_routes.py",
+    "app/backend/server/output_index_routes.py",
     "app/backend/server/result_display_routes.py",
     "app/backend/server/state_routes.py",
     "app/backend/server/style_thumbnail_routes.py",
@@ -66,6 +67,25 @@
     }
   ],
   "feature_groups": [
+    {
+      "id": "output_image_index",
+      "name": "Header-only metadata index of saved output images",
+      "legacy_dependency": "none",
+      "source_files": [
+        "core/output_index/__init__.py", "core/output_index/head_reader.py", "core/output_index/tags.py",
+        "core/output_index/store.py", "core/output_index/bits.py", "core/output_index/scanner.py",
+        "core/output_index/service.py", "app/backend/server/output_index_routes.py"
+      ],
+      "routes": [
+        {"method": "GET", "path": "/api/output-index/status", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/output-index/roots", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/output-index/rescan", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/output-index/query", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/output-index/suggest", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/output-index/file", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/output-index/decode", "smoke": "state_mutation"}
+      ]
+    },
     {
       "id": "agent_discovery",
       "name": "Agent capability discovery, usage schemas, coverage audit and correlated WebSocket calls",

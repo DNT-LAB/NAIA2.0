@@ -46,6 +46,7 @@ from app.backend.server.tagger_routes import register_tagger_routes
 from app.backend.server.params_workflow_routes import register_params_workflow_routes
 from app.backend.server.prompt_engineering_filter_routes import register_pe_filter_routes
 from app.backend.server.prompt_tools_routes import register_prompt_tools_routes
+from app.backend.server.output_index_routes import register_output_index_routes
 from app.backend.server.result_display_routes import register_result_display_routes
 from app.backend.server.state_routes import register_state_routes
 from app.backend.server.style_thumbnail_routes import register_style_thumbnail_routes
@@ -334,6 +335,7 @@ def register_headless_routes(
         clients=clients,
         start_generation_runner=ensure_generation_runner,
     )
+    register_output_index_routes(app, context, run_in_thread=run_in_thread)
     register_result_display_routes(
         app,
         context,

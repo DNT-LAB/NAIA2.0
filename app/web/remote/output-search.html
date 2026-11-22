@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Output Search — NAIA</title>
+<!--
+  저장된 출력 이미지 전체를 NAIA 밖 브라우저에서 찾는 단독 화면(사용자 지시 2026-11-22).
+  앱 안 Output Search 창 머리의 [↗] 가 연다 - 그때 걸어 둔 칩을 주소에 싣는다(inc · exc · text).
+  본문은 앱 안 창과 같은 js/features/outputSearch.mjs 다. 데이터는 /api/output-index/* 그대로.
+  [프롬프트] 는 여기서는 복사다(메인 프롬프트는 앱 안 창에서 넣는다).
+-->
+<style>
+  :root {
+    --bg-deep: #0a0a0f; --bg-surface: #12121a; --bg-card: #1a1a26; --border-dim: #2a2a3d; --border-glow: #3d3d5c;
+    --text-primary: #e8e8f0; --text-muted: #c6c6d8; --text-dim: #9ea0b4; --accent: #7c6aef; --accent-glow: #9d8bff;
+    --bg-hover: rgba(255,255,255,0.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg-surface); color: var(--text-primary);
+    font-family: "Inter", "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, sans-serif; font-size: 13px; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  header { flex: none; display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: var(--bg-card);
+    border-bottom: 1px solid var(--border-dim); }
+  header b { font-weight: 600; }
+  header span { color: var(--text-dim); font-size: 11px; }
+  #host { flex: 1; min-height: 0; }
+  .toast { position: fixed; right: 14px; bottom: 14px; max-width: 420px; padding: 8px 12px; border-radius: 6px;
+    background: var(--bg-card); border: 1px solid var(--border-glow); font-size: 12px; opacity: 0; transition: opacity .2s; }
+  .toast.show { opacity: 1; }
+  .toast.error { border-color: rgba(224,85,97,.7); }
+</style>
+</head>
+<body>
+<header><b>Output Search</b><span id="status"></span></header>
+<div id="host"></div>
+<div class="toast" id="toast" role="status"></div>
+<script type="module">
+  import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './js/features/outputSearch.mjs?v=20261122-a';
+
+  const style = document.createElement('style');
+  style.textContent = OUTPUT_SEARCH_STYLE;
+  document.head.appendChild(style);
+
+  const params = new URLSearchParams(location.search);
+  let toastTimer = 0;
+  function toast(message, kind) {
+    const node = document.getElementById('toast');
+    node.textContent = message;
+    node.className = `toast show ${kind || ''}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { node.className = 'toast'; }, 3200);
+  }
+  let storage = null;
+  try { storage = window.localStorage; } catch (_) { storage = null; }
+  createOutputSearch({
+    document, window,
+    host: document.getElementById('host'),
+    storage,
+    initial: {include: params.getAll('inc'), exclude: params.getAll('exc'), text: params.get('text') || ''},
+    toast,
+    onStatus: ({partial, rows}) => {
+      document.getElementById('status').textContent = partial ? `색인 중 ${Number(rows || 0).toLocaleString('en-US')}장` : '';
+    },
+  });
+</script>
+</body>
+</html>

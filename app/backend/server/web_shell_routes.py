@@ -78,6 +78,12 @@ def register_web_shell_routes(app: FastAPI, root_web_dir: Path) -> None:
         # 이 라우트는 페이지만 준다. 목록 · 그림 · 상세는 기존 /api/character-viewer/* 그대로다.
         return _web_file(root_web_dir / "character-viewer.html", "text/html")
 
+    @app.get("/output-search.html")
+    async def output_search_page():
+        # NAIA 밖 브라우저에서 저장된 출력 이미지를 찾는 단독 화면 - Output Search 창의 [외부 브라우저] 가 연다(11-22).
+        # 이 라우트는 페이지만 준다. 목록 · 그림은 /api/output-index/* 그대로다.
+        return _web_file(root_web_dir / "output-search.html", "text/html")
+
     @app.get("/style.css")
     async def serve_css():
         return _web_file(root_web_dir / "style.css", "text/css")

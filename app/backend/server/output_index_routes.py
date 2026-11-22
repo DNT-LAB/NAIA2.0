@@ -1,8 +1,11 @@
-"""Read-only searches are available remotely; changing what the host indexes is not."""
+"""Search and preview remotely. Host file actions require a loopback client."""
+import subprocess
+import sys
 from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from app.backend.server.install_manager_routes import _is_local_request
@@ -22,6 +25,26 @@ class _Query(BaseModel):
 
 def _forbidden():
     return JSONResponse({"ok": False, "error": "Output index changes require a loopback client."}, status_code=403)
+
+
+def _delete(service, rows):
+    from app.backend.server.result_display_routes import _move_to_trash
+
+    return service.delete_rows(rows, _move_to_trash)
+
+
+def _open_location(service, row):
+    path = service.file_path(row)
+    if path is None:
+        raise HTTPException(404, "Image not found")
+    if sys.platform == "win32":
+        args = ["explorer.exe", f"/select,{path}"]
+    elif sys.platform == "darwin":
+        args = ["open", "-R", str(path)]
+    else:
+        args = ["xdg-open", str(path.parent)]
+    subprocess.Popen(args)
+    return {"ok": True, "folder": str(path.parent)}
 
 
 def register_output_index_routes(app: FastAPI, context, *, run_in_thread):
@@ -98,12 +121,43 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread):
             raise HTTPException(404, "Image not found")
         return FileResponse(path)
 
-    @app.post("/api/output-index/decode")
-    async def decode(request: Request):
+    @app.get("/api/output-index/thumb")
+    async def thumb(request: Request, row: int, size: Literal["128", "192", "256", "384"] = "256"):
+        params = request.query_params
+        if params.keys() - {"row", "size"} or len(params.multi_items()) != len(params):
+            raise HTTPException(422, "Expected a row and optional size")
+        try:
+            data = await run_in_thread(service().thumbnail, row, int(size))
+        except (OSError, ValueError, Image.DecompressionBombError):
+            # 깨진 파일 · 지워진 파일 - 격자 한 칸이 500 으로 콘솔을 채우지 않게 404 로 둔다.
+            data = None
+        if data is None:
+            raise HTTPException(404, "Image not found")
+        return Response(data, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
+
+    @app.get("/api/output-index/meta")
+    async def meta(row: int):
+        result = await run_in_thread(service().metadata, row)
+        if result is None:
+            raise HTTPException(404, "Image not found")
+        return result
+
+    @app.post("/api/output-index/delete")
+    async def delete(request: Request):
         if not _is_local_request(request):
             return _forbidden()
-        rid = (await object_body(request)).get("root_id")
-        if type(rid) is not int:
-            raise HTTPException(422, "Expected an integer root_id")
-        await change(service().request_decode, rid)
-        return {"ok": True}
+        body = await object_body(request)
+        rows = body.get("rows")
+        if (body.keys() != {"rows"} or not isinstance(rows, list) or not 1 <= len(rows) <= 200
+                or any(type(row) is not int for row in rows) or len(set(rows)) != len(rows)):
+            raise HTTPException(422, "Expected 1 to 200 unique integer rows")
+        return await change(_delete, service(), rows)
+
+    @app.post("/api/output-index/open-location")
+    async def open_location(request: Request):
+        if not _is_local_request(request):
+            return _forbidden()
+        body = await object_body(request)
+        if body.keys() != {"row"} or type(body["row"]) is not int:
+            raise HTTPException(422, "Expected an integer row")
+        return await run_in_thread(_open_location, service(), body["row"])

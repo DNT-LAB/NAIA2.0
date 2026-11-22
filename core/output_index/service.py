@@ -2,6 +2,7 @@
 from collections import deque
 from concurrent.futures import Future
 from contextlib import closing, contextmanager
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import sqlite3
@@ -17,6 +18,18 @@ _FLAGS = {EXIST: "EXIST", META_HEAD: "META_HEAD", NEEDS_DECODE: "NEEDS_DECODE",
           NO_META: "NO_META", DECODED: "DECODED", READ_ERROR: "READ_ERROR"}
 _SOURCE_IDS = {name.upper(): i for i, name in enumerate(_SOURCES)}
 _CREATION = threading.Lock()
+
+
+@dataclass(frozen=True)
+class _IndexedFile:
+    path: Path
+    root_id: int
+    dir_id: int
+    root_path: str
+    rel: str
+    name: str
+    size: int
+    mtime_ns: int
 
 
 def output_index_service(context):
@@ -52,7 +65,7 @@ class OutputIndexService:
         self._folders_done = self._files_read = 0
         self._files = deque()
         self._commands = deque()
-        self._decode = set()
+        self._thumbs = None
         self._roots = {}
         self._bits = None
         self._partial = True
@@ -117,8 +130,51 @@ class OutputIndexService:
     def set_root_enabled(self, root_id, enabled):
         return self._command("enable", root_id, enabled)
 
-    def request_decode(self, root_id):
-        return self._command("decode", root_id)
+    def delete_rows(self, rows, move_to_trash):
+        from .scanner import safe_file
+
+        # Resolve the selection at one set of row numbers. Compaction may run
+        # while the OS moves files, so the writer also receives stable identities.
+        with self._lock:
+            with self._cv:
+                if self._stop:
+                    raise RuntimeError("index worker stopped")
+            files = [(row, self.file_path(row, with_identity=True)) for row in rows]
+        deleted, failed, forgotten = [], [], []
+        try:
+            for row, file in files:
+                if file is None or safe_file(file.root_path, Path(file.rel) / file.name) is None:
+                    failed.append({"row": row, "error": "not found"})
+                elif move_to_trash(file.path):
+                    deleted.append(row)
+                    forgotten.append(file)
+                else:
+                    failed.append({"row": row, "error": "could not move to recycle bin"})
+        finally:
+            if forgotten:
+                self._command("forget", forgotten)
+        return {"ok": bool(deleted), "deleted": deleted, "failed": failed}
+
+    def _forget(self, store, files, saved):
+        rows, dirs = [], []
+        with self._reader() as reader, store._db:
+            for file in files:
+                if self._scanning:
+                    saved.add((file.root_id, file.rel, file.name))
+                live = reader._db.execute(
+                    "SELECT row,size,mtime_ns FROM files f JOIN dirs d ON d.id=f.dir_id "
+                    "JOIN roots r ON r.id=d.root_id WHERE dir_id=? AND name=? AND flags & 1 "
+                    "AND r.path=? AND d.rel=?", (file.dir_id, file.name, file.root_path, file.rel)).fetchone()
+                if live is None:
+                    continue
+                if live[1:] != (file.size, file.mtime_ns) and file.path.exists():
+                    continue  # A newly saved replacement is already indexed.
+                rows.append(live[0])
+                dirs.append((file.dir_id,))
+            store._db.executemany("UPDATE dirs SET files=max(0,files-1) WHERE id=?", dirs)
+            store.mark_dead(rows)
+            for row in rows:
+                self._bits.set_dead(row)
 
     def _configured(self):
         from core.headless_save_service import HeadlessSaveService
@@ -166,7 +222,9 @@ class OutputIndexService:
                 r["unreachable_folders"] = previous.get("unreachable_folders", [])
             self._roots = {r["id"]: r for r in roots}
 
-    def _control(self, store, op, args):
+    def _control(self, store, op, args, saved):
+        if op == "forget":
+            return self._forget(store, args[0], saved)
         if op == "add":
             existing = next((r for r in store.roots() if Path(r["path"]) == args[0]), None)
             root_id = existing["id"] if existing else store.add_root(args[0], "user")
@@ -180,9 +238,6 @@ class OutputIndexService:
             root_id = args[0]
             if root_id not in self._roots:
                 raise ValueError("unknown root")
-            if op == "decode":
-                self._decode.add(root_id)
-                return root_id
             if op == "remove":
                 if self._roots[root_id]["kind"] != "user":
                     raise ValueError("disable a configured root instead")
@@ -252,7 +307,6 @@ class OutputIndexService:
         with self._lock:
             self._partial = False
             self._current = None
-        self._decode.update(r["id"] for r in self._roots.values() if r["kind"] == "save")
 
     def _hidden(self):
         return {rid for rid, r in self._roots.items()
@@ -273,49 +327,11 @@ class OutputIndexService:
                 if root["unreachable"]:
                     with self._cv:
                         self._rescan = True
-                if root["kind"] == "save":
-                    self._decode.add(rid)
             return
         # A save setting may have changed since the last pass.
         if any(path.is_relative_to(base) for base in self._configured()):
             with self._cv:
                 self._rescan = True
-
-    def _backfill(self, store, rid):
-        from . import scanner
-        from PIL import Image
-        from utils.image_info import ImageMetadataExtractor
-
-        if rid not in self._roots or rid in self._hidden():
-            return
-        # Bound the traversal: replacement rows are never candidates in this pass.
-        end = self._bits.n_rows
-        last = -1
-        while True:
-            batch = store._db.execute(
-                "SELECT row FROM files f JOIN dirs d ON d.id=f.dir_id WHERE root_id=? AND row>? AND row<? "
-                "AND flags & 1 AND flags & ? ORDER BY row LIMIT 128", (rid, last, end, NEEDS_DECODE)).fetchall()
-            if not batch:
-                return
-            for (last,) in batch:
-                rows = store.fetch([last])
-                if not rows:
-                    continue
-                item = rows[0]
-                path = scanner.safe_file(self._roots[rid]["path"], Path(item["rel"]) / item["name"])
-                if path:
-                    try:
-                        with Image.open(path) as img:
-                            meta = ImageMetadataExtractor.extract_metadata(img) or {}
-                        fields = scanner.metadata_fields(meta)
-                        found = fields["source"] or fields["prompt"] or fields["chars"]
-                        item.update(fields, flags=EXIST | (DECODED | META_HEAD if found else NO_META))
-                    except (OSError, ValueError):
-                        item["tags"] = []
-                        item["flags"] = EXIST | READ_ERROR
-                    with self._lock:
-                        scanner.publish(store, self._bits, [item], [last])
-                yield
 
     def _run(self):
         store = None
@@ -347,7 +363,7 @@ class OutputIndexService:
 
     def _loop(self, store):
         resume = True
-        scan = decode = decode_root = None
+        scan = None
         saved = set()
         maintenance = False
         while True:
@@ -362,7 +378,7 @@ class OutputIndexService:
                 if restart:
                     self._scanning, self._rescan = True, False
                 elif not reply:
-                    if not (self._files or scan or decode or self._decode or maintenance):
+                    if not (self._files or scan or maintenance):
                         self._busy = False
                         self._cv.wait()
                         continue
@@ -373,16 +389,14 @@ class OutputIndexService:
                 path = self._files.popleft() if self._files and not (reply or restart) else None
             try:
                 if reply:
-                    reply.set_result(self._control(store, op, args))
+                    reply.set_result(self._control(store, op, args, saved))
                 elif restart:
                     with self._lock:
                         self._partial, self._current, self._error = True, None, None
                     saved = set()
-                    if decode is not None:
-                        self._decode.add(decode_root)
-                    scan, decode = self._scan(store, saved, resume), None
+                    scan = self._scan(store, saved, resume)
                     resume = False
-                    next(scan)  # listing, no header reads or decode
+                    next(scan)  # listing only
                 else:
                     # Generation or shutdown can start while waiting for another
                     # warmup to release the slot. Recheck before touching a file.
@@ -401,13 +415,6 @@ class OutputIndexService:
                                 with self._cv:
                                     self._scanning = False
                                 maintenance = True
-                        elif decode or self._decode:
-                            if decode is None:
-                                decode_root = self._decode.pop()
-                                decode = self._backfill(store, decode_root)
-                            if next(decode, False) is False:
-                                decode = None
-                                maintenance = True
                         else:
                             maintenance = False
                             self._compact_if_idle(store)
@@ -421,7 +428,6 @@ class OutputIndexService:
                         with self._cv:
                             self._scanning = False
                         scan = None
-                    decode = None
                 if self._bits is None:
                     raise
 
@@ -505,12 +511,42 @@ class OutputIndexService:
             return {"items": [{"tag": t, "count": n, "condition_count": c} for t, n, c in items],
                     **self._progress()}
 
-    def file_path(self, row):
+    def _visible(self, root_id):
+        return root_id in self._roots and root_id not in self._hidden()
+
+    def metadata(self, row):
+        with self._reader() as reader:
+            rows = reader.fetch([row]) if reader and 0 <= row < self._bits.n_rows else []
+            if not rows or not self._visible(rows[0]["root_id"]):
+                return None
+            r = rows[0]
+            return {**self._item(r), "model": r["model"], "prompt": r["prompt"], "negative": r["negative"],
+                    "characters": r["chars"], "flags": [name for bit, name in _FLAGS.items() if r["flags"] & bit]}
+
+    def file_path(self, row, *, with_identity=False):
         from . import scanner
 
         with self._reader() as reader:
-            rows = reader.fetch([row]) if reader and 0 <= row < self._bits.n_rows else []
-            if not rows or rows[0]["root_id"] not in self._roots or rows[0]["root_id"] in self._hidden():
+            if reader is None or not 0 <= row < self._bits.n_rows:
                 return None
-            r = rows[0]
-            return scanner.safe_file(self._roots[r["root_id"]]["path"], Path(r["rel"]) / r["name"])
+            r = reader._db.execute(
+                "SELECT root_id,dir_id,rel,name,size,mtime_ns FROM files JOIN dirs ON dirs.id=files.dir_id "
+                "WHERE row=? AND flags & 1", (row,)).fetchone()
+            if r is None or not self._visible(r["root_id"]):
+                return None
+            root = self._roots[r["root_id"]]["path"]
+            path = scanner.safe_file(root, Path(r["rel"]) / r["name"])
+            if with_identity and path is not None:
+                return _IndexedFile(path=path, root_path=root, **r)
+            return path
+
+    def thumbnail(self, row, size):
+        from .thumbs import ThumbnailCache
+
+        file = self.file_path(row, with_identity=True)
+        if file is None:
+            return None
+        with self._lock:
+            if self._thumbs is None:
+                self._thumbs = ThumbnailCache(self.path.parent)
+        return self._thumbs.get(file, size)

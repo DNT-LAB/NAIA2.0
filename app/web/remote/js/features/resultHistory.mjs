@@ -1371,6 +1371,8 @@ export function createResultHistoryController({
                 title="전체 화면 (F)">\u{2921}</button>
         <button type="button" class="viewer-head-btn" id="vpShortcutBtn"
                 data-viewer-settings-btn title="뷰어 설정">\u{2699}</button>
+        <button type="button" class="viewer-head-btn" onclick="openOutputSearch()"
+                title="저장된 그림 전체 검색 (Output Search)">\u{1F50D}</button>
         <button type="button" class="viewer-head-btn" onclick="openResultFolder()"
                 title="결과 폴더 열기">\u{1F4C1}</button>
         <button type="button" class="history-close"

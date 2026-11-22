@@ -74,7 +74,9 @@
       "source_files": [
         "core/output_index/__init__.py", "core/output_index/head_reader.py", "core/output_index/tags.py",
         "core/output_index/store.py", "core/output_index/bits.py", "core/output_index/scanner.py",
-        "core/output_index/service.py", "app/backend/server/output_index_routes.py"
+        "core/output_index/service.py", "core/output_index/thumbs.py", "app/backend/server/output_index_routes.py",
+        "app/web/remote/js/features/outputSearch.mjs", "app/web/remote/js/features/outputSearchWindow.mjs",
+        "app/web/remote/output-search.html"
       ],
       "routes": [
         {"method": "GET", "path": "/api/output-index/status", "smoke": "non_destructive"},
@@ -83,7 +85,11 @@
         {"method": "POST", "path": "/api/output-index/query", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/output-index/suggest", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/output-index/file", "smoke": "non_destructive"},
-        {"method": "POST", "path": "/api/output-index/decode", "smoke": "state_mutation"}
+        {"method": "GET", "path": "/api/output-index/thumb", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/output-index/meta", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/output-index/delete", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/output-index/open-location", "smoke": "state_mutation"},
+        {"method": "GET", "path": "/output-search.html", "smoke": "static"}
       ]
     },
     {

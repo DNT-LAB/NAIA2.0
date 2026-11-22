@@ -8944,6 +8944,30 @@ function onViewerHistoryCleared(message) {
 }
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
 function openViewerPopup() { if (resultHistory) resultHistory.openPopup(); }
+// Output Search(11-22) - 저장된 출력 이미지 전체를 태그로 찾는 떠 있는 창. 처음 누를 때 불러온다.
+// 본문은 외부 브라우저 화면(output-search.html)과 같은 js/features/outputSearch.mjs 다.
+let outputSearchWindow = null;
+let outputSearchLoading = null;
+function openOutputSearch() {
+  if (outputSearchWindow) { outputSearchWindow.toggle(); return; }
+  if (outputSearchLoading) return;
+  outputSearchLoading = import('./js/features/outputSearchWindow.mjs?v=20261122-a')
+    .then(({createOutputSearchWindow}) => {
+      outputSearchWindow = createOutputSearchWindow({
+        document, window, showToast,
+        confirmDialog: (message, options) => showConfirmDialog(message, options),
+        // 메타데이터 뷰어의 [프롬프트/네거티브 적용] 과 같은 길 - 세션이 입력창을 가졌으면 세션으로 간다.
+        applyPrompt: payload => applyMetadataPrompt(payload),
+        openExternalUrl: openUrlInSystemBrowser,
+      });
+      outputSearchWindow.open();
+    })
+    .catch(error => {
+      console.error('Failed to open Output Search', error);
+      showToast('Output Search 를 열지 못했습니다.', 'error');
+    })
+    .finally(() => { outputSearchLoading = null; });
+}
 function closeViewerPopup() { if (resultHistory) resultHistory.closePopup(); }
 function navViewerPopup(direction) { if (resultHistory) resultHistory.navPopup(direction); }
 function toggleLightboxPrompt(forceVisible) { if (resultHistory) resultHistory.toggleLightboxPrompt(forceVisible); }

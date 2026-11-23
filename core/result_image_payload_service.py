@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
 
+from core.generation_mode import mode_from_generation_params, mode_from_image_metadata
+
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -165,6 +167,48 @@ def memory_history_thumbnail_payload(
         return b""
 
 
+def image_generation_mode(image, extracted: dict) -> str:
+    from utils.image_info import ImageMetadataExtractor
+
+    info = dict(getattr(image, "info", {}) or {})
+    comment = None
+    if "exif" in info:
+        comment = ImageMetadataExtractor._read_exif_text(image)
+        # ComfyUI's own WebP saver writes the graphs as EXIF "prompt:{...}" / "workflow:{...}" entries.
+        try:
+            from utils.comfyui_png_metadata import _extract_webp_exif_metadata
+
+            for key, value in _extract_webp_exif_metadata(image).items():
+                info.setdefault(key, value)
+        except Exception:
+            pass
+    return mode_from_image_metadata(info, extracted, comment)
+
+
+def history_generation_metadata(item, *, need_prompt: bool) -> tuple[str, dict]:
+    """Read embedded metadata once when the mode or the prompt needs a fallback."""
+    mode = mode_from_generation_params(
+        getattr(item, "generation_params", None), getattr(item, "api_metadata", None)
+    )
+    if mode and not need_prompt:
+        return mode, {}
+    raw_bytes = getattr(item, "raw_bytes", None)
+    if not raw_bytes:
+        return mode, {}
+
+    from PIL import Image
+    from utils.image_info import ImageMetadataExtractor, json_safe_metadata
+
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as image:
+            image.load()
+            extracted = ImageMetadataExtractor.extract_metadata(image) or {}
+            mode = mode or image_generation_mode(image, extracted)
+            return mode, json_safe_metadata(extracted) if need_prompt else {}
+    except Exception:
+        return mode, {}
+
+
 def history_item_meta_payload(
     item,
     *,
@@ -188,34 +232,22 @@ def history_item_meta_payload(
     characters = prompt_context.get("characters") if isinstance(prompt_context, dict) else None
 
     extra_summary: dict = {}
-    # External images (e.g. imported into history) carry no naia_* params; their
-    # prompt/params live only in the embedded PNG metadata (NAI Comment/stealth,
-    # WebUI parameters, ComfyUI workflow). Extract whenever the in-app prompt is
-    # missing so BOTH the summary (the Generation Info panel and floating prompt
-    # fetch /api/history/meta WITHOUT full=1) and the full detail view surface it —
-    # otherwise external images show "No metadata" in the result view even though
-    # the Metadata tab (full=1) reads them. This endpoint is only called per
-    # displayed item (the bulk history list uses a different summary), and generated
-    # results have a prompt so they skip the stealth-PNG scan.
-    if not prompt:
-        from utils.image_info import extract_embedded_metadata
+    mode, extracted = history_generation_metadata(item, need_prompt=not prompt)
+    if extracted:
+        raw["extracted_metadata"] = extracted
+        prompt = prompt or str(extracted.get("prompt") or "")
+        negative = negative or str(extracted.get("negative") or extracted.get("uc") or "")
+        if not characters and extracted.get("characters"):
+            characters = extracted.get("characters")
+        ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
+        for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
+            value = extracted.get(key)
+            if value in ("", None):
+                value = ext_params.get(key)
+            if value not in ("", None):
+                extra_summary[key] = value
 
-        extracted = extract_embedded_metadata(getattr(item, "raw_bytes", None))
-        if extracted:
-            raw["extracted_metadata"] = extracted
-            prompt = prompt or str(extracted.get("prompt") or "")
-            negative = negative or str(extracted.get("negative") or extracted.get("uc") or "")
-            if not characters and extracted.get("characters"):
-                characters = extracted.get("characters")
-            ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
-            for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
-                value = extracted.get(key)
-                if value in ("", None):
-                    value = ext_params.get(key)
-                if value not in ("", None):
-                    extra_summary[key] = value
-
-    result = {}
+    result = {"generation_mode": mode}
     if prompt:
         result["prompt"] = prompt
     if negative:

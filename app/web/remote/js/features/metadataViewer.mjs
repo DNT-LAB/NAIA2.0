@@ -1,3 +1,5 @@
+import {imageGenerationMode, loadBlockReason, shortBlockReason} from './generationModeGate.mjs?v=20261123-loadgate';
+
 export function createMetadataViewer({
   document,
   fetch,
@@ -12,6 +14,8 @@ export function createMetadataViewer({
   onRestoreVibeTransfer = null,
   canUseDesktopImg2Img = () => true,
   getCurrentImageUrl = () => '',
+  // 지금 생성 모드(NAI · WEBUI · COMFYUI · ANIMA). 주면 다른 모드 · 모드 불명 그림의 불러오기 단추를 막는다(11-23).
+  getGenerationMode = null,
 }) {
   const statusEl = document.getElementById('metadataStatus');
   const titleEl = document.getElementById('metadataTitle');
@@ -509,8 +513,56 @@ export function createMetadataViewer({
       : 'No raw metadata';
   }
 
+  // 불러오기 단추(프롬프트 · 설정 · 캐릭터 · Vibe)를 막을 까닭. img2img 보내기는 그림만 쓰므로 막지 않는다.
+  function gateReason(payload = currentActionPayload) {
+    if (!payload || typeof getGenerationMode !== 'function') return '';
+    return loadBlockReason(payload.generationMode, getGenerationMode());
+  }
+
+  // 화면을 그리지 않고 불러오기 묶음만 만든다 - 우클릭 '불러오기' 도 이 단추들과 같은 값을 쓴다.
+  function buildActionPayload(data, source = {}, extra = {}) {
+    const payload = data && typeof data === 'object' ? data : {};
+    const vibeTransfer = getVibeTransferData(payload);
+    return {
+      data: payload,
+      source,
+      label: extra.label ?? (payload.label || source.label || source.path || 'Input Image'),
+      blob: source.blob || null,
+      imageUrl: extra.imageUrl ?? (source.imageUrl || ''),
+      prompt: getPrompt(payload),
+      negative: getNegative(payload),
+      params: buildParams(payload, vibeTransfer).canonical,
+      characters: getCharacters(payload),
+      charactersUc: getCharacterNegatives(payload),
+      vibeTransfer,
+      generationMode: imageGenerationMode(payload),
+    };
+  }
+
+  // 상태 줄: 불러오기가 막혔으면 그 까닭을 짧게 보인다(단추는 꺼져 있다). 긴 까닭은 상태 줄 툴팁에.
+  function paintStatus() {
+    const data = currentActionPayload?.data;
+    if (!data) return;
+    const short = typeof getGenerationMode === 'function'
+      ? shortBlockReason(currentActionPayload.generationMode, getGenerationMode())
+      : '';
+    if (statusEl) statusEl.title = short ? gateReason() : '';
+    if (short) {
+      setStatus(short, 'error');
+      return;
+    }
+    setStatus(data.has_metadata === false ? 'No metadata' : 'Loaded', data.has_metadata === false ? 'muted' : 'ok');
+  }
+
+  // 모드가 바뀌었다 - 단추와 상태 줄을 다시 본다(불러오는 중이면 끝날 때 render 가 본다).
+  function refreshGate() {
+    updateActionButtons();
+    if (!loading) paintStatus();
+  }
+
   function updateActionButtons() {
     const hasPayload = Boolean(currentActionPayload);
+    const blocked = Boolean(gateReason());
     const hasPrompt = hasPayload && (currentActionPayload.prompt || currentActionPayload.negative);
     const hasParams = hasPayload && Object.keys(currentActionPayload.params || {}).length > 0;
     const hasCharacters = hasPayload && (currentActionPayload.characters || []).length > 0;
@@ -528,12 +580,12 @@ export function createMetadataViewer({
         : '📦 Vibe Transfer 복원';
     }
     [
-      [applyPromptBtn, typeof onApplyPrompt === 'function' && hasPrompt],
-      [applySettingsBtn, typeof onApplySettings === 'function' && hasParams],
-      [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters],
+      [applyPromptBtn, typeof onApplyPrompt === 'function' && hasPrompt && !blocked],
+      [applySettingsBtn, typeof onApplySettings === 'function' && hasParams && !blocked],
+      [applyCharacterSettingsBtn, typeof onApplyCharacterSettings === 'function' && hasParams && hasCharacters && !blocked],
       // ⚠️ 설정값(hasParams)을 요구하지 않는다 - 캐릭터만 있는 메타데이터에서도 써야 한다.
-      [applyCharactersBtn, typeof onApplyCharacters === 'function' && hasCharacters],
-      [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer],
+      [applyCharactersBtn, typeof onApplyCharacters === 'function' && hasCharacters && !blocked],
+      [restoreVibeBtn, typeof onRestoreVibeTransfer === 'function' && hasVibeTransfer && !blocked],
       [sendImg2ImgBtn, desktopImg2ImgAvailable && typeof onSendImg2Img === 'function' && hasImageActionSource],
     ].forEach(([button, enabled]) => {
       if (!button) return;
@@ -551,32 +603,19 @@ export function createMetadataViewer({
     const label = payload.label || source.label || source.path || 'Input Image';
     const prompt = getPrompt(payload);
     const negative = getNegative(payload);
-    const characters = renderCharacters(payload);
+    renderCharacters(payload);
     renderCharacterReference(payload);
-    const charactersUc = getCharacterNegatives(payload);
     const vibeTransfer = getVibeTransferData(payload);
-    const {rows, canonical} = buildParams(payload, vibeTransfer);
+    const {rows} = buildParams(payload, vibeTransfer);
     if (titleEl) titleEl.textContent = label;
     const imageUrl = renderPreview(payload, source);
     renderPromptBlock(promptEl, prompt, 'No prompt metadata');
     renderPromptBlock(negativeEl, negative, 'No negative metadata');
     renderParams(rows);
     renderRaw(payload);
-    currentActionPayload = {
-      data: payload,
-      source,
-      label,
-      blob: source.blob || null,
-      imageUrl,
-      prompt,
-      negative,
-      params: canonical,
-      characters,
-      charactersUc,
-      vibeTransfer,
-    };
+    currentActionPayload = buildActionPayload(payload, source, {label, imageUrl});
     updateActionButtons();
-    setStatus(payload.has_metadata === false ? 'No metadata' : 'Loaded', payload.has_metadata === false ? 'muted' : 'ok');
+    paintStatus();
   }
 
   function buildRequest(source) {
@@ -597,6 +636,13 @@ export function createMetadataViewer({
         init: {},
       };
     }
+    // 메타 주소를 그대로 받는 자리(History 창의 전체 범위 그림 = /api/output-index/metadata?row=).
+    if (source.kind === 'url' && source.url) {
+      return {
+        url: source.url,
+        init: {},
+      };
+    }
     if (source.kind === 'input' && source.blob) {
       const label = encodeURIComponent(source.label || 'Input Image');
       return {
@@ -612,7 +658,7 @@ export function createMetadataViewer({
   }
 
   function unavailableMessage(source) {
-    if (source.kind === 'saved') return 'Metadata unavailable';
+    if (source.kind === 'saved' || source.kind === 'url') return 'Metadata unavailable';
     if (source.kind === 'input') return 'Input image metadata unavailable';
     return 'No image selected';
   }
@@ -651,6 +697,8 @@ export function createMetadataViewer({
       } else if (nextSource.kind === 'input' && data && typeof data === 'object') {
         data.label = nextSource.label || data.label || 'Input Image';
         data.source = 'input';
+      } else if (nextSource.kind === 'url' && data && typeof data === 'object') {
+        data.label = nextSource.label || data.label || 'Image';
       }
       render(data, nextSource);
     } catch (error) {
@@ -673,6 +721,11 @@ export function createMetadataViewer({
   function loadSaved(path, options = {}) {
     if (!path) return loadSource(EMPTY_SOURCE, options);
     return loadSource({kind: 'saved', path}, options);
+  }
+
+  function loadUrl(url, label = '', options = {}) {
+    if (!url) return loadSource(EMPTY_SOURCE, options);
+    return loadSource({kind: 'url', path: '', url, label, imageUrl: options.imageUrl || ''}, options);
   }
 
   function loadImageBlob(blob, label = 'Input Image', options = {}) {
@@ -727,20 +780,27 @@ export function createMetadataViewer({
     });
   }
 
-  function bindAction(button, handler) {
+  function bindAction(button, handler, {gated = false} = {}) {
     if (!button) return;
     button.addEventListener('click', () => {
       if (button.disabled || !currentActionPayload || typeof handler !== 'function') return;
+      // 단추를 그린 뒤 모드가 바뀌었을 수 있다 - 누를 때 한 번 더 본다.
+      const reason = gated ? gateReason() : '';
+      if (reason) {
+        if (showToast) showToast(reason, 'error');
+        refreshGate();
+        return;
+      }
       handler(currentActionPayload);
     });
   }
 
   bindDetailTabs();
-  bindAction(applyPromptBtn, onApplyPrompt);
-  bindAction(applySettingsBtn, onApplySettings);
-  bindAction(applyCharacterSettingsBtn, onApplyCharacterSettings);
-  bindAction(applyCharactersBtn, onApplyCharacters);
-  bindAction(restoreVibeBtn, onRestoreVibeTransfer);
+  bindAction(applyPromptBtn, onApplyPrompt, {gated: true});
+  bindAction(applySettingsBtn, onApplySettings, {gated: true});
+  bindAction(applyCharacterSettingsBtn, onApplyCharacterSettings, {gated: true});
+  bindAction(applyCharactersBtn, onApplyCharacters, {gated: true});
+  bindAction(restoreVibeBtn, onRestoreVibeTransfer, {gated: true});
   bindAction(sendImg2ImgBtn, onSendImg2Img);
   renderEmpty('No image selected');
   setStatus('Idle', 'muted');
@@ -748,7 +808,10 @@ export function createMetadataViewer({
   return {
     loadCurrent,
     loadSaved,
+    loadUrl,
     loadImageBlob,
+    actionPayloadFor: (data, source = {}) => buildActionPayload(data, source),
+    refreshGate,
     displayPayload,
     refresh,
     getCurrentSource,

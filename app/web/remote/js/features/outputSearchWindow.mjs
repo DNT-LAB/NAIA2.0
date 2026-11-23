@@ -3,7 +3,7 @@
 // 진입로는 히스토리 칸 머리의 ↗ 하나다. 범위 [이번 세션 | 전체] 는 본문 첫 줄에 있다.
 // 떠 있는 창(draggablePanel) - 다른 창과 같은 URL(?v=)로 불러온다(다르면 창끼리 겹침 순서가 깨진다).
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './outputSearch.mjs?v=20261123-saved';
+import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './outputSearch.mjs?v=20261123-loadgate2';
 
 const STYLE = `
 .dragpanel.output-search-win .dragpanel-body {padding:0;gap:0;overflow:hidden;display:flex;flex-direction:column}
@@ -24,6 +24,10 @@ export function createOutputSearchWindow({
   showToast = () => {},
   confirmDialog = null,
   applyPrompt = null,
+  // 그림에서 불러오기 · 모드 문 · 메타데이터 탭(11-23) - outputSearch.mjs 로 그대로 넘긴다.
+  loadImage = null,
+  loadState = null,
+  showMetadata = null,
   openExternalUrl = null,
   // 이번 세션의 손(resultHistory.sessionActions) - 삭제 · 저장 규칙을 레일과 한 벌로 쓴다.
   session = null,
@@ -101,7 +105,7 @@ export function createOutputSearchWindow({
       document, window: win, host,
       storage: win.localStorage,
       initial: {scope},
-      applyPrompt, session, openUrl, confirmAsk,
+      applyPrompt, loadImage, loadState, showMetadata, session, openUrl, confirmAsk,
       toast: (message, kind) => showToast(message, kind || 'info'),
       onStatus: ({partial, rows}) => {
         const node = shell.slot.querySelector('[data-osr-status]');

@@ -68,6 +68,18 @@ def _delete(service, rows, context):
     return result, payloads
 
 
+def _read_metadata(service, row, context):
+    from app.backend.server.result_display_routes import (
+        _metadata_for_disk_image, _with_current_wildcard_frozen_state,
+    )
+
+    path = service.file_path(row)
+    if path is None:
+        raise FileNotFoundError("Image not found")
+    payload = _metadata_for_disk_image(path, path.name, include_full=True)
+    return _with_current_wildcard_frozen_state(context, payload)
+
+
 def _open_location(service, row):
     path = service.file_path(row)
     if path is None:
@@ -197,6 +209,19 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
         if result is None:
             raise HTTPException(404, "Image not found")
         return result
+
+    @app.get("/api/output-index/metadata")
+    async def metadata(request: Request, row: int):
+        if len(request.query_params.multi_items()) != 1:
+            raise HTTPException(422, "Expected a row number only")
+        try:
+            return await run_in_thread(_read_metadata, service(), row, context)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, "Image not found") from exc
+        except Exception as exc:
+            # The exception text can carry absolute paths - keep it in the server log only.
+            print(f"[output-index] metadata read failed for row {row}: {type(exc).__name__}")
+            return JSONResponse({"error": "Metadata extract failed"}, status_code=400)
 
     @app.post("/api/output-index/delete")
     async def delete(request: Request):

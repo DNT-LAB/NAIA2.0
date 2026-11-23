@@ -7,6 +7,8 @@ const ACTION_LOAD_PROMPT = 'load_prompt';
 const ACTION_REROLL_PROMPT = 'reroll_prompt';
 const ACTION_QUEUE_RESULT = 'queue_result';
 const ACTION_RESTORE_PARAMS = 'restore_params';
+// '불러오기' 묶음(11-23) - 그림의 모드가 지금 모드와 같을 때만. app.js 의 `onLoadFromImage(context, kind)`.
+const ACTION_LOAD_FROM = 'load_from_image';
 const ACTION_OPEN_LOCATION = 'open_location';
 const ACTION_SAVE_IMAGE = 'save_image';
 const ACTION_COPY_IMAGE = 'copy_image';
@@ -77,9 +79,24 @@ const DELETE_SETTINGS_MENU_ITEM = {
   ],
 };
 
+// 그림에서 불러오기 - 옛 '프롬프트 불러오기' · '생성 설정 복원' 을 한 묶음으로(사용자 지정 11-23).
+// 프롬프트는 네거티브와 함께 들어간다(메타데이터 뷰어 단추와 같은 길). 다른 모드 · 모드 불명 그림은 막는다 -
+// 메뉴를 열 때 `getLoadState` 로 미리 보고, 막혔으면 묶음 안 첫 줄에 까닭을 적는다.
+const LOAD_FROM_IMAGE_MENU_ITEM = {
+  label: '불러오기',
+  loadGroup: true,
+  children: [
+    {label: '프롬프트 · 네거티브', action: ACTION_LOAD_FROM, loadKind: 'prompt', capability: 'load_prompt'},
+    {label: '생성 설정', action: ACTION_LOAD_FROM, loadKind: 'settings', capability: 'restore_params'},
+    {label: '캐릭터', action: ACTION_LOAD_FROM, loadKind: 'characters', capability: 'metadata', modes: ['NAI']},
+    {label: '캐릭터 + 설정', action: ACTION_LOAD_FROM, loadKind: 'char_settings', capability: 'metadata', modes: ['NAI']},
+    {label: 'Vibe 복원', action: ACTION_LOAD_FROM, loadKind: 'vibe', capability: 'metadata', modes: ['NAI']},
+  ],
+};
+
 const MAIN_IMAGE_MENU = [
   ...MAIN_IMAGE_ACTIONS,
-  {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
+  LOAD_FROM_IMAGE_MENU_ITEM,
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {label: 'WEBUI Enhance', action: ACTION_WEBUI_ENHANCE, capability: 'enhance', modes: ['WEBUI']},
   {type: 'separator'},
@@ -102,7 +119,6 @@ const MAIN_IMAGE_MENU = [
     ],
   },
   {type: 'separator'},
-  {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {
     label: '메타데이터',
     capability: 'metadata',
@@ -144,7 +160,7 @@ const MAIN_IMAGE_MENU = [
 
 const THUMBNAIL_MENU = [
   ...THUMBNAIL_IMAGE_ACTIONS,
-  {label: '프롬프트 불러오기', action: ACTION_LOAD_PROMPT, capability: 'load_prompt'},
+  LOAD_FROM_IMAGE_MENU_ITEM,
   {label: '프롬프트 다시개봉', action: ACTION_REROLL_PROMPT, capability: 'reroll'},
   {label: 'WEBUI Enhance', action: ACTION_WEBUI_ENHANCE, capability: 'enhance', modes: ['WEBUI']},
   {type: 'separator'},
@@ -167,7 +183,6 @@ const THUMBNAIL_MENU = [
     ],
   },
   {type: 'separator'},
-  {label: '생성 설정 복원', action: ACTION_RESTORE_PARAMS, capability: 'restore_params'},
   {
     label: '메타데이터',
     capability: 'metadata',
@@ -257,6 +272,9 @@ export function createResultContextMenu({
   onRerollPrompt = null,
   onQueueResult = null,
   onRestoreSettings = null,
+  onLoadFromImage = null,
+  // (context) => Promise<{block, has}> - 메뉴를 열 때 그림의 모드 문을 미리 본다. 없으면 누를 때만 본다.
+  getLoadState = null,
   onOpenLocation = null,
   onSaveImage = null,
   onCopyImage = null,
@@ -287,6 +305,8 @@ export function createResultContextMenu({
   let sidePopup = null;
   let popupWildcardFreezeState = null;
   let menuVersion = 0;
+  // 지금 열린 메뉴의 맥락 - 자산 정보와 불러오기 상태가 따로 늦게 와도 서로를 지우지 않게 한곳에 모은다.
+  let menuContext = null;
   const submenuCloseTimers = new WeakMap();
   const DELETE_MODE_KEY = 'naia_result_delete_mode';
   let deleteMode = readDeleteMode();
@@ -376,15 +396,19 @@ export function createResultContextMenu({
     return !item.modes || item.modes.includes(currentMode());
   }
 
-  function isItemEnabled(item, context) {
+  function isItemEnabled(item, context, opts = {}) {
     if (!itemModeAllowed(item)) return false;
     if (item.desktopImg2Img && !(typeof canUseDesktopImg2Img === 'function' && canUseDesktopImg2Img())) return false;
     // 모바일은 우측 탭 스트립이 없어 '탭에서 보기'가 무의미 — 항목 자체를 숨긴다.
     if (item.desktopTabOnly && !(typeof canUseTabView === 'function' && canUseTabView())) return false;
     if (item.alwaysEnabled) return true;
     if (item.requiresPath && !context?.path) return false;
+    // 막힌 '불러오기' 묶음도 열린다 - 그 안 첫 줄에 막힌 까닭을 보여야 한다.
+    if (item.loadGroup) {
+      return item.children.some(child => isItemEnabled(child, context, {ignoreBlock: true}));
+    }
     if (item.children) {
-      return item.children.some(child => isItemEnabled(child, context));
+      return item.children.some(child => isItemEnabled(child, context, opts));
     }
     if (item.capability && !hasCapability(context, item.capability)) return false;
     if (item.action === ACTION_LOAD_PROMPT) {
@@ -398,6 +422,13 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_RESTORE_PARAMS) {
       return typeof onRestoreSettings === 'function';
+    }
+    if (item.action === ACTION_LOAD_FROM) {
+      if (typeof onLoadFromImage !== 'function') return false;
+      const state = context?.loadState;
+      if (state?.block && !opts.ignoreBlock) return false;
+      if (state?.has && state.has[item.loadKind] === false) return false;
+      return true;
     }
     if (item.action === ACTION_METADATA) {
       return hasCapability(context, 'metadata');
@@ -500,6 +531,8 @@ export function createResultContextMenu({
     const copyFormatAttr = item.copyFormat ? ` data-copy-format="${item.copyFormat}"` : '';
     const queuePositionAttr = item.queuePosition ? ` data-queue-position="${item.queuePosition}"` : '';
     const queueModeAttr = item.queueMode ? ` data-queue-mode="${item.queueMode}"` : '';
+    const loadKindAttr = item.loadKind ? ` data-load-kind="${item.loadKind}"` : '';
+    const loadBlock = item.loadGroup ? String(context?.loadState?.block || '') : '';
     const isDeleteModeItem = item.action === ACTION_SET_DELETE_MODE;
     const deleteModeAttr = isDeleteModeItem && item.deleteMode ? ` data-delete-mode="${item.deleteMode}"` : '';
     const deleteModeActive = isDeleteModeItem && item.deleteMode === deleteMode;
@@ -512,13 +545,18 @@ export function createResultContextMenu({
       ? `<span class="result-context-badge${badgeClass}">${escapeText(item.badge)}</span>`
       : '';
     const diskBadgeHtml = (item.action === ACTION_DELETE_RESULT && deleteMode === 'disk') ? DISK_BADGE_HTML : '';
+    // 막힌 '불러오기' = 묶음 첫 줄에 까닭(누를 수 없는 글) + 머리에 '막힘' 표.
+    const blockNoteHtml = loadBlock
+      ? `<div class="result-context-note" role="note" style="box-sizing:border-box;width:0;min-width:100%;padding:5px 10px;white-space:normal;overflow-wrap:anywhere;font-size:11px;line-height:1.4;color:#ff8a94">${escapeText(loadBlock)}</div>`
+      : '';
+    const blockBadgeHtml = loadBlock ? '<span class="result-context-badge danger">막힘</span>' : '';
     const childHtml = hasChildren
-      ? `<div class="result-context-children" role="menu">${item.children.map(child => renderItem(child, context)).join('')}</div>`
+      ? `<div class="result-context-children" role="menu">${blockNoteHtml}${item.children.map(child => renderItem(child, context)).join('')}</div>`
       : '';
     return `
       <div class="result-context-group${hasChildren ? ' has-children' : ''}">
-        <button type="button" class="result-context-item${danger}${deleteModeActiveCls}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${deleteModeAttr}${deleteLabelAttr}${submenuAttr}${disabledAttr}>
-          <span>${escapeText(labelText)}</span><span class="result-context-item-tail">${diskBadgeHtml}${badgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
+        <button type="button" class="result-context-item${danger}${deleteModeActiveCls}${hasChildren ? ' has-children' : ''}"${actionAttr}${imageActionAttr}${copyFormatAttr}${queuePositionAttr}${queueModeAttr}${loadKindAttr}${deleteModeAttr}${deleteLabelAttr}${submenuAttr}${disabledAttr}>
+          <span>${escapeText(labelText)}</span><span class="result-context-item-tail">${diskBadgeHtml}${badgeHtml}${blockBadgeHtml}${hasChildren ? '<span class="result-context-arrow" aria-hidden="true">›</span>' : ''}</span>
         </button>
         ${childHtml}
       </div>`;
@@ -697,6 +735,8 @@ export function createResultContextMenu({
           });
         } else if (action === ACTION_RESTORE_PARAMS) {
           onRestoreSettings(context);
+        } else if (action === ACTION_LOAD_FROM) {
+          onLoadFromImage(context, button.dataset.loadKind || 'prompt');
         } else if (action === ACTION_METADATA) {
           if (typeof onShowMetadata === 'function' && onShowMetadata(context) !== false) return;
           showMetadata(context);
@@ -753,11 +793,29 @@ export function createResultContextMenu({
     const version = ++menuVersion;
     menu = document.createElement('div');
     menu.className = `result-context-menu ${kind === 'thumbnail' ? 'thumbnail' : 'image-plane'}`;
+    menuContext = context;
     renderMenu(kind, context);
     document.body.appendChild(menu);
     menu.classList.add('open');
     positionMenu(x, y);
     refreshAssetContext(kind, context, version, x, y);
+    // 지금 결과는 경로가 없다 - 자산 정보가 히스토리 주소를 준 뒤에 본다(그래야 미리 본 그림 = 누를 그림).
+    if (context.path || context.metadataUrl) refreshLoadState(kind, context, version, x, y);
+  }
+
+  // 그림의 모드 문을 미리 본다 - 막혔으면 '불러오기' 묶음이 까닭을 적고 항목을 끈다. 실패하면 그대로 둔다
+  // (누를 때 app.js 가 다시 보고 막는다).
+  async function refreshLoadState(kind, context, version, x, y) {
+    if (typeof getLoadState !== 'function' || !context?.hasImage) return;
+    try {
+      const state = await getLoadState(context);
+      if (!state || !menu || version !== menuVersion) return;
+      menuContext = {...(menuContext || context), loadState: state};
+      renderMenu(kind, menuContext);
+      positionMenu(x, y);
+    } catch (error) {
+      console.warn('Failed to read image load state', error);
+    }
   }
 
   function isPreviewVisible(preview) {
@@ -896,9 +954,11 @@ export function createResultContextMenu({
       if (!response.ok) return;
       const asset = await response.json();
       if (!menu || version !== menuVersion) return;
-      const mergedContext = mergeAssetContext(context, asset);
+      const mergedContext = mergeAssetContext(menuContext || context, asset);
+      menuContext = mergedContext;
       renderMenu(kind, mergedContext);
       positionMenu(x, y);
+      if (!mergedContext.loadState && !context.path) refreshLoadState(kind, mergedContext, version, x, y);
     } catch (error) {
       console.warn('Failed to resolve result asset context', error);
     }

@@ -304,6 +304,16 @@ class HeadlessResultStore:
                 or api_result.get("source_node_id")
             )
         )
+        item_api_metadata = dict(api_result.get("api_metadata", {}) or {})
+        # 이 장을 실제로 만든 엔진. 관리형(ANIMA) 표식은 실행본 params 에만 붙고 요청 원본(= 히스토리 params)은
+        # COMFYUI 로만 보인다 - 모드 문(core/generation_mode.py)이 읽게 이번 실행의 api_metadata 에 적는다.
+        # 아래 PNG 보강보다 먼저 만든다 - 보강한 저장본의 naia_api_metadata 에도 실려야 디스크 · 색인에서
+        # 읽어도 ANIMA 다(Codex 리뷰 2차 H1).
+        # params 에 적지 않는다: 리플레이 요청에 실려 다른 엔진의 그림에 ANIMA 가 박힌다.
+        executed_params = api_result.get("generation_params")
+        if isinstance(executed_params, dict) and (
+                executed_params.get("_anima_meta") or executed_params.get("_comfyui_workflow_mode") == "managed"):
+            item_api_metadata["generation_mode"] = "ANIMA"
         if is_comfyui_generation:
             from utils.comfyui_png_metadata import (
                 enrich_comfyui_png_bytes,
@@ -337,7 +347,7 @@ class HeadlessResultStore:
                         workflow_ui=api_result.get("workflow_ui") or params.get("_comfyui_workflow_ui"),
                         generation_params=params,
                         prompt_context=prompt_context,
-                        api_metadata=dict(api_result.get("api_metadata", {}) or {}) or {"backend": "COMFYUI"},
+                        api_metadata=item_api_metadata or {"backend": "COMFYUI"},
                     )
                     if raw_is_png:
                         raw_bytes = enriched_bytes              # PNG: in-place(원본도 PNG라 무손실)
@@ -355,7 +365,7 @@ class HeadlessResultStore:
             generation_params=params,
             prompt_context=prompt_context,
             source_row=getattr(request, "source_row", None),
-            api_metadata=dict(api_result.get("api_metadata", {}) or {}),
+            api_metadata=item_api_metadata,
             png_payload_override=comfyui_png_override,
         )
         with self.history_mutation():
@@ -912,38 +922,35 @@ class HeadlessResultStore:
             "api_metadata": item.api_metadata,
             "image_meta": image_meta,
         }
-        # External images (imported into history) have no naia_* params; recover
-        # prompt/params from the embedded PNG metadata so the viewer is not limited
-        # to in-session generations. Only runs when there is no in-app prompt, so
-        # normal generated results never pay the extraction cost.
-        if not summary["prompt"]:
-            from utils.image_info import extract_embedded_metadata
+        mode, extracted = result_images.history_generation_metadata(item, need_prompt=not summary["prompt"])
+        if extracted:
+            raw["extracted_metadata"] = extracted
+            summary["prompt"] = summary["prompt"] or str(extracted.get("prompt") or "")
+            summary["negative"] = summary["negative"] or str(
+                extracted.get("negative") or extracted.get("uc") or ""
+            )
+            ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
+            for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
+                if summary.get(key) in ("", None):
+                    value = extracted.get(key)
+                    if value in ("", None):
+                        value = ext_params.get(key)
+                    if value not in ("", None):
+                        summary[key] = value
 
-            extracted = extract_embedded_metadata(getattr(item, "raw_bytes", None))
-            if extracted:
-                raw["extracted_metadata"] = extracted
-                summary["prompt"] = summary["prompt"] or str(extracted.get("prompt") or "")
-                summary["negative"] = summary["negative"] or str(
-                    extracted.get("negative") or extracted.get("uc") or ""
-                )
-                ext_params = extracted.get("parameters") if isinstance(extracted.get("parameters"), dict) else {}
-                for key in ("seed", "steps", "sampler", "cfg_scale", "scale", "model"):
-                    if summary.get(key) in ("", None):
-                        value = extracted.get(key)
-                        if value in ("", None):
-                            value = ext_params.get(key)
-                        if value not in ("", None):
-                            summary[key] = value
         # img2img/inpaint params는 리플레이용 원시 bytes(image_bytes/mask_bytes)를
         # 보존한다(add_api_result NOTE) — 응답 경계에서 자리표시자로 치환하지 않으면
         # FastAPI의 strict UTF-8 bytes 디코드가 /api/result/metadata를 500으로 만든다.
         # 저장본(item.generation_params)은 사본 변환이라 영향 없다.
         from utils.image_info import json_safe_generation_params
 
+        summary = {key: value for key, value in summary.items() if value not in ("", None)}
+        summary["generation_mode"] = mode
         return {
             "source": "current",
             "label": "Current Result",
-            "summary": {key: value for key, value in summary.items() if value not in ("", None)},
+            "generation_mode": mode,
+            "summary": summary,
             "raw": json_safe_generation_params(raw),
             "has_metadata": True,
         }

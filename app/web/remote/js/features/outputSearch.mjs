@@ -90,6 +90,9 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-menu div:hover {background:rgba(124,106,239,.22)}
 .osr-menu div.danger {color:#ff8a94}
 .osr-menu div.dis {opacity:.4;pointer-events:none}
+.osr-menu div.osr-mnote {cursor:default;white-space:normal;max-width:260px;font-size:11px;line-height:1.4;color:#ff8a94}
+.osr-menu div.osr-mnote:hover {background:none}
+.osr-menu div.osr-msep {height:1px;margin:4px 0;padding:0;background:var(--border-dim,#2a2a3a);cursor:default}
 .osr-dlg-bg {position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;
   justify-content:center;padding-top:72px}
 .osr-dlg {width:min(330px,92%);background:var(--bg-card,#1a1a26);border:1px solid var(--border-glow,#3d3d5c);border-radius:8px;
@@ -308,6 +311,11 @@ export function createOutputSearch({
   initial = {},
   // 앱 안에서만 오는 손: 메인 프롬프트에 넣기. 없으면 [프롬프트] 단추는 복사로 동작한다.
   applyPrompt = null,
+  // 앱 안에서만 오는 손(11-23): 그림에서 불러오기 · 모드 문 미리 보기 · 메타데이터 탭에 띄우기.
+  // ref = {metadataUrl, label, imageUrl}. loadImage 가 있으면 [프롬프트 넣기] 도 이 길(모드 문)로 간다.
+  loadImage = null,
+  loadState = null,
+  showMetadata = null,
   // 앱 안에서만 오는 손: 이번 세션의 삭제 · 저장 · 메인에 띄우기 · 바인딩(resultHistory.sessionActions).
   session = null,
   openUrl = url => { win.open(url, '_blank'); return true; },
@@ -683,8 +691,11 @@ export function createOutputSearch({
     menu = doc.createElement('div');
     menu.className = 'osr-menu';
     menu.setAttribute('role', 'menu');
-    menu.innerHTML = entries.map((e, i) =>
-      `<div role="menuitem" data-mi="${i}" class="${e.danger ? 'danger' : ''}${e.disabled ? ' dis' : ''}">${esc(e.label)}</div>`).join('');
+    menu.innerHTML = entries.map((e, i) => {
+      if (e.sep) return '<div class="osr-msep" role="separator"></div>';
+      if (e.note) return `<div class="osr-mnote" role="note">${esc(e.note)}</div>`;
+      return `<div role="menuitem" data-mi="${i}" class="${e.danger ? 'danger' : ''}${e.disabled ? ' dis' : ''}">${esc(e.label)}</div>`;
+    }).join('');
     host.appendChild(menu);
     const box = host.getBoundingClientRect();
     const x = Math.min(event.clientX - box.left, host.clientWidth - menu.offsetWidth - 4);
@@ -716,6 +727,58 @@ export function createOutputSearch({
         if (await confirmAsk(`즐겨찾기 '${fav.title}' 을(를) 지울까요?`)) changeSaved({action: 'delete', id: fav.id});
       }},
     ]);
+  }
+  // 메타 주소 - 전체 범위는 색인 행, 이번 세션은 결과 메뉴와 같은 뷰어 주소.
+  function imageRef(item) {
+    const metadataUrl = item.row != null
+      ? `${API}/metadata?row=${item.row}`
+      : (item.rel ? `/api/viewer/meta?path=${encodeURIComponent(item.rel)}&full=1` : `${HISTORY}/meta/${encodeURIComponent(item.hid)}?full=1`);
+    return {metadataUrl, label: item.name || item.path || '', imageUrl: item.full || ''};
+  }
+  // 전체 범위 그림의 우클릭 - 창 안에 그린다(이번 세션 그림은 앱의 결과 메뉴가 받는다).
+  // 불러오기는 모드 문을 미리 보고 막혔으면 끈 채 까닭을 맨 위에 적는다(누를 때 앱이 한 번 더 본다).
+  function tileMenu(event, item) {
+    const ref = imageRef(item);
+    // 메뉴가 열린 사이 목록이 다시 그려지면(색인 · 재조회) 같은 자리가 다른 그림이다 - 누를 때 그 그림을 다시 찾는다.
+    const at = run => () => {
+      const now = st.items.indexOf(item);
+      if (now < 0) { toast('목록이 바뀌었습니다 - 그림을 다시 골라 주세요.', 'error'); return; }
+      run(now);
+    };
+    const loads = [
+      ['prompt', '프롬프트 · 네거티브 불러오기'],
+      ['settings', '생성 설정 불러오기'],
+      ['characters', '캐릭터 불러오기', true],
+      ['char_settings', '캐릭터 + 설정 불러오기', true],
+      ['vibe', 'Vibe 복원', true],
+    ];
+    const build = state => {
+      const out = [];
+      if (loadImage) {
+        if (state?.block) out.push({note: state.block});
+        loads.forEach(([kind, label, onlyIfHas]) => {
+          const has = state?.has?.[kind];
+          if (onlyIfHas && has === false) return;
+          out.push({label, disabled: Boolean(state?.block) || has === false, run: () => loadImage(ref, kind, {authored: true})});
+        });
+        out.push({sep: true});
+      }
+      if (showMetadata) out.push({label: '메타데이터 보기', run: () => showMetadata(ref)});
+      out.push({label: '크게 보기', run: at(now => openBig(now))});
+      out.push({label: '원본 열기', run: () => { if (!openUrl(item.full)) toast('브라우저를 열지 못했습니다.', 'error'); }});
+      if (st.local) {
+        out.push({label: '폴더 열기', run: () => locate(item)});
+        out.push({sep: true});
+        out.push({label: '휴지통으로', danger: true, run: at(now => deleteItems(new Set([now])))});
+      }
+      return out;
+    };
+    openMenu(event, build(null));
+    if (!loadImage || typeof loadState !== 'function') return;
+    const opened = menu;
+    Promise.resolve(loadState(ref)).then(state => {
+      if (state && menu === opened) openMenu(event, build(state));
+    }).catch(() => {});
   }
   function recentMenu(event, item) {
     openMenu(event, [
@@ -834,6 +897,7 @@ export function createOutputSearch({
   }
   async function runQuery({keepCache = false} = {}) {
     const seq = ++st.seq;
+    closeMenu();   // 열린 우클릭 메뉴는 옛 목록의 것이다
     scheduleRecent();
     if (!keepCache) st.ovCache = null;
     resetFolders();
@@ -1150,7 +1214,7 @@ export function createOutputSearch({
     const session = isSession();
     const canLocate = st.local && item.saved;
     const canDelete = session || st.local;
-    const promptLabel = applyPrompt ? '프롬프트 넣기' : '프롬프트 복사';
+    const promptLabel = (loadImage || applyPrompt) ? '프롬프트 넣기' : '프롬프트 복사';
     box.innerHTML = `
       <div class="osr-prev" data-act="big" title="크게 보기 (Enter)"><img alt="" src="${item.thumb(384)}"></div>
       <div class="osr-path">${esc(item.path || item.name)}</div>
@@ -1166,7 +1230,7 @@ export function createOutputSearch({
         ${session && sessionHand() ? '<button type="button" data-act="main" title="메인 화면에 띄우기 - Result Info · Enhance · Sequence 가 이 그림을 따라간다">메인에 띄우기</button>' : ''}
         <button type="button" data-act="big" title="크게 보기 (Enter · 더블클릭)">크게</button>
         <button type="button" data-act="original" title="원본을 브라우저로">원본</button>
-        <button type="button" data-act="prompt" title="${applyPrompt ? '프롬프트 · 네거티브를 메인에 넣기' : '프롬프트 복사'}">${promptLabel}</button>
+        <button type="button" data-act="prompt" title="${(loadImage || applyPrompt) ? '프롬프트 · 네거티브를 메인에 넣기' : '프롬프트 복사'}">${promptLabel}</button>
         ${session ? '<button type="button" data-act="save" title="빠른 저장 폴더로 (Ctrl+S)">저장</button>' : ''}
         ${session && sessionHand()?.canSaveAs?.() ? '<button type="button" data-act="saveas" title="다른 곳에 저장">다른 이름</button>' : ''}
         ${canLocate ? '<button type="button" data-act="locate" title="탐색기에서 이 파일 보기">폴더 열기</button>' : ''}
@@ -1301,6 +1365,8 @@ export function createOutputSearch({
   }
 
   async function doPrompt(item) {
+    // 앱 안: 우클릭 '불러오기' 와 같은 길 - 다른 모드 · 모드 불명 그림은 막힌다(11-23).
+    if (loadImage) { await loadImage(imageRef(item), 'prompt'); return; }
     let meta;
     try { meta = await fullMeta(item); } catch (error) { toast(error.message, 'error'); return; }
     if (!meta?.prompt) { toast('이 그림에는 프롬프트가 없습니다.', 'info'); return; }
@@ -1492,6 +1558,16 @@ export function createOutputSearch({
   host.addEventListener('contextmenu', event => {
     const favNode = event.target.closest('[data-fav-id]');
     const recentNode = event.target.closest('[data-recent-i]');
+    const th = event.target.closest('.osr-th');
+    if (th && !isSession()) {
+      event.preventDefault();
+      event.stopPropagation();
+      const index = Number(th.dataset.i);
+      if (!st.sel.has(index)) select(index, {});
+      const item = st.items[index];
+      if (item) tileMenu(event, item);
+      return;
+    }
     if (!favNode && !recentNode) return;
     event.preventDefault();
     event.stopPropagation();

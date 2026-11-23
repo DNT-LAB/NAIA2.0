@@ -925,6 +925,8 @@ export function createResultImageActions({
 
   return {
     bindDragSource,
+    // 우클릭 '불러오기 > 생성 설정' 이 메타데이터 뷰어 값에 덧싣는다(WEBUI hires 칸은 이쪽만 읽는다).
+    buildMetadataActionPayload,
     requestPopupImageAction,
     insertExternalToHistory,
     requestMetadataImageAction,

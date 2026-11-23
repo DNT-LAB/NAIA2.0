@@ -488,6 +488,10 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
         or (isinstance(generation_params, dict) and generation_params.get("input"))
         or summary.get("prompt")
     )
+    has_negative = bool(
+        summary.get("negative")
+        or (isinstance(generation_params, dict) and generation_params.get("negative_prompt"))
+    )
     can_enhance = bool(item and has_generation_params and (nai_mode or webui_mode))
     return {
         **_linked_artist_fields(context, item),
@@ -502,7 +506,8 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
         "has_metadata": bool(metadata_payload or rel_path),
         "can_enhance": can_enhance,
         "capabilities": {
-            "load_prompt": bool(has_prompt),
+            # 네거티브만 든 그림도 '프롬프트 불러오기' 가 된다(불러오기는 네거티브까지 넣는다 - Codex 리뷰 2차 M6).
+            "load_prompt": bool(has_prompt or has_negative),
             "reroll": bool(has_source_row),
             "queue": has_generation_params,
             "restore_params": has_generation_params,
@@ -659,12 +664,26 @@ def insert_external_image_to_history(context: WebSessionContext, image_bytes: by
     # byte-for-byte when the upload is already a PNG; only re-encode other formats.
     # Re-encoding keeps the text chunks but stripping to the original bytes is lossless
     # so the imported history item keeps its full metadata for the viewer.
+    api_metadata = {}
     if result_images.is_png_bytes(image_bytes):
         png_bytes = bytes(image_bytes)
     else:
         png_bytes = result_images.pil_image_to_png_bytes(image)
+        # PNG 로 바꾸면 EXIF(WebP 의 NAIA 봉투 · ComfyUI 그래프)가 빠진다 - 바꾸기 전 원본으로 모드를 읽어
+        # 히스토리 항목에 적어 둔다(Codex 리뷰 2차 M10). params 가 아니라 api_metadata 다(리플레이에 안 실린다).
+        try:
+            from utils.image_info import ImageMetadataExtractor
+
+            with Image.open(io.BytesIO(image_bytes)) as original:
+                original.load()
+                mode = result_images.image_generation_mode(
+                    original, ImageMetadataExtractor.extract_metadata(original) or {})
+            if mode:
+                api_metadata["generation_mode"] = mode
+        except Exception:
+            pass
     safe_label = str(label or "Imported Image")[:120]
-    result = {"status": "success", "image": image, "raw_bytes": png_bytes}
+    result = {"status": "success", "image": image, "raw_bytes": png_bytes, "api_metadata": api_metadata}
     params = {
         **(extra_params or {}),
         "api_mode": str(context.get_api_mode() or "").upper(),
@@ -761,7 +780,9 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
             or ""
         )
 
+    generation_mode = result_images.image_generation_mode(image, extracted)
     summary = {
+        "generation_mode": generation_mode,
         "width": image.width,
         "height": image.height,
         "mode": image.mode,
@@ -804,6 +825,7 @@ def _build_input_metadata_payload(image, image_bytes: bytes, label: str, mime_ty
     return {
         "source": "input",
         "label": label,
+        "generation_mode": generation_mode,
         "summary": summary,
         "raw": raw_payload,
         "has_metadata": bool(parsed_info or extracted),

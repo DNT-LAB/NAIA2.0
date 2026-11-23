@@ -166,6 +166,9 @@ function _currentPresetStamp() {
 // 만 선택된 프리셋에 반영된다. Random 이 서버에서 만든 프롬프트는 `prompt_sync` 로
 // 내려올 뿐 이 경로로 돌아오지 않으므로, 랜덤 결과가 프리셋에 굳지 않는다.
 let _promptUserDirty = false;
+// 우클릭 '불러오기' 가 applyMetadataPrompt 로 칸만 채우고, 전송은 표식을 단 **한 번**으로 하려고 잠깐 세운다
+// (loadFromImage). 표식 없는 전송이 먼저 나가면 그 사이 바뀐 프리셋 위에 얹힌다(Codex 리뷰 2차 M11).
+let _metadataPromptSendHeld = false;
 // 그 편집을 **시작할 때** 화면이 믿던 프리셋. 보낼 때 다시 읽으면 안 된다 - 500ms
 // 디바운스 동안 다른 창이 프리셋을 바꾸면, A 를 보며 친 글이 B 의 이름표를 달고
 // B 에 저장된다(Codex 리뷰 2026-08-27).
@@ -1927,7 +1930,7 @@ function callResultImageAction(methodName, ...args) {
   return method(...args);
 }
 
-const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261114-i2iclose')
+const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=20261123-loadgate')
   .then(({createResultImageActions}) => {
     resultImageActions = createResultImageActions({
       document,
@@ -1969,7 +1972,7 @@ const resultImageActionsReady = import('./js/features/resultImageActions.mjs?v=2
   .catch(error => {
     console.error('Failed to initialize result image actions module', error);
   });
-const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20261009-v5medium')
+const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20261123-loadgate')
   .then(({createMetadataViewer}) => {
     metadataViewer = createMetadataViewer({
       document,
@@ -1983,6 +1986,8 @@ const metadataViewerReady = import('./js/features/metadataViewer.mjs?v=20261009-
       onSendImg2Img: payload => callResultImageAction('requestMetadataImageAction', payload, 'img2img'),
       onRestoreVibeTransfer: applyMetadataVibeTransfer,
       canUseDesktopImg2Img,
+      // 다른 모드 · 모드 불명 그림의 불러오기 단추를 막는다(11-23).
+      getGenerationMode: currentGenerationMode,
       getCurrentImageUrl: () => (
         preview && preview.classList.contains('show') ? (preview.getAttribute('src') || '') : ''
       ),
@@ -2263,7 +2268,7 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
 import('./js/features/mobileFullscreen.mjs?v=20261030-mfs4')
   .then(({createMobileFullscreen}) => createMobileFullscreen({document, window}))
   .catch(error => console.error('Failed to initialize mobile fullscreen module', error));
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261123-nopopup')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261123-loadgate')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -2285,6 +2290,9 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       onLoadPrompt: context => callResultImageAction('loadPromptFromContext', context),
       onRerollPrompt: context => callResultImageAction('rerollPromptFromContext', context),
       onRestoreSettings: context => callResultImageAction('restoreSettingsFromContext', context),
+      // '불러오기' 묶음(11-23) - 메뉴를 열 때 모드 문을 미리 보고, 누를 때 한 번 더 본다.
+      onLoadFromImage: (context, kind) => loadFromImage(imageRefFromContext(context), kind, {authored: true}),
+      getLoadState: context => imageLoadState(imageRefFromContext(context)),
       onOpenLocation: context => callResultImageAction('openLocationFromContext', context),
       onSaveImage: context => callResultImageAction('saveImageFromContext', context),
       onCopyImage: (context, format) => callResultImageAction('copyImageFromContext', context, format),
@@ -8955,13 +8963,17 @@ function openOutputSearch(scope = 'session') {
   if (outputSearchWindow) { outputSearchWindow.toggle(scope); return; }
   if (outputSearchLoading) return;
   // 이번 세션의 손(삭제 · 저장 · 메인에 띄우기 · 바인딩)은 히스토리 컨트롤러가 쥔다 - 그것이 뜬 뒤에 만든다.
-  outputSearchLoading = Promise.all([import('./js/features/outputSearchWindow.mjs?v=20261123-saved'), resultHistoryReady])
+  outputSearchLoading = Promise.all([import('./js/features/outputSearchWindow.mjs?v=20261123-loadgate2'), resultHistoryReady])
     .then(([{createOutputSearchWindow}]) => {
       outputSearchWindow = createOutputSearchWindow({
         document, window, showToast,
         confirmDialog: (message, options) => showConfirmDialog(message, options),
         // 메타데이터 뷰어의 [프롬프트/네거티브 적용] 과 같은 길 - 세션이 입력창을 가졌으면 세션으로 간다.
         applyPrompt: payload => applyMetadataPrompt(payload),
+        // 그림에서 불러오기(11-23) - 우클릭 메뉴와 같은 모드 문. [프롬프트 넣기] 도 이 길로 간다.
+        loadImage: (ref, kind, options) => loadFromImage(ref, kind, options),
+        loadState: ref => imageLoadState(ref),
+        showMetadata: ref => showImageMetadataInTab(ref),
         openExternalUrl: openUrlInSystemBrowser,
         session: resultHistory ? resultHistory.sessionActions : null,
       });
@@ -8979,6 +8991,144 @@ function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }
+
+// ── 그림에서 불러오기 · 모드 문(11-23) ─────────────────────────────────────────
+// 우클릭 '불러오기' 묶음 · History 창이 함께 쓴다. 메타를 받아 **모드 문**을 본 뒤 메타데이터 뷰어 단추와
+// 같은 함수로 넣는다. 다른 모드 · 모드 불명 그림은 막는다(사용자 지정 11-23 - ANIMA 와 외부 ComfyUI 도 다른 모드).
+let generationModeGate = null;
+const generationModeGateReady = import('./js/features/generationModeGate.mjs?v=20261123-loadgate')
+  .then(mod => { generationModeGate = mod; return mod; });
+// 지금 모드 - ANIMA 는 COMFYUI + 관리형 엔진이다(셀렉트 값은 둘 다 COMFYUI).
+function currentGenerationMode() {
+  const mode = String(currentMode || modeSelect?.value || '').toUpperCase();
+  return mode === 'COMFYUI' && isAnimaManagedMode() ? 'ANIMA' : mode;
+}
+function imageRefFromContext(context = {}) {
+  const path = context.path || '';
+  let metadataUrl = context.metadataUrl
+    || (path ? `/api/viewer/meta?path=${encodeURIComponent(path)}&full=1`
+      : (context.source === 'current' ? '/api/result/metadata' : ''));
+  // 자산 정보가 주는 메타 주소는 요약판이다(설정 · 캐릭터가 빠진다) - 메타데이터 탭처럼 전체판을 읽는다.
+  if (/^\/api\/history\/meta\/[^?]+$/.test(metadataUrl)) metadataUrl += '?full=1';
+  else if (metadataUrl.startsWith('/api/viewer/meta') && !/[?&]full=/.test(metadataUrl)) {
+    metadataUrl += (metadataUrl.includes('?') ? '&' : '?') + 'full=1';
+  }
+  return {metadataUrl, label: context.label || path || '', imageUrl: context.imageSrc || ''};
+}
+// 메뉴를 열 때 받은 메타를 누를 때 다시 쓴다 - 같은 그림을 두 번 받지 않게 잠깐만 쥔다.
+// 히스토리 id 주소만 쥔다 - '/api/result/metadata' 는 새 그림이 오면, 색인 행 주소는 색인 압축 때, 파일 경로 주소는
+// 파일을 갈아 끼우면 가리키는 것이 바뀐다(Codex 리뷰 2차 M9).
+const imageMetaCache = new Map();
+function fetchImageMeta(url) {
+  const cacheable = url.startsWith('/api/history/meta/');
+  const hit = cacheable ? imageMetaCache.get(url) : null;
+  if (hit && Date.now() - hit.at < 15000) return hit.promise;
+  const promise = fetch(url).then(async response => {
+    if (!response.ok) {
+      let message = `메타데이터를 읽지 못했습니다 (HTTP ${response.status})`;
+      try {
+        const body = await response.json();
+        if (body?.error || body?.detail) message = String(body.error || body.detail);
+      } catch (_) { /* 본문 없음 */ }
+      throw new Error(message);
+    }
+    return response.json();
+  });
+  if (cacheable) {
+    imageMetaCache.set(url, {at: Date.now(), promise});
+    promise.catch(() => imageMetaCache.delete(url));
+    if (imageMetaCache.size > 24) imageMetaCache.delete(imageMetaCache.keys().next().value);
+  }
+  return promise;
+}
+const METADATA_SETTING_KEYS = ['resolution', 'steps', 'cfg_scale', 'cfg_rescale', 'seed', 'sampler', 'scheduler', 'model',
+  'enable_hr', 'hr_scale', 'hr_upscaler', 'denoising_strength', 'hires_steps', 'hr_cfg', 'sm', 'sm_dyn', 'VAR+'];
+async function buildImageLoadPayload(ref) {
+  if (!ref?.metadataUrl) throw new Error('불러올 메타데이터가 없습니다.');
+  const [data, gate] = await Promise.all([fetchImageMeta(ref.metadataUrl), generationModeGateReady]);
+  await metadataViewerReady;
+  if (!metadataViewer?.actionPayloadFor) throw new Error('메타데이터 뷰어가 준비되지 않았습니다.');
+  const payload = metadataViewer.actionPayloadFor(data, {kind: 'url', url: ref.metadataUrl, label: ref.label, imageUrl: ref.imageUrl});
+  // 설정은 옛 '생성 설정 복원' 이 읽던 값(WEBUI hires 등)을 함께 싣는다 - 뷰어 표는 그 칸을 안 가진다.
+  const extra = resultImageActions?.buildMetadataActionPayload?.(data, {})?.params || {};
+  payload.params = {...payload.params, ...extra};
+  return {payload, block: gate.loadBlockReason(payload.generationMode, currentGenerationMode())};
+}
+function imageLoadHas(payload) {
+  const characters = (payload.characters || []).some(character => String(character ?? '').trim());
+  const params = payload.params || {};
+  return {
+    prompt: Boolean(payload.prompt || payload.negative),
+    settings: METADATA_SETTING_KEYS.some(key => params[key] !== undefined && params[key] !== null && params[key] !== ''),
+    characters,
+    char_settings: characters,
+    vibe: Boolean(payload.vibeTransfer?.reference_image_multiple?.length),
+  };
+}
+async function imageLoadState(ref) {
+  if (!ref?.metadataUrl) return null;
+  const {payload, block} = await buildImageLoadPayload(ref);
+  return {block, mode: payload.generationMode, has: imageLoadHas(payload)};
+}
+// `authored`: 사용자가 우클릭 '불러오기' 로 **골라서** 넣었다 - 옛 '프롬프트 불러오기'(onLoadPrompt)처럼 프리셋에도
+// 반영한다. History 창의 [프롬프트 넣기] 는 예전처럼 반영하지 않는다(applyMetadataPrompt 그대로).
+async function loadFromImage(ref, kind, {authored = false} = {}) {
+  let built;
+  try {
+    built = await buildImageLoadPayload(ref);
+  } catch (error) {
+    showToast(error?.message || '메타데이터를 읽지 못했습니다.', 'error');
+    return false;
+  }
+  // 누른 지금의 모드로 본 결과다(메뉴를 연 뒤 모드가 바뀌었어도).
+  const {payload, block} = built;
+  if (block) {
+    showToast(block, 'error');
+    return false;
+  }
+  switch (kind) {
+    case 'prompt':
+      if (!payload.prompt && !payload.negative) {
+        showToast('이 그림에는 프롬프트가 없습니다.', 'error');
+        return false;
+      }
+      // 세션 · Interactive · Draft 가 입력창을 가졌으면 칸의 글은 그쪽 것이다 - 표식 전송(promptTextForSave)은 칸이
+      // 아니라 맡아 둔 원문을 보내므로 메타데이터 탭처럼 applyMetadataPrompt 만 쓴다(Codex 리뷰 3차 M11).
+      const boxOwned = inpaintOwnsPromptBox() || promptBeforeInteractive !== null || Boolean(window.draftMode?.isActive?.());
+      if (!authored || boxOwned) {
+        applyMetadataPrompt(payload);
+        return true;
+      }
+      // 칸만 채우고(표식은 내려간다) 표식을 다시 세워 **지금 한 번** 보낸다(Codex 리뷰 11-23 M11 · 2차).
+      _metadataPromptSendHeld = true;
+      try { applyMetadataPrompt(payload); } finally { _metadataPromptSendHeld = false; }
+      if (payload.negative != null) markNegativeEdited();
+      onPromptAuthoredEdit();
+      firePendingPromptSend();
+      return true;
+    case 'settings':
+      return applyMetadataSettings(payload) > 0;
+    case 'characters':
+      await applyMetadataCharacters(payload, {withSettings: false});
+      return true;
+    case 'char_settings':
+      await applyMetadataCharacters(payload, {withSettings: true});
+      return true;
+    case 'vibe':
+      applyMetadataVibeTransfer(payload);
+      return true;
+    default:
+      return false;
+  }
+}
+// History 창 전체 범위 그림의 메타를 우측 메타데이터 탭에 띄운다.
+async function showImageMetadataInTab(ref) {
+  await metadataViewerReady;
+  if (!metadataViewer?.loadUrl || !ref?.metadataUrl) return false;
+  switchRightTab('pngInfo', {skipMetadataRefresh: true});
+  metadataViewer.loadUrl(ref.metadataUrl, ref.label, {imageUrl: ref.imageUrl});
+  return true;
+}
 
 // 결과 화면의 [Upscale] — 우클릭 메뉴의 'NAI 2x 업스케일' 과 **같은 경로**다
 // (`result_upscale` 커맨드). 자주 쓰는 것을 메뉴 두 단계 안쪽에 두지 않으려고
@@ -9272,12 +9422,22 @@ function bindMetadataImageDropTarget() {
 
 function applyMetadataPrompt(payload) {
   if (!payload) return;
+  // 인페인트 세션이 입력창을 가졌으면 프롬프트 · 네거티브 **둘 다** 세션으로 간다. 네거티브만 숨은 메인 칸에
+  // 쓰면 세션 네거티브는 옛 값으로 남아 다음 생성에 쓰인다(Codex 리뷰 11-23 H5).
+  const sessionOwns = inpaintOwnsPromptBox();
   if (promptEdit && payload.prompt != null) {
     promptEdit.value = payload.prompt || '';
     // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
     _promptUserDirty = false;
   }
-  if (negEdit && payload.negative != null) {
+  if (payload.negative != null && sessionOwns) {
+    const value = payload.negative || '';
+    const box = document.getElementById('sessionNegEdit');
+    if (box) box.value = value;
+    sessionNegSent = value;
+    sessionNegSentAt = Date.now();
+    setModuleParam('img2img', 'negative_prompt', value);
+  } else if (negEdit && payload.negative != null) {
     negEdit.value = payload.negative || '';
     syncNegativeMirror();
     // 이미지에서 불러온 값이지 사용자가 친 것이 아니다 - 프리셋에 넣지 않는다.
@@ -9295,7 +9455,7 @@ function applyMetadataPrompt(payload) {
   // 사용자의 진짜 프롬프트로 저장되거나 (b) 화면만 바뀌어 **유료 생성이 화면과
   // 달라진다**(Codex 리뷰 2026-08-29 HIGH 2).
   if (routePromptToOwner(promptEdit.value)) return;
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (!_metadataPromptSendHeld && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({
       type: 'set_prompt',
       prompt: promptEdit.value,
@@ -11230,6 +11390,7 @@ function paintComfyEngineOptions(noApi = false) {
     applyComfyUiFreeParamLock();
     if (!isExternalComfyMode()) comfyServerConsole?.hide?.();   // 관리형으로 바뀌었다 — 외부 서버 출력은 닫는다
     if (moduleBadges) moduleBadges.updateModeState();
+    metadataViewer?.refreshGate?.();   // ANIMA ↔ 외부 ComfyUI 는 다른 모드 - 불러오기 단추를 다시 본다(11-23)
   }
   return !other.disabled;   // 엔진을 바꿔 들어갈 칸이 열려 있다 — 연결된 모드가 없어도 셀렉트를 열어 둔다
 }
@@ -11342,6 +11503,8 @@ function syncMode(mode) {
   applyComfyUiFreeParamLock(mode);
   // 외부 ComfyUI 가 아니게 됐다 — 서버 출력 콘솔(실패로 남겨 둔 것 포함)을 닫는다
   if (!isExternalComfyMode()) comfyServerConsole?.hide?.();
+  // 메타데이터 탭의 불러오기 단추는 지금 모드에 매인다(11-23).
+  metadataViewer?.refreshGate?.();
   // Upscale 은 NAI 전용이라 모드가 바뀌면 다시 판정해야 한다(Director 는 모드 무관이라
   // 지금까지 이 자리에서 갱신할 이유가 없었다).
   updateNaiDirectorButton();

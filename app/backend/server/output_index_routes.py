@@ -22,6 +22,21 @@ class _Query(BaseModel):
     sort: Literal["mtime_desc", "mtime_asc"] = "mtime_desc"
     offset: Annotated[int, Field(ge=0)] = 0
     limit: Annotated[int, Field(ge=1, le=500)] = 100
+    dir_id: StrictInt | None = None
+
+
+class _Folders(BaseModel):
+    """Same filters as _Query; the page counts folders, not images."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    include: list[StrictStr] = Field(default_factory=list)
+    exclude: list[StrictStr] = Field(default_factory=list)
+    source: list[Literal["unknown", "NAI", "WEBUI", "ComfyUI", "COMFYUI", "NAIA"]] | None = None
+    roots: list[StrictInt] | None = None
+    text: str = ""
+    sort: Literal["mtime_desc", "mtime_asc"] = "mtime_desc"
+    offset: Annotated[int, Field(ge=0)] = 0
+    limit: Annotated[int, Field(ge=1, le=200)] = 40
+    samples: Annotated[int, Field(ge=1, le=12)] = 3
 
 
 def _forbidden():
@@ -126,6 +141,10 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
     @app.post("/api/output-index/query")
     async def query(body: _Query):
         return await run_in_thread(service().query, **body.model_dump())
+
+    @app.post("/api/output-index/folders")
+    async def folders(body: _Folders):
+        return await run_in_thread(service().folders, **body.model_dump())
 
     @app.get("/api/output-index/suggest")
     async def suggest(q: str = "", limit: int = Query(20, ge=1, le=500),

@@ -38,6 +38,7 @@ class IndexBits:
         self._mtime = np.empty(0, np.int64)
         self._source = np.empty(0, np.uint8)
         self._root = np.empty(0, np.int64)
+        self._dir = np.empty(0, np.int64)
         self._flags = {flag: np.empty(0, np.uint8) for flag in _FLAGS}
         self.dense: dict[str, np.ndarray] = {}
         self.sparse: dict[str, np.ndarray] = {}
@@ -56,6 +57,10 @@ class IndexBits:
         return self._root[:self.n_rows]
 
     @property
+    def dir(self) -> np.ndarray:
+        return self._dir[:self.n_rows]
+
+    @property
     def exist(self) -> np.ndarray:
         return self._flags[EXIST][:(self.n_rows + 7) // 8]
 
@@ -66,6 +71,7 @@ class IndexBits:
         self._mtime = _grow(self._mtime, capacity)
         self._source = _grow(self._source, capacity)
         self._root = _grow(self._root, capacity)
+        self._dir = _grow(self._dir, capacity)
         self._flags = {f: _grow(bits, (capacity + 7) // 8) for f, bits in self._flags.items()}
 
     def _extend(self, rows: Iterable[dict], building: bool) -> None:
@@ -76,6 +82,7 @@ class IndexBits:
                 raise ValueError("expected consecutive row numbers")
             self._reserve(i + 1)
             self._mtime[i], self._source[i], self._root[i] = item["mtime_ns"], item["source"], item["root_id"] or 0
+            self._dir[i] = item.get("dir_id") or 0
             for flag in _FLAGS:
                 if item["flags"] & flag:
                     self._flags[flag][i >> 3] |= 1 << (i & 7)
@@ -189,23 +196,56 @@ class IndexBits:
         order = np.lexsort((rows[selected], keys[selected]))
         return rows[selected[order]].tolist()
 
-    def query(self, include: Iterable[str] = (), exclude: Iterable[str] = (),
-              sources: list[int] | None = None, roots: list[int] | None = None,
-              hidden_roots: set[int] | None = None, sort: Literal["mtime_desc", "mtime_asc"] = "mtime_desc",
-              offset: int = 0, limit: int = 100) -> dict:
-        if sort not in ("mtime_asc", "mtime_desc") or offset < 0 or limit < 0:
-            raise ValueError("invalid sort or page")
+    def select(self, include: Iterable[str] = (), exclude: Iterable[str] = (),
+               sources: list[int] | None = None, roots: list[int] | None = None,
+               hidden_roots: set[int] | None = None, dirs: list[int] | None = None) -> tuple:
+        """(mask, top matched tags, matched tag total) - query and folders share one condition."""
         live = self._visible(hidden_roots)
         mask, names = self._condition(include, exclude, live)
         counts = self._counts(names, live)
         matched = [t for t in names if counts[t]]
         top = nsmallest(100, matched, key=lambda t: (-counts[t], t))
-        for values, allowed in ((self.source, sources), (self.root, roots)):
+        for values, allowed in ((self.source, sources), (self.root, roots), (self.dir, dirs)):
             if allowed is not None:
                 keep = np.isin(values, allowed)
                 mask &= np.packbits(keep, bitorder="little")
+        return mask, top, len(matched)
+
+    def rows_of(self, mask: np.ndarray) -> np.ndarray:
+        return np.flatnonzero(np.unpackbits(mask, count=self.n_rows, bitorder="little"))
+
+    def query(self, include: Iterable[str] = (), exclude: Iterable[str] = (),
+              sources: list[int] | None = None, roots: list[int] | None = None,
+              hidden_roots: set[int] | None = None, sort: Literal["mtime_desc", "mtime_asc"] = "mtime_desc",
+              offset: int = 0, limit: int = 100, dirs: list[int] | None = None) -> dict:
+        if sort not in ("mtime_asc", "mtime_desc") or offset < 0 or limit < 0:
+            raise ValueError("invalid sort or page")
+        mask, top, total = self.select(include, exclude, sources, roots, hidden_roots, dirs)
         return {"count": _pop(mask), "rows": self._page(mask, sort == "mtime_desc", offset, limit),
-                "matched": top, "matched_total": len(matched)}
+                "matched": top, "matched_total": total}
+
+    def group(self, rows, desc: bool = True, offset: int = 0, limit: int = 40,
+              samples: int = 3) -> tuple[int, list[tuple[int, int, list[int]]]]:
+        """Group rows by folder: (folder count, [(dir_id, rows in folder, first `samples` rows)]).
+
+        Folders are ordered by their best row in the sort direction (newest first for desc),
+        and so are the samples inside a folder - the same order the flat list would show.
+        """
+        if offset < 0 or limit < 0 or samples < 0:
+            raise ValueError("invalid page")
+        rows = np.asarray(rows, dtype=np.int64)
+        if not rows.size:
+            return 0, []
+        dirs = self.dir[rows]
+        # Complement rather than negate: also works for the minimum int64.
+        keys = ~self.mtime[rows] if desc else self.mtime[rows]
+        order = np.lexsort((rows, keys, dirs))
+        rows, dirs, keys = rows[order], dirs[order], keys[order]
+        starts = np.flatnonzero(np.r_[True, dirs[1:] != dirs[:-1]])
+        sizes = np.diff(np.r_[starts, rows.size])
+        folders = np.lexsort((dirs[starts], keys[starts]))[offset:offset + limit]
+        return int(starts.size), [(int(dirs[starts[g]]), int(sizes[g]),
+                                   rows[starts[g]:starts[g] + min(samples, int(sizes[g]))].tolist()) for g in folders]
 
     def suggest(self, q: str, limit: int = 20, include: Iterable[str] = (),
                 exclude: Iterable[str] = (), hidden_roots: set[int] | None = None) -> list[tuple[str, int, int]]:

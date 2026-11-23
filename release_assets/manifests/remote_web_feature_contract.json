@@ -83,6 +83,7 @@
         {"method": "POST", "path": "/api/output-index/roots", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/output-index/rescan", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/output-index/query", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/output-index/folders", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/output-index/suggest", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/output-index/file", "smoke": "non_destructive"},
         {"method": "GET", "path": "/api/output-index/thumb", "smoke": "non_destructive"},

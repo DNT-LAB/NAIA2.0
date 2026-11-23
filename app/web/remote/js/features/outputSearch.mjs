@@ -16,7 +16,12 @@ const HISTORY = '/api/history';
 const PAGE = 80;
 const PREFS_KEY = 'naia.outputSearch.prefs';
 const DELETE_MODE_KEY = 'naia_result_delete_mode';     // 레일 · 뷰어 설정과 같은 키(한 벌)
-const SOURCES = ['NAI', 'WEBUI', 'ComfyUI', 'NAIA', 'unknown'];
+// 칩은 셋만 둔다(사용자 11-23: NAIA · unknown 은 보통 필요 없는 이름). 셋이 다 켜져 있으면 거르지 않는다 -
+// 그래서 NAIA 표식 · 메타 없는 그림도 그때는 그대로 나온다. 하나라도 끄면 켠 것만.
+const SOURCES = ['NAI', 'WEBUI', 'ComfyUI'];
+// 폴더별 보기(전체) = 폴더 카드 - 한 줄에 2개 · 카드마다 견본 3장 · 더보기로 그 폴더만 펼친다(사용자 11-23).
+const FOLDER_PAGE = 30;
+const FOLDER_SAMPLES = 3;
 const SIZES = {s: {tile: 96, thumb: 192}, m: {tile: 136, thumb: 256}, l: {tile: 190, thumb: 384}};
 // 크게 보기는 앱의 떠 있는 창(10150)보다 위, 확인 창(11000)보다 아래 - 크게 보며 지울 때 확인 창이 가려지지 않게.
 const LIGHTBOX_Z = 10500;
@@ -96,6 +101,27 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-note {font-size:10.5px;color:var(--text-dim,#9ea0b4)}
 .osr-empty {padding:24px 10px;text-align:center;color:var(--text-dim,#9ea0b4)}
 .osr.narrow .osr-right {display:none}
+.osr-cards {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}
+.osr.narrow .osr-cards {grid-template-columns:minmax(0,1fr)}
+.osr-card {border:1px solid var(--border-dim,#2a2a3d);border-radius:5px;padding:5px;background:var(--bg-surface,#12121a)}
+.osr-card-h {display:flex;align-items:baseline;gap:6px;padding:1px 2px 5px}
+.osr-card-t {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;font-size:12.5px}
+.osr-card-t:hover {color:var(--accent-glow,#9d8bff)}
+.osr-card-g {display:grid;grid-template-columns:repeat(${FOLDER_SAMPLES},minmax(0,1fr)) 58px;gap:3px}
+.osr .osr-card-more {display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0;
+  border:1px dashed var(--border-glow,#3d3d5c);color:var(--accent-glow,#9d8bff);font-size:11px;line-height:1.35;white-space:normal}
+.osr-drill {display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border-dim,#2a2a3d)}
+.osr-drill b {font-weight:500}
+/* 스크롤 막대는 흰색으로 - 어두운 판에서 안 보였다(사용자 11-23). scrollbar-color 를 주면 크로미움이 아래를 버린다. */
+.osr-list::-webkit-scrollbar {width:12px;height:12px}
+.osr-right::-webkit-scrollbar, .osr-prompt::-webkit-scrollbar, .osr-sug::-webkit-scrollbar {width:8px}
+.osr-list::-webkit-scrollbar-track, .osr-right::-webkit-scrollbar-track,
+.osr-prompt::-webkit-scrollbar-track, .osr-sug::-webkit-scrollbar-track {background:rgba(255,255,255,.06)}
+.osr-list::-webkit-scrollbar-thumb, .osr-right::-webkit-scrollbar-thumb,
+.osr-prompt::-webkit-scrollbar-thumb, .osr-sug::-webkit-scrollbar-thumb {
+  background:rgba(255,255,255,.82);border-radius:6px;border:2px solid transparent;background-clip:padding-box;min-height:40px}
+.osr-list::-webkit-scrollbar-thumb:hover, .osr-right::-webkit-scrollbar-thumb:hover,
+.osr-prompt::-webkit-scrollbar-thumb:hover, .osr-sug::-webkit-scrollbar-thumb:hover {background-color:#fff}
 `;
 
 function esc(value) {
@@ -114,6 +140,22 @@ function folderOf(path) {
 function nameOf(path) {
   const i = String(path || '').lastIndexOf('/');
   return i < 0 ? String(path || '') : path.slice(i + 1);
+}
+
+/** 폴더 경로를 읽기 쉽게 - 20261121_203645 -> 2026-11-21 20:36 · 20261121 -> 2026-11-21. 다른 이름은 그대로. */
+export function folderLabel(rel) {
+  if (!rel) return '(뿌리)';
+  return String(rel).split('/').map(seg => {
+    let m = /^(\d{4})(\d{2})(\d{2})[_-](\d{2})(\d{2})(\d{2})?$/.exec(seg);
+    if (m) return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}`;
+    m = /^(\d{4})(\d{2})(\d{2})$/.exec(seg);
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : seg;
+  }).join(' / ');
+}
+
+function rootLabel(r) {
+  return r.kind === 'save' ? '저장 폴더' : r.kind === 'quicksave' ? '빠른 저장'
+    : nameOf(String(r.path || '').replace(/\\/g, '/')) || `폴더 ${r.id}`;
 }
 
 function readPrefs(storage) {
@@ -208,6 +250,10 @@ export function createOutputSearch({
     sel: new Set(), anchor: -1, current: null,
     partial: false, rows: 0,
     textMode: false,
+    // 폴더 카드(전체 · 폴더별): 받은 폴더 차례 · 폴더 정보 · 그린 카드 수. 견본 그림은 items 에 들고 item.dir 로 잇는다.
+    folderOrder: [], folderInfo: new Map(), folderCount: 0, cardsDrawn: 0,
+    dir: null,            // 더보기로 펼친 폴더 {id, rel, root, count} - 있으면 그 폴더만 한 줄로
+    ovCache: null,        // 펼치기 전 카드 목록 - 돌아갈 때 받은 자리 그대로
   };
   for (const tag of initial.include || []) st.chips.push(parseChip(tag, false));
   for (const tag of initial.exclude || []) st.chips.push(parseChip(tag, true));
@@ -268,6 +314,7 @@ export function createOutputSearch({
           <button type="button" data-act="seldelete" class="danger" title="고른 그림 삭제 (Del)">삭제</button>
           <button type="button" data-act="selclear" title="선택 해제 (Esc)">해제</button>
         </div>
+        <div class="osr-drill" data-drill hidden></div>
         <div class="osr-list" data-list tabindex="0"></div>
       </div>
       <div class="osr-right" data-detail></div>
@@ -276,6 +323,8 @@ export function createOutputSearch({
   const input = $('[data-input]');
   const list = $('[data-list]');
   const isSession = () => st.scope === 'session';
+  // 폴더 카드 판 - 전체 범위 · 폴더별 · 펼친 폴더 없음.
+  const overview = () => !isSession() && prefs.view === 'folder' && !st.dir;
 
   // ── 요청 ──────────────────────────────────────────────────────────────────
   async function req(url, body) {
@@ -325,6 +374,7 @@ export function createOutputSearch({
     if (scope === st.scope) return;
     st.scope = scope === 'all' ? 'all' : 'session';
     st.pendingNew = 0;
+    st.dir = null;
     lightbox.close();
     drawScope();
     drawPrefs();
@@ -395,10 +445,10 @@ export function createOutputSearch({
   // ── 거르개 줄 ─────────────────────────────────────────────────────────────
   function drawSources() {
     $('[data-sources]').innerHTML = SOURCES.map(s =>
-      `<button type="button" data-src="${s}" class="${st.sources.has(s) ? 'on' : 'off'}" title="${s === 'unknown' ? '메타 없음 · 스텔스' : s}">${s}</button>`).join(' ');
+      `<button type="button" data-src="${s}" class="${st.sources.has(s) ? 'on' : 'off'}" title="${s}">${s}</button>`).join(' ');
   }
   function drawRoots() {
-    const label = r => r.kind === 'save' ? '저장 폴더' : r.kind === 'quicksave' ? '빠른 저장' : nameOf(String(r.path || '').replace(/\\/g, '/')) || `폴더 ${r.id}`;
+    const label = rootLabel;
     $('[data-roots]').innerHTML = st.allRoots.filter(r => !r.shadowed).map(r => {
       if (r.unreachable) return `<button type="button" class="warn" title="연결 안 됨${r.path ? ' · ' + esc(r.path) : ''}">${esc(label(r))} ⚠</button>`;
       if (!r.enabled) return '';
@@ -416,7 +466,7 @@ export function createOutputSearch({
         ? ` · <span class="osr-link" data-act="refreshq" title="다시 찾기">새 그림 ${fmt(st.pendingNew)} ↻</span>` : '');
       node.title = '이번 실행에 만든 그림';
     } else {
-      let text = `${fmt(st.count)}장`;
+      let text = overview() ? `폴더 ${fmt(st.folderCount)} · ${fmt(st.count)}장` : `${fmt(st.count)}장`;
       if (st.partial) text += ` · 색인 중 ${fmt(st.rows)}`;
       node.textContent = text;
       node.title = st.matchedTotal ? `부분 일치로 펼친 태그 ${st.matchedTotal}개: ${st.matched.slice(0, 30).join(', ')}` : `${fmt(st.items.length)}장 불러옴`;
@@ -428,6 +478,15 @@ export function createOutputSearch({
     $('[data-act="view"]').textContent = prefs.view === 'flat' ? '한 줄' : '폴더별';
     host.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', b.dataset.size === prefs.size));
     host.style.setProperty('--osr-tile', `${SIZES[prefs.size].tile}px`);
+    drawDrill();
+  }
+  function drawDrill() {
+    const bar = $('[data-drill]');
+    const d = !isSession() && st.dir;
+    bar.hidden = !d;
+    if (!d) { bar.innerHTML = ''; return; }
+    bar.innerHTML = `<button type="button" data-act="folders-back" title="폴더 목록으로">‹ 폴더 목록</button>`
+      + `<b title="${esc(d.rel || '(뿌리)')}">${esc(folderLabel(d.rel))}</b><span class="osr-dim">${fmt(d.count)}장</span>`;
   }
   function savePrefs() {
     try { storage?.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (_) { /* 기억 못 해도 화면은 된다 */ }
@@ -441,10 +500,54 @@ export function createOutputSearch({
     if (isSession()) return body;
     if (st.sources.size !== SOURCES.length) body.source = [...st.sources];
     if (st.roots) body.roots = [...st.roots];
+    if (overview()) {
+      delete body.limit;
+      body.offset = st.folderOrder.length;
+      body.limit = FOLDER_PAGE;
+      body.samples = FOLDER_SAMPLES;
+    } else if (st.dir) body.dir_id = st.dir.id;
     return body;
   }
-  async function runQuery() {
+  function resetFolders() {
+    st.folderOrder = []; st.folderInfo = new Map(); st.folderCount = 0; st.cardsDrawn = 0;
+  }
+  // 펼친 폴더 · 돌아가기 - 카드 목록은 받은 그대로 두었다가 되살린다(다시 받으면 내려가 있던 자리를 잃는다).
+  function openFolder(id) {
+    const info = st.folderInfo.get(id);
+    if (!info || !overview()) return;
+    st.ovCache = {items: st.items, folderOrder: st.folderOrder, folderInfo: st.folderInfo, folderCount: st.folderCount,
+      count: st.count, done: st.done, matched: st.matched, matchedTotal: st.matchedTotal,
+      scroll: list.scrollTop, current: st.current};
+    st.dir = {...info};
+    lightbox.close();
+    drawDrill();
+    runQuery({keepCache: true});
+  }
+  function closeFolder() {
+    if (!st.dir) return;
+    const cache = st.ovCache;
+    st.dir = null;
+    st.ovCache = null;
+    drawDrill();
+    if (!cache || prefs.view !== 'folder') { runQuery(); return; }
+    st.seq += 1;
+    lightbox.close();
+    Object.assign(st, {items: cache.items, folderOrder: cache.folderOrder, folderInfo: cache.folderInfo,
+      folderCount: cache.folderCount, count: cache.count, done: cache.done, matched: cache.matched,
+      matchedTotal: cache.matchedTotal, loading: false, cardsDrawn: 0});
+    st.sel.clear(); st.anchor = -1; st.current = null;
+    list.innerHTML = '';
+    appendTiles(0);
+    list.scrollTop = cache.scroll;
+    if (st.items[cache.current]) select(cache.current, {});
+    else { drawSel(); drawDetail(); }
+    drawCount();
+    list.focus({preventScroll: true});
+  }
+  async function runQuery({keepCache = false} = {}) {
     const seq = ++st.seq;
+    if (!keepCache) st.ovCache = null;
+    resetFolders();
     st.items = []; st.done = false; st.loading = false;
     st.sel.clear(); st.anchor = -1; st.current = null;
     st.pendingNew = 0;
@@ -460,9 +563,23 @@ export function createOutputSearch({
     drawTail();
     try {
       const session = isSession();
-      const data = await req(session ? `${HISTORY}/query` : `${API}/query`, queryBody(st.items.length));
+      const cards = overview();
+      const data = await req(session ? `${HISTORY}/query` : cards ? `${API}/folders` : `${API}/query`,
+        queryBody(st.items.length));
       if (seq !== st.seq) return;
-      const items = (data.items || []).map(session ? normSession : normAll);
+      let items;
+      if (cards) {
+        items = [];
+        const folders = data.folders || [];
+        for (const f of folders) {
+          if (st.folderInfo.has(f.dir_id)) continue;
+          st.folderInfo.set(f.dir_id, {id: f.dir_id, rel: f.rel || '', root: f.root_id, count: f.count || 0});
+          st.folderOrder.push(f.dir_id);
+          for (const r of f.items || []) items.push({...normAll(r), dir: f.dir_id});
+        }
+        st.folderCount = data.folder_count || 0;
+        st.done = !folders.length || st.folderOrder.length >= st.folderCount;
+      } else items = (data.items || []).map(session ? normSession : normAll);
       st.count = data.count || 0;
       st.matched = data.matched || [];
       st.matchedTotal = data.matched_total || 0;
@@ -471,7 +588,7 @@ export function createOutputSearch({
       const start = st.items.length;
       // 이번 세션은 새 그림이 앞에 붙으며 쪽이 밀린다 - 이미 받은 것은 다시 넣지 않는다.
       st.items.push(...items.filter(it => !known.has(it.key)));
-      st.done = items.length < PAGE || st.items.length >= st.count;
+      if (!cards) st.done = items.length < PAGE || st.items.length >= st.count;
       appendTiles(start);
       if (st.current == null && st.items.length) select(0, {});
       if (!st.items.length) drawDetail();
@@ -502,7 +619,37 @@ export function createOutputSearch({
       + `${isSession() && !item.saved ? '<span class="osr-badge">미저장</span>' : ''}`
       + `${st.sel.has(index) && st.sel.size > 1 ? '<span class="osr-tick">✓</span>' : ''}</div>`;
   }
+  function card(id, indices) {
+    const info = st.folderInfo.get(id);
+    const roots = st.allRoots.filter(r => r.enabled && !r.shadowed);
+    const root = roots.length > 1 ? roots.find(r => r.id === info.root) : null;
+    const rest = info.count - indices.length;
+    const more = rest > 0
+      ? `<button type="button" class="osr-card-more" data-open-dir="${id}" title="이 폴더 ${fmt(info.count)}장 모두 보기">+${fmt(rest)}<span>더보기</span></button>`
+      : '';
+    return `<div class="osr-card" data-dir="${id}"><div class="osr-card-h">`
+      + `<span class="osr-card-t" data-open-dir="${id}" title="${esc(info.rel || '(뿌리)')} · 펼치기">${esc(folderLabel(info.rel))}</span>`
+      + `${root ? `<span class="osr-dim">${esc(rootLabel(root))}</span>` : ''}<span class="osr-dim">${fmt(info.count)}장</span></div>`
+      + `<div class="osr-card-g">${indices.map(i => tile(st.items[i], i)).join('')}${more}</div></div>`;
+  }
+  function appendCards() {
+    let box = list.querySelector('.osr-cards');
+    if (!box) {
+      list.insertAdjacentHTML('afterbegin', '<div class="osr-cards"></div>');
+      box = list.querySelector('.osr-cards');
+    }
+    const byDir = new Map();
+    st.items.forEach((it, i) => {
+      if (!byDir.has(it.dir)) byDir.set(it.dir, []);
+      byDir.get(it.dir).push(i);
+    });
+    const fresh = st.folderOrder.slice(st.cardsDrawn);
+    box.insertAdjacentHTML('beforeend', fresh.map(id => card(id, byDir.get(id) || [])).join(''));
+    st.cardsDrawn = st.folderOrder.length;
+    drawTail();
+  }
   function appendTiles(start) {
+    if (overview()) { appendCards(); return; }
     const html = [];
     let grid = list.lastElementChild?.matches?.('.osr-group') ? list.lastElementChild : null;
     if (!grid) grid = [...list.querySelectorAll('.osr-group')].pop() || null;
@@ -515,7 +662,7 @@ export function createOutputSearch({
       chunk = [];
     };
     // 이번 세션은 늘 한 줄이다 - 저장 안 된 그림은 폴더가 없고, 저장 폴더가 섞여 묶음이 잘게 쪼개진다.
-    if (prefs.view === 'flat' || isSession()) {
+    if (prefs.view === 'flat' || isSession() || st.dir) {
       if (!grid) {
         list.insertAdjacentHTML('afterbegin', '<div class="osr-group" data-folder=""><div class="osr-grid"></div></div>');
         grid = list.querySelector('.osr-group');
@@ -547,6 +694,7 @@ export function createOutputSearch({
   function rebuild() {
     const top = list.scrollTop;
     list.innerHTML = '';
+    st.cardsDrawn = 0;
     appendTiles(0);
     list.scrollTop = top;
   }
@@ -563,7 +711,8 @@ export function createOutputSearch({
       tail.textContent = isSession()
         ? (st.chips.length ? '맞는 그림이 없습니다.' : '이번 실행에 만든 그림이 아직 없습니다.')
         : (st.partial ? '아직 색인하는 중입니다.' : '맞는 그림이 없습니다.');
-    } else tail.textContent = st.done ? `${fmt(st.items.length)}장` : '';
+    } else if (overview()) tail.textContent = st.done ? `폴더 ${fmt(st.folderOrder.length)}개` : '';
+    else tail.textContent = st.done ? `${fmt(st.items.length)}장` : '';
   }
   list.addEventListener('scroll', () => {
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 400) loadMore();
@@ -828,9 +977,19 @@ export function createOutputSearch({
     const before = st.items.length;
     const selKeys = new Set([...st.sel].map(i => st.items[i]?.key).filter(Boolean));
     const goneUnsaved = isSession() ? st.items.filter(it => keys.has(it.key) && !it.saved).length : 0;
+    for (const it of st.items) {
+      if (!keys.has(it.key)) continue;
+      const info = it.dir != null ? st.folderInfo.get(it.dir) : null;
+      if (info) info.count = Math.max(0, info.count - 1);
+    }
     st.items = st.items.filter(it => !keys.has(it.key));
     const gone = before - st.items.length;
     if (!gone) return;
+    if (st.dir) {
+      st.dir.count = Math.max(0, st.dir.count - gone);
+      st.ovCache = null;      // 돌아갈 때 카드 장수 · 견본을 서버에서 새로 받는다
+      drawDrill();
+    }
     if (goneUnsaved) st.unsaved = Math.max(0, st.unsaved - goneUnsaved);
     st.count = Math.max(0, st.count - gone);
     // 범위 단추의 장수도 함께 줄인다 - 전체에서 지운 것은 파일째 휴지통으로 갔다.
@@ -902,7 +1061,7 @@ export function createOutputSearch({
       footer: true,
       zIndex: LIGHTBOX_Z,
       rowStep: gridColumns,
-      total: () => st.count,
+      total: () => (overview() ? st.items.length : st.count),
       loadMore: async () => {
         await loadMore();
         lightbox.setItems(lbItems(), st.items[lightbox.current()]?.key);
@@ -985,6 +1144,8 @@ export function createOutputSearch({
     }
     const size = t.closest('[data-size]')?.dataset.size;
     if (size) { prefs.size = size; savePrefs(); drawPrefs(); runQuery(); return; }
+    const openDir = t.closest('[data-open-dir]')?.dataset.openDir;
+    if (openDir != null) { openFolder(Number(openDir)); return; }
     const th = t.closest('.osr-th');
     if (th) {
       select(Number(th.dataset.i), {ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey});
@@ -996,7 +1157,8 @@ export function createOutputSearch({
     switch (act) {
       case 'text': st.textMode = !st.textMode; drawChips(); closeSug(); input.focus(); break;
       case 'sort': prefs.sort = prefs.sort === 'mtime_asc' ? 'mtime_desc' : 'mtime_asc'; savePrefs(); drawPrefs(); runQuery(); break;
-      case 'view': prefs.view = prefs.view === 'flat' ? 'folder' : 'flat'; savePrefs(); drawPrefs(); runQuery(); break;
+      case 'view': prefs.view = prefs.view === 'flat' ? 'folder' : 'flat'; st.dir = null; savePrefs(); drawPrefs(); runQuery(); break;
+      case 'folders-back': closeFolder(); break;
       case 'refreshq': runQuery(); break;
       case 'addroot': $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
       case 'addroot-cancel': $('[data-addroot-row]').hidden = true; break;
@@ -1100,8 +1262,20 @@ export function createOutputSearch({
       repaintAll(); drawSel();
       return;
     }
-    const cols = gridColumns();
     const at = st.current ?? -1;
+    if (overview() && (key === 'ArrowDown' || key === 'ArrowUp')) {
+      own();
+      const order = st.folderOrder;
+      const here = order.indexOf(st.items[at]?.dir);
+      const step = key === 'ArrowDown' ? 2 : -2;       // 카드가 한 줄에 둘 - 위아래는 한 줄
+      const narrow = host.classList.contains('narrow');
+      const target = order[Math.max(0, Math.min(order.length - 1, here + (narrow ? step / 2 : step)))];
+      const next = st.items.findIndex(it => it.dir === target);
+      if (next >= 0) moveTo(next, event.shiftKey);
+      else if (key === 'ArrowDown') loadMore();
+      return;
+    }
+    const cols = gridColumns();
     if (key === 'ArrowRight') { own(); moveTo(at + 1, event.shiftKey); return; }
     if (key === 'ArrowLeft') { own(); moveTo(Math.max(0, at - 1), event.shiftKey); return; }
     // 위아래는 한 줄(열 수만큼) - 덜 찬 마지막 줄에서는 끝 그림에 붙는다.

@@ -516,13 +516,14 @@ class OutputIndexService:
                 "source": _SOURCES[r["source"]], "seed": r["seed"], "prompt": r["prompt"][:300]}
 
     def query(self, *, include=(), exclude=(), source=None, roots=None, sort="mtime_desc",
-              offset=0, limit=100, text=""):
+              offset=0, limit=100, text="", dir_id=None):
         sources = None if source is None else [_SOURCE_IDS[s.upper()] for s in source]
+        dirs = None if dir_id is None else [dir_id]
         with self._reader() as reader:
             if reader is None:
                 return {**self._progress(), "count": 0, "items": [], "matched": [], "matched_total": 0}
             result = self._bits.query(include, exclude, sources, roots, self._hidden(), sort,
-                                      0 if text else offset, self._bits.n_rows if text else limit)
+                                      0 if text else offset, self._bits.n_rows if text else limit, dirs)
             rows = result.pop("rows")
             if text:
                 items, count = [], 0
@@ -537,6 +538,37 @@ class OutputIndexService:
             else:
                 items = [self._item(r) for r in reader.fetch(rows)]
             return {**result, "items": items, **self._progress()}
+
+    def folders(self, *, include=(), exclude=(), source=None, roots=None, sort="mtime_desc",
+                offset=0, limit=40, text="", samples=3):
+        """Folder overview: one entry per folder with its size and first `samples` images."""
+        sources = None if source is None else [_SOURCE_IDS[s.upper()] for s in source]
+        with self._reader() as reader:
+            if reader is None:
+                return {**self._progress(), "count": 0, "folder_count": 0, "folders": [],
+                        "matched": [], "matched_total": 0}
+            mask, top, total = self._bits.select(include, exclude, sources, roots, self._hidden())
+            rows = self._bits.rows_of(mask)
+            if text:
+                needle, keep = text.casefold(), []
+                for start in range(0, len(rows), 500):
+                    for r in reader.fetch(rows[start:start+500].tolist()):
+                        if any(needle in s.casefold() for s in (r["prompt"], r["negative"], *r["chars"])):
+                            keep.append(r["row"])
+                rows = keep
+            folder_count, groups = self._bits.group(rows, sort == "mtime_desc", offset, limit, samples)
+            fetched = {r["row"]: r for r in reader.fetch([row for _, _, picked in groups for row in picked])}
+            folders = []
+            for dir_id, size, picked in groups:
+                lines = [fetched[row] for row in picked if row in fetched]
+                rel = Path(lines[0]["rel"]) if lines else Path()
+                # A malformed cache row must not disclose an absolute host path.
+                safe = rel.as_posix() if not rel.anchor and ".." not in rel.parts else ""
+                folders.append({"dir_id": dir_id, "root_id": lines[0]["root_id"] if lines else None,
+                                "rel": "" if safe == "." else safe, "count": size,
+                                "items": [self._item(r) for r in lines]})
+            return {"count": len(rows), "folder_count": folder_count, "folders": folders,
+                    "matched": top, "matched_total": total, **self._progress()}
 
     def suggest(self, q, limit=20, include=(), exclude=()):
         with self._lock:

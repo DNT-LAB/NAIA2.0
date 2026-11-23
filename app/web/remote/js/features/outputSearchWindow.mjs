@@ -3,7 +3,7 @@
 // 진입로는 히스토리 칸 머리의 ↗ 하나다. 범위 [이번 세션 | 전체] 는 본문 첫 줄에 있다.
 // 떠 있는 창(draggablePanel) - 다른 창과 같은 URL(?v=)로 불러온다(다르면 창끼리 겹침 순서가 깨진다).
 import {createDraggablePanel} from './draggablePanel.mjs?v=20260926-childalign';
-import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './outputSearch.mjs?v=20261122-b';
+import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './outputSearch.mjs?v=20261123-fold';
 
 const STYLE = `
 .dragpanel.output-search-win .dragpanel-body {padding:0;gap:0;overflow:hidden;display:flex;flex-direction:column}

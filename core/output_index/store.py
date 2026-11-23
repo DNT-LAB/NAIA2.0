@@ -199,7 +199,7 @@ class IndexStore:
         for tag_id, tag in self._db.execute("SELECT id,tag FROM vocab WHERE id>? ORDER BY id", (self._last_tag,)):
             self._vocab[tag_id] = tag
             self._last_tag = tag_id
-        for r in self._db.execute("SELECT row,flags,source,mtime_ns,root_id,tags FROM files "
+        for r in self._db.execute("SELECT row,flags,source,mtime_ns,root_id,dir_id,tags FROM files "
                                   "LEFT JOIN dirs ON dirs.id=files.dir_id WHERE row>=? ORDER BY row", (start,)):
             yield {**r, "tags": _decode_tags(r["tags"], self._vocab)}
 

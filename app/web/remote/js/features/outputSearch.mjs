@@ -156,6 +156,25 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-card-g {display:grid;grid-template-columns:repeat(${FOLDER_SAMPLES},minmax(0,1fr)) 58px;gap:3px}
 .osr .osr-card-more {display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0;
   border:1px dashed var(--border-glow,#3d3d5c);color:var(--accent-glow,#9d8bff);font-size:11px;line-height:1.35;white-space:normal}
+/* 보기 · 정렬 · 크기 토글 - 고른 쪽은 꽉 찬 보라(옅은 .on 과 구별 · 사용자 11-23: 폴더 -> 전체 전환이 안 보였다). */
+.osr-lab2 {flex:none;font-size:11px;color:var(--text-dim,#9ea0b4)}
+.osr .osr-tog button {color:var(--text-dim,#9ea0b4)}
+.osr .osr-tog button.on {color:#fff;background:var(--accent,#7c6aef);border-color:var(--accent,#7c6aef);position:relative;z-index:1}
+.osr .osr-tog button:not(.on):hover {color:var(--text-primary,#e8e8f0)}
+.osr-mk {opacity:.7;margin-right:1px}
+.osr-roots-pop {position:absolute;z-index:20;min-width:280px;max-width:min(460px,92%);padding:4px 0;background:var(--bg-card,#1a1a26);
+  border:1px solid var(--border-glow,#3d3d5c);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.osr-roots-pop .osr-rr {display:flex;align-items:center;gap:8px;padding:5px 12px;cursor:pointer;white-space:nowrap}
+.osr-roots-pop .osr-rr:hover {background:rgba(124,106,239,.22)}
+.osr-roots-pop .osr-rr.dis {cursor:default;opacity:.6}
+.osr-roots-pop .osr-rr.dis:hover {background:none}
+.osr-roots-pop .osr-ck {width:14px;height:14px;flex:none;border:1px solid var(--border-glow,#3d3d5c);border-radius:3px;
+  font-size:10px;line-height:12px;text-align:center}
+.osr-roots-pop .osr-rr.on .osr-ck {background:var(--accent,#7c6aef);border-color:var(--accent,#7c6aef);color:#fff}
+.osr-roots-pop small {margin-left:auto;padding-left:12px;max-width:240px;overflow:hidden;text-overflow:ellipsis;
+  color:var(--text-dim,#9ea0b4);font-size:11px}
+.osr-roots-pop .osr-rnote {padding:3px 12px 5px;font-size:11px;color:var(--text-dim,#9ea0b4);white-space:normal}
+.osr-roots-pop .osr-radd {border-top:1px solid var(--border-dim,#2a2a3d);margin-top:3px;color:var(--accent-glow,#9d8bff)}
 .osr-drill {display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border-dim,#2a2a3d);
   background:rgba(124,106,239,.08)}
 .osr-drill b {font-weight:500}
@@ -209,7 +228,7 @@ export function folderLabel(rel) {
 }
 
 function rootLabel(r) {
-  return r.kind === 'save' ? '저장 폴더' : r.kind === 'quicksave' ? '빠른 저장'
+  return r.kind === 'save' ? '자동 저장 폴더' : r.kind === 'quicksave' ? '빠른 저장 폴더'
     : nameOf(String(r.path || '').replace(/\\/g, '/')) || `폴더 ${r.id}`;
 }
 
@@ -247,9 +266,14 @@ export function emptyQuery(q) {
   return !(q?.include?.length || q?.exclude?.length || String(q?.text || '').trim());
 }
 
-/** 알약에 쓰는 한 줄 - 정확히(*tag)는 그대로 · 부분은 ~ · 제외는 − · 본문은 따옴표. */
+/** 태그 하나의 표기 - 정확히는 *tag · 부분은 ~tag(입력칸에 치는 문법과 같다 · 사용자 11-23). */
+export function tagMark(t) {
+  return String(t).startsWith('*') ? String(t) : `~${t}`;
+}
+
+/** 알약에 쓰는 한 줄 - 정확히는 *tag · 부분은 ~tag · 제외는 − · 본문은 따옴표. */
 export function querySummary(q) {
-  const tag = t => (String(t).startsWith('*') ? String(t).slice(1) : `~${t}`);
+  const tag = tagMark;
   const parts = [...(q?.include || []).map(tag), ...(q?.exclude || []).map(t => `−${tag(t)}`)];
   if (q?.text) parts.push(`“${q.text}”`);
   return parts.join(' · ');
@@ -257,7 +281,7 @@ export function querySummary(q) {
 
 /** 알약 안쪽 - 제외는 칩처럼 빨강 + 취소선(글자 '−~tag' 보다 한눈에 보인다). */
 export function queryPillHtml(q) {
-  const tag = t => (String(t).startsWith('*') ? String(t).slice(1) : `~${t}`);
+  const tag = tagMark;
   const parts = [...(q?.include || []).map(t => esc(tag(t))),
     ...(q?.exclude || []).map(t => `<span class="osr-pex">${esc(tag(t))}</span>`)];
   if (q?.text) parts.push(`“${esc(q.text)}”`);
@@ -385,23 +409,38 @@ export function createOutputSearch({
       </div>
       <button type="button" data-act="fav-save" title="지금 검색어를 즐겨찾기로">☆ 저장</button>
       <button type="button" data-act="text" title="프롬프트 본문에서 글자 그대로 찾기">본문</button>
+    </div>
+    <div class="osr-row" data-viewrow>
+      <span class="osr-lab2" data-only="all">보기</span>
+      <span class="osr-seg osr-tog" data-only="all" role="group" aria-label="보기">
+        <button type="button" data-view="folder" title="폴더마다 견본 3장 · 더보기로 그 폴더만">▦ 폴더별</button>
+        <button type="button" data-view="flat" title="모든 그림을 한 줄로 이어서">☰ 전체 한 줄</button>
+      </span>
+      <span class="osr-sep" data-only="all"></span>
+      <span class="osr-lab2">정렬</span>
+      <span class="osr-seg osr-tog" role="group" aria-label="정렬">
+        <button type="button" data-sort="mtime_desc" title="새 그림부터">↓ 최신순</button>
+        <button type="button" data-sort="mtime_asc" title="오래된 그림부터">↑ 오래된순</button>
+      </span>
       <span class="osr-sep"></span>
-      <button type="button" data-act="sort" title="정렬"></button>
-      <button type="button" data-act="view" data-only="all" title="보기 방식"></button>
-      <button type="button" data-size="s" title="작게">S</button>
-      <button type="button" data-size="m" title="보통">M</button>
-      <button type="button" data-size="l" title="크게">L</button>
+      <span class="osr-lab2">크기</span>
+      <span class="osr-seg osr-tog" role="group" aria-label="크기">
+        <button type="button" data-size="s" title="작게">S</button>
+        <button type="button" data-size="m" title="보통">M</button>
+        <button type="button" data-size="l" title="크게">L</button>
+      </span>
+      <span class="osr-grow"></span>
+      <span class="osr-dim" data-count></span>
     </div>
     <div class="osr-row" data-filters>
+      <span class="osr-lab2" data-only="all">만든 곳</span>
       <span data-only="all" data-sources></span>
       <span data-only="all" class="osr-sep"></span>
-      <span data-only="all" data-roots></span>
-      <button type="button" data-only="all" data-act="addroot" data-local title="색인할 폴더 추가 (이 PC 에서만)" hidden>+ 폴더</button>
+      <span class="osr-lab2" data-only="all">찾을 폴더</span>
+      <button type="button" data-only="all" data-act="rootsmenu" data-roots-btn title="어느 폴더에서 찾을지"></button>
       <button type="button" data-only="session" data-act="saveall" title="저장 안 된 그림을 모두 저장 폴더로">미저장 모두 저장</button>
       <button type="button" data-only="session" data-act="zip" title="저장 안 된 그림을 zip 으로 받기">미저장 zip</button>
       <button type="button" data-only="session" data-act="clearall" class="danger" title="히스토리를 통째로 비웁니다 — 저장된 파일은 그대로 남습니다">일괄정리</button>
-      <span class="osr-grow"></span>
-      <span class="osr-dim" data-count></span>
     </div>
     <div class="osr-row" data-addroot-row hidden>
       <div class="osr-addroot">
@@ -524,6 +563,7 @@ export function createOutputSearch({
     st.pendingNew = 0;
     if (st.dir) dropFolderEntry();
     st.dir = null;
+    closeRootsPop();
     lightbox.close();
     drawScope();
     drawPrefs();
@@ -538,8 +578,8 @@ export function createOutputSearch({
   function drawChips() {
     const one = (chip, i) => {
       const cls = chip.kind === 'text' ? 'tx' : chip.ex ? 'ex' : '';
-      const mark = chip.kind === 'text' ? '“' : chip.exact ? '' : '~';
-      const what = chip.exact ? '이 태그만' : '이 글자가 든 태그 전부';
+      const mark = chip.kind === 'text' ? '“' : `<span class="osr-mk">${chip.exact ? '*' : '~'}</span>`;
+      const what = chip.exact ? '* 정확히 이 태그만' : '~ 이 글자가 든 태그 전부';
       const tip = chip.kind === 'text' ? '본문 글자 검색' : `${what} · 클릭: ${chip.ex ? '포함으로' : '제외로'}`;
       return `<span class="osr-chip ${cls}" data-chip="${i}" title="${tip}">${mark}<span class="osr-ct">${esc(chip.text)}</span>`
         + `<span class="osr-x" data-rm="${i}" title="빼기">×</span></span>`;
@@ -600,7 +640,8 @@ export function createOutputSearch({
     } else {
       let raw = String(text || '');
       if (ex == null) ({text: raw, ex} = typedTag(raw, st.mode === 'ex'));
-      const value = raw.trim().toLowerCase();
+      let value = raw.trim().toLowerCase();
+      if (!exact && /^[*~]./.test(value)) { exact = value[0] === '*'; value = value.slice(1).trim(); }
       if (!value) return;
       const same = st.chips.find(c => c.kind === 'tag' && c.text === value && c.exact === exact);
       if (same) same.ex = Boolean(ex);
@@ -687,8 +728,8 @@ export function createOutputSearch({
     if (dialogOpen) return Promise.resolve(null);
     dialogOpen = true;
     closeMenu();
-    const inc = (q.include || []).map(t => (t.startsWith('*') ? t.slice(1) : `~${t}`));
-    const exc = (q.exclude || []).map(t => (t.startsWith('*') ? t.slice(1) : `~${t}`));
+    const inc = (q.include || []).map(tagMark);
+    const exc = (q.exclude || []).map(tagMark);
     const line = [`포함 ${inc.join(' · ') || '없음'}`, `제외 ${exc.join(' · ') || '없음'}`, q.text ? `본문 “${q.text}”` : ''].filter(Boolean).join(' / ');
     const bg = doc.createElement('div');
     bg.className = 'osr-dlg-bg';
@@ -843,15 +884,45 @@ export function createOutputSearch({
     $('[data-sources]').innerHTML = SOURCES.map(s =>
       `<button type="button" data-src="${s}" class="${st.sources.has(s) ? 'on' : 'off'}" title="${s}">${s}</button>`).join(' ');
   }
+  // 찾을 폴더 = 색인한 뿌리 폴더들 - 단추 하나로 접고, 누르면 체크 목록(사용자 11-23: 칩만으로는 뜻을 몰랐다).
+  const liveRoots = () => st.allRoots.filter(r => r.enabled && !r.unreachable && !r.shadowed);
+  let rootsPop = null;
+  function closeRootsPop() { rootsPop?.remove(); rootsPop = null; }
   function drawRoots() {
-    const label = rootLabel;
-    $('[data-roots]').innerHTML = st.allRoots.filter(r => !r.shadowed).map(r => {
-      if (r.unreachable) return `<button type="button" class="warn" title="연결 안 됨${r.path ? ' · ' + esc(r.path) : ''}">${esc(label(r))} ⚠</button>`;
-      if (!r.enabled) return '';
+    const btn = $('[data-roots-btn]');
+    const live = liveRoots();
+    const lost = st.allRoots.some(r => r.enabled && r.unreachable && !r.shadowed);
+    const picked = st.roots ? live.filter(r => st.roots.has(r.id)).length : live.length;
+    btn.textContent = `${!st.roots ? `전체 (${live.length}곳)` : `${picked} / ${live.length}곳`}${lost ? ' ⚠' : ''} ▾`;
+    btn.classList.toggle('on', Boolean(st.roots));
+    if (rootsPop) fillRootsPop();
+  }
+  function fillRootsPop() {
+    const rows = st.allRoots.filter(r => !r.shadowed && (r.enabled || r.unreachable)).map(r => {
+      const where = r.path ? `<small title="${esc(r.path)}">${esc(r.path)}</small>` : '';
+      if (r.unreachable) {
+        return `<div class="osr-rr dis" title="연결 안 됨"><span class="osr-ck">!</span>${esc(rootLabel(r))} ⚠ 연결 안 됨${where}</div>`;
+      }
       const on = !st.roots || st.roots.has(r.id);
-      const rm = st.local && r.kind === 'user' ? `<span class="osr-x" data-rmroot="${r.id}" title="색인에서 빼기"> ×</span>` : '';
-      return `<button type="button" data-root="${r.id}" class="${on ? 'on' : 'off'}" title="${esc(r.path || label(r))}">${esc(label(r))}${rm}</button>`;
-    }).join(' ');
+      const rm = st.local && r.kind === 'user' ? `<span class="osr-x" data-rmroot="${r.id}" title="색인에서 빼기">×</span>` : '';
+      return `<div class="osr-rr${on ? ' on' : ''}" data-root="${r.id}" role="menuitemcheckbox" aria-checked="${on}">`
+        + `<span class="osr-ck">${on ? '✓' : ''}</span>${esc(rootLabel(r))}${where}${rm}</div>`;
+    });
+    rootsPop.innerHTML = `<div class="osr-rnote">체크한 폴더에서만 찾습니다</div>${rows.join('')}`
+      + (st.local ? '<div class="osr-rr osr-radd" data-act="addroot">＋ 다른 폴더도 찾기…</div>' : '');
+  }
+  function openRootsPop() {
+    if (rootsPop) { closeRootsPop(); return; }
+    closeMenu();
+    rootsPop = doc.createElement('div');
+    rootsPop.className = 'osr-roots-pop';
+    rootsPop.setAttribute('role', 'menu');
+    host.appendChild(rootsPop);
+    fillRootsPop();
+    const box = host.getBoundingClientRect();
+    const b = $('[data-roots-btn]').getBoundingClientRect();
+    rootsPop.style.left = `${Math.max(0, Math.min(b.left - box.left, host.clientWidth - rootsPop.offsetWidth - 4))}px`;
+    rootsPop.style.top = `${b.bottom - box.top + 3}px`;
   }
   function drawCount() {
     const node = $('[data-count]');
@@ -871,8 +942,8 @@ export function createOutputSearch({
     drawScope();
   }
   function drawPrefs() {
-    $('[data-act="sort"]').textContent = prefs.sort === 'mtime_asc' ? '오래된순' : '최신순';
-    $('[data-act="view"]').textContent = prefs.view === 'flat' ? '한 줄' : '폴더별';
+    host.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === prefs.view));
+    host.querySelectorAll('[data-sort]').forEach(b => b.classList.toggle('on', b.dataset.sort === prefs.sort));
     host.querySelectorAll('[data-size]').forEach(b => b.classList.toggle('on', b.dataset.size === prefs.size));
     host.style.setProperty('--osr-tile', `${SIZES[prefs.size].tile}px`);
     drawDrill();
@@ -1578,19 +1649,32 @@ export function createOutputSearch({
       else st.sources.add(src);
       drawSources(); runQuery(); return;
     }
+    // 찾을 폴더 체크 - 켜고 끄기만(마지막 하나는 끄지 않는다). 다 켜지면 '전체'.
     const root = t.closest('[data-root]')?.dataset.root;
     if (root) {
       const id = Number(root);
-      const live = st.allRoots.filter(r => r.enabled && !r.unreachable && !r.shadowed).map(r => r.id);
-      if (!st.roots) st.roots = new Set([id]);
-      else if (st.roots.has(id) && st.roots.size === 1) st.roots = null;
-      else if (st.roots.has(id)) st.roots.delete(id);
-      else st.roots.add(id);
-      if (st.roots && live.every(r => st.roots.has(r))) st.roots = null;
+      const live = liveRoots().map(r => r.id);
+      const cur = new Set(st.roots || live);
+      if (cur.has(id)) { if (cur.size <= 1) return; cur.delete(id); } else cur.add(id);
+      st.roots = live.every(r => cur.has(r)) ? null : cur;
       drawRoots(); runQuery(); return;
     }
     const size = t.closest('[data-size]')?.dataset.size;
-    if (size) { prefs.size = size; savePrefs(); drawPrefs(); runQuery(); return; }
+    if (size) { if (size !== prefs.size) { prefs.size = size; savePrefs(); drawPrefs(); runQuery(); } return; }
+    const view = t.closest('[data-view]')?.dataset.view;
+    if (view) {
+      if (view !== prefs.view) {
+        prefs.view = view === 'flat' ? 'flat' : 'folder';
+        if (st.dir) dropFolderEntry();
+        st.dir = null; savePrefs(); drawPrefs(); runQuery();
+      }
+      return;
+    }
+    const sort = t.closest('[data-sort]')?.dataset.sort;
+    if (sort) {
+      if (sort !== prefs.sort) { prefs.sort = sort === 'mtime_asc' ? 'mtime_asc' : 'mtime_desc'; savePrefs(); drawPrefs(); runQuery(); }
+      return;
+    }
     const openDir = t.closest('[data-open-dir]')?.dataset.openDir;
     if (openDir != null) { openFolder(Number(openDir)); return; }
     const th = t.closest('.osr-th');
@@ -1604,14 +1688,10 @@ export function createOutputSearch({
     switch (act) {
       case 'text': st.textMode = !st.textMode; drawChips(); closeSug(); input.focus(); break;
       case 'fav-save': await saveFavorite(); break;
-      case 'sort': prefs.sort = prefs.sort === 'mtime_asc' ? 'mtime_desc' : 'mtime_asc'; savePrefs(); drawPrefs(); runQuery(); break;
-      case 'view':
-        prefs.view = prefs.view === 'flat' ? 'folder' : 'flat';
-        if (st.dir) dropFolderEntry();
-        st.dir = null; savePrefs(); drawPrefs(); runQuery(); break;
+      case 'rootsmenu': openRootsPop(); break;
       case 'folders-back': folderBack(); break;
       case 'refreshq': runQuery(); break;
-      case 'addroot': $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
+      case 'addroot': closeRootsPop(); $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
       case 'addroot-cancel': $('[data-addroot-row]').hidden = true; break;
       case 'addroot-ok': await addRoot(); break;
       case 'seldelete': await deleteItems(st.sel); break;
@@ -1660,6 +1740,7 @@ export function createOutputSearch({
   });
   host.addEventListener('keydown', event => {
     if (menu && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
+    else if (rootsPop && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRootsPop(); }
     else if (event.altKey && event.key === 'ArrowLeft' && !isSession() && st.dir && !lightbox.isOpen()) {
       event.preventDefault(); folderBack();
     }
@@ -1726,6 +1807,7 @@ export function createOutputSearch({
   doc.addEventListener('pointerdown', event => {
     if (!event.target.closest?.('[data-box]')) closeSug();
     if (menu && !event.target.closest?.('.osr-menu')) closeMenu();
+    if (rootsPop && !event.target.closest?.('.osr-roots-pop, [data-roots-btn]')) closeRootsPop();
   });
   // 목록의 키는 여기서 끝낸다 - 뒤의 히스토리 레일(document 리스너)이 Del · Ctrl+A · Esc 를 자기 선택에 쓰지 않게.
   list.addEventListener('keydown', event => {

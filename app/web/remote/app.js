@@ -8963,7 +8963,7 @@ function openOutputSearch(scope = 'session') {
   if (outputSearchWindow) { outputSearchWindow.toggle(scope); return; }
   if (outputSearchLoading) return;
   // 이번 세션의 손(삭제 · 저장 · 메인에 띄우기 · 바인딩)은 히스토리 컨트롤러가 쥔다 - 그것이 뜬 뒤에 만든다.
-  outputSearchLoading = Promise.all([import('./js/features/outputSearchWindow.mjs?v=20261123-folderback3'), resultHistoryReady])
+  outputSearchLoading = Promise.all([import('./js/features/outputSearchWindow.mjs?v=20261123-toolbar'), resultHistoryReady])
     .then(([{createOutputSearchWindow}]) => {
       outputSearchWindow = createOutputSearchWindow({
         document, window, showToast,

@@ -2490,11 +2490,16 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
   }
   /** 태그 묶음을 핀으로 꽂고 바로 찾는다(Presets 카드 우클릭 - 사용자 11-23). 등급은 사용자 것 그대로 · 인원은 준 것이 있을 때만.
    *  핀 수 한도를 넘는 태그는 뒤에서 버린다. 제외 · 압축은 새 조합이라 비운다(searchCombination 과 같다). */
+  let pinsSeq = 0;
   async function searchPins({tags = [], persons: want = []} = {}) {
     const clean = [...new Set((Array.isArray(tags) ? tags : []).map(t => String(t || '').trim()).filter(Boolean))];
     if (!clean.length) return;
     if (linkPending || linkUncertain) { toast('랜덤 연결 상태를 확인한 뒤 다시 검색해주세요.', 'error'); return; }
+    // 연달아 우클릭하면 마지막 것만 - 앞 요청의 show() 가 늦게 끝나도 뒤 요청의 핀을 덮지 않는다(Codex 리뷰 11-23).
+    const seq = ++pinsSeq;
     await show();
+    if (seq !== pinsSeq) return;
+    if (linkPending || linkUncertain) { toast('랜덤 연결 상태를 확인한 뒤 다시 검색해주세요.', 'error'); return; }
     library?.close();
     pins = clean.slice(0, Number(mapState?.limits?.max_pins || 16)); excludes = [];
     const okPersons = (Array.isArray(want) ? want : []).filter(id => PERSON_IDS.includes(id));

@@ -559,9 +559,16 @@ export function createPresetBench({
     },
     exportTarget: '',
   };
+  // 11-23 전에 고른 여여(girl_girl) 2인 자세는 vpool '' 로 저장됐다 - 지금은 따로 뺀 '여여' 대분류에 있다(결과 칩 -> 카드 찾기).
+  for (const pick of Object.values(st.picks)) {
+    if (pick && typeof pick === 'object' && pick.pool === 'girl_girl' && !pick.vpool) { pick.vpool = 'yuri'; pick.cat = ''; }
+  }
   let bases = null;        // {current, presets: [...]}
   let directs = [];        // [{name, prefix, postfix, negative_prompt, params}]
   let thumbStatus = null;
+  let thumbsMissingSeen = false;   // '설치 안 됨' 을 본 적 있다 - 다음 '설치됨' 이 받기 완료(한 번만 처리)
+  let thumbSerial = 0;
+  let thumbPollTimer = 0;
   const catalogCache = new Map();
   const setsCache = new Map();
   let searchTimer = 0;
@@ -1104,19 +1111,53 @@ export function createPresetBench({
       ${busy ? `<span class="pbw-dim">받는 중 ${Number.isFinite(pct) ? Math.round(pct) + '%' : ''}</span>` : '<button type="button" class="pbw-btn" data-act="thumb-dl">받기</button>'}</div>`;
   }
 
+  // 상태 묻기 - 가장 늦게 보낸 요청의 답만 쓴다. 실패하면 마지막 상태를 그대로 두고(받는 중이었으면 다시 묻는다).
+  // 받는 중이면 창이 숨어도 끝까지 묻는다 - 미니 팝업(/의상 …)도 완료를 알아야 한다(Codex 리뷰 11-23).
   async function refreshThumbStatus() {
-    const wasMissing = thumbStatus ? !thumbStatus.installed : false;
-    try { thumbStatus = await getJson(API.thumbStatus); } catch (_) { thumbStatus = null; }
+    const serial = ++thumbSerial;
+    let next;
+    try { next = await getJson(API.thumbStatus); } catch (_) { next = undefined; }
+    if (serial !== thumbSerial) return;
+    if (next !== undefined) thumbStatus = next;
     renderBand();
-    if (thumbStatus?.downloading && active) win.setTimeout(refreshThumbStatus, 2000);
-    else if (thumbStatus?.installed) {
+    if (thumbStatus && !thumbStatus.installed) thumbsMissingSeen = true;
+    if (thumbStatus?.downloading) {
+      win.clearTimeout(thumbPollTimer);
+      thumbPollTimer = win.setTimeout(() => { thumbPollTimer = 0; void refreshThumbStatus(); }, 2000);
+    } else if (thumbStatus?.installed) {
       catalogCache.clear(); setsCache.clear();
-      // 받기가 막 끝났다 - 담아 둔 목록은 has_thumb 가 거짓이라 '미생성' 칸만 남는다. 지금 보는 목록을 새로 받아 그리고
-      // 미니 팝업(/의상 …)에도 알린다(사용자 11-23 '최초 다운로드 뒤 빈 썸네일').
-      if (wasMissing) {
-        try { win.dispatchEvent(new win.CustomEvent('naia:preset-thumbs-installed')); } catch (_) {}
-        if (active) void renderExplorer();
-      }
+      if (thumbsMissingSeen) { thumbsMissingSeen = false; onThumbsInstalled(); }
+    }
+  }
+
+  // 받기가 막 끝났다 - 담아 둔 목록은 has_thumb 가 거짓이라 '미생성' 칸만 남는다(사용자 11-23 '최초 다운로드 뒤 빈 썸네일').
+  // 미니 팝업에 알리고, 관련 의상 목록을 새로 받고, 지금 보는 목록을 보던 자리 그대로 다시 그린다.
+  function onThumbsInstalled() {
+    try { win.dispatchEvent(new win.CustomEvent('naia:preset-thumbs-installed')); } catch (_) {}
+    for (const [slotId, view] of Object.entries(st.views)) {
+      if (view.mode === 'related' && view.related) void reloadRelated(slotId, view);
+    }
+    if (!active) return;      // 숨어 있으면 다음에 열 때(boot -> renderAll) 새 목록으로 그린다
+    const grid = $('grid');
+    const top = grid ? grid.scrollTop : 0;
+    const serial = searchSerial + 1;
+    void renderExplorer().then(() => { if (grid && serial === searchSerial) grid.scrollTop = top; });
+  }
+
+  async function reloadRelated(slotId, view) {
+    const slot = slotById(slotId);
+    const tag = view.relatedTag;
+    if (!slot || !tag) return;
+    const ctx = (st.picks[slotId]?.tags || []).filter(t => t !== tag).join('|');
+    let data;
+    try { data = await getJson(API.related(tag, st.picks[slotId]?.pool || slot.pool || 'female', ctx)); } catch (_) { return; }
+    if (view.mode !== 'related' || view.relatedTag !== tag) return;
+    view.related = data;
+    if (active && st.cur === slotId) {
+      const grid = $('grid');
+      const top = grid ? grid.scrollTop : 0;
+      await renderExplorer();
+      if (grid) grid.scrollTop = top;
     }
   }
 
@@ -2533,7 +2574,7 @@ export function createPresetBench({
     const set = card && card.dataset.cardSlot === st.cur ? shownSets.get(card.dataset.set) : null;
     if (!set || !(set.tags || []).length) return;
     event.preventDefault();
-    hideZoom();
+    leaveCard();
     Promise.resolve()
       .then(() => searchEventMap({tags: set.tags, persons: EVENT_MAP_PERSONS[set.pool] || []}))
       .catch(error => notify(error?.message || '이벤트 맵 검색에 실패했습니다.', 'error'));

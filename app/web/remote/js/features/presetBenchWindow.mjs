@@ -1148,22 +1148,24 @@ export function createPresetBench({
     void renderExplorer().then(() => { if (grid && serial === searchSerial) grid.scrollTop = top; });
   }
 
-  // 관련 의상 받기 - 연 때의 조건(view.relatedReq)으로. 새로 연 요청 · 다시 받기가 겹치면 마지막 요청의 답만 쓴다.
+  // 관련 의상 받기 - 연 때의 조건(view.relatedReq)으로. 새로 연 요청 · 다시 받기가 겹치면 늦게 보낸 요청의 답이 이긴다
+  // (앞 요청의 답은 뒤 요청의 답이 이미 들어왔을 때만 버린다 - 다시 받기가 실패해도 첫 답은 산다. Codex 리뷰 11-23).
   // 다시 받기(썸네일 설치 직후)가 실패하면 앞 목록을 그대로 두고, 보던 스크롤 자리를 지킨다.
   async function fetchRelated(slotId, view, {reload = false} = {}) {
     const req = view.relatedReq;
     if (!req) return;
     const seq = view.relatedSeq = (view.relatedSeq || 0) + 1;
-    const fresh = () => seq === view.relatedSeq && view.mode === 'related' && view.relatedReq === req;
+    const newest = () => view.mode === 'related' && view.relatedReq === req && seq > (view.relatedApplied || 0);
     let data;
     try {
       data = await getJson(API.related(req.tag, req.pool, req.ctx));
     } catch (error) {
-      if (!fresh() || (reload && view.related)) return;
+      if (reload || !newest()) return;
       data = {groups: []};
       notify(error.status === 404 ? `'${req.tag}' 의 관련 의상 정보가 없습니다` : `관련 의상을 읽지 못했습니다: ${error.message}`, error.status === 404 ? 'info' : 'error');
     }
-    if (!fresh()) return;
+    if (!newest()) return;
+    view.relatedApplied = seq;
     view.related = data;
     if (st.cur !== slotId) return;
     const grid = $('grid');

@@ -98,8 +98,8 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
   window?.addEventListener?.('naia:preset-thumbs-installed', () => {
     catalogCache.clear(); setsCache.clear();
     if (!st) return;
-    const pending = st.searchPending;
-    if (pending && pending.kind === memo.kind && viewOf(pending.kind).q === pending.text) return;
+    const pending = st.searchPending?.[memo.kind];     // 갈래마다 따로 - 다른 갈래의 검색이 덮지 않는다
+    if (pending && viewOf(memo.kind).q === pending.text) return;
     void render();
   });
   // 창을 닫아도 마지막 갈래 · 대분류 · 묶음은 기억한다(다음 /preset 이 그 자리에서 열린다).
@@ -251,7 +251,7 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
     let apart = new Set();
     const token = {kind, text};
     const popup = st;
-    popup.searchPending = token;
+    popup.searchPending = {...(popup.searchPending || {}), [kind]: token};
     ++popup.serial;          // 이미 도는 render 가 앞 목록을 st.shown 에 넣지 못하게
     try {
       try { rows = await getJson(API.search(text, kind)); }
@@ -259,7 +259,7 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
       if (!st || viewOf(kind).q !== text) return;
       // 따로 뺀 풀(여여 · 남남 · 후타나리)은 빼고 찾는다 - 그 대분류를 열어 고른다(벤치와 같다).
       try { apart = new Set(((await catalogOf(kind)).groups || []).map(g => g.pool).filter(Boolean)); } catch (_) {}
-    } finally { if (popup.searchPending === token) popup.searchPending = null; }
+    } finally { if (popup.searchPending?.[kind] === token) delete popup.searchPending[kind]; }
     if (!st || viewOf(kind).q !== text) return;
     const bySeed = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {

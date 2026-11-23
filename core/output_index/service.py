@@ -415,7 +415,10 @@ class OutputIndexService:
                         self._busy = False
                         self._cv.wait()
                         continue
-                    if self.context.is_generating:
+                    # 저장 알림(그림 한 장의 머리 읽기)은 생성 중에도 처리한다. Auto Gen 은 저장하자마자 다음 장을
+                    # 시작해 '생성 아님' 틈이 거의 없다 - 기다리면 멈출 때까지 한 장도 색인되지 않았다(11-23 실측 0/12).
+                    # 생성을 비켜 가는 것은 전체 재검사 · 압축뿐이다.
+                    if self.context.is_generating and not self._files:
                         self._cv.wait(0.5)
                         continue
                 self._busy = True
@@ -434,7 +437,7 @@ class OutputIndexService:
                     # Generation or shutdown can start while waiting for another
                     # warmup to release the slot. Recheck before touching a file.
                     with background_cpu_slot(self.context):
-                        if self.context.is_generating or self._stop:
+                        if self._stop or (path is None and self.context.is_generating):
                             if path is not None:
                                 with self._cv:
                                     self._files.appendleft(path)

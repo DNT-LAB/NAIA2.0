@@ -337,6 +337,8 @@ export function createOutputSearch({
     loading: false, done: false, seq: 0,
     sel: new Set(), anchor: -1, current: null,
     partial: false, rows: 0,
+    indexRows: null,      // 마지막으로 본 색인 행 수(status.rows) - 늘면 목록이 낡았다
+    autoAt: 0,            // 색인이 자라서 목록을 스스로 다시 찾은 때
     textMode: false,
     // 폴더 카드(전체 · 폴더별): 받은 폴더 차례 · 폴더 정보 · 그린 카드 수. 견본 그림은 items 에 들고 item.dir 로 잇는다.
     folderOrder: [], folderInfo: new Map(), folderCount: 0, cardsDrawn: 0,
@@ -446,6 +448,27 @@ export function createOutputSearch({
   const api = (path, body) => req(API + path, body);
 
   let statusTimer = 0;
+  // 창이 보이는가 - 닫아 둔 창은 상태를 묻지 않는다(다시 열 때 poke 가 묻는다).
+  const shown = () => host.isConnected && host.getClientRects().length > 0 && doc.visibilityState !== 'hidden';
+  // 사람이 아직 목록을 만지지 않았다 - 맨 위 · 한 장만 고름 · 큰 보기 · 메뉴 · 끌기 없음.
+  const untouched = () => list.scrollTop < 8 && !lightbox.isOpen() && !menu && !marquee && st.sel.size <= 1
+    && (st.current == null || st.current === 0);
+  // 만지지 않은 목록은 스스로 다시 찾고, 만진 목록에는 [새로 색인 N ↻] 만 띄운다(보던 자리를 뺏지 않는다).
+  let autoTimer = 0;
+  function indexGrew(added) {
+    if (isSession() || added <= 0) return;
+    st.pendingNew += added;
+    if (!untouched()) { drawCount(); return; }
+    if (autoTimer) return;
+    // 처음 색인하는 동안은 2초마다 자란다 - 4초에 한 번만 다시 찾는다(그림이 깜박이지 않게).
+    autoTimer = win.setTimeout(() => {
+      autoTimer = 0;
+      if (isSession() || !st.pendingNew) return;
+      if (st.loading || !untouched()) { drawCount(); return; }
+      st.autoAt = Date.now();
+      runQuery({keepCache: true});
+    }, Math.max(0, st.autoAt + 4000 - Date.now()));
+  }
   async function loadStatus() {
     win.clearTimeout(statusTimer);
     let status;
@@ -453,6 +476,10 @@ export function createOutputSearch({
     const wasPartial = st.partial;
     st.partial = Boolean(status.partial);
     st.rows = status.live_rows || 0;
+    // 행 수는 새로 넣을 때만 는다(압축하면 준다) - 는 만큼이 이 목록이 모르는 그림이다.
+    const rows = Number(status.rows) || 0;
+    const added = st.indexRows == null ? 0 : rows - st.indexRows;
+    st.indexRows = rows;
     st.allRoots = status.roots || [];
     // 원격 화면에는 서버가 경로를 빼서 준다 - 그것으로 '이 PC' 인지 안다.
     st.local = st.allRoots.length > 0 && st.allRoots.every(r => typeof r.path === 'string');
@@ -461,7 +488,16 @@ export function createOutputSearch({
     drawScope();
     onStatus({partial: st.partial, rows: st.rows, foldersDone: status.folders_done, pending: status.pending_dirs});
     if (st.partial || status.running) statusTimer = win.setTimeout(loadStatus, 2000);
+    // 쉬는 동안에도 전체 범위가 보이면 가끔 묻는다(외부 페이지 · 다른 곳에서 저장한 그림).
+    else if (!isSession() && shown()) statusTimer = win.setTimeout(loadStatus, 10000);
     if (wasPartial && !st.partial && !isSession()) runQuery();
+    else indexGrew(added);
+  }
+  // 저장 알림을 받으면 색인이 그 그림을 넣을 짬을 두고 묻는다.
+  let pokeTimer = 0;
+  function poke(delay = 0) {
+    win.clearTimeout(pokeTimer);
+    pokeTimer = win.setTimeout(loadStatus, delay);
   }
 
   // ── 범위 ──────────────────────────────────────────────────────────────────
@@ -819,7 +855,8 @@ export function createOutputSearch({
     } else {
       let text = overview() ? `폴더 ${fmt(st.folderCount)} · ${fmt(st.count)}장` : `${fmt(st.count)}장`;
       if (st.partial) text += ` · 색인 중 ${fmt(st.rows)}`;
-      node.textContent = text;
+      node.innerHTML = esc(text) + (st.pendingNew
+        ? ` · <span class="osr-link" data-act="refreshq" title="다시 찾기">새로 색인 ${fmt(st.pendingNew)} ↻</span>` : '');
       node.title = st.matchedTotal ? `부분 일치로 펼친 태그 ${st.matchedTotal}개: ${st.matched.slice(0, 30).join(', ')}` : `${fmt(st.items.length)}장 불러옴`;
     }
     drawScope();
@@ -1143,7 +1180,8 @@ export function createOutputSearch({
     return {x: event.clientX - rect.left + list.scrollLeft, y: event.clientY - rect.top + list.scrollTop};
   }
   list.addEventListener('pointerdown', event => {
-    if (event.button !== 0 || event.target.closest('.osr-th') || event.target.closest('.osr-more')) return;
+    // 단추 · 폴더 이름에서는 끌기를 시작하지 않는다 - 포인터를 잡으면 click 이 목록으로 가서 더보기가 안 눌렸다.
+    if (event.button !== 0 || event.target.closest('.osr-th, .osr-more, button, [data-open-dir]')) return;
     // 세로 스크롤 막대를 누른 것은 끌기 선택이 아니다.
     if (event.offsetX >= list.clientWidth) return;
     const p = contentPoint(event);
@@ -1723,11 +1761,13 @@ export function createOutputSearch({
   loadSaved();
   runQuery();
   // 다른 화면(외부 브라우저 · 휴대폰)에서 바꾼 목록 - 이 창으로 돌아오면 다시 읽는다.
-  const onFocus = () => loadSaved();
+  const onFocus = () => { loadSaved(); loadStatus(); };
   win.addEventListener('focus', onFocus);
 
   return {
     refresh() { loadStatus(); loadSaved(); runQuery(); },
+    /** 창을 다시 열었다 - 닫혀 있는 동안 자란 색인을 본다. */
+    poke() { poke(0); },
     focus() { input.focus(); },
     setScope,
     scope: () => st.scope,
@@ -1761,7 +1801,12 @@ export function createOutputSearch({
       if (Number.isFinite(Number(payload.total))) st.total = Number(payload.total);
       const dup = isSession() && st.items.some(it => it.key === payload.rel_path);
       if (payload.source === 'memory' && !dup) st.unsaved += 1;
-      if (!isSession()) { drawScope(); return; }
+      if (!isSession()) {
+        drawScope();
+        // 디스크에 저장된 그림이면 색인이 넣는다 - 조금 뒤 물어 전체 목록에 반영한다.
+        if (payload.source !== 'memory') poke(800);
+        return;
+      }
       if (st.items.some(it => it.key === payload.rel_path)) return;
       // 거르는 중이거나 오래된순이면 어디에 낄지 모른다 - 알리기만 하고 [새 그림 ↻] 로 다시 찾게 한다.
       if (st.chips.length || prefs.sort === 'mtime_asc') { st.pendingNew += 1; drawCount(); return; }
@@ -1777,7 +1822,7 @@ export function createOutputSearch({
     },
     saveShortcut,
     destroy() {
-      win.clearTimeout(statusTimer); win.clearTimeout(recentTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
+      win.clearTimeout(statusTimer); win.clearTimeout(pokeTimer); win.clearTimeout(autoTimer); win.clearTimeout(recentTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
       win.removeEventListener('focus', onFocus);
       doc.removeEventListener('mousedown', onAuxDown);
       doc.removeEventListener('auxclick', onAuxClick);

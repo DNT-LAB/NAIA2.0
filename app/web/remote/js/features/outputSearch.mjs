@@ -946,6 +946,8 @@ export function createOutputSearch({
     lightbox.close();
     drawDrill();
     runQuery({keepCache: true});
+    // 누른 더보기 단추는 다시 그려지며 사라진다 - 초점이 body 로 떨어지지 않게 목록에 둔다(Alt+← · 화살표가 바로 먹게).
+    list.focus({preventScroll: true});
   }
   function closeFolder() {
     if (!st.dir) return;
@@ -1791,12 +1793,23 @@ export function createOutputSearch({
   const onAuxUp = event => {
     if (folderMouseBack(event)) { event.preventDefault(); folderBack(); }
   };
+  // 초점이 아무 데도 없을 때(body)의 Alt+← 도 폴더 목록으로 - 창 안의 초점은 창의 keydown 이 이미 처리했다.
+  // 다른 입력칸 · 창에 초점이 있으면 그쪽 몫이므로 건드리지 않는다.
+  const onDocKey = event => {
+    if (event.defaultPrevented || !event.altKey || event.key !== 'ArrowLeft') return;
+    if (isSession() || !st.dir || lightbox.isOpen() || !shown()) return;
+    const t = event.target;
+    if (t && t !== doc.body && t !== doc.documentElement && t !== doc) return;
+    event.preventDefault();
+    folderBack();
+  };
   const onAuxClick = event => {
     const path = mouseBindingPath(event);
     if (path && sessionHand().dispatchMouseBinding(event.button, path)) event.preventDefault();
   };
   doc.addEventListener('mousedown', onAuxDown);
   doc.addEventListener('mouseup', onAuxUp);
+  doc.addEventListener('keydown', onDocKey);
   doc.addEventListener('auxclick', onAuxClick);
   win.addEventListener('popstate', onPopState);
 
@@ -1881,6 +1894,7 @@ export function createOutputSearch({
       win.removeEventListener('popstate', onPopState);
       doc.removeEventListener('mousedown', onAuxDown);
       doc.removeEventListener('mouseup', onAuxUp);
+      doc.removeEventListener('keydown', onDocKey);
       doc.removeEventListener('auxclick', onAuxClick);
     },
   };

@@ -13071,7 +13071,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261123-pl12')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261123-pl13')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -13094,6 +13094,7 @@ function loadPresetBench() {
             if (!window.eventMap?.searchPins) throw new Error('이벤트 맵을 아직 불러오지 못했습니다.');
             await window.eventMap.searchPins(request);
           },
+          getEventMapPins: () => window.eventMap?.pins?.() || [],
         });
         return presetBenchControl;
       })

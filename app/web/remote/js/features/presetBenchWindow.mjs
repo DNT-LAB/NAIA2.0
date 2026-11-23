@@ -230,6 +230,12 @@ body.preset-bench-mode .bottom-controls { display: none !important; }
 .pbw-btn.pbw-go { margin-top: auto; padding: 7px; font-size: 13px; font-weight: 600; background: var(--accent); border-color: var(--accent); color: #fff; }
 .pbw-btn.pbw-go:hover:not(:disabled) { background: var(--accent-glow); border-color: var(--accent-glow); }
 .pbw-note { display: flex; gap: 8px; align-items: center; padding: 4px 8px; border-radius: 5px; background: var(--bg-hover); font-size: 11px; }
+.pbw-menu { position: fixed; z-index: 10050; min-width: 160px; padding: 4px 0; background: var(--bg-card, #1a1a26); font-size: 12px;
+  border: 1px solid var(--border-glow, #3d3d5c); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+.pbw-menu div { padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+.pbw-menu div:hover { background: rgba(124,106,239,.22); }
+.pbw-menu div.pbw-mnote { cursor: default; white-space: normal; max-width: 260px; font-size: 11px; line-height: 1.4; color: var(--text-dim, #9a9ab0); }
+.pbw-menu div.pbw-mnote:hover { background: none; }
 .pbw-note a { color: var(--accent); cursor: pointer; }
 /* 탐색 세 칸(대분류 | 소분류 · 시드 | 그림) 사이에 세로 선 - 상자는 씌우지 않는다. */
 .pbw-cats { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-dim); padding-right: 6px; }
@@ -485,8 +491,10 @@ export function createPresetBench({
   bindTagAssist = null,
   notify = () => {},
   onVisibilityChange = () => {},
-  // 카드 우클릭 -> 이벤트 맵에서 그 세트의 태그를 핀으로 찾는다(app.js 의 window.eventMap.searchPins). 없으면 우클릭은 브라우저 것.
+  // 카드 우클릭 메뉴 -> 이벤트 맵에서 그 세트의 태그를 핀으로 찾는다(app.js 의 window.eventMap.searchPins). 없으면 우클릭은 브라우저 것.
+  // getEventMapPins = 이벤트 맵에 지금 꽂힌 핀(메뉴에 '바뀝니다' 를 적는다).
   searchEventMap = null,
+  getEventMapPins = () => [],
   // 기반 설정 판(사용자 11-20) - 메인 Params 탭의 지금 값 · 고를 목록(모델 · 샘플러 · 스케줄러) · PE 프리셋 요약(모델 배지 · 미리보기) ·
   // 이름 묻기(앱 표준 대화 상자). 없으면 빈 값 · 빈 목록 · 브라우저 prompt.
   getSessionParams = () => ({}),
@@ -1196,7 +1204,7 @@ export function createPresetBench({
     const picture = set.has_thumb
       ? `<img class="pbw-th${tall}" loading="lazy" src="${API.thumb(set.key)}" alt="">`
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
-    const hint = searchEventMap ? '\n우클릭: 이벤트 맵에서 이 태그로 찾기' : '';
+    const hint = searchEventMap ? '\n우클릭: 메뉴(이벤트 맵에서 찾기)' : '';
     return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" data-card-slot="${esc(slot.id)}" title="${esc((set.tags || []).join(', ') + hint)}">
       <button type="button" class="pbw-play" data-play="${esc(set.id)}" title="지금 조합에서 이 칸만 이 세트로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 세트로 1장 생성">▶</button>
       ${badge}${picture}<div class="pbw-cap">${words}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
@@ -2578,9 +2586,37 @@ export function createPresetBench({
   $('grid').addEventListener('scroll', () => { if (dbView && charIndex() >= 0 && st.cv.src === 'db') void loadMoreDb(); }, {passive: true});
   fitGridCols();
 
-  // 세트 카드 우클릭 = 이벤트 맵에서 그 세트의 태그를 핀으로 꽂아 찾는다(사용자 11-23). 2인 자세 · 남성 세트는 인원도
-  // 그 세트에 맞춘다(여1 단독으로 남남 세트를 찾으면 늘 0건) - 여성 세트는 사용자가 고른 인원 그대로. 등급은 손대지 않는다.
+  // 세트 카드 우클릭 = 메뉴 -> [이벤트 맵에서 이 태그로 찾기](사용자 11-23 - 바로 열면 쓰던 이벤트 맵의 핀이 날아간다).
+  // 찾기 = 그 세트의 태그를 핀으로 꽂는다. 2인 자세 · 남성 세트는 인원도 그 세트에 맞춘다(여1 단독으로 남남 세트를 찾으면
+  // 늘 0건) - 여성 세트는 사용자가 고른 인원 그대로. 등급은 손대지 않는다. 이벤트 맵에 핀이 있으면 바뀐다고 메뉴에 적는다.
   const EVENT_MAP_PERSONS = {male: ['1boy_solo', '1boy'], girl_boy: ['1girl_1boy'], girl_girl: ['2girls'], boy_boy: ['2boys']};
+  let cardMenu = null;
+  function closeCardMenu() { cardMenu?.remove(); cardMenu = null; }
+  function openCardMenu(event, set) {
+    closeCardMenu();
+    let pins = [];
+    try { pins = (getEventMapPins() || []).map(String); } catch (_) { pins = []; }
+    const shown = pins.slice(0, 3).join(', ') + (pins.length > 3 ? ` 외 ${pins.length - 3}` : '');
+    cardMenu = doc.createElement('div');
+    cardMenu.className = 'pbw-menu';
+    cardMenu.setAttribute('role', 'menu');
+    cardMenu.innerHTML = `<div role="menuitem" data-pbw-mi="event-map">이벤트 맵에서 이 태그로 찾기</div>`
+      + (pins.length ? `<div class="pbw-mnote" role="note">지금 이벤트 맵의 핀 ${pins.length}개(${esc(shown)})는 이 세트 태그로 바뀝니다</div>` : '');
+    doc.body.appendChild(cardMenu);
+    const x = Math.min(event.clientX, win.innerWidth - cardMenu.offsetWidth - 4);
+    const y = Math.min(event.clientY, win.innerHeight - cardMenu.offsetHeight - 4);
+    cardMenu.style.left = `${Math.max(0, x)}px`;
+    cardMenu.style.top = `${Math.max(0, y)}px`;
+    cardMenu.addEventListener('contextmenu', e => e.preventDefault());
+    cardMenu.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (!ev.target.closest('[data-pbw-mi="event-map"]')) return;
+      closeCardMenu();
+      Promise.resolve()
+        .then(() => searchEventMap({tags: set.tags, persons: EVENT_MAP_PERSONS[set.pool] || []}))
+        .catch(error => notify(error?.message || '이벤트 맵 검색에 실패했습니다.', 'error'));
+    });
+  }
   listen('contextmenu', event => {
     if (!searchEventMap) return;
     const card = event.target.closest?.('.pbw-card[data-set]');
@@ -2588,10 +2624,14 @@ export function createPresetBench({
     if (!set || !(set.tags || []).length) return;
     event.preventDefault();
     leaveCard();
-    Promise.resolve()
-      .then(() => searchEventMap({tags: set.tags, persons: EVENT_MAP_PERSONS[set.pool] || []}))
-      .catch(error => notify(error?.message || '이벤트 맵 검색에 실패했습니다.', 'error'));
+    openCardMenu(event, set);
   });
+  // 메뉴 밖을 누르거나 · Esc · 스크롤 · 창 크기 바꿈 · 창을 떠나면 닫는다.
+  doc.addEventListener('pointerdown', event => { if (cardMenu && !cardMenu.contains(event.target)) closeCardMenu(); }, true);
+  doc.addEventListener('keydown', event => { if (cardMenu && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeCardMenu(); } }, true);
+  doc.addEventListener('scroll', () => closeCardMenu(), true);
+  win.addEventListener('resize', () => closeCardMenu());
+  win.addEventListener('blur', () => closeCardMenu());
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {

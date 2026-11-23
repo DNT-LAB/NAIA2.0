@@ -1861,7 +1861,7 @@ const resultInfoResizerReady = import('./js/features/resultInfoResizer.mjs?v=202
   .catch(error => {
     console.error('Failed to initialize result info resizer module', error);
   });
-const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261006-histlazy')
+const resultHistoryReady = import('./js/features/resultHistory.mjs?v=20261123-nopopup')
   .then(({createResultHistoryController}) => {
     resultHistory = createResultHistoryController({
       document,
@@ -2263,7 +2263,7 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
 import('./js/features/mobileFullscreen.mjs?v=20261030-mfs4')
   .then(({createMobileFullscreen}) => createMobileFullscreen({document, window}))
   .catch(error => console.error('Failed to initialize mobile fullscreen module', error));
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261023-peq5')
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261123-nopopup')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -8900,8 +8900,6 @@ function initializeDetachedShell() {
 
 // ---- Result history (Desktop History mirror) ----
 function initViewer() { if (resultHistory) resultHistory.initViewer(); }
-function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(); }
-function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
 function onViewerNewImage(message) {
   // 비운 뒤에 늦게 온 이전 세대 알림이면 레일이 false 를 준다 - History 창도 받지 않는다.
   const acceptedNew = resultHistory ? resultHistory.onNewImage(message) : true;
@@ -8975,13 +8973,9 @@ function openOutputSearch(scope = 'session') {
     })
     .finally(() => { outputSearchLoading = null; });
 }
-function closeViewerPopup() { if (resultHistory) resultHistory.closePopup(); }
-function navViewerPopup(direction) { if (resultHistory) resultHistory.navPopup(direction); }
-function toggleLightboxPrompt(forceVisible) { if (resultHistory) resultHistory.toggleLightboxPrompt(forceVisible); }
 function viewerThumbClick(relPath) { if (resultHistory) resultHistory.thumbClick(relPath); }
 function navViewer(direction) { if (resultHistory) resultHistory.navViewer(direction); }
 function hideViewerNav() { if (resultHistory) resultHistory.hideNav(); }
-function toggleVpPrompt(checked) { if (resultHistory) resultHistory.togglePopupPrompt(checked); }
 function openResultFolder() { if (resultHistory) resultHistory.openFolder(); }
 function requestResultEnhance() { if (resultEnhance) resultEnhance.request(); }
 function refreshMetadataViewer() { if (metadataViewer) metadataViewer.refresh(); }

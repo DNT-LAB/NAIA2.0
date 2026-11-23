@@ -7654,14 +7654,12 @@ body.resizing-result-info {
   align-content: start;
 }
 .viewer-panel-grid,
-.viewer-popup-left,
 .viewer-thumb {
   user-select: none;
   -webkit-user-select: none;
   -webkit-user-drag: none;
 }
 .viewer-panel-grid:focus,
-.viewer-popup-left:focus,
 .viewer-thumb:focus {
   outline: none;
 }
@@ -7693,22 +7691,6 @@ body.resizing-result-info {
   border-color: var(--accent);
   outline-color: var(--accent-secondary);
 }
-.viewer-panel-grid.is-selecting,
-.viewer-popup-left.is-selecting {
-  cursor: crosshair;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.history-selection-marquee {
-  position: fixed;
-  z-index: 10050;
-  pointer-events: none;
-  border: 1px solid rgba(199,125,186,0.95);
-  background: rgba(199,125,186,0.16);
-  box-shadow: inset 0 0 0 1px rgba(10,10,15,0.36);
-  border-radius: 2px;
-}
-
 .history-selection-bar {
   position: relative;
   display: grid;
@@ -7965,368 +7947,6 @@ body.resizing-result-info {
   }
 }
 
-/* ---- Viewer lightbox (popup mode) ---- */
-.viewer-lightbox {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-viewer-modal);
-  background: rgba(0,0,0,0.92);
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-.viewer-lightbox.open { display: flex; }
-.viewer-lightbox img {
-  max-width: 95%; max-height: 95%;
-  object-fit: contain;
-}
-.viewer-lightbox-inner {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  padding: 20px 14px 88px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: default;
-}
-.viewer-lightbox-inner > img {
-  width: 100%;
-  height: 100%;
-  max-width: 100%;
-  max-height: 100%;
-  object-fit: contain;
-}
-.viewer-lightbox-prompt {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 66px;
-  max-width: none;
-}
-.viewer-lightbox-controls {
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 12px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.viewer-lightbox-btn {
-  padding: 8px 14px;
-  border-radius: 12px;
-  background: rgba(18,18,26,0.92);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255,255,255,0.08);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: background 0.2s, border-color 0.2s;
-}
-.viewer-lightbox-btn:hover { background: rgba(40,40,58,0.92); }
-.viewer-lightbox-btn.accent {
-  background: rgba(124,106,239,0.24);
-  border-color: rgba(157,139,255,0.45);
-}
-.viewer-lightbox-btn.danger {
-  background: rgba(120,36,36,0.28);
-  border-color: rgba(244,67,54,0.35);
-}
-/* Viewer floating popup (fullscreen overlay, split layout on PC) */
-.viewer-popup-inner {
-  width: 100%; height: 100%;
-  display: flex;
-  flex-direction: column;
-  cursor: default;
-  background: var(--bg-primary);
-}
-/* 팝업 헤더는 앱의 다른 패널과 **같은 한 줄**이다(.ia-as-pv-head / .ia-cblock-head 참조).
-   예전에는 헤더·선택바·힌트로 세 줄을 쓰면서 가운데 1,400px 이 비어 있었고, 그 탓에
-   혼자 다른 앱처럼 보였다(사용자 지적). 한 줄에 다 들어간다:
-     [🖼] HISTORY [n] · [선택 n개 · 저장 · 삭제 · ×] ──── [📁] [×] */
-.viewer-popup-header {
-  display: flex;
-  align-items: center;
-  flex-wrap: nowrap;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-dim);
-  flex-shrink: 0;
-}
-.viewer-popup-header .viewer-panel-title {
-  flex: 0 0 auto;
-  font-size: 9px; font-weight: 600; letter-spacing: 1px;
-  color: var(--text-dim);
-}
-.viewer-block-icon { font-size: 12px; line-height: 1; flex: 0 0 auto; filter: grayscale(0.4); }
-.viewer-popup-header .viewer-panel-count {
-  flex: 0 0 auto;
-  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
-  color: var(--accent-glow);
-}
-.viewer-head-spring { flex: 1 1 auto; }
-/* 닫기는 앱 공통 `.history-close`(28px 붉은 톤)를 그대로 쓴다. 그 옆 보조 버튼은
-   같은 크기·모서리로 맞추되 색만 중립으로 둔다 — 닫기가 유일한 붉은 것이어야 한다. */
-.viewer-head-btn {
-  flex: 0 0 auto; width: 28px; height: 28px; padding: 0;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(255,255,255,0.04); color: var(--text-dim); cursor: pointer;
-  font-size: 13px; line-height: 1;
-  transition: all 0.2s;
-}
-.viewer-head-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--border-glow);
-  background: rgba(255,255,255,0.09);
-}
-.viewer-popup-header .history-close { flex: 0 0 auto; }
-
-/* 헤더 안으로 들어온 선택 바 — 자기 테두리·배경을 버리고 한 줄에 녹는다.
-   고른 것이 없으면 아예 자리를 차지하지 않는다. */
-.viewer-popup-header .viewer-popup-selection {
-  display: flex; align-items: center; gap: 7px;
-  flex: 0 0 auto;
-  padding: 0 0 0 9px; background: none; grid-template-columns: none;
-  /* 총 개수 배지와 붙어 "HISTORY 2 2개 선택"으로 읽히던 것을 세로 괘선으로 끊는다. */
-  border: 0; border-left: 1px solid var(--border-dim);
-}
-.viewer-popup-header .viewer-popup-selection .history-selection-scope { display: none; }
-.viewer-popup-header .viewer-popup-selection .history-selection-count {
-  font-size: 10px; white-space: nowrap;
-  padding-right: 0;   /* 레일에서 절대배치 × 를 피하려던 여백 — 여기선 필요 없다 */
-}
-/* 레일에서는 바 우상단에 떠 있지만, 헤더에서는 한 줄의 마지막 항목이다.
-   절대배치를 그대로 두면 '삭제 N' 버튼 위에 겹쳐 찍힌다(실측). */
-.viewer-popup-header .viewer-popup-selection .history-selection-clear {
-  position: static;
-  width: 18px; height: 18px;
-  font-size: 15px;
-}
-.viewer-popup-header .viewer-popup-selection .history-selection-actions {
-  display: flex; gap: 5px; min-width: 0;
-}
-.viewer-popup-header .viewer-popup-selection .history-selection-btn {
-  min-height: 22px; padding: 3px 9px; font-size: 10px; white-space: nowrap;
-}
-/* 고른 것이 없으면 자리를 아예 비운다 — 비활성 버튼 두 개가 헤더에 상주하면
-   눈에 걸리기만 한다. `is-empty` 는 updateSelectionUi() 가 바 자신에게 붙인다
-   (레일의 `has-history-selection` 은 .viewer-panel 에만 붙어서 팝업엔 안 닿는다). */
-.viewer-popup-header .viewer-popup-selection.is-empty { display: none; }
-.viewer-popup-body {
-  flex: 1;
-  display: flex;
-  flex-direction: row;
-  min-height: 0;
-}
-/* Left: thumbnail grid */
-/* 두 칸을 50:50 으로 갈라 두면, 썸네일 몇 장뿐일 때 왼쪽 절반이 통째로 검은
-   허공이 되고 정작 보고 있는 그림은 좁아진다(실측). 목록은 필요한 만큼만 갖고
-   나머지는 미리보기에 준다. 바닥색도 갈라서 '목록 판 / 그림 무대'로 층을 만든다 —
-   앱의 다른 화면이 전부 그렇게 쌓여 있다. */
-/* 목록 칸은 이제 **세로 두 칸**이다 — 위는 스크롤되는 격자, 아래는 발치 바.
-   폭과 오른쪽 경계선은 바깥 칸이 갖는다(격자만 스크롤하고 바는 붙박이여야
-   하므로 폭을 안쪽에 두면 바가 같이 흐른다). */
-.viewer-popup-left-col {
-  flex: 0 0 clamp(300px, 34%, 620px);
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  border-right: 1px solid var(--border-dim);
-  background: var(--bg-surface);
-}
-.viewer-popup-left {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 10px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-  gap: 8px;
-  align-content: start;
-  background: var(--bg-surface);
-}
-/* 오른쪽 조작 바와 같은 높이·문법. 두 발치가 한 줄로 이어져 보인다. */
-.vp-left-bar {
-  flex: 0 0 auto;
-  height: 44px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 12px;
-  border-top: 1px solid var(--border-dim);
-  background: var(--bg-surface);
-}
-.vp-left-note {
-  font-family: var(--font-mono); font-size: 10px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-/* 되돌릴 수 없는 것 하나뿐이라 붉은 톤을 아낀다. */
-.vp-bar-btn.is-danger {
-  border-color: rgba(255,112,112,0.32);
-  background: rgba(255,94,94,0.08);
-  color: #ffb1b1;
-}
-.vp-bar-btn.is-danger:hover {
-  border-color: rgba(255,112,112,0.6);
-  background: rgba(255,94,94,0.18);
-  color: #fff;
-}
-.viewer-popup-left::-webkit-scrollbar { width: 4px; }
-.viewer-popup-left::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
-/* 원본 비율 그대로 두면 세로 긴 그림 옆에 회색 여백이 생겨 격자가 들쭉날쭉해진다.
-   목록은 훑는 용도이므로 정사각으로 잘라 균일한 판으로 만든다 — 전체 그림은
-   오른쪽 무대에서 어차피 온전히 보인다. */
-.viewer-popup-left .viewer-thumb {
-  aspect-ratio: 1;
-  object-fit: cover;
-  border: 1px solid var(--border-dim);
-  border-radius: 6px;
-}
-/* Right: preview + prompt */
-.viewer-popup-right {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  min-width: 0;
-  background: var(--bg-deep);
-}
-/* ── 그림 무대 (옛 NAIA Viewer 의 QGraphicsView 자리) ──────────────────────
-   `object-fit: contain` 은 실제 배율을 알려주지 않아 "100%"를 정직하게 띄울 수
-   없다. 그래서 원본 픽셀 크기로 두고 transform 으로 직접 확대/이동한다. */
-.vp-stage {
-  position: absolute;
-  left: 0; right: 0; top: 0;
-  bottom: 44px;            /* 조작 바 자리. 겹쳐 띄우면 그림 아랫부분을 가린다 */
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: default;
-}
-.vp-stage.is-pannable { cursor: grab; }
-.vp-stage.is-panning { cursor: grabbing; }
-.viewer-popup-right img.vp-preview {
-  max-width: none;
-  max-height: none;
-  width: auto;
-  height: auto;
-  transform-origin: center center;
-  will-change: transform;
-  user-select: none;
-  -webkit-user-drag: none;
-}
-
-/* ── 하단 조작 바 ────────────────────────────────────────────────────────── */
-/* 머리와 같은 문법의 한 줄 — 다만 발치에 앉는다. 그림 위에 떠 있지 않으므로
-   아랫부분이 가려지지 않는다. */
-.vp-bar {
-  position: absolute;
-  left: 0; right: 0; bottom: 0;
-  height: 44px;
-  z-index: 18;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 12px;
-  border-top: 1px solid var(--border-dim);
-  background: var(--bg-surface);
-}
-.vp-bar-btn {
-  flex: 0 0 auto;
-  min-width: 26px; height: 26px; padding: 0 7px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border: 1px solid var(--border-dim); border-radius: 6px;
-  background: rgba(255,255,255,0.04);
-  color: var(--text-muted);
-  font-family: var(--font-mono); font-size: 11px; line-height: 1;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.vp-bar-btn:hover { color: var(--text-primary); border-color: var(--border-glow); background: rgba(255,255,255,0.09); }
-.vp-bar-btn.is-wide { min-width: 44px; }
-.vp-bar-btn.is-on { border-color: rgba(124,106,239,0.55); color: var(--accent-glow); }
-.vp-bar-sep {
-  flex: 0 0 auto; width: 1px; height: 16px; margin: 0 2px;
-  background: var(--border-dim);
-}
-.vp-pos, .vp-zoom {
-  flex: 0 0 auto;
-  font-family: var(--font-mono); font-size: 10px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.vp-pos { min-width: 64px; text-align: center; }
-.vp-zoom { min-width: 42px; text-align: center; }
-.vp-seen {
-  flex: 0 0 auto;
-  font-family: var(--font-mono); font-size: 10px;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 머리 한가운데의 조작 안내. 휠이 장을 넘기게 되면서 확대가 Ctrl+휠 로 옮겨갔는데,
-   그건 눌러 보기 전에는 알 길이 없다. 글자를 읽기 싫어하는 것을 아니까 최소한으로 —
-   키 이름만 밝게 하고 나머지는 가라앉힌다. 좁으면 통째로 사라진다(자리를 다투지 않는다). */
-.vp-guide {
-  flex: 0 1 auto;
-  min-width: 0;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.2px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  opacity: 0.75;
-}
-.vp-guide b { font-weight: 700; color: var(--text-muted); }
-.vp-guide i { font-style: normal; color: var(--border-glow); margin: 0 2px; }
-@media (max-width: 900px) {
-  .vp-guide { display: none; }
-}
-
-/* 위치 슬라이더. 지나온 만큼 강조색으로 차는 것(옛 뷰어의 sub-page)은 CSS 만으로는
-   안 된다 — 크로뮴에 track 의 앞부분만 칠하는 표준 방법이 없다. 그래서 JS 가
-   `background` 에 그라디언트를 직접 그린다. 아래 값은 그 전의 바탕이다. */
-.vp-slider {
-  flex: 1 1 auto;
-  min-width: 60px;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 2px;
-  background: var(--border-dim);
-  cursor: pointer;
-}
-.vp-slider:disabled { opacity: 0.4; cursor: default; }
-.vp-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  width: 12px; height: 12px;
-  border-radius: 50%;
-  background: var(--accent-glow);
-  border: 0;
-  cursor: pointer;
-}
-.vp-slider::-moz-range-thumb {
-  width: 12px; height: 12px; border: 0; border-radius: 50%;
-  background: var(--accent-glow); cursor: pointer;
-}
-
-/* ── 목록 접기 = 그림 최대화 ─────────────────────────────────────────────── */
-.viewer-popup-inner.list-hidden .viewer-popup-left-col { display: none; }
-
 /* ── 숏컷 설정 (앱 전용) ──────────────────────────────────────────────────
    머리의 ⌨ 버튼에서 내려오는 작은 판. 팝업 안에 떠 있으므로 조작 바보다 위다. */
 /* 판은 팝업 밖(document.body)에 산다 — 레일에서도 같은 것을 열기 때문이다.
@@ -8505,42 +8125,7 @@ body.resizing-result-info {
   color: var(--accent-glow);
   background: rgba(124,106,239,0.14);
 }
-.vb-check {
-  display: flex; align-items: center; gap: 4px;
-  font-size: 10px; color: var(--text-dim);
-  white-space: nowrap; cursor: pointer;
-}
 
-/* ── 본 것 표시 ──────────────────────────────────────────────────────────
-   펼쳐 본 것은 가라앉히고 아직 안 본 것을 또렷하게 둔다 — '어디까지 봤는지'가
-   격자에서 바로 읽힌다(읽음/안읽음과 같은 손버릇). 썸네일이 벌거벗은 <img> 라
-   가상 요소를 못 붙이므로 밝기와 테두리로만 가른다. */
-.viewer-popup-left .viewer-thumb { opacity: 0.95; }
-.viewer-popup-left .viewer-thumb[data-seen="1"] {
-  opacity: 0.42;
-  border-color: rgba(42,42,61,0.5);
-}
-.viewer-popup-left .viewer-thumb[data-seen="1"]:hover { opacity: 0.85; }
-.viewer-popup-left .viewer-thumb[data-seen="1"].active,
-.viewer-popup-left .viewer-thumb[data-seen="1"].selected {
-  opacity: 1;
-  border-color: var(--accent);
-}
-.viewer-popup-right .prompt-float {
-  position: absolute;
-  bottom: 54px; left: 12px; right: 12px;   /* 하단 조작 바(44px) 바로 위에 앉는다 */
-  max-width: none;
-}
-@media (max-width: 600px) {
-  .viewer-popup-selection {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .viewer-popup-selection .history-selection-count,
-  .viewer-popup-selection .history-selection-actions {
-    grid-column: 1;
-    min-width: 0;
-  }
-}
 /* ---- Prompt floating panel (reusable) ---- */
 .prompt-float {
   position: absolute;
@@ -12920,8 +12505,7 @@ body.detached-module.detached-module-e621_event { --detached-module-width: 1120p
 body.detached-shell header,
 body.detached-shell .control-panel,
 body.detached-shell .right-tab-bar,
-body.detached-shell .viewer-panel,
-body.detached-shell .viewer-lightbox {
+body.detached-shell .viewer-panel {
   display: none !important;
 }
 body.detached-shell .app-layout {
@@ -25080,8 +24664,6 @@ body:has(#resultViewer.is-cq-posedit) #naiUsagePill { display: none !important; 
 .ilb-btn { padding: 3px 10px; border-radius: 5px; cursor: pointer; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #eee; font-family: var(--font-mono); font-size: 11px; }
 .ilb-stage { position: absolute; inset: 0; overflow: hidden; cursor: default; }
 .ilb-stage.is-panning { cursor: grabbing; }
-/* `vp-stage` 는 preload 의 Ctrl+휠 비켜 가기용 이름뿐 - 히스토리 팝업 무대의 자리(아래 44px 비움)는 받지 않는다. */
-.ilb-stage.vp-stage { bottom: 0; display: block; }
 /* Characters 창(characterWindow.mjs · 2026-10-22) - 떠 있는 창 · 그룹 | 썸네일 격자(보이는 만큼만) · 고른 캐릭터 줄. */
 .dragpanel.chw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
 .chw { flex: 1; min-height: 0; display: flex; flex-direction: column; font-family: var(--font-mono); }

@@ -783,7 +783,7 @@ export function createResultContextMenu({
   }
 
   function getSourceImageFromTarget(target) {
-    const sourceImage = target.closest('#preview, #viewerLightboxImg, #vpPreview, .vp-preview');
+    const sourceImage = target.closest('#preview');
     if (sourceImage && sourceImage.getAttribute('src')) return sourceImage;
     return null;
   }
@@ -1376,7 +1376,7 @@ export function createResultContextMenu({
       return;
     }
 
-    const imagePlaneTarget = target.closest('#preview, #viewerLightboxImg, .vp-preview, .viewer');
+    const imagePlaneTarget = target.closest('#preview, .viewer');
     if (imagePlaneTarget) {
       event.preventDefault();
       open('image-plane', event.clientX, event.clientY, buildImagePlaneContext(target));

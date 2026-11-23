@@ -1,7 +1,7 @@
 /**
  * 검은 배경 크게 보기 - 그림 목록 하나를 받아 한 장씩 본다(사용자 지시 2026-10-22: 세션 와일드카드 히스토리 창).
  *
- * 손버릇은 히스토리 브라우저 팝업(`resultHistory.mjs` 의 vp* · bindPopupViewer)과 **같다** - 그쪽을 고치면 여기도 맞춰라:
+ * 손버릇은 옛 히스토리 브라우저 팝업(11-23 제거 · History 창으로 합침)에서 이어받았다:
  *   휠 = 장 넘김 · Ctrl/Cmd/Alt + 휠 = 확대(커서 자리 기준) · 확대해서 넘칠 때만 끌어 옮김 · 더블클릭 = 맞춤 <-> 원본
  *   ← → Space = 한 장 · ↑ ↓ = 한 줄(부른 쪽 격자의 열 수) · Home/End · 0 = 맞춤 · 1 = 원본 · + - = 확대/축소 · F = 전체 화면 · Esc = 닫기
  * 히스토리 팝업은 서버 히스토리 쪽수 읽기에 묶여 있어 그대로 빌려 쓰지 못했다 - 목록을 받는 판으로 따로 뺐다.
@@ -164,7 +164,7 @@ export function createImageLightbox({document: doc = document, escHtml = v => St
   function canPan() { const r = panRange(); return r.x > 0.5 || r.y > 0.5; }
   function apply() {
     const img = root.querySelector('[data-ilb-img]');
-    // 그림 끝을 무대 안으로 들이지 않는다(히스토리 팝업 vpApplyTransform 과 같다) - 끌어서 빈 화면을 만들 수 없게.
+    // 그림 끝을 무대 안으로 들이지 않는다(옛 히스토리 팝업에서 이어받음) - 끌어서 빈 화면을 만들 수 없게.
     const range = panRange();
     tx = Math.min(range.x, Math.max(-range.x, tx));
     ty = Math.min(range.y, Math.max(-range.y, ty));

@@ -9,10 +9,14 @@
 // 다른 이름 저장 · 숏컷 바인딩 · 일괄정리. 삭제 · 저장 규칙은 앱이 넘기는 session 손(resultHistory.sessionActions)이
 // 레일과 한 벌로 쥔다 - 여기서 다시 만들지 않는다. 외부 브라우저에는 그 손이 없어 단순한 대체 흐름을 쓴다.
 // 전체 범위의 바꾸는 요청(삭제 · 폴더 열기 · 폴더 추가)은 서버가 이 PC 에서 온 요청만 받는다 - 원격이면 그 단추를 그리지 않는다.
+// 최근 검색어 · 즐겨찾기(11-23 사용자 지정)는 서버 파일 하나(/api/output-index/saved) - 앱 창 · 외부 브라우저 · 휴대폰이 같은 목록.
+// 담는 것은 검색어(포함 · 제외 · 본문)뿐이다. 출처 · 폴더 칩 · 범위는 지금 화면 것을 그대로 쓴다.
 import {createImageLightbox} from './imageLightbox.mjs?v=20261122-b';
 
 const API = '/api/output-index';
 const HISTORY = '/api/history';
+const SAVED = '/api/output-index/saved';
+const RECENT_DELAY = 1500;     // 결과를 이만큼 보고 있으면 최근 검색어로 남긴다(칩을 고치는 중간 단계는 안 남게)
 const PAGE = 80;
 const PREFS_KEY = 'naia.outputSearch.prefs';
 const DELETE_MODE_KEY = 'naia_result_delete_mode';     // 레일 · 뷰어 설정과 같은 키(한 벌)
@@ -51,11 +55,50 @@ export const OUTPUT_SEARCH_STYLE = `
   padding:2px 6px;background:var(--bg-deep,#0a0a0f);border:1px solid var(--border-glow,#3d3d5c);border-radius:4px;cursor:text}
 .osr-box:focus-within {border-color:var(--accent,#7c6aef)}
 .osr-box input {flex:1;min-width:110px;border:0;outline:none;background:transparent;color:inherit;font:inherit;padding:2px 0}
-.osr-chip {display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(124,106,239,.55);border-radius:4px;
-  padding:0 5px;background:rgba(124,106,239,.18);cursor:pointer;line-height:18px}
-.osr-chip.ex {border-color:rgba(224,85,97,.55);background:rgba(224,85,97,.16);color:#ffb3b9}
+.osr {position:relative}
+/* 포함 = 초록 · 제외 = 빨강 + 취소선 · 본문 글자 = 보라 - 칩은 포함 / 제외 묶음으로 나눠 그린다(사용자 11-23: 더 직관적으로). */
+.osr-chip {display:inline-flex;align-items:center;gap:4px;border:1px solid rgba(92,184,122,.6);border-radius:4px;
+  padding:0 5px;background:rgba(92,184,122,.16);color:#bfeccd;cursor:pointer;line-height:18px}
+.osr-chip.ex {border-color:rgba(224,85,97,.6);background:rgba(224,85,97,.16);color:#ffb3b9}
 .osr-chip.ex .osr-ct {text-decoration:line-through}
-.osr-chip.tx {border-color:rgba(92,184,122,.55);background:rgba(92,184,122,.14)}
+.osr-chip.tx {border-color:rgba(124,106,239,.55);background:rgba(124,106,239,.18);color:inherit}
+.osr-grp {display:inline-flex;align-items:center;flex-wrap:wrap;gap:3px;margin-right:4px}
+.osr-grp > em {font-style:normal;font-size:10.5px;color:var(--text-dim,#9ea0b4)}
+.osr .osr-mode button.on.inc {color:#bfeccd;background:rgba(92,184,122,.2);border-color:rgba(92,184,122,.75)}
+.osr .osr-mode button.on.exc {color:#ffb3b9;background:rgba(224,85,97,.18);border-color:rgba(224,85,97,.75)}
+.osr button.fav-on {color:#e8c46a;border-color:rgba(232,196,106,.6)}
+.osr button:disabled {opacity:.45;cursor:default}
+.osr-sug .osr-sr {display:flex;align-items:center;gap:2px}
+.osr-sug b {font-weight:400;border:1px solid var(--border-dim,#2a2a3d);border-radius:3px;padding:0 6px;margin-left:3px;
+  line-height:16px;color:var(--text-muted,#c6c6d8)}
+.osr-sug b[data-ex="0"]:hover {border-color:rgba(92,184,122,.8);color:#bfeccd;background:rgba(92,184,122,.2)}
+.osr-sug b[data-ex="1"]:hover {border-color:rgba(224,85,97,.8);color:#ffb3b9;background:rgba(224,85,97,.2)}
+.osr-row.osr-saved {flex-wrap:nowrap;gap:6px;padding:3px 8px}
+.osr-saved > .osr-lab {flex:none;width:64px;font-size:11px;color:var(--text-dim,#9ea0b4)}
+.osr-pills {flex:1;min-width:0;display:flex;gap:5px;overflow:hidden;flex-wrap:nowrap}
+.osr-saved.open .osr-pills {flex-wrap:wrap;max-height:30vh;overflow:auto}
+.osr-pill {flex:none;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:18px;
+  border:1px solid var(--border-dim,#2a2a3d);border-radius:11px;padding:0 9px;cursor:pointer;background:var(--bg-surface,#12121a)}
+.osr-pill:hover {border-color:var(--border-glow,#3d3d5c);background:var(--bg-hover,rgba(255,255,255,.06))}
+.osr-pex {color:#ff9aa3;text-decoration:line-through}
+.osr-pill.fav {border-color:rgba(232,196,106,.45)}
+.osr-pill.on {border-color:var(--accent,#7c6aef);background:rgba(124,106,239,.22)}
+.osr .osr-morebtn {flex:none;border-color:transparent;color:var(--accent-glow,#9d8bff)}
+.osr-menu {position:absolute;z-index:20;min-width:160px;padding:4px 0;background:var(--bg-card,#1a1a26);
+  border:1px solid var(--border-glow,#3d3d5c);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
+.osr-menu div {padding:5px 12px;cursor:pointer;white-space:nowrap}
+.osr-menu div:hover {background:rgba(124,106,239,.22)}
+.osr-menu div.danger {color:#ff8a94}
+.osr-menu div.dis {opacity:.4;pointer-events:none}
+.osr-dlg-bg {position:absolute;inset:0;z-index:30;background:rgba(0,0,0,.4);display:flex;align-items:flex-start;
+  justify-content:center;padding-top:72px}
+.osr-dlg {width:min(330px,92%);background:var(--bg-card,#1a1a26);border:1px solid var(--border-glow,#3d3d5c);border-radius:8px;
+  padding:12px;display:flex;flex-direction:column;gap:8px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.osr-dlg input {background:var(--bg-deep,#0a0a0f);color:inherit;font:inherit;border:1px solid var(--accent,#7c6aef);
+  border-radius:4px;padding:4px 7px;outline:none}
+.osr-dlg-q {font-size:11px;color:var(--text-dim,#9ea0b4);word-break:break-word}
+.osr-dlg-warn {font-size:11px;color:#e8c46a}
+.osr-dlg-acts {display:flex;justify-content:flex-end;gap:6px}
 .osr-chip .osr-x {opacity:.6;padding:0 1px}
 .osr-chip .osr-x:hover {opacity:1}
 .osr-sug {position:absolute;left:-1px;right:-1px;top:calc(100% + 2px);z-index:5;max-height:260px;overflow:auto;
@@ -114,14 +157,15 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-drill b {font-weight:500}
 /* 스크롤 막대는 흰색으로 - 어두운 판에서 안 보였다(사용자 11-23). scrollbar-color 를 주면 크로미움이 아래를 버린다. */
 .osr-list::-webkit-scrollbar {width:12px;height:12px}
-.osr-right::-webkit-scrollbar, .osr-prompt::-webkit-scrollbar, .osr-sug::-webkit-scrollbar {width:8px}
+.osr-right::-webkit-scrollbar, .osr-prompt::-webkit-scrollbar, .osr-sug::-webkit-scrollbar, .osr-pills::-webkit-scrollbar {width:8px}
 .osr-list::-webkit-scrollbar-track, .osr-right::-webkit-scrollbar-track,
-.osr-prompt::-webkit-scrollbar-track, .osr-sug::-webkit-scrollbar-track {background:rgba(255,255,255,.06)}
+.osr-prompt::-webkit-scrollbar-track, .osr-sug::-webkit-scrollbar-track, .osr-pills::-webkit-scrollbar-track {background:rgba(255,255,255,.06)}
 .osr-list::-webkit-scrollbar-thumb, .osr-right::-webkit-scrollbar-thumb,
-.osr-prompt::-webkit-scrollbar-thumb, .osr-sug::-webkit-scrollbar-thumb {
+.osr-prompt::-webkit-scrollbar-thumb, .osr-sug::-webkit-scrollbar-thumb, .osr-pills::-webkit-scrollbar-thumb {
   background:rgba(255,255,255,.82);border-radius:6px;border:2px solid transparent;background-clip:padding-box;min-height:40px}
 .osr-list::-webkit-scrollbar-thumb:hover, .osr-right::-webkit-scrollbar-thumb:hover,
-.osr-prompt::-webkit-scrollbar-thumb:hover, .osr-sug::-webkit-scrollbar-thumb:hover {background-color:#fff}
+.osr-prompt::-webkit-scrollbar-thumb:hover, .osr-sug::-webkit-scrollbar-thumb:hover,
+.osr-pills::-webkit-scrollbar-thumb:hover {background-color:#fff}
 `;
 
 function esc(value) {
@@ -180,6 +224,42 @@ export function chipQuery(chips) {
     (chip.ex ? exclude : include).push(chip.exact ? `*${chip.text}` : chip.text);
   }
   return {include, exclude, text};
+}
+
+/** 같은 검색인지 - 칩 순서 · 대소문자는 상관없다(서버 saved_searches.query_key 와 같은 규칙). */
+export function queryKey(q) {
+  const tags = list => [...(list || [])].map(t => String(t).toLowerCase()).sort();
+  return JSON.stringify([tags(q?.include), tags(q?.exclude), String(q?.text || '').trim().toLowerCase()]);
+}
+
+export function emptyQuery(q) {
+  return !(q?.include?.length || q?.exclude?.length || String(q?.text || '').trim());
+}
+
+/** 알약에 쓰는 한 줄 - 정확히(*tag)는 그대로 · 부분은 ~ · 제외는 − · 본문은 따옴표. */
+export function querySummary(q) {
+  const tag = t => (String(t).startsWith('*') ? String(t).slice(1) : `~${t}`);
+  const parts = [...(q?.include || []).map(tag), ...(q?.exclude || []).map(t => `−${tag(t)}`)];
+  if (q?.text) parts.push(`“${q.text}”`);
+  return parts.join(' · ');
+}
+
+/** 알약 안쪽 - 제외는 칩처럼 빨강 + 취소선(글자 '−~tag' 보다 한눈에 보인다). */
+export function queryPillHtml(q) {
+  const tag = t => (String(t).startsWith('*') ? String(t).slice(1) : `~${t}`);
+  const parts = [...(q?.include || []).map(t => esc(tag(t))),
+    ...(q?.exclude || []).map(t => `<span class="osr-pex">${esc(tag(t))}</span>`)];
+  if (q?.text) parts.push(`“${esc(q.text)}”`);
+  return parts.join(' · ');
+}
+
+/** 입력칸 글자 -> {text, ex}. 앞에 - 를 붙이면 제외, + 면 포함. 없으면 지금 고른 쪽(defaultEx).
+ *  -_- 같은 태그가 있어 - 뒤에 _ · - 가 오면 표식이 아니다. */
+export function typedTag(raw, defaultEx = false) {
+  const value = String(raw || '').trim();
+  if (/^[-−](?![_\-−])/.test(value)) return {text: value.slice(1).trim(), ex: true};
+  if (/^\+(?![_+])/.test(value)) return {text: value.slice(1).trim(), ex: false};
+  return {text: value, ex: Boolean(defaultEx)};
 }
 
 /** 프롬프트에서 포함 칩에 걸린 태그를 강조한다. 부분 칩은 서버가 펼친 목록(matched)으로 판정한다. */
@@ -254,6 +334,9 @@ export function createOutputSearch({
     folderOrder: [], folderInfo: new Map(), folderCount: 0, cardsDrawn: 0,
     dir: null,            // 더보기로 펼친 폴더 {id, rel, root, count} - 있으면 그 폴더만 한 줄로
     ovCache: null,        // 펼치기 전 카드 목록 - 돌아갈 때 받은 자리 그대로
+    mode: 'inc',          // Enter 로 넣는 태그가 갈 곳 - 'inc' 포함 · 'ex' 제외
+    saved: {recent: [], favorites: []},
+    open: {recent: false, fav: false},     // 더보기로 펼친 줄
   };
   for (const tag of initial.include || []) st.chips.push(parseChip(tag, false));
   for (const tag of initial.exclude || []) st.chips.push(parseChip(tag, true));
@@ -273,11 +356,16 @@ export function createOutputSearch({
         <button type="button" data-scope="session" title="이번 실행에 만든 그림 - 저장 안 된 것 포함">이번 세션<i data-scount></i></button>
         <button type="button" data-scope="all" title="저장된 그림 전체 - 지난 실행 · 추가한 폴더 포함">전체<i data-acount></i></button>
       </span>
+      <span class="osr-seg osr-mode" aria-label="Enter 로 넣을 곳">
+        <button type="button" class="inc" data-mode="inc" title="Enter 로 넣는 태그 = 포함 · 앞에 - 를 붙이면 제외 · Shift+Enter 는 반대쪽">+ 포함</button>
+        <button type="button" class="exc" data-mode="ex" title="Enter 로 넣는 태그 = 제외 · 앞에 + 를 붙이면 포함 · Shift+Enter 는 반대쪽">− 제외</button>
+      </span>
       <div class="osr-box" data-box>
         <span class="osr-chips" data-chips></span>
         <input data-input type="text" placeholder="태그 추가" autocomplete="off" spellcheck="false" aria-label="태그 검색">
         <div class="osr-sug" data-sug hidden></div>
       </div>
+      <button type="button" data-act="fav-save" title="지금 검색어를 즐겨찾기로">☆ 저장</button>
       <button type="button" data-act="text" title="프롬프트 본문에서 글자 그대로 찾기">본문</button>
       <span class="osr-sep"></span>
       <button type="button" data-act="sort" title="정렬"></button>
@@ -303,6 +391,14 @@ export function createOutputSearch({
         <button type="button" data-act="addroot-ok">추가</button>
         <button type="button" data-act="addroot-cancel">취소</button>
       </div>
+    </div>
+    <div class="osr-row osr-saved" data-saved="recent">
+      <span class="osr-lab">최근</span><div class="osr-pills" data-pills="recent"></div>
+      <button type="button" class="osr-morebtn" data-more="recent">더보기 ▾</button>
+    </div>
+    <div class="osr-row osr-saved" data-saved="fav">
+      <span class="osr-lab">★ 즐겨찾기</span><div class="osr-pills" data-pills="fav"></div>
+      <button type="button" class="osr-morebtn" data-more="fav">더보기 ▾</button>
     </div>
     <div class="osr-body">
       <div class="osr-left">
@@ -387,31 +483,45 @@ export function createOutputSearch({
 
   // ── 칩 · 후보 ─────────────────────────────────────────────────────────────
   function drawChips() {
-    $('[data-chips]').innerHTML = st.chips.map((chip, i) => {
+    const one = (chip, i) => {
       const cls = chip.kind === 'text' ? 'tx' : chip.ex ? 'ex' : '';
-      const mark = chip.kind === 'text' ? '“' : chip.ex ? '−' : chip.exact ? '' : '~';
-      const tip = chip.kind === 'text' ? '본문 글자 검색' : chip.exact ? '이 태그만 · 클릭: 포함/제외' : '이 글자가 든 태그 전부 · 클릭: 포함/제외';
+      const mark = chip.kind === 'text' ? '“' : chip.exact ? '' : '~';
+      const what = chip.exact ? '이 태그만' : '이 글자가 든 태그 전부';
+      const tip = chip.kind === 'text' ? '본문 글자 검색' : `${what} · 클릭: ${chip.ex ? '포함으로' : '제외로'}`;
       return `<span class="osr-chip ${cls}" data-chip="${i}" title="${tip}">${mark}<span class="osr-ct">${esc(chip.text)}</span>`
         + `<span class="osr-x" data-rm="${i}" title="빼기">×</span></span>`;
-    }).join('');
+    };
+    const indexed = st.chips.map((chip, i) => [chip, i]);
+    const group = (label, part) => (part.length
+      ? `<span class="osr-grp"><em>${label}</em>${part.map(([c, i]) => one(c, i)).join('')}</span>` : '');
+    $('[data-chips]').innerHTML = group('포함', indexed.filter(([c]) => c.kind === 'tag' && !c.ex))
+      + group('제외', indexed.filter(([c]) => c.kind === 'tag' && c.ex))
+      + indexed.filter(([c]) => c.kind === 'text').map(([c, i]) => one(c, i)).join('');
     $('[data-act="text"]').classList.toggle('on', st.textMode);
-    input.placeholder = st.textMode ? '본문 글자 (Enter)' : (st.chips.length ? '' : '태그 추가');
+    host.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('on', (b.dataset.mode === 'ex') === (st.mode === 'ex')));
+    input.placeholder = st.textMode ? '본문 글자 (Enter)' : st.mode === 'ex' ? '제외할 태그' : '포함할 태그';
+    drawSaved();
   }
+  const typed = () => typedTag(input.value, st.mode === 'ex');
 
   let sugSeq = 0, sugTimer = 0, sugItems = [], sugAct = -1;
   function closeSug() { $('[data-sug]').hidden = true; sugItems = []; sugAct = -1; }
   function drawSug() {
     const box = $('[data-sug]');
-    const q = input.value.trim();
+    const {text: q, ex} = typed();
     if (!q || st.textMode) { closeSug(); return; }
-    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>~ ${esc(q)} <i>포함 전부</i></span><i>Enter</i></div>`];
+    // 줄마다 + 포함 · − 제외 - 줄 자체를 누르거나 Enter 면 지금 고른 쪽(앞에 - 를 쳤으면 제외).
+    const pm = i => `<b data-sug-add="${i}" data-ex="0" title="포함">+</b><b data-sug-add="${i}" data-ex="1" title="제외">−</b>`;
+    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>~ ${esc(q)} <i>${ex ? '제외' : '포함'} 전부</i></span>`
+      + `<span class="osr-sr"><i>Enter</i>${pm(-1)}</span></div>`];
     sugItems.forEach((item, i) => rows.push(
-      `<div data-sug-i="${i}" class="${sugAct === i ? 'act' : ''}"><span>${esc(item.tag)}</span><i>${fmt(item.condition_count ?? item.count)}</i></div>`));
+      `<div data-sug-i="${i}" class="${sugAct === i ? 'act' : ''}"><span>${esc(item.tag)}</span>`
+      + `<span class="osr-sr"><i>${fmt(item.condition_count ?? item.count)}</i>${pm(i)}</span></div>`));
     box.innerHTML = rows.join('');
     box.hidden = false;
   }
   async function loadSug() {
-    const q = input.value.trim();
+    const q = typed().text;
     const seq = ++sugSeq;
     if (!q || st.textMode) { closeSug(); return; }
     const {include, exclude} = chipQuery(st.chips);
@@ -426,20 +536,198 @@ export function createOutputSearch({
       drawSug();
     } catch (_) { /* 후보가 없어도 Enter 는 된다 */ }
   }
-  function addChip(text, exact) {
-    const value = String(text || '').trim().toLowerCase();
-    if (!value) return;
+  // ex 를 안 주면 글자의 -/+ 표식 · 지금 고른 쪽으로 정한다. 같은 칩이 반대쪽에 있으면 옮긴다.
+  function addChip(text, exact, ex = null) {
     if (st.textMode) {
+      const body = String(text || '').trim();
+      if (!body) return;
       st.chips = st.chips.filter(c => c.kind !== 'text');
-      st.chips.push({kind: 'text', text: String(text).trim()});
+      st.chips.push({kind: 'text', text: body});
       st.textMode = false;
-    } else if (!st.chips.some(c => c.kind === 'tag' && c.text === value && c.exact === exact)) {
-      st.chips.push({kind: 'tag', text: value, exact, ex: false});
+    } else {
+      let raw = String(text || '');
+      if (ex == null) ({text: raw, ex} = typedTag(raw, st.mode === 'ex'));
+      const value = raw.trim().toLowerCase();
+      if (!value) return;
+      const same = st.chips.find(c => c.kind === 'tag' && c.text === value && c.exact === exact);
+      if (same) same.ex = Boolean(ex);
+      else st.chips.push({kind: 'tag', text: value, exact, ex: Boolean(ex)});
     }
     input.value = '';
     closeSug();
     drawChips();
     runQuery();
+  }
+
+  // ── 최근 검색어 · 즐겨찾기 ────────────────────────────────────────────────
+  const currentQuery = () => chipQuery(st.chips);
+  let recentTimer = 0, recentKey = '';
+  async function loadSaved() {
+    try { setSaved(await req(SAVED)); } catch (_) { /* 목록이 없어도 검색은 된다 */ }
+  }
+  function setSaved(data) {
+    st.saved = {recent: data?.recent || [], favorites: data?.favorites || []};
+    drawSaved();
+  }
+  async function changeSaved(body, {quiet = false} = {}) {
+    try { setSaved(await req(SAVED, body)); return true; } catch (error) {
+      if (!quiet) toast(error.message, 'error');
+      return false;
+    }
+  }
+  // 칩을 고치는 중간 단계까지 남지 않게 - 결과를 잠깐 보고 있을 때만 남긴다.
+  function scheduleRecent() {
+    win.clearTimeout(recentTimer);
+    const q = currentQuery();
+    const key = queryKey(q);
+    if (emptyQuery(q) || key === recentKey) return;
+    recentTimer = win.setTimeout(() => {
+      if (queryKey(currentQuery()) !== key) return;
+      recentKey = key;
+      changeSaved({action: 'recent', q}, {quiet: true});
+    }, RECENT_DELAY);
+  }
+  function drawSaved() {
+    const now = queryKey(currentQuery());
+    const recent = st.saved.recent.map((r, i) => {
+      const text = querySummary(r.q);
+      return `<span class="osr-pill${queryKey(r.q) === now ? ' on' : ''}" data-recent-i="${i}" title="${esc(text)} · 우클릭: 즐겨찾기에 추가 · 지우기">${queryPillHtml(r.q)}</span>`;
+    });
+    const favs = st.saved.favorites.map(f => {
+      const text = querySummary(f.q);
+      return `<span class="osr-pill fav${queryKey(f.q) === now ? ' on' : ''}" data-fav-id="${esc(f.id)}" title="${esc(f.title)} — ${esc(text)} · 우클릭: 이름 바꾸기 · 덮어쓰기 · 삭제">${esc(f.title)}</span>`;
+    });
+    $('[data-pills="recent"]').innerHTML = recent.join('') || '<span class="osr-dim">검색하면 여기에 남습니다</span>';
+    $('[data-pills="fav"]').innerHTML = favs.join('') || '<span class="osr-dim">☆ 저장으로 지금 검색어를 담아 둡니다</span>';
+    const btn = $('[data-act="fav-save"]');
+    const hit = st.saved.favorites.find(f => queryKey(f.q) === now);
+    btn.disabled = emptyQuery(currentQuery());
+    btn.classList.toggle('fav-on', Boolean(hit));
+    btn.textContent = hit ? '★ 저장됨' : '☆ 저장';
+    btn.title = hit ? `'${hit.title}' 으로 저장되어 있습니다 · 누르면 새로 하나 더` : '지금 검색어를 즐겨찾기로';
+    drawMore();
+  }
+  // 더보기는 넘칠 때만(펼친 줄은 접기로) - 너비를 재야 하므로 창 크기가 바뀔 때도 다시 본다.
+  function drawMore() {
+    for (const [key, sel] of [['recent', 'recent'], ['fav', 'fav']]) {
+      const row = $(`[data-saved="${sel}"]`);
+      const pills = row.querySelector('.osr-pills');
+      const btn = row.querySelector('[data-more]');
+      row.classList.toggle('open', st.open[key]);
+      btn.textContent = st.open[key] ? '접기 ▴' : '더보기 ▾';
+      btn.hidden = !st.open[key] && pills.scrollWidth <= pills.clientWidth + 1;
+    }
+  }
+  function useQuery(q) {
+    st.chips = [...(q.include || []).map(t => parseChip(t, false)), ...(q.exclude || []).map(t => parseChip(t, true))];
+    if (q.text) st.chips.push({kind: 'text', text: String(q.text)});
+    st.textMode = false;
+    input.value = '';
+    closeSug();
+    closeMenu();
+    drawChips();
+    runQuery();
+  }
+  // 제목을 묻는 작은 창 - 앱 창(Electron)에는 window.prompt 가 없다. 빈 제목은 받지 않는다.
+  let dialogOpen = false;
+  function askTitle({heading, value = '', q, note = ''}) {
+    if (dialogOpen) return Promise.resolve(null);
+    dialogOpen = true;
+    closeMenu();
+    const inc = (q.include || []).map(t => (t.startsWith('*') ? t.slice(1) : `~${t}`));
+    const exc = (q.exclude || []).map(t => (t.startsWith('*') ? t.slice(1) : `~${t}`));
+    const line = [`포함 ${inc.join(' · ') || '없음'}`, `제외 ${exc.join(' · ') || '없음'}`, q.text ? `본문 “${q.text}”` : ''].filter(Boolean).join(' / ');
+    const bg = doc.createElement('div');
+    bg.className = 'osr-dlg-bg';
+    bg.innerHTML = `<div class="osr-dlg" role="dialog" aria-label="${esc(heading)}"><div>${esc(heading)}</div>`
+      + `<input type="text" maxlength="60" spellcheck="false" placeholder="제목" aria-label="제목">`
+      + `<div class="osr-dlg-q">${esc(line)}</div><div class="osr-dlg-warn" data-dlg-warn>${esc(note)}</div>`
+      + `<div class="osr-dlg-acts"><button type="button" data-dlg="no">취소</button><button type="button" class="on" data-dlg="ok">저장</button></div></div>`;
+    host.appendChild(bg);
+    const field = bg.querySelector('input');
+    field.value = value;
+    field.focus();
+    field.select();
+    return new Promise(resolve => {
+      const done = result => { dialogOpen = false; bg.remove(); resolve(result); };
+      const ok = () => {
+        const title = field.value.trim();
+        if (!title) { bg.querySelector('[data-dlg-warn]').textContent = '제목을 적어 주세요.'; field.focus(); return; }
+        done(title);
+      };
+      bg.addEventListener('click', event => {
+        event.stopPropagation();
+        const which = event.target.closest('[data-dlg]')?.dataset.dlg;
+        if (which === 'ok') ok();
+        else if (which === 'no' || event.target === bg) done(null);
+      });
+      // 창 · 목록 · 레일의 키(Del · Backspace · Esc · Ctrl+A)가 제목 입력을 먹지 않게 여기서 끝낸다.
+      bg.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); ok(); }
+        else if (event.key === 'Escape') { event.preventDefault(); done(null); }
+      });
+    });
+  }
+  async function saveFavorite(q = currentQuery()) {
+    if (emptyQuery(q)) { toast('먼저 검색어를 넣어 주세요.', 'info'); return; }
+    const same = st.saved.favorites.find(f => queryKey(f.q) === queryKey(q));
+    const title = await askTitle({heading: '즐겨찾기 이름', q, note: same ? `같은 검색이 '${same.title}' 으로 이미 있습니다.` : ''});
+    if (title && await changeSaved({action: 'add', title, q})) toast(`'${title}' 을(를) 즐겨찾기에 담았습니다.`, 'success');
+  }
+  // 알약 우클릭 메뉴 - 창 안에 그린다(앱의 결과 메뉴와 섞이지 않게).
+  let menu = null;
+  function closeMenu() { menu?.remove(); menu = null; }
+  function openMenu(event, entries) {
+    closeMenu();
+    menu = doc.createElement('div');
+    menu.className = 'osr-menu';
+    menu.setAttribute('role', 'menu');
+    menu.innerHTML = entries.map((e, i) =>
+      `<div role="menuitem" data-mi="${i}" class="${e.danger ? 'danger' : ''}${e.disabled ? ' dis' : ''}">${esc(e.label)}</div>`).join('');
+    host.appendChild(menu);
+    const box = host.getBoundingClientRect();
+    const x = Math.min(event.clientX - box.left, host.clientWidth - menu.offsetWidth - 4);
+    const y = Math.min(event.clientY - box.top, host.clientHeight - menu.offsetHeight - 4);
+    menu.style.left = `${Math.max(0, x)}px`;
+    menu.style.top = `${Math.max(0, y)}px`;
+    menu.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const i = ev.target.closest('[data-mi]')?.dataset.mi;
+      if (i == null) return;
+      const entry = entries[Number(i)];
+      closeMenu();
+      if (entry && !entry.disabled) entry.run();
+    });
+  }
+  function favoriteMenu(event, fav) {
+    const cur = currentQuery();
+    openMenu(event, [
+      {label: '이름 바꾸기', run: async () => {
+        const title = await askTitle({heading: '이름 바꾸기', value: fav.title, q: fav.q});
+        if (title && title !== fav.title) changeSaved({action: 'rename', id: fav.id, title});
+      }},
+      {label: '지금 검색어로 덮어쓰기', disabled: emptyQuery(cur) || queryKey(cur) === queryKey(fav.q), run: async () => {
+        if (await confirmAsk(`'${fav.title}' 을(를) 지금 검색어로 바꿀까요?\n${querySummary(cur)}`)) {
+          changeSaved({action: 'update', id: fav.id, q: cur});
+        }
+      }},
+      {label: '삭제', danger: true, run: async () => {
+        if (await confirmAsk(`즐겨찾기 '${fav.title}' 을(를) 지울까요?`)) changeSaved({action: 'delete', id: fav.id});
+      }},
+    ]);
+  }
+  function recentMenu(event, item) {
+    openMenu(event, [
+      {label: '즐겨찾기에 추가', run: () => saveFavorite(item.q)},
+      {label: '목록에서 지우기', run: () => {
+        if (queryKey(item.q) === recentKey) recentKey = '';
+        changeSaved({action: 'recent_remove', q: item.q});
+      }},
+      {label: '최근 검색 모두 지우기', danger: true, run: async () => {
+        if (await confirmAsk('최근 검색어를 모두 지울까요?')) { recentKey = ''; changeSaved({action: 'recent_clear'}); }
+      }},
+    ]);
   }
 
   // ── 거르개 줄 ─────────────────────────────────────────────────────────────
@@ -546,6 +834,7 @@ export function createOutputSearch({
   }
   async function runQuery({keepCache = false} = {}) {
     const seq = ++st.seq;
+    scheduleRecent();
     if (!keepCache) st.ovCache = null;
     resetFolders();
     st.items = []; st.done = false; st.loading = false;
@@ -1097,6 +1386,14 @@ export function createOutputSearch({
     const t = event.target;
     const scope = t.closest('[data-scope]')?.dataset.scope;
     if (scope) { setScope(scope); return; }
+    const mode = t.closest('[data-mode]')?.dataset.mode;
+    if (mode) { st.mode = mode === 'ex' ? 'ex' : 'inc'; drawChips(); if (!$('[data-sug]').hidden) drawSug(); input.focus(); return; }
+    const favId = t.closest('[data-fav-id]')?.dataset.favId;
+    if (favId != null) { const fav = st.saved.favorites.find(f => f.id === favId); if (fav) useQuery(fav.q); return; }
+    const recentAt = t.closest('[data-recent-i]')?.dataset.recentI;
+    if (recentAt != null) { const r = st.saved.recent[Number(recentAt)]; if (r) useQuery(r.q); return; }
+    const more = t.closest('[data-more]')?.dataset.more;
+    if (more) { st.open[more] = !st.open[more]; drawMore(); return; }
     const rmIndex = t.closest('[data-rm]')?.dataset.rm;
     if (rmIndex != null) { st.chips.splice(Number(rmIndex), 1); drawChips(); runQuery(); return; }
     const chip = t.closest('[data-chip]');
@@ -1105,10 +1402,18 @@ export function createOutputSearch({
       if (c && c.kind === 'tag') { c.ex = !c.ex; drawChips(); runQuery(); }
       return;
     }
+    const sugAdd = t.closest('[data-sug-add]');
+    if (sugAdd) {
+      const i = Number(sugAdd.dataset.sugAdd);
+      const ex = sugAdd.dataset.ex === '1';
+      if (i < 0) addChip(typed().text, false, ex); else addChip(sugItems[i]?.tag, true, ex);
+      input.focus();
+      return;
+    }
     const sug = t.closest('[data-sug-i]');
     if (sug) {
       const i = Number(sug.dataset.sugI);
-      if (i < 0) addChip(input.value, false); else addChip(sugItems[i]?.tag, true);
+      if (i < 0) addChip(input.value, false); else addChip(sugItems[i]?.tag, true, typed().ex);
       input.focus();
       return;
     }
@@ -1156,6 +1461,7 @@ export function createOutputSearch({
     const item = st.items[st.current];
     switch (act) {
       case 'text': st.textMode = !st.textMode; drawChips(); closeSug(); input.focus(); break;
+      case 'fav-save': await saveFavorite(); break;
       case 'sort': prefs.sort = prefs.sort === 'mtime_asc' ? 'mtime_desc' : 'mtime_asc'; savePrefs(); drawPrefs(); runQuery(); break;
       case 'view': prefs.view = prefs.view === 'flat' ? 'folder' : 'flat'; st.dir = null; savePrefs(); drawPrefs(); runQuery(); break;
       case 'folders-back': closeFolder(); break;
@@ -1182,6 +1488,23 @@ export function createOutputSearch({
       case 'delete': if (item) await deleteItems(new Set([st.current])); break;
       default: break;
     }
+  });
+  host.addEventListener('contextmenu', event => {
+    const favNode = event.target.closest('[data-fav-id]');
+    const recentNode = event.target.closest('[data-recent-i]');
+    if (!favNode && !recentNode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (favNode) {
+      const fav = st.saved.favorites.find(f => f.id === favNode.dataset.favId);
+      if (fav) favoriteMenu(event, fav);
+    } else {
+      const item = st.saved.recent[Number(recentNode.dataset.recentI)];
+      if (item) recentMenu(event, item);
+    }
+  });
+  host.addEventListener('keydown', event => {
+    if (menu && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
   });
   host.addEventListener('dblclick', event => {
     const th = event.target.closest('.osr-th');
@@ -1228,9 +1551,14 @@ export function createOutputSearch({
     if (event.key === 'ArrowDown' && sugOpen) { event.preventDefault(); sugAct = Math.min(sugAct + 1, sugItems.length - 1); drawSug(); }
     else if (event.key === 'ArrowUp' && sugOpen) { event.preventDefault(); sugAct = Math.max(sugAct - 1, -1); drawSug(); }
     else if (event.key === 'Enter') {
+      if (event.isComposing) return;
       event.preventDefault();
-      if (sugAct >= 0 && sugItems[sugAct]) addChip(sugItems[sugAct].tag, true);
-      else addChip(input.value, false);
+      // Shift+Enter = 반대쪽(포함 <-> 제외). 본문 글자 칸이면 그대로 본문.
+      const {text, ex} = typed();
+      const side = event.shiftKey ? !ex : ex;
+      if (st.textMode) addChip(input.value, false);
+      else if (sugAct >= 0 && sugItems[sugAct]) addChip(sugItems[sugAct].tag, true, side);
+      else addChip(text, false, side);
     } else if (event.key === 'Escape') { if (sugOpen) { event.stopPropagation(); closeSug(); } }
     else if (event.key === 'Backspace' && !input.value && st.chips.length) { st.chips.pop(); drawChips(); runQuery(); }
   });
@@ -1239,6 +1567,7 @@ export function createOutputSearch({
   });
   doc.addEventListener('pointerdown', event => {
     if (!event.target.closest?.('[data-box]')) closeSug();
+    if (menu && !event.target.closest?.('.osr-menu')) closeMenu();
   });
   // 목록의 키는 여기서 끝낸다 - 뒤의 히스토리 레일(document 리스너)이 Del · Ctrl+A · Esc 를 자기 선택에 쓰지 않게.
   list.addEventListener('keydown', event => {
@@ -1306,7 +1635,7 @@ export function createOutputSearch({
 
   // 좁은 창에서는 상세를 접는다(목록이 먼저다).
   const ro = typeof win.ResizeObserver === 'function'
-    ? new win.ResizeObserver(() => host.classList.toggle('narrow', host.clientWidth < 620)) : null;
+    ? new win.ResizeObserver(() => { host.classList.toggle('narrow', host.clientWidth < 620); drawMore(); }) : null;
   ro?.observe(host);
 
   drawChips();
@@ -1315,10 +1644,14 @@ export function createOutputSearch({
   drawScope();
   drawDetail();
   loadStatus();
+  loadSaved();
   runQuery();
+  // 다른 화면(외부 브라우저 · 휴대폰)에서 바꾼 목록 - 이 창으로 돌아오면 다시 읽는다.
+  const onFocus = () => loadSaved();
+  win.addEventListener('focus', onFocus);
 
   return {
-    refresh() { loadStatus(); runQuery(); },
+    refresh() { loadStatus(); loadSaved(); runQuery(); },
     focus() { input.focus(); },
     setScope,
     scope: () => st.scope,
@@ -1368,7 +1701,8 @@ export function createOutputSearch({
     },
     saveShortcut,
     destroy() {
-      win.clearTimeout(statusTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
+      win.clearTimeout(statusTimer); win.clearTimeout(recentTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
+      win.removeEventListener('focus', onFocus);
       doc.removeEventListener('mousedown', onAuxDown);
       doc.removeEventListener('auxclick', onAuxClick);
     },

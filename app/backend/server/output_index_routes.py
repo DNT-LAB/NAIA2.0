@@ -146,6 +146,23 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
     async def folders(body: _Folders):
         return await run_in_thread(service().folders, **body.model_dump())
 
+    # 최근 검색어 · 즐겨찾기 - 원격(휴대폰)에서도 같은 목록을 쓴다. 파일 작업이 아니라 이 PC 제한은 없다.
+    @app.get("/api/output-index/saved")
+    async def saved_state():
+        from core.output_index.saved_searches import saved_searches
+        return await run_in_thread(saved_searches(context).state)
+
+    @app.post("/api/output-index/saved")
+    async def saved_change(request: Request):
+        from core.output_index.saved_searches import saved_searches
+        body = await object_body(request)
+        try:
+            return await run_in_thread(saved_searches(context).apply, body)
+        except LookupError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @app.get("/api/output-index/suggest")
     async def suggest(q: str = "", limit: int = Query(20, ge=1, le=500),
                       include: list[str] = Query(default=[]), exclude: list[str] = Query(default=[])):

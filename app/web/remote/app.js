@@ -16755,7 +16755,7 @@ const PRESET_MINI_COMMANDS = [['의상', 'outfit'], ['자세', 'event'], ['표�
 let presetMini = null;
 function openPresetMini(ctx) {
   if (presetMini) return presetMini.open(ctx);
-  import('./js/features/presetMiniPopup.mjs?v=20261123-pm9')
+  import('./js/features/presetMiniPopup.mjs?v=20261123-pm10')
     .then(({createPresetMiniPopup}) => {
       presetMini ||= createPresetMiniPopup({document, window, showToast});
       presetMini.open(ctx);

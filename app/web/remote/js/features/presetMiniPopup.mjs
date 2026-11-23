@@ -280,6 +280,10 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
     const view = viewOf(kind);
     const box = name => st.el.querySelector(`[data-pm-${name}]`);
     st.el.querySelectorAll('[data-pm-kind]').forEach(tab => tab.classList.toggle('is-on', tab.dataset.pmKind === kind));
+    // 이 갈래의 검색 답을 기다리는 중이면(탭을 오갔다) 앞 목록을 그리지 않는다 - 그리면 [무작위] 가 그 목록에서 고른다.
+    // 검색이 끝나면 runSearch 가 표식을 지우고 다시 그린다(Codex 리뷰 11-23).
+    const pending = st.searchPending?.[kind];
+    if (pending && view.q === pending.text) { box('grid').innerHTML = '<div class="pmini-empty">찾는 중…</div>'; return; }
     let catalog;
     try { catalog = await catalogOf(kind); }
     catch (error) {

@@ -2488,6 +2488,25 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     if (eventLinked()) await syncRandomLink();
     await explore();
   }
+  /** 태그 묶음을 핀으로 꽂고 바로 찾는다(Presets 카드 우클릭 - 사용자 11-23). 등급은 사용자 것 그대로 · 인원은 준 것이 있을 때만.
+   *  핀 수 한도를 넘는 태그는 뒤에서 버린다. 제외 · 압축은 새 조합이라 비운다(searchCombination 과 같다). */
+  async function searchPins({tags = [], persons: want = []} = {}) {
+    const clean = [...new Set((Array.isArray(tags) ? tags : []).map(t => String(t || '').trim()).filter(Boolean))];
+    if (!clean.length) return;
+    if (linkPending || linkUncertain) { toast('랜덤 연결 상태를 확인한 뒤 다시 검색해주세요.', 'error'); return; }
+    await show();
+    library?.close();
+    pins = clean.slice(0, Number(mapState?.limits?.max_pins || 16)); excludes = [];
+    const okPersons = (Array.isArray(want) ? want : []).filter(id => PERSON_IDS.includes(id));
+    if (okPersons.length) persons = new Set(okPersons);
+    takeCompress(null);
+    group = ''; roles.clear(); subcategory = ''; samples = null; browse = null;
+    if (isTree()) { treeFilter = treeSel.d1; treeAll = false; }
+    input.value = ''; suggest = null; ++suggestSeq; clearTimeout(timer);
+    savePrefs(persons, ratings, sortMode);
+    if (eventLinked()) await syncRandomLink();
+    await explore();
+  }
   // ── 압축(사용자 지시 2026-11-02) ──────────────────────────────────────────
   // 기준 축(고른 갈래)의 태그(+ 핀 · 인원 · 등급)가 같은 게시물끼리 이벤트 하나 - 랜덤은 이벤트를 같은 확률로 뽑는다
   // (서버 core/event_map/compress.py). 축 = 이벤트 맵 갈래 10개. 처음엔 '지울 갈래' 를 골랐는데 무엇을 꺼야 할지
@@ -3298,5 +3317,5 @@ export function initEventMap({ insertTag, insertAtCursor = null, showToast, getP
     randomLinkMode: () => (randomLink.enabled ? (randomLink.mode || 'event') : ''),
     /** 스테이징이 바뀌었다(S 창) - [스테이징] 단추의 켜짐을 다시 정한다. */
     syncStaged: () => { if (overlay) paintActions(); },
-    receiveRandomLink, refreshRandomLink, searchCombination, openSelection };
+    receiveRandomLink, refreshRandomLink, searchCombination, searchPins, openSelection };
 }

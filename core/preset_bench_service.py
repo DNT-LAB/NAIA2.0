@@ -52,8 +52,14 @@ APART_POOL = "apart"
 FUTA_POOL = "futa"
 FUTA_LABEL = "후타나리"
 _FUTA_TAG = re.compile(r"\bfuta(nari)?\b")
-# 따로 뺀 대분류 차례(목록 맨 끝에 이 차례로) - (가상 풀, 이름).
-APART_GROUPS = ((APART_POOL, SEPARATE["link"][0]), (FUTA_POOL, FUTA_LABEL))
+# 여여(girl_girl 2인 자세 · yuri 내용)도 남남과 같이 따로 - 일반 목록에 자꾸 섞여 나왔다(사용자 11-23).
+# 남남 · 후타나리가 먼저 가져가고 남은 것만. 빌더가 장르 태그를 걸러 지금 팩엔 yuri 태그 세트가 없다 - 태그 판정은 안전망.
+YURI_POOL = "yuri"
+YURI_LABEL = "여여"
+YURI_POOLS = ("girl_girl",)
+YURI_TAGS = frozenset({"yuri", "implied yuri"})
+# 따로 뺀 대분류 차례(목록 맨 끝에 이 차례로) - (가상 풀, 이름). 남남을 맨 끝 쪽에(싫어하는 사람이 많다).
+APART_GROUPS = ((YURI_POOL, YURI_LABEL), (APART_POOL, SEPARATE["link"][0]), (FUTA_POOL, FUTA_LABEL))
 _SUBJECTS = ("girl", "boy", "other")
 
 
@@ -104,13 +110,21 @@ def is_apart(row):
     return bool(spec) and (row["pool"] in spec[1] or row["seed"] in YAOI_TAGS or not YAOI_TAGS.isdisjoint(row["tags"]))
 
 
+def is_yuri(row):
+    """따로 뺀 대분류(여여)에 갈 세트인가 - 2인 자세 girl_girl 풀이거나 yuri 내용."""
+    return row["kind"] in SEPARATE and ((row["kind"] == "link" and row["pool"] in YURI_POOLS)
+                                        or row["seed"] in YURI_TAGS or not YURI_TAGS.isdisjoint(row["tags"]))
+
+
 def apart_pool(row):
-    """따로 뺀 대분류의 가상 풀 - 남남(APART_POOL) · 후타나리(FUTA_POOL) · 아니면 ""."""
+    """따로 뺀 대분류의 가상 풀 - 남남(APART_POOL) · 후타나리(FUTA_POOL) · 여여(YURI_POOL) · 아니면 ""."""
     if row["kind"] not in SEPARATE:
         return ""
     if is_apart(row):
         return APART_POOL
-    return FUTA_POOL if row.get("futa") else ""
+    if row.get("futa"):
+        return FUTA_POOL
+    return YURI_POOL if is_yuri(row) else ""
 
 
 _HANGUL = re.compile("[가-힣]")

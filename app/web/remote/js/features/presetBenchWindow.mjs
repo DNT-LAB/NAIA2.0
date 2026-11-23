@@ -485,6 +485,8 @@ export function createPresetBench({
   bindTagAssist = null,
   notify = () => {},
   onVisibilityChange = () => {},
+  // 카드 우클릭 -> 이벤트 맵에서 그 세트의 태그를 핀으로 찾는다(app.js 의 window.eventMap.searchPins). 없으면 우클릭은 브라우저 것.
+  searchEventMap = null,
   // 기반 설정 판(사용자 11-20) - 메인 Params 탭의 지금 값 · 고를 목록(모델 · 샘플러 · 스케줄러) · PE 프리셋 요약(모델 배지 · 미리보기) ·
   // 이름 묻기(앱 표준 대화 상자). 없으면 빈 값 · 빈 목록 · 브라우저 prompt.
   getSessionParams = () => ({}),
@@ -1103,10 +1105,19 @@ export function createPresetBench({
   }
 
   async function refreshThumbStatus() {
+    const wasMissing = thumbStatus ? !thumbStatus.installed : false;
     try { thumbStatus = await getJson(API.thumbStatus); } catch (_) { thumbStatus = null; }
     renderBand();
     if (thumbStatus?.downloading && active) win.setTimeout(refreshThumbStatus, 2000);
-    else if (thumbStatus?.installed) { catalogCache.clear(); setsCache.clear(); }
+    else if (thumbStatus?.installed) {
+      catalogCache.clear(); setsCache.clear();
+      // 받기가 막 끝났다 - 담아 둔 목록은 has_thumb 가 거짓이라 '미생성' 칸만 남는다. 지금 보는 목록을 새로 받아 그리고
+      // 미니 팝업(/의상 …)에도 알린다(사용자 11-23 '최초 다운로드 뒤 빈 썸네일').
+      if (wasMissing) {
+        try { win.dispatchEvent(new win.CustomEvent('naia:preset-thumbs-installed')); } catch (_) {}
+        if (active) void renderExplorer();
+      }
+    }
   }
 
   // 기본 풀이 아닌 세트에 작은 표지(목록은 여성 · girl_boy 세트가 먼저 온다).
@@ -1131,7 +1142,8 @@ export function createPresetBench({
     const picture = set.has_thumb
       ? `<img class="pbw-th${tall}" loading="lazy" src="${API.thumb(set.key)}" alt="">`
       : `<div class="pbw-th${tall} pbw-none">미생성</div>`;
-    return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" data-card-slot="${esc(slot.id)}" title="${esc((set.tags || []).join(', '))}">
+    const hint = searchEventMap ? '\n우클릭: 이벤트 맵에서 이 태그로 찾기' : '';
+    return `<div class="pbw-card${selected ? ' is-sel' : ''}${hit ? ' is-hit' : ''}" data-set="${esc(set.id)}" data-card-slot="${esc(slot.id)}" title="${esc((set.tags || []).join(', ') + hint)}">
       <button type="button" class="pbw-play" data-play="${esc(set.id)}" title="지금 조합에서 이 칸만 이 세트로 바꿔 바로 1장 생성합니다(칸은 그대로)" aria-label="이 세트로 1장 생성">▶</button>
       ${badge}${picture}<div class="pbw-cap">${words}${(set.add || []).length ? ` <span class="pbw-cap-add" title="메인 프롬프트에 함께 싣는 태그">+${esc(set.add.join(', +'))}</span>` : ''}</div></div>`;
   }
@@ -2511,6 +2523,21 @@ export function createPresetBench({
   }
   $('grid').addEventListener('scroll', () => { if (dbView && charIndex() >= 0 && st.cv.src === 'db') void loadMoreDb(); }, {passive: true});
   fitGridCols();
+
+  // 세트 카드 우클릭 = 이벤트 맵에서 그 세트의 태그를 핀으로 꽂아 찾는다(사용자 11-23). 2인 자세 · 남성 세트는 인원도
+  // 그 세트에 맞춘다(여1 단독으로 남남 세트를 찾으면 늘 0건) - 여성 세트는 사용자가 고른 인원 그대로. 등급은 손대지 않는다.
+  const EVENT_MAP_PERSONS = {male: ['1boy_solo', '1boy'], girl_boy: ['1girl_1boy'], girl_girl: ['2girls'], boy_boy: ['2boys']};
+  listen('contextmenu', event => {
+    if (!searchEventMap) return;
+    const card = event.target.closest?.('.pbw-card[data-set]');
+    const set = card && card.dataset.cardSlot === st.cur ? shownSets.get(card.dataset.set) : null;
+    if (!set || !(set.tags || []).length) return;
+    event.preventDefault();
+    hideZoom();
+    Promise.resolve()
+      .then(() => searchEventMap({tags: set.tags, persons: EVENT_MAP_PERSONS[set.pool] || []}))
+      .catch(error => notify(error?.message || '이벤트 맵 검색에 실패했습니다.', 'error'));
+  });
 
   // ---------------------------------------------------------------- 결과 수신(app.js 가 부른다)
   function handleResultMeta(meta) {

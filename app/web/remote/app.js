@@ -1667,7 +1667,7 @@ import('./js/features/fastSearch.mjs?v=20260928-review2')
   .catch(error => console.error('Failed to initialize Fast Search', error));
 // Ctrl+E 이벤트 맵. 핀을 쌓아 함께 달린 태그를 따라간다. **삽입과 복사 둘 다** 한다 -
 // Fast Search 와 계약이 다르다(사용자 지시 2026-09-11). 삽입은 Tag Search 와 같은 커서 삽입.
-import('./js/features/eventMapPanel.mjs?v=20261113-classic')
+import('./js/features/eventMapPanel.mjs?v=20261123-pins')
   .then(({initEventMap}) => {
     window.eventMap = initEventMap({
       // 색인을 받고 나면 Draft 의 '색인 없음' 을 새로 묻는다(알약 툴팁 · 켜기).
@@ -13071,7 +13071,7 @@ let presetBenchFailed = false;
 function loadPresetBench() {
   if (presetBenchControl || presetBenchFailed) return Promise.resolve(presetBenchControl);
   if (!presetBenchLoading) {
-    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261120-pl8')
+    presetBenchLoading = import('./js/features/presetBenchWindow.mjs?v=20261123-pl9')
       .then(({createPresetBench}) => {
         presetBenchControl = createPresetBench({
           document,
@@ -13090,6 +13090,10 @@ function loadPresetBench() {
           rightMount: document.getElementById('presetBenchRoot'),
           onLeave: () => switchRightTab('result'),
           onVisibilityChange: () => { if (moduleLauncherControl) moduleLauncherControl.updateState(); },
+          searchEventMap: async request => {
+            if (!window.eventMap?.searchPins) throw new Error('이벤트 맵을 아직 불러오지 못했습니다.');
+            await window.eventMap.searchPins(request);
+          },
         });
         return presetBenchControl;
       })
@@ -16751,7 +16755,7 @@ const PRESET_MINI_COMMANDS = [['의상', 'outfit'], ['자세', 'event'], ['표�
 let presetMini = null;
 function openPresetMini(ctx) {
   if (presetMini) return presetMini.open(ctx);
-  import('./js/features/presetMiniPopup.mjs?v=20261120-pm5')
+  import('./js/features/presetMiniPopup.mjs?v=20261123-pm6')
     .then(({createPresetMiniPopup}) => {
       presetMini ||= createPresetMiniPopup({document, window, showToast});
       presetMini.open(ctx);

@@ -92,6 +92,11 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   const catalogCache = new Map();
   const setsCache = new Map();
+  // 썸네일 팩을 막 받았다(벤치가 알린다) - 담아 둔 목록은 has_thumb 가 거짓이다. 다음에 열 때 새로 받고, 열려 있으면 지금 다시 그린다.
+  window?.addEventListener?.('naia:preset-thumbs-installed', () => {
+    catalogCache.clear(); setsCache.clear();
+    if (st) void render();
+  });
   // 창을 닫아도 마지막 갈래 · 대분류 · 묶음은 기억한다(다음 /preset 이 그 자리에서 열린다).
   const memo = {kind: 'outfit', views: {}};
   let st = null;          // 열려 있을 때만

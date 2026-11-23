@@ -8903,7 +8903,9 @@ function initViewer() { if (resultHistory) resultHistory.initViewer(); }
 function closeViewerLightbox() { if (resultHistory) resultHistory.closeLightbox(); }
 function onLightboxClick(event) { if (resultHistory) resultHistory.onLightboxClick(event); }
 function onViewerNewImage(message) {
-  if (resultHistory) resultHistory.onNewImage(message);
+  // 비운 뒤에 늦게 온 이전 세대 알림이면 레일이 false 를 준다 - History 창도 받지 않는다.
+  const acceptedNew = resultHistory ? resultHistory.onNewImage(message) : true;
+  if (outputSearchWindow && acceptedNew !== false) outputSearchWindow.sessionEvent('new', message);
   // 방금 생성한 조합에 썸네일이 붙었을 수 있다 — 목록이 열려 있을 때만 다시 읽는다.
   if (interactiveAssetsPanel) interactiveAssetsPanel.refresh();
   // 씬 카드도 방금 썸네일이 붙었을 수 있다 - 열려 있을 때만 다시 읽는다.
@@ -8924,6 +8926,7 @@ function onViewerHistoryRemoved(message) {
     releaseLatestResultBuffers();
   }
   if (resultHistory) resultHistory.onRemoved(message);
+  if (outputSearchWindow) outputSearchWindow.sessionEvent('removed', message);
   // 캐릭터 에셋 벤치 후보는 history_id로 저장한다 - 퇴출되면 만료 표시.
   if (characterAssetControl && typeof characterAssetControl.handleHistoryRemoved === 'function') {
     characterAssetControl.handleHistoryRemoved(message);
@@ -8934,6 +8937,7 @@ function onViewerHistoryCleared(message) {
   // 낡은 세대의 알림이면 컨트롤러가 false 를 준다 — 그때는 현재 결과를 건드리면 안 된다
   // (이미 그 뒤에 도착한 정상 이미지의 blob/메타를 날려 버린다).
   if (!resultHistory || !resultHistory.onCleared(message)) return;
+  if (outputSearchWindow) outputSearchWindow.sessionEvent('cleared', message);
   // 서버의 current asset 이 사라졌으므로 object URL/blob/meta 도 함께 놓는다
   // (삭제 경로와 같은 정리 — 안 하면 지운 결과가 메모리에 남는다).
   releaseLatestResultBuffers();
@@ -8943,24 +8947,27 @@ function onViewerHistoryCleared(message) {
   renderResultUnsavedActions(null);
 }
 function jumpToLatestViewerImage() { if (resultHistory) resultHistory.jumpToLatest(); }
-function openViewerPopup() { if (resultHistory) resultHistory.openPopup(); }
-// Output Search(11-22) - 저장된 출력 이미지 전체를 태그로 찾는 떠 있는 창. 처음 누를 때 불러온다.
+// 히스토리 칸 머리의 ↗ = History 창(11-22). 옛 히스토리 브라우저 팝업을 Output Search 와 합쳤다 - 진입로는 이것 하나다.
+function openViewerPopup() { openOutputSearch('session'); }
+// History 창 - [이번 세션 | 전체] 범위로 그림을 태그로 찾는 떠 있는 창. 처음 누를 때 불러온다.
 // 본문은 외부 브라우저 화면(output-search.html)과 같은 js/features/outputSearch.mjs 다.
 let outputSearchWindow = null;
 let outputSearchLoading = null;
-function openOutputSearch() {
-  if (outputSearchWindow) { outputSearchWindow.toggle(); return; }
+function openOutputSearch(scope = 'session') {
+  if (outputSearchWindow) { outputSearchWindow.toggle(scope); return; }
   if (outputSearchLoading) return;
-  outputSearchLoading = import('./js/features/outputSearchWindow.mjs?v=20261122-a')
-    .then(({createOutputSearchWindow}) => {
+  // 이번 세션의 손(삭제 · 저장 · 메인에 띄우기 · 바인딩)은 히스토리 컨트롤러가 쥔다 - 그것이 뜬 뒤에 만든다.
+  outputSearchLoading = Promise.all([import('./js/features/outputSearchWindow.mjs?v=20261122-b'), resultHistoryReady])
+    .then(([{createOutputSearchWindow}]) => {
       outputSearchWindow = createOutputSearchWindow({
         document, window, showToast,
         confirmDialog: (message, options) => showConfirmDialog(message, options),
         // 메타데이터 뷰어의 [프롬프트/네거티브 적용] 과 같은 길 - 세션이 입력창을 가졌으면 세션으로 간다.
         applyPrompt: payload => applyMetadataPrompt(payload),
         openExternalUrl: openUrlInSystemBrowser,
+        session: resultHistory ? resultHistory.sessionActions : null,
       });
-      outputSearchWindow.open();
+      outputSearchWindow.open(scope);
     })
     .catch(error => {
       console.error('Failed to open Output Search', error);
@@ -16874,6 +16881,11 @@ document.addEventListener('keydown', async e => {
     && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey;
   if (!isSave) return;
   if (isTypingTarget(e.target)) return;
+  // History 창 안에서 누른 것이면 창이 맡는다(고른 것 · 보고 있는 것 저장) - 어느 탭에 있든 창은 떠 있다.
+  if (outputSearchWindow && outputSearchWindow.handleSaveShortcut(e)) {
+    e.preventDefault();
+    return;
+  }
   if (!isResultViewActive()) return;
 
   // 히스토리가 자기 규칙(고른 것 일괄 저장)을 가지고 있으면 그쪽이 우선이다.

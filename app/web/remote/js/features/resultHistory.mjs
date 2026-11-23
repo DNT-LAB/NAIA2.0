@@ -584,8 +584,8 @@ export function createResultHistoryController({
     try { await writable.write(blob); } finally { await writable.close(); }
   }
 
-  async function saveSelectedAs() {
-    const paths = orderedSelectedPaths();
+  async function saveSelectedAs(chosen = null) {
+    const paths = Array.isArray(chosen) ? chosen : orderedSelectedPaths();
     if (!paths.length || selectionBusy) return;
     if (!hasNativeSavePicker()) {
       showToast('이 환경에서는 저장 위치를 고를 수 없습니다.', 'error');
@@ -658,8 +658,8 @@ export function createResultHistoryController({
     return dirHandle.getFileHandle(`${stem} (${Date.now()})${ext}`, {create: true});
   }
 
-  async function saveSelected() {
-    const paths = orderedSelectedPaths();
+  async function saveSelected(chosen = null) {
+    const paths = Array.isArray(chosen) ? chosen : orderedSelectedPaths();
     if (!paths.length || selectionBusy) return;
     if (paths.length > HISTORY_SELECTION_MAX_ITEMS) {
       showToast(`한 번에 최대 ${HISTORY_SELECTION_MAX_ITEMS}개까지 저장할 수 있습니다.`, 'error');
@@ -695,9 +695,11 @@ export function createResultHistoryController({
     }
   }
 
-  async function deleteSelected() {
-    const paths = orderedSelectedPaths();
-    if (!paths.length || selectionBusy) return;
+  /** 고른 것 삭제. chosen = 합친 창(Output Search 이번 세션)이 넘기는 경로 목록 - 없으면 레일 · 팝업의 선택.
+   *  @returns {Promise<string[]>} 실제로 히스토리에서 빠진 rel_path 들(취소 · 실패면 빈 목록). */
+  async function deleteSelected(chosen = null) {
+    const paths = Array.isArray(chosen) ? chosen : orderedSelectedPaths();
+    if (!paths.length || selectionBusy) return [];
     // 뷰어 설정 판과 우클릭 메뉴가 쓰는 것과 **같은 키**다. 세 곳이 한 값을 본다.
     let deleteMode = 'history';
     try { deleteMode = localStorage.getItem(HISTORY_DELETE_MODE_KEY) === 'disk' ? 'disk' : 'history'; } catch (_) {}
@@ -751,7 +753,7 @@ export function createResultHistoryController({
           checkbox: forceConfirm ? null : askOnce,
         })
         : window.confirm(message);
-      if (!confirmed) return;
+      if (!confirmed) return [];
       // 확인을 누른 경우에만 켜진다(다이얼로그가 그때만 되적는다).
       if (askOnce.checked) skipDeleteConfirmThisRun = true;
     }
@@ -760,6 +762,7 @@ export function createResultHistoryController({
     let succeeded = 0;
     let failed = 0;
     let unrescued = 0;
+    const removedPaths = [];
     try {
       const response = await fetch('/api/history/selected/delete', {
         method: 'POST',
@@ -771,6 +774,7 @@ export function createResultHistoryController({
       const removed = Array.isArray(data.removed) ? data.removed : [];
       removed.forEach(item => {
         selectedPaths.delete(item.rel_path || '');
+        if (item.rel_path) removedPaths.push(item.rel_path);
         onRemoved(item);
       });
       succeeded = Number(data.deleted || removed.length || 0);
@@ -789,6 +793,7 @@ export function createResultHistoryController({
     const level = failed || unrescued ? (succeeded ? 'warning' : 'error') : 'success';
     const note = unrescued ? ` · ${unrescued}개는 사본을 못 남겼습니다(복구 불가)` : '';
     showToast(`선택 삭제 완료: 성공 ${succeeded}개, 실패 ${failed}개${note}`, level);
+    return removedPaths;
   }
 
   function setRailCollapsed(collapsed, persist = true) {
@@ -1775,21 +1780,24 @@ export function createResultHistoryController({
   // `mousedown` 에서 미리 막는다 — auxclick 만 막으면 이미 늦다.
   function bindShortcutInputs() {
     const AUX = new Set([1, 3, 4]);
+    // 숏컷 입력 받기는 팝업과 상관없다(History 창 · 레일의 ⚙ 에서도 연다). 실행은 팝업일 때만 여기서 -
+    // History 창은 자기 그림으로 sessionActions.dispatchMouseBinding 을 부른다.
     document.addEventListener('mousedown', event => {
-      if (!viewerPopupOpen || !AUX.has(event.button)) return;
+      if (!AUX.has(event.button)) return;
       const inputId = viewerBindings.inputIdFromMouse(event.button);
-      if (viewerBindings.isCapturing() || viewerBindings.hasBinding(inputId)) {
+      if (viewerBindings.isCapturing() || (viewerPopupOpen && viewerBindings.hasBinding(inputId))) {
         event.preventDefault();
       }
     });
     document.addEventListener('auxclick', event => {
-      if (!viewerPopupOpen || !AUX.has(event.button)) return;
+      if (!AUX.has(event.button)) return;
       const inputId = viewerBindings.inputIdFromMouse(event.button);
       if (viewerBindings.isCapturing()) {
         event.preventDefault();
         viewerBindings.finishCapture(inputId);
         return;
       }
+      if (!viewerPopupOpen) return;
       if (viewerBindings.hasBinding(inputId)) {
         event.preventDefault();
         viewerBindings.dispatch(inputId, vpCurrentPath);
@@ -1935,6 +1943,13 @@ export function createResultHistoryController({
   function bindKeyboard() {
     document.addEventListener('keydown', event => {
       if (isEditableTarget(event.target)) return;
+      // 뷰어 설정(⚙)이 숏컷 입력을 기다린다 - 팝업 없이(History 창 · 레일 ⚙)도 받는다. Esc 는 설정 닫기.
+      if (!viewerPopupOpen && viewerBindings.isCapturing()) {
+        event.preventDefault();
+        if (event.key === 'Escape') viewerBindings.setPanelOpen(false);
+        else viewerBindings.finishCapture(viewerBindings.inputIdFromKey(event));
+        return;
+      }
 
       const commandKey = Boolean(event.metaKey || event.ctrlKey);
       const key = String(event.key || '').toLowerCase();
@@ -2143,6 +2158,47 @@ export function createResultHistoryController({
       if (!selectedPaths.size) return false;
       saveSelected();
       return true;
+    },
+    // ── 합친 창(Output Search 의 '이번 세션')이 쓰는 손 - 규칙은 레일 · 팝업과 한 벌이다(11-22) ──
+    sessionActions: {
+      deletePaths: paths => deleteSelected(paths),
+      quicksavePaths: paths => saveSelected(paths),
+      saveAsPaths: paths => saveSelectedAs(paths),
+      canSaveAs: () => hasNativeSavePicker(),
+      // 메인 프리뷰에 띄운다 - Result Info · Enhance · Sequence 가 이 그림을 따라간다.
+      showInMain: relPath => thumbClick(relPath),
+      // Del 을 다른 화면(인페인트 캔버스)이 가져가는가 - 그러면 창은 아무것도 지우지 않는다.
+      deleteKeyClaimed(event) {
+        if (typeof deleteKeyGuard !== 'function') return false;
+        try { return deleteKeyGuard(event) === true; } catch (_) { return false; }
+      },
+      deleteKeyDEnabled: () => viewerBindings.deleteKeyDEnabled(),
+      // 숏컷 바인딩(앱 전용) - 이 키가 바인딩이면 보내고 true.
+      dispatchBindingKey(event, relPath) {
+        if (!relPath || viewerBindings.isCapturing()) return false;
+        const inputId = viewerBindings.inputIdFromKey(event);
+        if (!viewerBindings.hasBinding(inputId)) return false;
+        viewerBindings.dispatch(inputId, relPath);
+        return true;
+      },
+      loadBindings: () => viewerBindings.load(),
+      isCapturing: () => viewerBindings.isCapturing(),
+      // 마우스 보조 버튼(휠 클릭 · 뒤로 · 앞으로) - 바인딩이면 그 입력 이름, 아니면 ''.
+      mouseBindingId(button) {
+        if (viewerBindings.isCapturing()) return '';
+        const inputId = viewerBindings.inputIdFromMouse(button);
+        return viewerBindings.hasBinding(inputId) ? inputId : '';
+      },
+      dispatchMouseBinding(button, relPath) {
+        if (!relPath || viewerBindings.isCapturing()) return false;
+        const inputId = viewerBindings.inputIdFromMouse(button);
+        if (!viewerBindings.hasBinding(inputId)) return false;
+        viewerBindings.dispatch(inputId, relPath);
+        return true;
+      },
+      // 히스토리 통째로 비우기 - 미저장 장수를 세어 경고하는 확인 창이 거기 붙어 있다.
+      clearAll: () => { if (typeof clearAllHistory === 'function') clearAllHistory(); },
+      toggleSettings: anchor => viewerBindings.togglePanel(anchor),
     },
     closePopup,
     navPopup,

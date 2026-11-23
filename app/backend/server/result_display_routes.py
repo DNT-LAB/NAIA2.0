@@ -9,11 +9,12 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from pydantic import BaseModel, ConfigDict, Field
 
 from core import result_image_payload_service as result_images
 from core.event_stream_vibe import strip_event_stream_vibe_params
@@ -27,6 +28,39 @@ SELECTED_HISTORY_MAX_ITEMS = 200
 PROMPT_SOURCE_KEYS = ("general", "character", "copyright", "artist", "meta", "prompt", "input", "tags", "sentence")
 AsyncRunner = Callable[..., Awaitable[Any]]
 JsonBroadcaster = Callable[[set[Any], dict[str, Any]], Awaitable[None]]
+
+
+class _HistoryQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    include: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+    text: str = ""
+    sort: Literal["mtime_desc", "mtime_asc"] = "mtime_desc"
+    offset: int = Field(0, ge=0)
+    limit: int = Field(80, ge=1, le=200)
+
+
+def _forget_index_paths(context, paths):
+    try:
+        service = getattr(context, "_output_index_service", None)
+        if service is not None:
+            service.forget_paths(paths)
+    except Exception:
+        pass
+
+
+def _open_history_location(item):
+    path = Path(os.path.abspath(item.filepath)) if item.filepath else None
+    if path is None or not path.is_file():
+        return JSONResponse({"error": "not saved"}, status_code=409)
+    if os.name == "nt":
+        args = ["explorer.exe", f"/select,{path}"]
+    elif sys.platform == "darwin":
+        args = ["open", "-R", str(path)]
+    else:
+        args = ["xdg-open", str(path.parent)]
+    subprocess.Popen(args)
+    return {"ok": True, "folder": str(path.parent)}
 
 
 def _image_action_result(result: Any, added_message: str) -> tuple[Any, str]:
@@ -1092,6 +1126,32 @@ def register_result_display_routes(
             return JSONResponse({"error": "No image generated yet"}, status_code=404)
         return _with_current_wildcard_frozen_state(session_context, payload)
 
+    @app.post("/api/history/query")
+    async def api_history_query(body: _HistoryQuery):
+        return await run_in_thread(session_context.result_store.history_query, **body.model_dump())
+
+    @app.get("/api/history/suggest")
+    async def api_history_suggest(req: Request, q: str = "", limit: int = Query(20, ge=1, le=50),
+                                  include: list[str] = Query(default=[]), exclude: list[str] = Query(default=[])):
+        if req.query_params.keys() - {"q", "limit", "include", "exclude"}:
+            raise HTTPException(422, "Unexpected query parameter")
+        return await run_in_thread(session_context.result_store.history_suggest, q, limit, include, exclude)
+
+    @app.post("/api/history/open-location")
+    async def api_history_open_location(req: Request):
+        if not _is_local_request(req):
+            return JSONResponse({"error": "Opening a location requires a loopback client."}, status_code=403)
+        try:
+            body = await req.json()
+        except ValueError as exc:
+            raise HTTPException(422, "Expected a history_id") from exc
+        if not isinstance(body, dict) or body.keys() != {"history_id"} or not isinstance(body["history_id"], str):
+            raise HTTPException(422, "Expected a history_id")
+        item = session_context.result_store.get_item(body["history_id"])
+        if item is None:
+            raise HTTPException(404, "History item not found")
+        return await run_in_thread(_open_history_location, item)
+
     @app.get("/api/history/list")
     async def api_history_list(page: int = 0, per_page: int = 30):
         return session_context.result_store.history_list(page=page, per_page=per_page)
@@ -1463,6 +1523,7 @@ def register_result_display_routes(
                             if not _move_to_trash(target):
                                 raise OSError(f"Could not move file to recycle bin: {target}")
                             deleted_file = True
+                            _forget_index_paths(session_context, [target])
                     elif not file_path and not keep_file:
                         # **저장된 적 없는 그림도 휴지통을 거친다**(사용자 지정 2026-08-30:
                         # "디스크에서 삭제 옵션의 사양이 휴지통으로 보내는 것이니 그대로
@@ -1586,6 +1647,7 @@ def register_result_display_routes(
                         if not _move_to_trash(target):
                             raise OSError(f"Could not move file to recycle bin: {target}")
                         trashed = True
+                        _forget_index_paths(session_context, [target])
                 removed = session_context.result_store.remove_item(item, deleted=True)
                 if removed is None:
                     raise FileNotFoundError("History item not found")
@@ -1807,6 +1869,7 @@ def register_result_display_routes(
                     if not _move_to_trash(target):
                         raise OSError(f"Could not move file to recycle bin: {target}")
                     deleted_file = True
+                    _forget_index_paths(session_context, [target])
             removed = session_context.result_store.remove_item(item, deleted=True)
             if removed is None:
                 raise FileNotFoundError("History item not found")

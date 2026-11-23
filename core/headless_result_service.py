@@ -90,6 +90,7 @@ class HeadlessResultStore:
         # remains available for standalone stores; None means no hidden cap.
         self.max_items = max(1, int(max_items)) if max_items is not None else None
         self._items: list[HeadlessHistoryItem] = []
+        self._history_search_cache: dict[str, dict[str, Any]] = {}
         # _items 와 latest_* 는 항상 같은 것을 가리켜야 한다. 생성 워커(add_api_result),
         # 외부 이미지 삽입, 삭제, 히스토리 초기화가 서로 다른 스레드에서 들어오므로
         # **목록을 바꾸는 구간만** 직렬화한다(이미지 인코딩 같은 무거운 작업은 락 밖).
@@ -367,6 +368,7 @@ class HeadlessResultStore:
                 evicted = self._items[self.max_items:]
                 del self._items[self.max_items:]
                 for removed in evicted:
+                    self._history_search_cache.pop(removed.history_id, None)
                     pool_history.record_removed(self._context, removed.history_id)
             elif self._context is not None:
                 evicted, history_limit_stop_reason = self._context._save_service().enforce_history_limit()
@@ -577,6 +579,7 @@ class HeadlessResultStore:
                 if item.history_id != history_id:
                     continue
                 removed = self._items.pop(index)
+                self._history_search_cache.pop(history_id, None)
                 if self.latest_item and self.latest_item.history_id == history_id:
                     self._set_latest_item(self._items[0] if self._items else None)
                 return removed
@@ -591,6 +594,7 @@ class HeadlessResultStore:
             for item in self._items:
                 pool_history.record_removed(self._context, item.history_id, deleted=True)
             self._items.clear()
+            self._history_search_cache.clear()
             self._set_latest_item(None)
             self._epoch += 1
             epoch = self._epoch
@@ -646,6 +650,111 @@ class HeadlessResultStore:
             **self._history_pipeline_ids(item),
             **self._history_linked_artist(item),
         }
+
+    def history_snapshot(self) -> list[HeadlessHistoryItem]:
+        with self._mutation_lock:
+            return list(self._items)
+
+    @classmethod
+    def _history_search_data(cls, item: HeadlessHistoryItem) -> dict[str, Any]:
+        # 그림 하나의 메타가 깨져 있어도 찾기 전체가 500 이 되지 않게 - 그 그림은 태그 없이 남는다.
+        try:
+            return cls._history_search_data_unsafe(item)
+        except Exception:
+            return {"tags": frozenset(), "prompt": "", "text": "", "seed": None, "model": None, "api_mode": None}
+
+    @staticmethod
+    def _history_search_data_unsafe(item: HeadlessHistoryItem) -> dict[str, Any]:
+        from core.output_index.tags import prompt_tags
+        from utils.image_info import character_prompts_from_embedded
+
+        meta = result_images.history_item_meta_payload(item, include_full=True)
+        params = item.generation_params if isinstance(item.generation_params, dict) else {}
+        context = item.prompt_context if isinstance(item.prompt_context, dict) else {}
+        characters, negatives = [], []
+        for values in (meta.get("characters"), context.get("character_prompts"),
+                       params.get("_executed_characters"), params.get("character_prompts")):
+            for value in values if isinstance(values, list) else []:
+                if isinstance(value, str):
+                    characters.append(value)
+                elif isinstance(value, dict):
+                    characters.append(str(value.get("prompt") or value.get("char_caption") or ""))
+                    negatives.append(str(value.get("uc") or value.get("negative_prompt") or ""))
+        for source in (params, meta.get("raw", {}).get("extracted_metadata", {})):
+            for slot in character_prompts_from_embedded(source):
+                characters.append(slot["prompt"])
+                negatives.append(slot["uc"])
+        negatives.extend(v for v in params.get("_executed_characters_uc", []) if isinstance(v, str))
+        prompt = meta.get("prompt", "")
+        summary = meta.get("summary", {})
+        return {"tags": frozenset(prompt_tags(prompt, characters)), "prompt": prompt,
+                "text": "\n".join([prompt, meta.get("negative", ""), *characters, *negatives]).casefold(),
+                "seed": params.get("seed", summary.get("seed")),
+                "model": params.get("model", summary.get("model")),
+                "api_mode": params.get("api_mode") or (item.api_metadata or {}).get("source")}
+
+    def _history_search_snapshot(self):
+        with self._mutation_lock:
+            items = list(self._items)
+            cached = dict(self._history_search_cache)
+            unsaved = self.unsaved_history_count()
+        data = {item.history_id: cached.get(item.history_id) or self._history_search_data(item)
+                for item in items}
+        with self._mutation_lock:
+            live = {item.history_id for item in self._items}
+            self._history_search_cache.update({key: value for key, value in data.items() if key in live})
+        return items, data, unsaved
+
+    @staticmethod
+    def _history_conditions(data, include, exclude):
+        from core.output_index.tags import normalize_tag
+
+        vocabulary = set().union(*(value["tags"] for value in data.values()))
+        matched, positive, negative = set(), [], []
+        for chips, groups in ((include, positive), (exclude, negative)):
+            for chip in chips:
+                exact = chip.startswith("*")
+                text = normalize_tag(chip[1:] if exact else chip)
+                names = {text} & vocabulary if exact else {tag for tag in vocabulary if text in tag}
+                groups.append(names)
+                if not exact:
+                    matched.update(names)
+        keep = {key for key, value in data.items()
+                if all(value["tags"] & names for names in positive)
+                and not any(value["tags"] & names for names in negative)}
+        return keep, sorted(matched)
+
+    def history_query(self, *, include=(), exclude=(), text="", sort="mtime_desc", offset=0, limit=80):
+        items, data, unsaved = self._history_search_snapshot()
+        keep, matched = self._history_conditions(data, include, exclude)
+        selected = [(index, item) for index, item in enumerate(items)
+                    if item.history_id in keep and text.casefold() in data[item.history_id]["text"]]
+        if sort == "mtime_asc":
+            selected.reverse()
+        result = []
+        for index, item in selected[offset:offset + limit]:
+            entry = data[item.history_id]
+            summary = {**self.history_summary(item, index), "prompt": entry["prompt"][:300],
+                       "seed": entry["seed"], "model": entry["model"], "saved": bool(item.filepath)}
+            if entry["api_mode"]:
+                summary["api_mode"] = entry["api_mode"]
+            result.append(summary)
+        return {"count": len(selected), "total": len(items), "unsaved": unsaved,
+                "matched": matched[:200], "matched_total": len(matched), "items": result}
+
+    def history_suggest(self, q="", limit=20, include=(), exclude=()):
+        from collections import Counter
+
+        _, data, _ = self._history_search_snapshot()
+        keep, _ = self._history_conditions(data, include, exclude)
+        counts, conditions = Counter(), Counter()
+        for key, value in data.items():
+            tags = [tag for tag in value["tags"] if q.casefold() in tag]
+            counts.update(tags)
+            if key in keep:
+                conditions.update(tags)
+        tags = sorted(counts, key=lambda tag: (-conditions[tag], tag))[:limit]
+        return {"items": [{"tag": tag, "count": counts[tag], "condition_count": conditions[tag]} for tag in tags]}
 
     def history_list(self, page: int = 0, per_page: int = 30) -> dict[str, Any]:
         page = max(0, int(page or 0))

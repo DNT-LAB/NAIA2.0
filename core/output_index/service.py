@@ -130,6 +130,39 @@ class OutputIndexService:
     def set_root_enabled(self, root_id, enabled):
         return self._command("enable", root_id, enabled)
 
+    def forget_paths(self, paths):
+        try:
+            with self._cv:
+                if self._stop or not self._thread or not self._thread.is_alive():
+                    return
+            files = []
+            with self._reader() as reader:
+                if reader is None:
+                    return
+                roots = reader.roots()
+                for value in dict.fromkeys(paths):
+                    path = Path(value)
+                    if not path.is_absolute():
+                        continue
+                    path = path.resolve()
+                    for root in roots:
+                        try:
+                            relative = path.relative_to(Path(root["path"]).resolve())
+                        except ValueError:
+                            continue
+                        rel = relative.parent.as_posix() if relative.parent != Path(".") else ""
+                        row = reader._db.execute(
+                            "SELECT dir_id,name,size,mtime_ns FROM files f JOIN dirs d ON d.id=f.dir_id "
+                            "WHERE d.root_id=? AND d.rel=? AND f.name=? AND f.flags & 1",
+                            (root["id"], rel, relative.name)).fetchone()
+                        if row is not None:
+                            files.append(_IndexedFile(path=path, root_id=root["id"], root_path=root["path"],
+                                                      rel=rel, **row))
+            if files:
+                self._command("forget", files)
+        except Exception:
+            pass
+
     def delete_rows(self, rows, move_to_trash):
         from .scanner import safe_file
 

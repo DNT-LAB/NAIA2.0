@@ -187,11 +187,13 @@ class HeadlessViewerBindingService:
             target = self._unique(plain)
             if action == ACTION_MOVE:
                 shutil.move(str(src), str(target))
+                self._note_index_change(target, source=src)
                 # 히스토리가 옛 경로를 가리키면 이후의 저장/삭제가 헛돈다.
                 # 그림 자체는 메모리에서 나오므로 화면은 그대로다.
                 self._point_at(item, target)
             else:
                 shutil.copy2(str(src), str(target))
+                self._note_index_change(target)
                 self.context.result_store.remember_saved_path(item, target)
             return {"ok": True, "path": str(target), "mode": action}
 
@@ -204,6 +206,7 @@ class HeadlessViewerBindingService:
         suffix = ".webp" if "webp" in str(media_type) else ".png"
         target = self._unique(dest_dir / f"{stem}{suffix}")
         target.write_bytes(image_bytes)
+        self._note_index_change(target)
         if action == ACTION_MOVE:
             # 여기서도 항목이 새 파일을 가리켜야 디스크에 원본이 있던 경우와 같아진다.
             # 안 가리키면 이 항목은 계속 '미저장'으로 남아(미저장 판정 = filepath 없음)
@@ -216,6 +219,17 @@ class HeadlessViewerBindingService:
             # changing the result item's Auto Save status.
             self.context.result_store.remember_saved_path(item, target)
         return {"ok": True, "path": str(target), "mode": "write"}
+
+    def _note_index_change(self, target: Path, source: Path | None = None) -> None:
+        try:
+            from core.output_index.service import output_index_service
+
+            service = output_index_service(self.context)
+            if source is not None:
+                service.forget_paths([source])
+            service.note_saved(target)
+        except Exception:
+            pass
 
     def _point_at(self, item: Any, target: Path) -> None:
         # Update the item and pool together under pool -> commit -> store locks.

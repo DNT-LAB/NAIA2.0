@@ -3,10 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Output Search — NAIA</title>
+<title>History — NAIA</title>
 <!--
   저장된 출력 이미지 전체를 NAIA 밖 브라우저에서 찾는 단독 화면(사용자 지시 2026-11-22).
-  앱 안 Output Search 창 머리의 [↗] 가 연다 - 그때 걸어 둔 칩을 주소에 싣는다(inc · exc · text).
+  앱 안 History 창 머리의 [↗] 가 연다 - 그때 범위와 걸어 둔 칩을 주소에 싣는다(scope · inc · exc · text).
+  이번 세션 범위는 여기서는 실시간으로 붙지 않는다(웹소켓이 없다) - [↻] 로 다시 찾는다.
   본문은 앱 안 창과 같은 js/features/outputSearch.mjs 다. 데이터는 /api/output-index/* 그대로.
   [프롬프트] 는 여기서는 복사다(메인 프롬프트는 앱 안 창에서 넣는다).
 -->
@@ -32,11 +33,11 @@
 </style>
 </head>
 <body>
-<header><b>Output Search</b><span id="status"></span></header>
+<header><b>History</b><span id="status"></span><span style="flex:1"></span><button type="button" id="refresh" title="다시 찾기" style="font:inherit;color:inherit;background:transparent;border:1px solid var(--border-dim);border-radius:4px;padding:1px 8px;cursor:pointer">↻</button></header>
 <div id="host"></div>
 <div class="toast" id="toast" role="status"></div>
 <script type="module">
-  import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './js/features/outputSearch.mjs?v=20261122-a';
+  import {createOutputSearch, OUTPUT_SEARCH_STYLE} from './js/features/outputSearch.mjs?v=20261122-b';
 
   const style = document.createElement('style');
   style.textContent = OUTPUT_SEARCH_STYLE;
@@ -53,16 +54,17 @@
   }
   let storage = null;
   try { storage = window.localStorage; } catch (_) { storage = null; }
-  createOutputSearch({
+  const view = createOutputSearch({
     document, window,
     host: document.getElementById('host'),
     storage,
-    initial: {include: params.getAll('inc'), exclude: params.getAll('exc'), text: params.get('text') || ''},
+    initial: {scope: params.get('scope') || 'session', include: params.getAll('inc'), exclude: params.getAll('exc'), text: params.get('text') || ''},
     toast,
     onStatus: ({partial, rows}) => {
       document.getElementById('status').textContent = partial ? `색인 중 ${Number(rows || 0).toLocaleString('en-US')}장` : '';
     },
   });
+  document.getElementById('refresh').addEventListener('click', () => view.refresh());
 </script>
 </body>
 </html>

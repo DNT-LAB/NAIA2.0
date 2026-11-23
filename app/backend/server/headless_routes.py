@@ -335,7 +335,8 @@ def register_headless_routes(
         clients=clients,
         start_generation_runner=ensure_generation_runner,
     )
-    register_output_index_routes(app, context, run_in_thread=run_in_thread)
+    register_output_index_routes(app, context, run_in_thread=run_in_thread,
+                                 clients=clients, broadcast_json=broadcast_json)
     register_result_display_routes(
         app,
         context,

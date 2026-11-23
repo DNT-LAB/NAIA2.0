@@ -1,18 +1,30 @@
-// Output Search - 저장된 출력 이미지 전체를 태그 칩으로 찾는 화면(11-22 사용자 지정).
+// Output Search · History - 그림을 태그 칩으로 찾고 고르고 지우는 화면(11-22 사용자 지정).
+// 범위가 둘이다(같은 칩 · 같은 손):
+//   이번 세션 = 메모리 히스토리(/api/history/*) - 저장 안 된 그림도 여기에만 있다. 새 그림이 오면 바로 붙는다.
+//   전체     = 디스크 색인(/api/output-index/*) - 지난 실행 · 다른 폴더까지.
+// 두 목록은 섞지 않는다(같은 그림이 두 번 보이지 않게) - 범위 단추로 읽는 곳만 바꾼다.
 // 같은 본문을 두 곳이 쓴다: 앱 안의 떠 있는 창(outputSearchWindow.mjs)과 외부 브라우저 화면
 // (output-search.html). 진입점이 둘이라도 본문은 하나다 - 한쪽만 고치는 일이 없게.
-// 데이터는 전부 /api/output-index/* 이다. 바꾸는 요청(삭제 · 폴더 열기 · 폴더 추가)은
-// 서버가 이 PC 에서 온 요청만 받는다 - 원격이면 그 단추를 아예 그리지 않는다.
+// 히스토리 브라우저 팝업의 손은 여기로 왔다: 크게 보기(imageLightbox) · 드래그 사각형 선택 · 저장(Ctrl+S) ·
+// 다른 이름 저장 · 숏컷 바인딩 · 일괄정리. 삭제 · 저장 규칙은 앱이 넘기는 session 손(resultHistory.sessionActions)이
+// 레일과 한 벌로 쥔다 - 여기서 다시 만들지 않는다. 외부 브라우저에는 그 손이 없어 단순한 대체 흐름을 쓴다.
+// 전체 범위의 바꾸는 요청(삭제 · 폴더 열기 · 폴더 추가)은 서버가 이 PC 에서 온 요청만 받는다 - 원격이면 그 단추를 그리지 않는다.
+import {createImageLightbox} from './imageLightbox.mjs?v=20261122-b';
 
 const API = '/api/output-index';
+const HISTORY = '/api/history';
 const PAGE = 80;
 const PREFS_KEY = 'naia.outputSearch.prefs';
+const DELETE_MODE_KEY = 'naia_result_delete_mode';     // 레일 · 뷰어 설정과 같은 키(한 벌)
 const SOURCES = ['NAI', 'WEBUI', 'ComfyUI', 'NAIA', 'unknown'];
 const SIZES = {s: {tile: 96, thumb: 192}, m: {tile: 136, thumb: 256}, l: {tile: 190, thumb: 384}};
+// 크게 보기는 앱의 떠 있는 창(10150)보다 위, 확인 창(11000)보다 아래 - 크게 보며 지울 때 확인 창이 가려지지 않게.
+const LIGHTBOX_Z = 10500;
 
 export const OUTPUT_SEARCH_STYLE = `
 .osr {display:flex;flex-direction:column;min-height:0;height:100%;font-size:12px;color:var(--text-primary,#e8e8f0)}
 .osr [hidden] {display:none!important}
+.osr.scope-session [data-only="all"], .osr.scope-all [data-only="session"] {display:none!important}
 .osr button {font:inherit;color:inherit;background:transparent;border:1px solid var(--border-dim,#2a2a3d);
   border-radius:4px;padding:2px 7px;cursor:pointer;white-space:nowrap}
 .osr button:hover {border-color:var(--border-glow,#3d3d5c);background:var(--bg-hover,rgba(255,255,255,.06))}
@@ -21,10 +33,16 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr button.warn {color:#e8c46a;border-color:rgba(232,196,106,.45);cursor:default}
 .osr button.danger:hover {border-color:#e05561;color:#ff8a94}
 .osr-row {display:flex;align-items:center;gap:5px;padding:5px 8px;border-bottom:1px solid var(--border-dim,#2a2a3d);flex-wrap:wrap}
+.osr-seg {display:inline-flex;flex:none}
+.osr-seg button {border-radius:0;margin-left:-1px}
+.osr-seg button:first-child {border-radius:4px 0 0 4px;margin-left:0}
+.osr-seg button:last-child {border-radius:0 4px 4px 0}
+.osr-seg i {font-style:normal;color:var(--text-dim,#9ea0b4);margin-left:4px}
 .osr-sep {width:1px;height:16px;background:var(--border-dim,#2a2a3d);margin:0 2px}
 .osr-grow {flex:1}
 .osr-dim {color:var(--text-dim,#9ea0b4);font-size:11px}
-.osr-box {position:relative;flex:1 1 280px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:26px;
+.osr-link {cursor:pointer;color:var(--accent-glow,#9d8bff)}
+.osr-box {position:relative;flex:1 1 240px;display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:26px;
   padding:2px 6px;background:var(--bg-deep,#0a0a0f);border:1px solid var(--border-glow,#3d3d5c);border-radius:4px;cursor:text}
 .osr-box:focus-within {border-color:var(--accent,#7c6aef)}
 .osr-box input {flex:1;min-width:110px;border:0;outline:none;background:transparent;color:inherit;font:inherit;padding:2px 0}
@@ -47,17 +65,20 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-left {flex:1;min-width:0;display:flex;flex-direction:column}
 .osr-selbar {display:flex;align-items:center;gap:6px;padding:4px 8px;background:rgba(124,106,239,.12);
   border-bottom:1px solid var(--border-dim,#2a2a3d)}
-.osr-list {flex:1;min-height:0;overflow:auto;padding:4px 6px 10px;user-select:none}
+.osr-list {position:relative;flex:1;min-height:0;overflow:auto;padding:4px 6px 10px;user-select:none;outline:none}
+.osr-marq {position:absolute;z-index:3;border:1px solid var(--accent-glow,#9d8bff);background:rgba(124,106,239,.14);pointer-events:none}
 .osr-fold {display:flex;justify-content:space-between;padding:6px 2px 3px;color:var(--text-dim,#9ea0b4);font-size:11px;
   border-bottom:1px solid var(--border-dim,#2a2a3d);margin-bottom:3px}
 .osr-grid {display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--osr-tile,136px),1fr));gap:3px}
 .osr-th {position:relative;aspect-ratio:7/9;background:var(--bg-surface,#12121a);border:2px solid transparent;
   border-radius:3px;overflow:hidden;cursor:pointer}
-.osr-th img {width:100%;height:100%;object-fit:cover;display:block}
+.osr-th img {width:100%;height:100%;object-fit:cover;display:block;pointer-events:none}
 .osr-th.sel {border-color:var(--accent-glow,#9d8bff)}
 .osr-th.cur {border-color:#e8c46a}
 .osr-th .osr-tick {position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:3px;font-size:10px;line-height:14px;
   text-align:center;background:var(--accent,#7c6aef);color:#fff}
+.osr-th .osr-badge {position:absolute;right:3px;bottom:3px;padding:0 4px;border-radius:3px;font-size:10px;line-height:14px;
+  background:rgba(232,196,106,.9);color:#2a1d00}
 .osr-more {padding:10px;text-align:center;color:var(--text-dim,#9ea0b4);font-size:11px}
 .osr-right {width:290px;flex:none;border-left:1px solid var(--border-dim,#2a2a3d);overflow:auto;padding:8px;
   display:flex;flex-direction:column;gap:6px}
@@ -67,10 +88,12 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-path {word-break:break-all;color:var(--text-dim,#9ea0b4);font-size:11px}
 .osr-meta {display:flex;flex-wrap:wrap;gap:4px}
 .osr-meta span {border:1px solid var(--border-dim,#2a2a3d);border-radius:3px;padding:0 5px;font-size:11px;color:var(--text-muted,#c6c6d8)}
+.osr-meta span.unsaved {border-color:rgba(232,196,106,.55);color:#e8c46a}
 .osr-prompt {font-size:11px;line-height:1.45;color:var(--text-muted,#c6c6d8);border:1px solid var(--border-dim,#2a2a3d);
   border-radius:3px;padding:5px 6px;background:var(--bg-deep,#0a0a0f);max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-word}
 .osr-hl {background:rgba(124,106,239,.3);color:var(--text-primary,#e8e8f0);border-radius:2px}
 .osr-acts {display:flex;flex-wrap:wrap;gap:4px}
+.osr-note {font-size:10.5px;color:var(--text-dim,#9ea0b4)}
 .osr-empty {padding:24px 10px;text-align:center;color:var(--text-dim,#9ea0b4)}
 .osr.narrow .osr-right {display:none}
 `;
@@ -132,6 +155,29 @@ export function highlightPrompt(prompt, chips, matched = []) {
   }).join('');
 }
 
+// ── 두 범위의 항목을 한 모양으로 ───────────────────────────────────────────────
+function normAll(r) {
+  return {
+    key: `r${r.row}`, row: r.row, path: r.path || '', name: nameOf(r.path), saved: true,
+    mtime: r.mtime, width: r.width, height: r.height, source: r.source, seed: r.seed, prompt: r.prompt || '',
+    thumb: size => `${API}/thumb?row=${r.row}&size=${size}`,
+    full: `${API}/file?row=${r.row}`,
+  };
+}
+
+function normSession(r) {
+  const file = String(r.file_path || '').replace(/\\/g, '/');
+  const id = encodeURIComponent(r.history_id || '');
+  return {
+    key: r.rel_path, rel: r.rel_path, hid: r.history_id, path: file, name: file ? nameOf(file) : (r.filename || ''),
+    saved: r.saved != null ? Boolean(r.saved) : Boolean(file),
+    mtime: r.mtime, width: r.width, height: r.height, source: r.api_mode || r.model || '', seed: r.seed,
+    prompt: r.prompt || '',
+    thumb: size => `${HISTORY}/thumb/${id}?size=${size}`,
+    full: `${HISTORY}/image/${id}`,
+  };
+}
+
 export function createOutputSearch({
   document: doc,
   window: win,
@@ -140,19 +186,24 @@ export function createOutputSearch({
   initial = {},
   // 앱 안에서만 오는 손: 메인 프롬프트에 넣기. 없으면 [프롬프트] 단추는 복사로 동작한다.
   applyPrompt = null,
+  // 앱 안에서만 오는 손: 이번 세션의 삭제 · 저장 · 메인에 띄우기 · 바인딩(resultHistory.sessionActions).
+  session = null,
   openUrl = url => { win.open(url, '_blank'); return true; },
   confirmAsk = async message => win.confirm(message),
   toast = () => {},
   onStatus = () => {},
+  onScope = () => {},
 }) {
   const prefs = readPrefs(storage);
   const st = {
+    scope: initial.scope === 'all' ? 'all' : 'session',
     chips: [],
     sources: new Set(SOURCES),
     roots: null,          // null = 전부. 아니면 켠 root id 집합
     allRoots: [],
     local: false,
     items: [], count: 0, matched: [], matchedTotal: 0,
+    total: 0, unsaved: 0, pendingNew: 0,     // 이번 세션: 전체 장수 · 미저장 · 거르는 중에 온 새 그림
     loading: false, done: false, seq: 0,
     sel: new Set(), anchor: -1, current: null,
     partial: false, rows: 0,
@@ -161,6 +212,7 @@ export function createOutputSearch({
   for (const tag of initial.include || []) st.chips.push(parseChip(tag, false));
   for (const tag of initial.exclude || []) st.chips.push(parseChip(tag, true));
   if (initial.text) st.chips.push({kind: 'text', text: String(initial.text)});
+  const lightbox = createImageLightbox({document: doc, escHtml: esc});
 
   function parseChip(raw, ex) {
     const text = String(raw || '').trim();
@@ -171,24 +223,31 @@ export function createOutputSearch({
   host.classList.add('osr');
   host.innerHTML = `
     <div class="osr-row">
+      <span class="osr-seg" role="tablist" aria-label="범위">
+        <button type="button" data-scope="session" title="이번 실행에 만든 그림 - 저장 안 된 것 포함">이번 세션<i data-scount></i></button>
+        <button type="button" data-scope="all" title="저장된 그림 전체 - 지난 실행 · 추가한 폴더 포함">전체<i data-acount></i></button>
+      </span>
       <div class="osr-box" data-box>
         <span class="osr-chips" data-chips></span>
         <input data-input type="text" placeholder="태그 추가" autocomplete="off" spellcheck="false" aria-label="태그 검색">
         <div class="osr-sug" data-sug hidden></div>
       </div>
-      <button type="button" data-act="text" title="프롬프트 본문에서 글자 그대로 찾기 (느림)">본문</button>
+      <button type="button" data-act="text" title="프롬프트 본문에서 글자 그대로 찾기">본문</button>
       <span class="osr-sep"></span>
       <button type="button" data-act="sort" title="정렬"></button>
-      <button type="button" data-act="view" title="보기 방식"></button>
+      <button type="button" data-act="view" data-only="all" title="보기 방식"></button>
       <button type="button" data-size="s" title="작게">S</button>
       <button type="button" data-size="m" title="보통">M</button>
       <button type="button" data-size="l" title="크게">L</button>
     </div>
     <div class="osr-row" data-filters>
-      <span data-sources></span>
-      <span class="osr-sep"></span>
-      <span data-roots></span>
-      <button type="button" data-act="addroot" data-local title="색인할 폴더 추가 (이 PC 에서만)" hidden>+ 폴더</button>
+      <span data-only="all" data-sources></span>
+      <span data-only="all" class="osr-sep"></span>
+      <span data-only="all" data-roots></span>
+      <button type="button" data-only="all" data-act="addroot" data-local title="색인할 폴더 추가 (이 PC 에서만)" hidden>+ 폴더</button>
+      <button type="button" data-only="session" data-act="saveall" title="저장 안 된 그림을 모두 저장 폴더로">미저장 모두 저장</button>
+      <button type="button" data-only="session" data-act="zip" title="저장 안 된 그림을 zip 으로 받기">미저장 zip</button>
+      <button type="button" data-only="session" data-act="clearall" class="danger" title="히스토리를 통째로 비웁니다 — 저장된 파일은 그대로 남습니다">일괄정리</button>
       <span class="osr-grow"></span>
       <span class="osr-dim" data-count></span>
     </div>
@@ -204,7 +263,9 @@ export function createOutputSearch({
         <div class="osr-selbar" data-selbar hidden>
           <span data-selcount></span>
           <span class="osr-grow"></span>
-          <button type="button" data-act="seldelete" data-local class="danger" title="고른 그림을 휴지통으로 (Del)">삭제</button>
+          <button type="button" data-only="session" data-act="selsave" title="고른 그림을 빠른 저장 폴더로 (Ctrl+S)">저장</button>
+          <button type="button" data-only="session" data-act="selsaveas" data-saveas title="고른 그림을 다른 곳에 저장">다른 이름</button>
+          <button type="button" data-act="seldelete" class="danger" title="고른 그림 삭제 (Del)">삭제</button>
           <button type="button" data-act="selclear" title="선택 해제 (Esc)">해제</button>
         </div>
         <div class="osr-list" data-list tabindex="0"></div>
@@ -214,12 +275,13 @@ export function createOutputSearch({
   const $ = sel => host.querySelector(sel);
   const input = $('[data-input]');
   const list = $('[data-list]');
+  const isSession = () => st.scope === 'session';
 
-  // ── 머리 상태 ──────────────────────────────────────────────────────────────
-  async function api(path, body) {
+  // ── 요청 ──────────────────────────────────────────────────────────────────
+  async function req(url, body) {
     const options = body === undefined ? {cache: 'no-store'}
       : {method: 'POST', cache: 'no-store', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
-    const response = await win.fetch(API + path, options);
+    const response = await win.fetch(url, options);
     let data = null;
     try { data = await response.json(); } catch (_) { data = null; }
     if (!response.ok) {
@@ -228,6 +290,7 @@ export function createOutputSearch({
     }
     return data;
   }
+  const api = (path, body) => req(API + path, body);
 
   let statusTimer = 0;
   async function loadStatus() {
@@ -242,9 +305,34 @@ export function createOutputSearch({
     st.local = st.allRoots.length > 0 && st.allRoots.every(r => typeof r.path === 'string');
     host.querySelectorAll('[data-local]').forEach(node => { node.hidden = !st.local; });
     drawRoots();
+    drawScope();
     onStatus({partial: st.partial, rows: st.rows, foldersDone: status.folders_done, pending: status.pending_dirs});
     if (st.partial || status.running) statusTimer = win.setTimeout(loadStatus, 2000);
-    if (wasPartial && !st.partial) runQuery();
+    if (wasPartial && !st.partial && !isSession()) runQuery();
+  }
+
+  // ── 범위 ──────────────────────────────────────────────────────────────────
+  function drawScope() {
+    host.classList.toggle('scope-session', isSession());
+    host.classList.toggle('scope-all', !isSession());
+    host.querySelectorAll('[data-scope]').forEach(b => b.classList.toggle('on', b.dataset.scope === st.scope));
+    $('[data-scount]').textContent = st.total ? fmt(st.total) : '';
+    $('[data-acount]').textContent = st.rows ? fmt(st.rows) : '';
+    // 다른 이름 저장은 브라우저가 파일 선택 창을 줄 때만 된다.
+    host.querySelectorAll('[data-saveas]').forEach(n => { n.hidden = !(session && session.canSaveAs?.()); });
+  }
+  function setScope(scope) {
+    if (scope === st.scope) return;
+    st.scope = scope === 'all' ? 'all' : 'session';
+    st.pendingNew = 0;
+    lightbox.close();
+    drawScope();
+    drawPrefs();
+    closeSug();
+    runQuery();
+    // 전체 장수는 상태(status)가 준다 - 창을 연 뒤 저장된 그림을 범위를 바꿀 때 다시 센다.
+    loadStatus();
+    onScope(st.scope);
   }
 
   // ── 칩 · 후보 ─────────────────────────────────────────────────────────────
@@ -281,7 +369,7 @@ export function createOutputSearch({
     include.forEach(t => params.append('include', t));
     exclude.forEach(t => params.append('exclude', t));
     try {
-      const data = await api('/suggest?' + params.toString());
+      const data = await req(`${isSession() ? HISTORY : API}/suggest?${params.toString()}`);
       if (seq !== sugSeq) return;
       sugItems = data.items || [];
       sugAct = -1;
@@ -320,12 +408,20 @@ export function createOutputSearch({
     }).join(' ');
   }
   function drawCount() {
-    const loaded = st.items.length;
-    let text = `${fmt(st.count)}장`;
-    if (st.partial) text += ` · 색인 중 ${fmt(st.rows)}`;
     const node = $('[data-count]');
-    node.textContent = text;
-    node.title = st.matchedTotal ? `부분 일치로 펼친 태그 ${st.matchedTotal}개: ${st.matched.slice(0, 30).join(', ')}` : `${fmt(loaded)}장 불러옴`;
+    if (isSession()) {
+      let text = st.chips.length ? `${fmt(st.count)} / ${fmt(st.total)}장` : `${fmt(st.total)}장`;
+      if (st.unsaved) text += ` · 미저장 ${fmt(st.unsaved)}`;
+      node.innerHTML = esc(text) + (st.pendingNew
+        ? ` · <span class="osr-link" data-act="refreshq" title="다시 찾기">새 그림 ${fmt(st.pendingNew)} ↻</span>` : '');
+      node.title = '이번 실행에 만든 그림';
+    } else {
+      let text = `${fmt(st.count)}장`;
+      if (st.partial) text += ` · 색인 중 ${fmt(st.rows)}`;
+      node.textContent = text;
+      node.title = st.matchedTotal ? `부분 일치로 펼친 태그 ${st.matchedTotal}개: ${st.matched.slice(0, 30).join(', ')}` : `${fmt(st.items.length)}장 불러옴`;
+    }
+    drawScope();
   }
   function drawPrefs() {
     $('[data-act="sort"]').textContent = prefs.sort === 'mtime_asc' ? '오래된순' : '최신순';
@@ -342,6 +438,7 @@ export function createOutputSearch({
     const {include, exclude, text} = chipQuery(st.chips);
     const body = {include, exclude, sort: prefs.sort, offset, limit: PAGE};
     if (text) body.text = text;
+    if (isSession()) return body;
     if (st.sources.size !== SOURCES.length) body.source = [...st.sources];
     if (st.roots) body.roots = [...st.roots];
     return body;
@@ -349,10 +446,12 @@ export function createOutputSearch({
   async function runQuery() {
     const seq = ++st.seq;
     st.items = []; st.done = false; st.loading = false;
-    st.sel.clear(); st.anchor = -1;
+    st.sel.clear(); st.anchor = -1; st.current = null;
+    st.pendingNew = 0;
     list.scrollTop = 0;
     list.innerHTML = '';
     drawSel();
+    drawDetail();
     await loadMore(seq);
   }
   async function loadMore(seq = st.seq) {
@@ -360,23 +459,36 @@ export function createOutputSearch({
     st.loading = true;
     drawTail();
     try {
-      const data = await api('/query', queryBody(st.items.length));
+      const session = isSession();
+      const data = await req(session ? `${HISTORY}/query` : `${API}/query`, queryBody(st.items.length));
       if (seq !== st.seq) return;
-      const items = data.items || [];
+      const items = (data.items || []).map(session ? normSession : normAll);
       st.count = data.count || 0;
       st.matched = data.matched || [];
       st.matchedTotal = data.matched_total || 0;
+      if (session) { st.total = data.total || 0; st.unsaved = data.unsaved || 0; }
+      const known = new Set(st.items.map(it => it.key));
       const start = st.items.length;
-      st.items.push(...items);
+      // 이번 세션은 새 그림이 앞에 붙으며 쪽이 밀린다 - 이미 받은 것은 다시 넣지 않는다.
+      st.items.push(...items.filter(it => !known.has(it.key)));
       st.done = items.length < PAGE || st.items.length >= st.count;
       appendTiles(start);
-      if (!st.current && st.items.length) select(0, {});
+      if (st.current == null && st.items.length) select(0, {});
       if (!st.items.length) drawDetail();
     } catch (error) {
       if (seq === st.seq) toast(error.message, 'error');
       st.done = true;
     } finally {
-      if (seq === st.seq) { st.loading = false; drawTail(); drawCount(); }
+      if (seq === st.seq) {
+        st.loading = false; drawTail(); drawCount();
+        if (lightbox.isOpen()) {
+          const viewing = lightbox.currentItem()?.key;
+          lightbox.setItems(lbItems(), viewing);
+          // 목록의 '지금 그림' 도 큰 보기가 보는 그림으로 맞춘다(닫았을 때 그 자리로 돌아오게).
+          const at = indexOfKey(viewing);
+          if (at >= 0 && st.current !== at) select(at, {});
+        }
+      }
     }
     // 첫 장이 화면을 다 못 채우면 스크롤이 생기지 않는다 - 그때는 바로 더 부른다.
     if (seq === st.seq && !st.done && list.scrollHeight <= list.clientHeight + 40) loadMore(seq);
@@ -384,13 +496,16 @@ export function createOutputSearch({
   function tile(item, index) {
     const size = SIZES[prefs.size].thumb;
     const cls = ['osr-th', st.sel.has(index) ? 'sel' : '', st.current === index ? 'cur' : ''].join(' ');
-    return `<div class="${cls}" data-i="${index}" title="${esc(nameOf(item.path))}">`
-      + `<img loading="lazy" decoding="async" alt="" src="${API}/thumb?row=${item.row}&size=${size}">`
+    const ctxPath = isSession() && item.rel ? ` data-path="${esc(item.rel)}"` : '';
+    return `<div class="${cls}" data-i="${index}"${ctxPath} title="${esc(item.name || item.path)}">`
+      + `<img loading="lazy" decoding="async" alt="" src="${item.thumb(size)}">`
+      + `${isSession() && !item.saved ? '<span class="osr-badge">미저장</span>' : ''}`
       + `${st.sel.has(index) && st.sel.size > 1 ? '<span class="osr-tick">✓</span>' : ''}</div>`;
   }
   function appendTiles(start) {
     const html = [];
     let grid = list.lastElementChild?.matches?.('.osr-group') ? list.lastElementChild : null;
+    if (!grid) grid = [...list.querySelectorAll('.osr-group')].pop() || null;
     let lastFolder = grid ? grid.dataset.folder : null;
     let chunk = [];
     const flush = () => {
@@ -399,10 +514,11 @@ export function createOutputSearch({
       else html.push(chunk.join(''));
       chunk = [];
     };
-    if (prefs.view === 'flat') {
+    // 이번 세션은 늘 한 줄이다 - 저장 안 된 그림은 폴더가 없고, 저장 폴더가 섞여 묶음이 잘게 쪼개진다.
+    if (prefs.view === 'flat' || isSession()) {
       if (!grid) {
-        list.insertAdjacentHTML('beforeend', '<div class="osr-group" data-folder=""><div class="osr-grid"></div></div>');
-        grid = list.lastElementChild;
+        list.insertAdjacentHTML('afterbegin', '<div class="osr-group" data-folder=""><div class="osr-grid"></div></div>');
+        grid = list.querySelector('.osr-group');
       }
       grid.querySelector('.osr-grid').insertAdjacentHTML('beforeend',
         st.items.slice(start).map((item, k) => tile(item, start + k)).join(''));
@@ -412,9 +528,10 @@ export function createOutputSearch({
         if (folder !== lastFolder) {
           flush();
           if (html.length) { list.insertAdjacentHTML('beforeend', html.join('')); html.length = 0; }
-          list.insertAdjacentHTML('beforeend',
-            `<div class="osr-group" data-folder="${esc(folder)}"><div class="osr-fold"><span>${esc(folder || '(뿌리)')}</span><span data-fc>0</span></div><div class="osr-grid"></div></div>`);
-          grid = list.lastElementChild;
+          const tail = list.querySelector('.osr-more');
+          const markup = `<div class="osr-group" data-folder="${esc(folder)}"><div class="osr-fold"><span>${esc(folder || '(뿌리)')}</span><span data-fc>0</span></div><div class="osr-grid"></div></div>`;
+          if (tail) tail.insertAdjacentHTML('beforebegin', markup); else list.insertAdjacentHTML('beforeend', markup);
+          grid = [...list.querySelectorAll('.osr-group')].pop();
           lastFolder = folder;
         }
         chunk.push(tile(st.items[i], i));
@@ -427,6 +544,12 @@ export function createOutputSearch({
     }
     drawTail();
   }
+  function rebuild() {
+    const top = list.scrollTop;
+    list.innerHTML = '';
+    appendTiles(0);
+    list.scrollTop = top;
+  }
   function drawTail() {
     let tail = list.querySelector('.osr-more');
     if (!tail) {
@@ -436,8 +559,11 @@ export function createOutputSearch({
       list.appendChild(tail);
     }
     if (st.loading) tail.textContent = '불러오는 중…';
-    else if (!st.items.length) tail.textContent = st.partial ? '아직 색인하는 중입니다.' : '맞는 그림이 없습니다.';
-    else tail.textContent = st.done ? `${fmt(st.items.length)}장` : '';
+    else if (!st.items.length) {
+      tail.textContent = isSession()
+        ? (st.chips.length ? '맞는 그림이 없습니다.' : '이번 실행에 만든 그림이 아직 없습니다.')
+        : (st.partial ? '아직 색인하는 중입니다.' : '맞는 그림이 없습니다.');
+    } else tail.textContent = st.done ? `${fmt(st.items.length)}장` : '';
   }
   list.addEventListener('scroll', () => {
     if (list.scrollTop + list.clientHeight >= list.scrollHeight - 400) loadMore();
@@ -483,6 +609,8 @@ export function createOutputSearch({
     const n = st.sel.size;
     $('[data-selbar]').hidden = n < 2;
     $('[data-selcount]').textContent = `${fmt(n)}장 선택`;
+    // 전체 범위의 삭제는 이 PC 에서만 - 원격이면 단추를 그리지 않는다.
+    $('[data-act="seldelete"]').hidden = !isSession() && !st.local;
   }
   function clearSel() {
     if (st.sel.size < 2) return;
@@ -490,8 +618,90 @@ export function createOutputSearch({
     repaintAll();
     drawSel();
   }
+  function chosen() {
+    return [...st.sel].filter(i => st.items[i]).sort((a, b) => a - b);
+  }
+  function gridColumns() {
+    const grid = list.querySelector('.osr-grid');
+    if (!grid) return 1;
+    const columns = (win.getComputedStyle(grid).gridTemplateColumns || '').trim();
+    return columns && columns !== 'none' ? Math.max(1, columns.split(/\s+/).length) : 1;
+  }
+  function moveTo(next, shift = false) {
+    if (!st.items[next]) return;
+    select(next, {shift});
+    list.querySelector(`.osr-th[data-i="${next}"]`)?.scrollIntoView({block: 'nearest'});
+    if (next >= st.items.length - gridColumns() * 2) loadMore();
+  }
+
+  // 드래그 사각형 선택 - 빈 곳에서 끌기 시작한다(타일 위에서 누르면 그 타일 클릭이다). Ctrl 을 누르면 더한다.
+  let marquee = null;
+  function contentPoint(event) {
+    const rect = list.getBoundingClientRect();
+    return {x: event.clientX - rect.left + list.scrollLeft, y: event.clientY - rect.top + list.scrollTop};
+  }
+  list.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target.closest('.osr-th') || event.target.closest('.osr-more')) return;
+    // 세로 스크롤 막대를 누른 것은 끌기 선택이 아니다.
+    if (event.offsetX >= list.clientWidth) return;
+    const p = contentPoint(event);
+    marquee = {x: p.x, y: p.y, base: event.ctrlKey || event.metaKey ? new Set(st.sel) : new Set(), node: null, moved: false};
+    list.setPointerCapture?.(event.pointerId);
+    list.focus({preventScroll: true});
+  });
+  list.addEventListener('pointermove', event => {
+    if (!marquee) return;
+    const p = contentPoint(event);
+    const box = {l: Math.min(p.x, marquee.x), t: Math.min(p.y, marquee.y), r: Math.max(p.x, marquee.x), b: Math.max(p.y, marquee.y)};
+    if (!marquee.moved && box.r - box.l + box.b - box.t < 6) return;
+    marquee.moved = true;
+    if (!marquee.node) {
+      marquee.node = doc.createElement('div');
+      marquee.node.className = 'osr-marq';
+      list.appendChild(marquee.node);
+    }
+    Object.assign(marquee.node.style, {left: `${box.l}px`, top: `${box.t}px`, width: `${box.r - box.l}px`, height: `${box.b - box.t}px`});
+    const rect = list.getBoundingClientRect();
+    const next = new Set(marquee.base);
+    list.querySelectorAll('.osr-th').forEach(node => {
+      const r = node.getBoundingClientRect();
+      const l = r.left - rect.left + list.scrollLeft, t = r.top - rect.top + list.scrollTop;
+      if (l < box.r && l + r.width > box.l && t < box.b && t + r.height > box.t) next.add(Number(node.dataset.i));
+    });
+    st.sel = next;
+    repaintAll();
+    drawSel();
+    // 아래 끝까지 끌면 다음 쪽을 부른다.
+    if (event.clientY > rect.bottom - 30) { list.scrollTop += 20; loadMore(); }
+    else if (event.clientY < rect.top + 30) list.scrollTop -= 20;
+  });
+  const endMarquee = () => {
+    if (!marquee) return;
+    const {moved, node} = marquee;
+    marquee = null;
+    node?.remove();
+    if (!moved) return;
+    const picked = [...st.sel].sort((a, b) => a - b);
+    if (picked.length && !st.sel.has(st.current)) {
+      const prev = st.current;
+      st.current = picked[0];
+      st.anchor = picked[0];
+      paintTile(prev);
+      paintTile(st.current);
+      drawDetail();
+    }
+    drawSel();
+  };
+  list.addEventListener('pointerup', endMarquee);
+  list.addEventListener('pointercancel', endMarquee);
 
   // ── 상세 ──────────────────────────────────────────────────────────────────
+  async function fullMeta(item) {
+    if (item.row != null) return api(`/meta?row=${item.row}`);
+    const meta = await req(`${HISTORY}/meta/${encodeURIComponent(item.hid)}`);
+    const chars = Array.isArray(meta.characters) ? meta.characters : [];
+    return {...meta, characters: chars.map(c => (typeof c === 'string' ? c : (c && (c.prompt || c.caption)) || '')).filter(Boolean)};
+  }
   let metaSeq = 0;
   function drawDetail() {
     const box = $('[data-detail]');
@@ -499,38 +709,64 @@ export function createOutputSearch({
     if (!item) { box.innerHTML = `<div class="osr-empty">${st.items.length ? '' : '그림을 고르면 여기에 보입니다.'}</div>`; return; }
     const date = new Date(item.mtime * 1000);
     const when = Number.isFinite(date.getTime()) ? date.toLocaleString() : '';
+    const session = isSession();
+    const canLocate = st.local && item.saved;
+    const canDelete = session || st.local;
+    const promptLabel = applyPrompt ? '프롬프트 넣기' : '프롬프트 복사';
     box.innerHTML = `
-      <div class="osr-prev" data-act="original" title="원본 열기"><img alt="" src="${API}/thumb?row=${item.row}&size=384"></div>
-      <div class="osr-path">${esc(item.path)}</div>
+      <div class="osr-prev" data-act="big" title="크게 보기 (Enter)"><img alt="" src="${item.thumb(384)}"></div>
+      <div class="osr-path">${esc(item.path || item.name)}</div>
       <div class="osr-meta">
+        ${session && !item.saved ? '<span class="unsaved" title="아직 디스크에 없다 - 이번 실행이 끝나면 사라진다">미저장</span>' : ''}
         ${item.width ? `<span>${item.width}×${item.height}</span>` : ''}
-        <span>${esc(item.source)}</span>
-        ${item.seed != null ? `<span title="seed">${esc(item.seed)}</span>` : ''}
+        ${item.source ? `<span>${esc(item.source)}</span>` : ''}
+        ${item.seed != null && item.seed !== '' ? `<span title="seed">${esc(item.seed)}</span>` : ''}
         ${when ? `<span>${esc(when)}</span>` : ''}
       </div>
-      <div class="osr-prompt" data-prompt>${item.prompt ? highlightPrompt(item.prompt, st.chips, st.matched) : '<i class="osr-dim">메타 없음</i>'}</div>
+      <div class="osr-prompt" data-prompt>${item.prompt ? highlightPrompt(item.prompt, st.chips, st.matched) : '<i class="osr-dim">불러오는 중…</i>'}</div>
       <div class="osr-acts">
+        ${session && sessionHand() ? '<button type="button" data-act="main" title="메인 화면에 띄우기 - Result Info · Enhance · Sequence 가 이 그림을 따라간다">메인에 띄우기</button>' : ''}
+        <button type="button" data-act="big" title="크게 보기 (Enter · 더블클릭)">크게</button>
         <button type="button" data-act="original" title="원본을 브라우저로">원본</button>
-        <button type="button" data-act="prompt" title="${applyPrompt ? '프롬프트 · 네거티브를 메인에 넣기' : '프롬프트 복사'}" ${item.prompt ? '' : 'disabled'}>${applyPrompt ? '프롬프트 넣기' : '프롬프트 복사'}</button>
-        <button type="button" data-act="locate" data-local title="탐색기에서 이 파일 보기" ${st.local ? '' : 'hidden'}>폴더 열기</button>
-        <button type="button" data-act="delete" data-local class="danger" title="휴지통으로 (Del)" ${st.local ? '' : 'hidden'}>삭제</button>
-      </div>`;
-    // 목록의 프롬프트는 300자로 잘려 온다 - 긴 것만 전체를 따로 받는다.
-    if (item.prompt && item.prompt.length >= 300) {
+        <button type="button" data-act="prompt" title="${applyPrompt ? '프롬프트 · 네거티브를 메인에 넣기' : '프롬프트 복사'}">${promptLabel}</button>
+        ${session ? '<button type="button" data-act="save" title="빠른 저장 폴더로 (Ctrl+S)">저장</button>' : ''}
+        ${session && sessionHand()?.canSaveAs?.() ? '<button type="button" data-act="saveas" title="다른 곳에 저장">다른 이름</button>' : ''}
+        ${canLocate ? '<button type="button" data-act="locate" title="탐색기에서 이 파일 보기">폴더 열기</button>' : ''}
+        ${canDelete ? `<button type="button" data-act="delete" class="danger" title="삭제 (Del)">삭제</button>` : ''}
+      </div>
+      <div class="osr-note">${session ? '삭제 = 뷰어 설정(⚙)의 방식 · 히스토리에서만 / 휴지통' : (st.local ? '삭제 = 휴지통 · 늘 묻습니다' : '')}</div>`;
+    // 목록의 프롬프트는 300자로 잘려 온다(이번 세션 새 그림은 비어 온다) - 그때만 전체를 따로 받는다.
+    if (!item.prompt || item.prompt.length >= 300) {
       const seq = ++metaSeq;
-      api(`/meta?row=${item.row}`).then(meta => {
+      fullMeta(item).then(meta => {
         if (seq !== metaSeq || st.items[st.current] !== item) return;
         const node = $('[data-prompt]');
-        if (node && meta?.prompt) node.innerHTML = highlightPrompt(meta.prompt, st.chips, st.matched);
-      }).catch(() => {});
+        if (!node) return;
+        if (meta?.prompt) {
+          if (!item.prompt) item.prompt = meta.prompt.slice(0, 300);
+          node.innerHTML = highlightPrompt(meta.prompt, st.chips, st.matched);
+        } else node.innerHTML = '<i class="osr-dim">메타 없음</i>';
+      }).catch(() => {
+        const node = $('[data-prompt]');
+        if (node && st.items[st.current] === item && !item.prompt) node.innerHTML = '<i class="osr-dim">메타 없음</i>';
+      });
     }
   }
+  const sessionHand = () => (session && typeof session === 'object' ? session : null);
 
-  async function doDelete(indices) {
-    const targets = [...indices].filter(i => st.items[i]).sort((a, b) => a - b);
+  // ── 바꾸기: 삭제 · 저장 ───────────────────────────────────────────────────
+  async function deleteItems(indices) {
+    const targets = [...indices].filter(i => st.items[i]).sort((a, b) => a - b).map(i => st.items[i]);
     if (!targets.length) return;
+    if (isSession()) {
+      const removed = sessionHand() ? await sessionHand().deletePaths(targets.map(t => t.rel)) : await plainSessionDelete(targets);
+      if (Array.isArray(removed) && removed.length) removeKeys(new Set(removed));
+      return;
+    }
+    if (!st.local) return;
+    // 전체 범위는 '묻지 않기' 와 상관없이 늘 묻는다(사용자 결정 11-22) - 지난 실행 · 다른 폴더의 파일이다.
     const ok = await confirmAsk(targets.length === 1
-      ? `${nameOf(st.items[targets[0]].path)} 을(를) 휴지통으로 보낼까요?`
+      ? `${targets[0].name} 을(를) 휴지통으로 보낼까요?`
       : `${fmt(targets.length)}장을 휴지통으로 보낼까요?`);
     if (!ok) return;
     const deleted = new Set();
@@ -538,37 +774,88 @@ export function createOutputSearch({
     for (let k = 0; k < targets.length; k += 200) {
       const part = targets.slice(k, k + 200);
       try {
-        const data = await api('/delete', {rows: part.map(i => st.items[i].row)});
-        (data.deleted || []).forEach(row => deleted.add(row));
+        const data = await api('/delete', {rows: part.map(t => t.row)});
+        (data.deleted || []).forEach(row => deleted.add(`r${row}`));
         failed.push(...(data.failed || []));
       } catch (error) {
         toast(error.message, 'error');
         break;
       }
     }
-    if (deleted.size) removeRows(deleted);
+    if (deleted.size) removeKeys(deleted);
     if (failed.length) toast(`${fmt(failed.length)}장은 지우지 못했습니다: ${failed[0].error || ''}`, 'error');
     else if (deleted.size) toast(`${fmt(deleted.size)}장을 휴지통으로 보냈습니다.`, 'success');
   }
-  function removeRows(rows) {
-    const keepCurrent = st.items[st.current];
-    const nextIndex = st.current;
-    st.items = st.items.filter(item => !rows.has(item.row));
-    st.count = Math.max(0, st.count - rows.size);
-    st.sel.clear();
-    list.innerHTML = '';
-    appendTiles(0);
-    const stay = keepCurrent && !rows.has(keepCurrent.row) ? st.items.indexOf(keepCurrent) : Math.min(nextIndex ?? 0, st.items.length - 1);
-    st.current = null;
-    if (stay >= 0) select(stay, {}); else drawDetail();
+  // 외부 브라우저 화면(앱의 손이 없다) - 삭제 방식은 같은 키를 읽고, 늘 묻는다.
+  async function plainSessionDelete(targets) {
+    let toDisk = false;
+    try { toDisk = storage?.getItem(DELETE_MODE_KEY) === 'disk'; } catch (_) { toDisk = false; }
+    const how = toDisk ? '저장 파일은 휴지통으로 보냅니다.' : '히스토리에서만 빼고 저장 파일은 남깁니다.';
+    if (!(await confirmAsk(`${fmt(targets.length)}장을 지울까요?\n${how}`))) return [];
+    try {
+      const data = await req(`${HISTORY}/selected/delete`, {paths: targets.map(t => t.rel), keep_file: !toDisk});
+      const removed = (data.removed || []).map(r => r.rel_path).filter(Boolean);
+      const failed = Array.isArray(data.failed) ? data.failed.length : 0;
+      const unrescued = (data.removed || []).filter(r => r && r.rescue_failed).length;
+      let text = `${fmt(removed.length)}장을 지웠습니다.`;
+      if (failed) text += ` 실패 ${fmt(failed)}장.`;
+      if (unrescued) text += ` ${fmt(unrescued)}장은 사본을 못 남겼습니다(복구 불가).`;
+      toast(text, failed || unrescued ? (removed.length ? 'warning' : 'error') : 'success');
+      return removed;
+    } catch (error) {
+      toast(error.message, 'error');
+      return [];
+    }
+  }
+  async function quicksave(indices) {
+    const paths = indices.map(i => st.items[i]?.rel).filter(Boolean);
+    if (!paths.length) return;
+    if (sessionHand()) { await sessionHand().quicksavePaths(paths); markSaved(indices); return; }
+    try {
+      const data = await req(`${HISTORY}/selected/quicksave`, {paths});
+      toast(`저장 ${fmt(data.saved || 0)}개 · ${data.directory || '빠른 저장 폴더'}`, 'success');
+      markSaved(indices);
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+  // 빠른 저장은 미저장 표식을 지우지 않는다(자동 저장 장수와 별개다) - 다음 찾기 때 서버 값으로 맞는다.
+  function markSaved() { drawCount(); }
+  function removeKeys(keys) {
+    if (!keys || !keys.size) return;
+    const keep = st.items[st.current];
+    const at = st.current ?? 0;
+    const before = st.items.length;
+    const selKeys = new Set([...st.sel].map(i => st.items[i]?.key).filter(Boolean));
+    const goneUnsaved = isSession() ? st.items.filter(it => keys.has(it.key) && !it.saved).length : 0;
+    st.items = st.items.filter(it => !keys.has(it.key));
+    const gone = before - st.items.length;
+    if (!gone) return;
+    if (goneUnsaved) st.unsaved = Math.max(0, st.unsaved - goneUnsaved);
+    st.count = Math.max(0, st.count - gone);
+    // 범위 단추의 장수도 함께 줄인다 - 전체에서 지운 것은 파일째 휴지통으로 갔다.
+    if (isSession()) st.total = Math.max(0, st.total - gone);
+    else st.rows = Math.max(0, st.rows - gone);
+    drawScope();
+    // 살아남은 선택은 그대로 둔다(번호만 새로) - 다른 창에서 한 장 지웠다고 골라 둔 것이 풀리지 않게.
+    st.sel = new Set();
+    st.items.forEach((it, i) => { if (selKeys.has(it.key)) st.sel.add(i); });
+    const stay = keep && !keys.has(keep.key) ? st.items.indexOf(keep) : Math.min(at, st.items.length - 1);
+    st.current = stay >= 0 ? stay : null;
+    if (st.current != null && !st.sel.size) st.sel.add(st.current);
+    st.anchor = st.current ?? -1;
+    rebuild();
+    drawDetail();
     drawCount();
     drawSel();
+    if (lightbox.isOpen()) lightbox.setItems(lbItems(), keep && !keys.has(keep.key) ? keep.key : undefined);
     if (!st.done && list.scrollHeight <= list.clientHeight + 40) loadMore();
   }
 
   async function doPrompt(item) {
     let meta;
-    try { meta = await api(`/meta?row=${item.row}`); } catch (error) { toast(error.message, 'error'); return; }
+    try { meta = await fullMeta(item); } catch (error) { toast(error.message, 'error'); return; }
+    if (!meta?.prompt) { toast('이 그림에는 프롬프트가 없습니다.', 'info'); return; }
     if (applyPrompt) { applyPrompt({prompt: meta.prompt || '', negative: meta.negative || '', meta}); return; }
     try {
       await win.navigator.clipboard.writeText(meta.prompt || '');
@@ -577,10 +864,80 @@ export function createOutputSearch({
       toast('클립보드에 쓰지 못했습니다.', 'error');
     }
   }
+  async function locate(item) {
+    try {
+      if (item.row != null) await api('/open-location', {row: item.row});
+      else await req(`${HISTORY}/open-location`, {history_id: item.hid});
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+
+  // ── 크게 보기 ─────────────────────────────────────────────────────────────
+  function lbItems() {
+    return st.items.map(it => ({key: it.key, full: it.full, thumb: it.thumb(384), label: it.name || it.path || '',
+      prompt: it.prompt, path: it.rel || ''}));
+  }
+  function isDeleteKey(event) {
+    const ctrl = event.ctrlKey || event.metaKey;
+    if (event.key === 'Delete' || event.key === 'Backspace') return !ctrl && !event.altKey;
+    return ctrl && !event.altKey && !event.shiftKey && String(event.key).toLowerCase() === 'd'
+      && isSession() && Boolean(sessionHand()?.deleteKeyDEnabled?.());
+  }
+  function indexOfKey(key) {
+    return key == null ? -1 : st.items.findIndex(it => it.key === key);
+  }
+  // Ctrl+S - 이번 세션이면 고른 것을 빠른 저장, 전체면 안내만.
+  function saveShortcut() {
+    if (isSession()) quicksave(chosen());
+    else toast('전체 보기에서는 Ctrl+S 저장이 없습니다.', 'info');
+  }
+  function isSaveKey(event) {
+    return (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && String(event.key).toLowerCase() === 's';
+  }
+  function openBig(index = st.current) {
+    if (!st.items[index]) return;
+    sessionHand()?.loadBindings?.();
+    lightbox.open(lbItems(), index, {
+      footer: true,
+      zIndex: LIGHTBOX_Z,
+      rowStep: gridColumns,
+      total: () => st.count,
+      loadMore: async () => {
+        await loadMore();
+        lightbox.setItems(lbItems(), st.items[lightbox.current()]?.key);
+      },
+      onIndex: (_i, item) => {
+        const i = indexOfKey(item?.key);
+        if (i < 0 || st.current === i) return;
+        select(i, {});
+        list.querySelector(`.osr-th[data-i="${i}"]`)?.scrollIntoView({block: 'nearest'});
+      },
+      onKey: (event, item) => {
+        const i = indexOfKey(item?.key);
+        if (isDeleteKey(event)) {
+          // 인페인트 편집 중에는 Del 이 캔버스의 것이다(목록 · 레일과 같은 규칙).
+          if (sessionHand()?.deleteKeyClaimed?.(event)) return true;
+          if (i >= 0 && (isSession() || st.local)) deleteItems(new Set([i]));
+          return true;
+        }
+        if (isSaveKey(event)) {
+          if (!isSession()) toast('전체 보기에서는 Ctrl+S 저장이 없습니다.', 'info');
+          else if (i >= 0) quicksave([i]);
+          return true;
+        }
+        if (isSession() && i >= 0 && sessionHand()?.dispatchBindingKey?.(event, st.items[i].rel)) return true;
+        return false;
+      },
+      onClose: () => list.focus({preventScroll: true}),
+    });
+  }
 
   // ── 손 ────────────────────────────────────────────────────────────────────
   host.addEventListener('click', async event => {
     const t = event.target;
+    const scope = t.closest('[data-scope]')?.dataset.scope;
+    if (scope) { setScope(scope); return; }
     const rmIndex = t.closest('[data-rm]')?.dataset.rm;
     if (rmIndex != null) { st.chips.splice(Number(rmIndex), 1); drawChips(); runQuery(); return; }
     const chip = t.closest('[data-chip]');
@@ -640,26 +997,50 @@ export function createOutputSearch({
       case 'text': st.textMode = !st.textMode; drawChips(); closeSug(); input.focus(); break;
       case 'sort': prefs.sort = prefs.sort === 'mtime_asc' ? 'mtime_desc' : 'mtime_asc'; savePrefs(); drawPrefs(); runQuery(); break;
       case 'view': prefs.view = prefs.view === 'flat' ? 'folder' : 'flat'; savePrefs(); drawPrefs(); runQuery(); break;
+      case 'refreshq': runQuery(); break;
       case 'addroot': $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
       case 'addroot-cancel': $('[data-addroot-row]').hidden = true; break;
       case 'addroot-ok': await addRoot(); break;
-      case 'seldelete': await doDelete(st.sel); break;
+      case 'seldelete': await deleteItems(st.sel); break;
       case 'selclear': clearSel(); break;
-      case 'original': if (item && !openUrl(`${API}/file?row=${item.row}`)) toast('브라우저를 열지 못했습니다.', 'error'); break;
-      case 'prompt': if (item) await doPrompt(item); break;
-      case 'locate':
-        if (item) { try { await api('/open-location', {row: item.row}); } catch (error) { toast(error.message, 'error'); } }
+      case 'selsave': await quicksave(chosen()); break;
+      case 'selsaveas': await sessionHand()?.saveAsPaths(chosen().map(i => st.items[i].rel)); break;
+      case 'saveall': await saveAllUnsaved(); break;
+      case 'zip':
+        if (!openUrl(`${HISTORY}/unsaved/download`)) toast('브라우저를 열지 못했습니다.', 'error');
         break;
-      case 'delete': if (item) await doDelete(new Set([st.current])); break;
+      case 'clearall': await clearAll(); break;
+      case 'big': openBig(); break;
+      case 'main': if (item) sessionHand()?.showInMain(item.rel); break;
+      case 'original': if (item && !openUrl(item.full)) toast('브라우저를 열지 못했습니다.', 'error'); break;
+      case 'prompt': if (item) await doPrompt(item); break;
+      case 'save': if (st.current != null) await quicksave([st.current]); break;
+      case 'saveas': if (item) await sessionHand()?.saveAsPaths([item.rel]); break;
+      case 'locate': if (item) await locate(item); break;
+      case 'delete': if (item) await deleteItems(new Set([st.current])); break;
       default: break;
     }
   });
   host.addEventListener('dblclick', event => {
     const th = event.target.closest('.osr-th');
-    const item = th ? st.items[Number(th.dataset.i)] : null;
-    if (item) openUrl(`${API}/file?row=${item.row}`);
+    if (th) openBig(Number(th.dataset.i));
   });
 
+  async function saveAllUnsaved() {
+    try {
+      const data = await req(`${HISTORY}/unsaved/save-all`, {});
+      toast(`미저장 ${fmt(data.saved || 0)}장을 저장했습니다.${data.remaining ? ` · 남음 ${fmt(data.remaining)}` : ''}`, 'success');
+      runQuery();
+    } catch (error) {
+      toast(error.message, 'error');
+    }
+  }
+  async function clearAll() {
+    // 앱 안에서는 레일과 같은 흐름(미저장 장수를 세어 경고) - 비우고 나면 viewer_cleared 알림이 목록을 다시 부른다.
+    if (sessionHand()?.clearAll) { sessionHand().clearAll(); return; }
+    if (!(await confirmAsk('히스토리를 통째로 비울까요?\n저장된 파일은 그대로 남고, 저장 안 된 그림은 사라집니다.'))) return;
+    try { await req(`${HISTORY}/clear`, {}); runQuery(); } catch (error) { toast(error.message, 'error'); }
+  }
   async function addRoot() {
     const path = $('[data-rootpath]').value.trim();
     if (!path) return;
@@ -697,23 +1078,57 @@ export function createOutputSearch({
   doc.addEventListener('pointerdown', event => {
     if (!event.target.closest?.('[data-box]')) closeSug();
   });
+  // 목록의 키는 여기서 끝낸다 - 뒤의 히스토리 레일(document 리스너)이 Del · Ctrl+A · Esc 를 자기 선택에 쓰지 않게.
   list.addEventListener('keydown', event => {
-    if (event.key === 'Delete' && st.local) { event.preventDefault(); doDelete(st.sel.size ? st.sel : new Set([st.current])); }
-    else if (event.key === 'Escape' && st.sel.size > 1) { event.stopPropagation(); clearSel(); }
-    else if ((event.key === 'a' || event.key === 'A') && (event.ctrlKey || event.metaKey)) {
-      event.preventDefault();
+    const key = event.key;
+    const ctrl = event.ctrlKey || event.metaKey;
+    const own = () => { event.preventDefault(); event.stopPropagation(); };
+    // 뷰어 설정(⚙)이 숏컷 입력을 기다리는 중이면 이 키는 그쪽 몫이다.
+    if (sessionHand()?.isCapturing?.()) return;
+    if (isSaveKey(event)) { own(); saveShortcut(); return; }
+    if (isDeleteKey(event)) {
+      own();
+      // 인페인트 편집 중에는 Del 이 캔버스의 것이다 - 창도 아무것도 지우지 않는다(레일과 같은 규칙).
+      if (sessionHand()?.deleteKeyClaimed?.(event)) return;
+      if (isSession() || st.local) deleteItems(new Set(chosen()));
+      return;
+    }
+    if (key === 'Escape') { if (st.sel.size > 1) { own(); clearSel(); } return; }
+    if (ctrl && String(key).toLowerCase() === 'a') {
+      own();
       st.items.forEach((_, i) => st.sel.add(i));
       repaintAll(); drawSel();
-    } else if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
-      event.preventDefault();
-      const next = (st.current ?? -1) + (event.key === 'ArrowRight' ? 1 : -1);
-      if (st.items[next]) {
-        select(next, {shift: event.shiftKey});
-        list.querySelector(`.osr-th[data-i="${next}"]`)?.scrollIntoView({block: 'nearest'});
-        if (next >= st.items.length - 6) loadMore();
-      }
+      return;
     }
+    const cols = gridColumns();
+    const at = st.current ?? -1;
+    if (key === 'ArrowRight') { own(); moveTo(at + 1, event.shiftKey); return; }
+    if (key === 'ArrowLeft') { own(); moveTo(Math.max(0, at - 1), event.shiftKey); return; }
+    // 위아래는 한 줄(열 수만큼) - 덜 찬 마지막 줄에서는 끝 그림에 붙는다.
+    if (key === 'ArrowDown') { own(); moveTo(Math.min(st.items.length - 1, at + cols), event.shiftKey); return; }
+    if (key === 'ArrowUp') { own(); moveTo(Math.max(0, at - cols), event.shiftKey); return; }
+    if (key === 'Home') { own(); moveTo(0); return; }
+    if (key === 'End') { own(); moveTo(st.items.length - 1); return; }
+    if (key === 'Enter' || key === ' ') { own(); openBig(); return; }
+    if (isSession() && !ctrl && st.items[st.current] && sessionHand()?.dispatchBindingKey?.(event, st.items[st.current].rel)) own();
   });
+
+  const AUX_BUTTONS = new Set([1, 3, 4]);
+  function mouseBindingPath(event) {
+    if (!isSession() || !AUX_BUTTONS.has(event.button) || !sessionHand()?.dispatchMouseBinding) return '';
+    if (lightbox.isOpen()) return st.items[indexOfKey(lightbox.currentItem()?.key)]?.rel || '';
+    return host.contains(event.target) ? (st.items[st.current]?.rel || '') : '';
+  }
+  // 뒤로 · 앞으로는 브라우저가 방문 기록을 넘기려 하므로 mousedown 에서 미리 막는다(옛 팝업과 같다).
+  const onAuxDown = event => {
+    if (mouseBindingPath(event) && sessionHand().mouseBindingId?.(event.button)) event.preventDefault();
+  };
+  const onAuxClick = event => {
+    const path = mouseBindingPath(event);
+    if (path && sessionHand().dispatchMouseBinding(event.button, path)) event.preventDefault();
+  };
+  doc.addEventListener('mousedown', onAuxDown);
+  doc.addEventListener('auxclick', onAuxClick);
 
   // 좁은 창에서는 상세를 접는다(목록이 먼저다).
   const ro = typeof win.ResizeObserver === 'function'
@@ -723,6 +1138,7 @@ export function createOutputSearch({
   drawChips();
   drawSources();
   drawPrefs();
+  drawScope();
   drawDetail();
   loadStatus();
   runQuery();
@@ -730,15 +1146,57 @@ export function createOutputSearch({
   return {
     refresh() { loadStatus(); runQuery(); },
     focus() { input.focus(); },
-    state() { return {chips: st.chips.map(c => ({...c})), count: st.count, loaded: st.items.length}; },
+    setScope,
+    scope: () => st.scope,
+    state() { return {scope: st.scope, chips: st.chips.map(c => ({...c})), count: st.count, loaded: st.items.length}; },
     externalParams() {
       const p = new URLSearchParams();
       const {include, exclude, text} = chipQuery(st.chips);
+      p.set('scope', st.scope);
       include.forEach(t => p.append('inc', t));
       exclude.forEach(t => p.append('exc', t));
       if (text) p.set('text', text);
       return p.toString();
     },
-    destroy() { win.clearTimeout(statusTimer); ro?.disconnect(); host.innerHTML = ''; },
+    /** Ctrl+S - 앱의 단일 판정이 부른다. 이 화면에서 눌렀으면 true(우리가 처리했다). */
+    handleSaveShortcut(event) {
+      if (!host.contains(event.target) || lightbox.isOpen()) return false;
+      if (isSession()) { quicksave(chosen()); return true; }
+      toast('전체 보기에서는 Ctrl+S 저장이 없습니다.', 'info');
+      return true;
+    },
+    /** 이번 세션의 실시간 알림(앱의 웹소켓) - 'new' · 'removed' · 'cleared'. */
+    sessionEvent(type, payload = {}) {
+      if (type === 'removed') {
+        if (payload.rel_path && isSession()) removeKeys(new Set([payload.rel_path]));
+        // 서버가 준 남은 장수가 진실이다(다른 창 · 전체 범위에서 지운 것도 여기로 온다).
+        if (Number.isFinite(Number(payload.total))) { st.total = Number(payload.total); drawScope(); drawCount(); }
+        return;
+      }
+      if (type === 'cleared') { if (isSession()) runQuery(); else { st.total = 0; drawScope(); } return; }
+      if (type !== 'new' || !payload.rel_path) return;
+      if (Number.isFinite(Number(payload.total))) st.total = Number(payload.total);
+      const dup = isSession() && st.items.some(it => it.key === payload.rel_path);
+      if (payload.source === 'memory' && !dup) st.unsaved += 1;
+      if (!isSession()) { drawScope(); return; }
+      if (st.items.some(it => it.key === payload.rel_path)) return;
+      // 거르는 중이거나 오래된순이면 어디에 낄지 모른다 - 알리기만 하고 [새 그림 ↻] 로 다시 찾게 한다.
+      if (st.chips.length || prefs.sort === 'mtime_asc') { st.pendingNew += 1; drawCount(); return; }
+      st.items.unshift(normSession(payload));
+      st.count += 1;
+      st.sel = new Set([...st.sel].map(i => i + 1));
+      if (st.current != null) st.current += 1;
+      if (st.anchor >= 0) st.anchor += 1;
+      rebuild();
+      if (st.current == null) select(0, {});
+      drawCount();
+      if (lightbox.isOpen()) lightbox.setItems(lbItems(), st.items[lightbox.current() + 1]?.key);
+    },
+    saveShortcut,
+    destroy() {
+      win.clearTimeout(statusTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
+      doc.removeEventListener('mousedown', onAuxDown);
+      doc.removeEventListener('auxclick', onAuxClick);
+    },
   };
 }

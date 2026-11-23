@@ -393,6 +393,12 @@ class HeadlessSaveService:
                         "directory": str(directory)}
             if mode == "move":
                 shutil.move(str(src), str(target))
+                try:
+                    service = getattr(context, "_output_index_service", None)
+                    if service is not None:
+                        service.forget_paths([src])
+                except Exception:
+                    pass
                 # 히스토리가 옛 경로를 가리키면 뷰어가 깨진다. 새 경로로 돌린다.
                 context.result_store.mark_saved(item, target)
             else:

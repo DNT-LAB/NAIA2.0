@@ -89,6 +89,9 @@
         {"method": "GET", "path": "/api/output-index/meta", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/output-index/delete", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/output-index/open-location", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/history/query", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/history/suggest", "smoke": "non_destructive"},
+        {"method": "POST", "path": "/api/history/open-location", "smoke": "state_mutation"},
         {"method": "GET", "path": "/output-search.html", "smoke": "static"}
       ]
     },

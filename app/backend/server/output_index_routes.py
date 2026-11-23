@@ -1,4 +1,5 @@
 """Search and preview remotely. Host file actions require a loopback client."""
+import os
 import subprocess
 import sys
 from typing import Annotated, Literal
@@ -27,10 +28,29 @@ def _forbidden():
     return JSONResponse({"ok": False, "error": "Output index changes require a loopback client."}, status_code=403)
 
 
-def _delete(service, rows):
+def _delete(service, rows, context):
     from app.backend.server.result_display_routes import _move_to_trash
 
-    return service.delete_rows(rows, _move_to_trash)
+    removed_paths = set()
+
+    def trash(path):
+        if not _move_to_trash(path):
+            return False
+        removed_paths.add(os.path.normcase(os.path.abspath(path)))
+        return True
+
+    result = service.delete_rows(rows, trash)
+    store = getattr(context, "result_store", None)
+    payloads = []
+    if store is not None:
+        with store.history_mutation():
+            for item in store.history_snapshot():
+                if item.filepath and os.path.normcase(os.path.abspath(item.filepath)) in removed_paths:
+                    removed = store.remove_item(item, deleted=True)
+                    if removed is not None:
+                        payloads.append(store.viewer_removed_payload(removed))
+        result["history_removed"] = [payload["rel_path"] for payload in payloads]
+    return result, payloads
 
 
 def _open_location(service, row):
@@ -47,7 +67,7 @@ def _open_location(service, row):
     return {"ok": True, "folder": str(path.parent)}
 
 
-def register_output_index_routes(app: FastAPI, context, *, run_in_thread):
+def register_output_index_routes(app: FastAPI, context, *, run_in_thread, clients=None, broadcast_json=None):
     def service():
         from core.output_index.service import output_index_service
         return output_index_service(context)
@@ -151,7 +171,12 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread):
         if (body.keys() != {"rows"} or not isinstance(rows, list) or not 1 <= len(rows) <= 200
                 or any(type(row) is not int for row in rows) or len(set(rows)) != len(rows)):
             raise HTTPException(422, "Expected 1 to 200 unique integer rows")
-        return await change(_delete, service(), rows)
+        result, payloads = await change(_delete, service(), rows, context)
+        if broadcast_json is not None and clients is not None and payloads:
+            for payload in payloads:
+                await broadcast_json(clients, payload)
+            await broadcast_json(clients, context.auto_save_state_payload())
+        return result
 
     @app.post("/api/output-index/open-location")
     async def open_location(request: Request):

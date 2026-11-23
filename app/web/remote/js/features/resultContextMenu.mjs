@@ -1350,6 +1350,9 @@ export function createResultContextMenu({
     return sections.join('');
   }
 
+  // 떠 있는 창(10150) · 큰 보기(10500) 위, 확인 창(11000) 아래.
+  const FLOATING_MENU_Z = '10600';
+
   function onContextMenu(event) {
     const target = event.target;
     if (!target || !(target instanceof window.Element)) return;
@@ -1358,6 +1361,14 @@ export function createResultContextMenu({
     if (thumb) {
       event.preventDefault();
       open('thumbnail', event.clientX, event.clientY, buildThumbnailContext(thumb));
+      return;
+    }
+    // History 창(이번 세션)의 타일 · 큰 보기 그림 - 레일 썸네일과 같은 메뉴. 떠 있는 창 위에 그린다.
+    const floating = target.closest('.osr-th[data-path], [data-ilb-img][data-path]');
+    if (floating && floating.dataset.path) {
+      event.preventDefault();
+      open('thumbnail', event.clientX, event.clientY, buildThumbnailContext(floating));
+      if (menu) menu.style.zIndex = FLOATING_MENU_Z;
       return;
     }
 

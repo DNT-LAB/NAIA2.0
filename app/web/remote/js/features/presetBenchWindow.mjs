@@ -1118,7 +1118,11 @@ export function createPresetBench({
     let next;
     try { next = await getJson(API.thumbStatus); } catch (_) { next = undefined; }
     if (serial !== thumbSerial) return;
-    if (next !== undefined) thumbStatus = next;
+    applyThumbStatus(next);
+  }
+
+  function applyThumbStatus(next) {
+    if (next && typeof next === 'object') thumbStatus = next;
     renderBand();
     if (thumbStatus && !thumbStatus.installed) thumbsMissingSeen = true;
     if (thumbStatus?.downloading) {
@@ -1135,7 +1139,7 @@ export function createPresetBench({
   function onThumbsInstalled() {
     try { win.dispatchEvent(new win.CustomEvent('naia:preset-thumbs-installed')); } catch (_) {}
     for (const [slotId, view] of Object.entries(st.views)) {
-      if (view.mode === 'related' && view.related) void reloadRelated(slotId, view);
+      if (view.mode === 'related' && view.relatedReq) void fetchRelated(slotId, view, {reload: true});
     }
     if (!active) return;      // 숨어 있으면 다음에 열 때(boot -> renderAll) 새 목록으로 그린다
     const grid = $('grid');
@@ -1144,21 +1148,28 @@ export function createPresetBench({
     void renderExplorer().then(() => { if (grid && serial === searchSerial) grid.scrollTop = top; });
   }
 
-  async function reloadRelated(slotId, view) {
-    const slot = slotById(slotId);
-    const tag = view.relatedTag;
-    if (!slot || !tag) return;
-    const ctx = (st.picks[slotId]?.tags || []).filter(t => t !== tag).join('|');
+  // 관련 의상 받기 - 연 때의 조건(view.relatedReq)으로. 새로 연 요청 · 다시 받기가 겹치면 마지막 요청의 답만 쓴다.
+  // 다시 받기(썸네일 설치 직후)가 실패하면 앞 목록을 그대로 두고, 보던 스크롤 자리를 지킨다.
+  async function fetchRelated(slotId, view, {reload = false} = {}) {
+    const req = view.relatedReq;
+    if (!req) return;
+    const seq = view.relatedSeq = (view.relatedSeq || 0) + 1;
+    const fresh = () => seq === view.relatedSeq && view.mode === 'related' && view.relatedReq === req;
     let data;
-    try { data = await getJson(API.related(tag, st.picks[slotId]?.pool || slot.pool || 'female', ctx)); } catch (_) { return; }
-    if (view.mode !== 'related' || view.relatedTag !== tag) return;
-    view.related = data;
-    if (active && st.cur === slotId) {
-      const grid = $('grid');
-      const top = grid ? grid.scrollTop : 0;
-      await renderExplorer();
-      if (grid) grid.scrollTop = top;
+    try {
+      data = await getJson(API.related(req.tag, req.pool, req.ctx));
+    } catch (error) {
+      if (!fresh() || (reload && view.related)) return;
+      data = {groups: []};
+      notify(error.status === 404 ? `'${req.tag}' 의 관련 의상 정보가 없습니다` : `관련 의상을 읽지 못했습니다: ${error.message}`, error.status === 404 ? 'info' : 'error');
     }
+    if (!fresh()) return;
+    view.related = data;
+    if (st.cur !== slotId) return;
+    const grid = $('grid');
+    const top = reload && grid ? grid.scrollTop : 0;
+    await renderExplorer();
+    if (reload && grid) grid.scrollTop = top;
   }
 
   // 기본 풀이 아닌 세트에 작은 표지(목록은 여성 · girl_boy 세트가 먼저 온다).
@@ -1400,17 +1411,12 @@ export function createPresetBench({
     view.mode = 'related';
     view.relatedTag = tag;
     view.related = null;
+    // 관련 의상은 풀마다 따로 센다 - 그 칸에 든 세트의 풀(옛 저장값엔 없다 -> female). 조건은 연 때 것으로 고정한다
+    // (목록 안에서 다른 세트를 골라도, 썸네일 설치 뒤 다시 받을 때도 같은 목록).
+    view.relatedReq = {tag, pool: st.picks[slotId]?.pool || slot.pool || 'female', ctx: (st.picks[slotId]?.tags || []).filter(t => t !== tag).join('|')};
     renderSlots();
     void renderExplorer();
-    const ctx = (st.picks[slotId]?.tags || []).filter(t => t !== tag).join('|');
-    try {
-      // 관련 의상은 풀마다 따로 센다 - 그 칸에 든 세트의 풀(옛 저장값엔 없다 -> female).
-      view.related = await getJson(API.related(tag, st.picks[slotId]?.pool || slot.pool || 'female', ctx));
-    } catch (error) {
-      view.related = {groups: []};
-      notify(error.status === 404 ? `'${tag}' 의 관련 의상 정보가 없습니다` : `관련 의상을 읽지 못했습니다: ${error.message}`, error.status === 404 ? 'info' : 'error');
-    }
-    if (st.cur === slotId && view.mode === 'related') await renderExplorer();
+    await fetchRelated(slotId, view);
   }
 
   // ---------------------------------------------------------------- 캐릭터 고르기(DB · 에셋 · REF)
@@ -2169,8 +2175,13 @@ export function createPresetBench({
     if (act === 'note-x') { st.note = ''; st.memo = null; renderNote(); return; }
     if (act === 'related-back') { viewOf(st.cur).mode = viewOf(st.cur).q ? 'search' : 'browse'; void renderExplorer(); return; }
     if (act === 'thumb-dl') {
-      sendJson(API.thumbDownload, 'POST', {}).then(() => refreshThumbStatus())
-        .catch(error => notify(`받기를 시작하지 못했습니다: ${error.message}`, 'error'));
+      // 받기 응답(설치 관리자 스냅숏)의 상태를 바로 쓴다 - 직후 상태 묻기가 실패해도 '받는 중' 이라 다시 묻는다(Codex 리뷰 11-23).
+      sendJson(API.thumbDownload, 'POST', {}).then(snap => {
+        ++thumbSerial;      // 누르기 전에 보낸 상태 묻기의 늦은 답은 버린다
+        const s = snap?.preset_thumbs;
+        applyThumbStatus(s && typeof s === 'object' ? s : {...(thumbStatus || {}), installed: false, downloading: true});
+        if (!thumbStatus?.downloading) void refreshThumbStatus();
+      }).catch(error => notify(`받기를 시작하지 못했습니다: ${error.message}`, 'error'));
       return;
     }
     if (act === 'pin') {

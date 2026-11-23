@@ -93,11 +93,14 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
   const catalogCache = new Map();
   const setsCache = new Map();
   // 썸네일 팩을 막 받았다(벤치가 알린다) - 담아 둔 목록은 has_thumb 가 거짓이다. 다음에 열 때 새로 받고, 열려 있으면 지금 다시 그린다.
-  // 검색을 기다리는 중이면 다시 그리지 않는다 - 그리면 st.shown 이 앞 목록으로 차서 [무작위] 가 그것을 고른다(Codex 리뷰 11-23).
-  let searching = 0;
+  // 지금 화면에 결과를 낼 검색을 기다리는 중이면 다시 그리지 않는다 - 그리면 st.shown 이 앞 목록으로 차서 [무작위] 가
+  // 그것을 고른다. 그 검색이 버려졌으면(대분류 · 갈래를 바꿨다) 다시 그린다(Codex 리뷰 11-23).
   window?.addEventListener?.('naia:preset-thumbs-installed', () => {
     catalogCache.clear(); setsCache.clear();
-    if (st && !searching) void render();
+    if (!st) return;
+    const pending = st.searchPending;
+    if (pending && pending.kind === memo.kind && viewOf(pending.kind).q === pending.text) return;
+    void render();
   });
   // 창을 닫아도 마지막 갈래 · 대분류 · 묶음은 기억한다(다음 /preset 이 그 자리에서 열린다).
   const memo = {kind: 'outfit', views: {}};
@@ -246,14 +249,18 @@ export function createPresetMiniPopup({document = globalThis.document, window = 
     if (!text) { view.hits = null; await render(); return; }
     let rows = [];
     let apart = new Set();
-    searching += 1;
+    const token = {kind, text};
+    const popup = st;
+    popup.searchPending = token;
+    ++popup.serial;          // 이미 도는 render 가 앞 목록을 st.shown 에 넣지 못하게
     try {
       try { rows = await getJson(API.search(text, kind)); }
       catch (error) { showToast?.(`검색하지 못했습니다: ${error.message}`, 'error'); }
       if (!st || viewOf(kind).q !== text) return;
       // 따로 뺀 풀(여여 · 남남 · 후타나리)은 빼고 찾는다 - 그 대분류를 열어 고른다(벤치와 같다).
       try { apart = new Set(((await catalogOf(kind)).groups || []).map(g => g.pool).filter(Boolean)); } catch (_) {}
-    } finally { searching -= 1; }
+    } finally { if (popup.searchPending === token) popup.searchPending = null; }
+    if (!st || viewOf(kind).q !== text) return;
     const bySeed = new Map();
     for (const row of Array.isArray(rows) ? rows : []) {
       if (apart.has(row.pool)) continue;

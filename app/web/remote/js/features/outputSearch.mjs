@@ -158,6 +158,11 @@ export const OUTPUT_SEARCH_STYLE = `
   border:1px dashed var(--border-glow,#3d3d5c);color:var(--accent-glow,#9d8bff);font-size:11px;line-height:1.35;white-space:normal}
 /* 보기 · 정렬 · 크기 토글 - 고른 쪽은 꽉 찬 보라(옅은 .on 과 구별 · 사용자 11-23: 폴더 -> 전체 전환이 안 보였다). */
 .osr-lab2 {flex:none;font-size:11px;color:var(--text-dim,#9ea0b4)}
+/* 토글 · 켜고 끄는 단추의 테두리는 밝게 - 어두운 판에서 칸이 안 보였다(사용자 11-23). */
+.osr .osr-seg button, .osr button[data-act="text"], .osr button[data-src], .osr button[data-roots-btn] {
+  border-color:rgba(200,200,235,.38)}
+.osr .osr-seg button:hover, .osr button[data-act="text"]:hover, .osr button[data-src]:hover, .osr button[data-roots-btn]:hover {
+  border-color:rgba(220,220,250,.62)}
 .osr .osr-tog button {color:var(--text-dim,#9ea0b4)}
 .osr .osr-tog button.on {color:#fff;background:var(--accent,#7c6aef);border-color:var(--accent,#7c6aef);position:relative;z-index:1}
 .osr .osr-tog button:not(.on):hover {color:var(--text-primary,#e8e8f0)}
@@ -266,12 +271,12 @@ export function emptyQuery(q) {
   return !(q?.include?.length || q?.exclude?.length || String(q?.text || '').trim());
 }
 
-/** 태그 하나의 표기 - 정확히는 *tag · 부분은 ~tag(입력칸에 치는 문법과 같다 · 사용자 11-23). */
+/** 태그 하나의 표기 - 정확히는 *tag · 부분은 그냥 tag(검색 문법 그대로 · 사용자 11-23). */
 export function tagMark(t) {
-  return String(t).startsWith('*') ? String(t) : `~${t}`;
+  return String(t);
 }
 
-/** 알약에 쓰는 한 줄 - 정확히는 *tag · 부분은 ~tag · 제외는 − · 본문은 따옴표. */
+/** 알약에 쓰는 한 줄 - 정확히는 *tag · 부분은 그냥 tag · 제외는 − · 본문은 따옴표. */
 export function querySummary(q) {
   const tag = tagMark;
   const parts = [...(q?.include || []).map(tag), ...(q?.exclude || []).map(t => `−${tag(t)}`)];
@@ -557,7 +562,14 @@ export function createOutputSearch({
     // 다른 이름 저장은 브라우저가 파일 선택 창을 줄 때만 된다.
     host.querySelectorAll('[data-saveas]').forEach(n => { n.hidden = !(session && session.canSaveAs?.()); });
   }
+  // 창을 이번 세션으로 열었는데 비어 있으면 전체로 넘어간다(사용자 11-23). 여는 때 한 번만 - 사람이 고른 범위는 두고.
+  let autoAll = st.scope === 'session';
+  function armAutoAll() {
+    autoAll = isSession();
+    if (autoAll && !st.loading && !st.total && !st.items.length) { autoAll = false; setScope('all'); }
+  }
   function setScope(scope) {
+    autoAll = false;
     if (scope === st.scope) return;
     st.scope = scope === 'all' ? 'all' : 'session';
     st.pendingNew = 0;
@@ -578,8 +590,8 @@ export function createOutputSearch({
   function drawChips() {
     const one = (chip, i) => {
       const cls = chip.kind === 'text' ? 'tx' : chip.ex ? 'ex' : '';
-      const mark = chip.kind === 'text' ? '“' : `<span class="osr-mk">${chip.exact ? '*' : '~'}</span>`;
-      const what = chip.exact ? '* 정확히 이 태그만' : '~ 이 글자가 든 태그 전부';
+      const mark = chip.kind === 'text' ? '“' : chip.exact ? '<span class="osr-mk">*</span>' : '';
+      const what = chip.exact ? '* 정확히 이 태그만' : '이 글자가 든 태그 전부';
       const tip = chip.kind === 'text' ? '본문 글자 검색' : `${what} · 클릭: ${chip.ex ? '포함으로' : '제외로'}`;
       return `<span class="osr-chip ${cls}" data-chip="${i}" title="${tip}">${mark}<span class="osr-ct">${esc(chip.text)}</span>`
         + `<span class="osr-x" data-rm="${i}" title="빼기">×</span></span>`;
@@ -605,7 +617,7 @@ export function createOutputSearch({
     if (!q || st.textMode) { closeSug(); return; }
     // 줄마다 + 포함 · − 제외 - 줄 자체를 누르거나 Enter 면 지금 고른 쪽(앞에 - 를 쳤으면 제외).
     const pm = i => `<b data-sug-add="${i}" data-ex="0" title="포함">+</b><b data-sug-add="${i}" data-ex="1" title="제외">−</b>`;
-    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>~ ${esc(q)} <i>${ex ? '제외' : '포함'} 전부</i></span>`
+    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>${esc(q)} <i>이 글자가 든 태그 ${ex ? '제외' : '포함'}</i></span>`
       + `<span class="osr-sr"><i>Enter</i>${pm(-1)}</span></div>`];
     sugItems.forEach((item, i) => rows.push(
       `<div data-sug-i="${i}" class="${sugAct === i ? 'act' : ''}"><span>${esc(item.tag)}</span>`
@@ -1083,6 +1095,10 @@ export function createOutputSearch({
       st.matched = data.matched || [];
       st.matchedTotal = data.matched_total || 0;
       if (session) { st.total = data.total || 0; st.unsaved = data.unsaved || 0; }
+      if (session && autoAll) {
+        autoAll = false;
+        if (!st.total) { win.setTimeout(() => { if (isSession() && !st.total) setScope('all'); }, 0); return; }
+      }
       const known = new Set(st.items.map(it => it.key));
       const start = st.items.length;
       // 이번 세션은 새 그림이 앞에 붙으며 쪽이 밀린다 - 이미 받은 것은 다시 넣지 않는다.
@@ -1916,6 +1932,8 @@ export function createOutputSearch({
     refresh() { loadStatus(); loadSaved(); runQuery(); },
     /** 창을 다시 열었다 - 닫혀 있는 동안 자란 색인을 본다. */
     poke() { poke(0); },
+    /** 창을 이번 세션으로 열었다 - 비어 있으면 전체로. */
+    armAutoAll,
     focus() { input.focus(); },
     setScope,
     scope: () => st.scope,

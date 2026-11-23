@@ -156,8 +156,16 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr-card-g {display:grid;grid-template-columns:repeat(${FOLDER_SAMPLES},minmax(0,1fr)) 58px;gap:3px}
 .osr .osr-card-more {display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;padding:0;
   border:1px dashed var(--border-glow,#3d3d5c);color:var(--accent-glow,#9d8bff);font-size:11px;line-height:1.35;white-space:normal}
-.osr-drill {display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border-dim,#2a2a3d)}
+.osr-drill {display:flex;align-items:center;gap:8px;padding:4px 8px;border-bottom:1px solid var(--border-dim,#2a2a3d);
+  background:rgba(124,106,239,.08)}
 .osr-drill b {font-weight:500}
+/* 돌아가기 단추는 보라로 - 테두리가 배경과 같아 글자로 보였다(사용자 11-23: 뒤로 못 간다). */
+.osr .osr-back {flex:none;border-color:var(--accent,#7c6aef);background:rgba(124,106,239,.22);padding:3px 10px}
+.osr .osr-back:hover {border-color:var(--accent-glow,#9d8bff);background:rgba(124,106,239,.36)}
+.osr-crumb {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-dim,#9ea0b4)}
+.osr-crumb b {color:var(--text-primary,#e8e8f0)}
+.osr-backhint {flex:none}
+.osr.narrow .osr-backhint {display:none}
 /* 스크롤 막대는 흰색으로 - 어두운 판에서 안 보였다(사용자 11-23). scrollbar-color 를 주면 크로미움이 아래를 버린다. */
 .osr-list::-webkit-scrollbar {width:12px;height:12px}
 .osr-right::-webkit-scrollbar, .osr-prompt::-webkit-scrollbar, .osr-sug::-webkit-scrollbar, .osr-pills::-webkit-scrollbar {width:8px}
@@ -514,6 +522,7 @@ export function createOutputSearch({
     if (scope === st.scope) return;
     st.scope = scope === 'all' ? 'all' : 'session';
     st.pendingNew = 0;
+    if (st.dir) dropFolderEntry();
     st.dir = null;
     lightbox.close();
     drawScope();
@@ -873,8 +882,10 @@ export function createOutputSearch({
     const d = !isSession() && st.dir;
     bar.hidden = !d;
     if (!d) { bar.innerHTML = ''; return; }
-    bar.innerHTML = `<button type="button" data-act="folders-back" title="폴더 목록으로">‹ 폴더 목록</button>`
-      + `<b title="${esc(d.rel || '(뿌리)')}">${esc(folderLabel(d.rel))}</b><span class="osr-dim">${fmt(d.count)}장</span>`;
+    bar.innerHTML = `<button type="button" class="osr-back" data-act="folders-back" title="폴더 목록으로 (마우스 뒤로 · Alt+←)">← 폴더 목록</button>`
+      + `<span class="osr-crumb">전체 폴더 › <b title="${esc(d.rel || '(뿌리)')}">${esc(folderLabel(d.rel))}</b></span>`
+      + `<span class="osr-dim">${fmt(d.count)}장</span><span class="osr-grow"></span>`
+      + `<span class="osr-dim osr-backhint">마우스 뒤로 · Alt+← 로도 돌아갑니다</span>`;
   }
   function savePrefs() {
     try { storage?.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (_) { /* 기억 못 해도 화면은 된다 */ }
@@ -899,6 +910,30 @@ export function createOutputSearch({
   function resetFolders() {
     st.folderOrder = []; st.folderInfo = new Map(); st.folderCount = 0; st.cardsDrawn = 0;
   }
+  // 펼친 폴더는 방문 기록 한 칸을 쓴다 - 브라우저 · 마우스 뒤로가기가 앱을 떠나지 않고 폴더 목록으로 돌아온다.
+  // 칸은 이 창의 표식(NAV_KEY)으로 알아본다. 다른 길(범위 · 보기 바꾸기)로 폴더가 닫히면 그 칸을 치운다.
+  const NAV_KEY = `osr-${Math.random().toString(36).slice(2)}`;
+  let navSkipPop = false;
+  const navOurs = () => { try { return win.history?.state?.osrDir === NAV_KEY; } catch (_) { return false; } };
+  function pushFolderEntry() {
+    if (navOurs()) return;
+    try { win.history.pushState({...(win.history.state || {}), osrDir: NAV_KEY}, ''); } catch (_) { /* 기록을 못 써도 단추는 된다 */ }
+  }
+  function dropFolderEntry() {
+    if (!navOurs()) return;
+    navSkipPop = true;
+    try { win.history.back(); } catch (_) { navSkipPop = false; }
+  }
+  // 단추 · 마우스 뒤로 · Alt+← - 우리 칸이 맨 위면 기록을 한 칸 되돌린다(popstate 가 닫는다).
+  function folderBack() {
+    if (!st.dir) return;
+    if (navOurs()) { try { win.history.back(); return; } catch (_) { /* 아래에서 바로 닫는다 */ } }
+    closeFolder();
+  }
+  const onPopState = () => {
+    if (navSkipPop) { navSkipPop = false; return; }
+    if (st.dir && !navOurs()) closeFolder();
+  };
   // 펼친 폴더 · 돌아가기 - 카드 목록은 받은 그대로 두었다가 되살린다(다시 받으면 내려가 있던 자리를 잃는다).
   function openFolder(id) {
     const info = st.folderInfo.get(id);
@@ -907,6 +942,7 @@ export function createOutputSearch({
       count: st.count, done: st.done, matched: st.matched, matchedTotal: st.matchedTotal,
       scroll: list.scrollTop, current: st.current};
     st.dir = {...info};
+    pushFolderEntry();
     lightbox.close();
     drawDrill();
     runQuery({keepCache: true});
@@ -1567,8 +1603,11 @@ export function createOutputSearch({
       case 'text': st.textMode = !st.textMode; drawChips(); closeSug(); input.focus(); break;
       case 'fav-save': await saveFavorite(); break;
       case 'sort': prefs.sort = prefs.sort === 'mtime_asc' ? 'mtime_desc' : 'mtime_asc'; savePrefs(); drawPrefs(); runQuery(); break;
-      case 'view': prefs.view = prefs.view === 'flat' ? 'folder' : 'flat'; st.dir = null; savePrefs(); drawPrefs(); runQuery(); break;
-      case 'folders-back': closeFolder(); break;
+      case 'view':
+        prefs.view = prefs.view === 'flat' ? 'folder' : 'flat';
+        if (st.dir) dropFolderEntry();
+        st.dir = null; savePrefs(); drawPrefs(); runQuery(); break;
+      case 'folders-back': folderBack(); break;
       case 'refreshq': runQuery(); break;
       case 'addroot': $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
       case 'addroot-cancel': $('[data-addroot-row]').hidden = true; break;
@@ -1619,6 +1658,9 @@ export function createOutputSearch({
   });
   host.addEventListener('keydown', event => {
     if (menu && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
+    else if (event.altKey && event.key === 'ArrowLeft' && !isSession() && st.dir && !lightbox.isOpen()) {
+      event.preventDefault(); folderBack();
+    }
   });
   host.addEventListener('dblclick', event => {
     const th = event.target.closest('.osr-th');
@@ -1705,6 +1747,8 @@ export function createOutputSearch({
       repaintAll(); drawSel();
       return;
     }
+    // Alt+← = 폴더 목록으로(← 만 누르면 앞 그림). 목록이 ← 를 먹으므로 창의 keydown 까지 가지 않는다.
+    if (event.altKey && key === 'ArrowLeft' && !isSession() && st.dir) { own(); folderBack(); return; }
     const at = st.current ?? -1;
     if (overview() && (key === 'ArrowDown' || key === 'ArrowUp')) {
       own();
@@ -1737,15 +1781,24 @@ export function createOutputSearch({
     return host.contains(event.target) ? (st.items[st.current]?.rel || '') : '';
   }
   // 뒤로 · 앞으로는 브라우저가 방문 기록을 넘기려 하므로 mousedown 에서 미리 막는다(옛 팝업과 같다).
+  // 전체 범위에서 폴더를 펼쳤으면 이 창 위의 마우스 뒤로 = 폴더 목록(바인딩은 이번 세션에서만 돈다 - 겹치지 않는다).
+  const folderMouseBack = event => event.button === 3 && !isSession() && Boolean(st.dir) && !lightbox.isOpen()
+    && host.contains(event.target);
   const onAuxDown = event => {
+    if (folderMouseBack(event)) { event.preventDefault(); return; }
     if (mouseBindingPath(event) && sessionHand().mouseBindingId?.(event.button)) event.preventDefault();
+  };
+  const onAuxUp = event => {
+    if (folderMouseBack(event)) { event.preventDefault(); folderBack(); }
   };
   const onAuxClick = event => {
     const path = mouseBindingPath(event);
     if (path && sessionHand().dispatchMouseBinding(event.button, path)) event.preventDefault();
   };
   doc.addEventListener('mousedown', onAuxDown);
+  doc.addEventListener('mouseup', onAuxUp);
   doc.addEventListener('auxclick', onAuxClick);
+  win.addEventListener('popstate', onPopState);
 
   // 좁은 창에서는 상세를 접는다(목록이 먼저다).
   const ro = typeof win.ResizeObserver === 'function'
@@ -1824,7 +1877,10 @@ export function createOutputSearch({
     destroy() {
       win.clearTimeout(statusTimer); win.clearTimeout(pokeTimer); win.clearTimeout(autoTimer); win.clearTimeout(recentTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
       win.removeEventListener('focus', onFocus);
+      if (st.dir) dropFolderEntry();
+      win.removeEventListener('popstate', onPopState);
       doc.removeEventListener('mousedown', onAuxDown);
+      doc.removeEventListener('mouseup', onAuxUp);
       doc.removeEventListener('auxclick', onAuxClick);
     },
   };

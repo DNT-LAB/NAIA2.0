@@ -38,7 +38,6 @@ NODE_PORTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "concat": (("in",), ("out",)),
     "instant_wildcard": (("in",), ("out",)),   # 노드 안 글칸에서 한 줄 - 흘러온 줄기에 끼운다
     "var_draw": (("in",), ("out",)),           # 글칸에서 한 줄을 뽑아 변수에만 담는다(프롬프트는 그대로)
-    "event_map_query": (("in",), ("out",)),    # 이벤트 맵 1인 게시물에서 의상 한 벌 -> 변수 · 줄기
     "final_prompt": (("in",), ()),          # 끝 노드 - PE 선행/후행을 붙여 메인 프롬프트를 대치한다
 }
 

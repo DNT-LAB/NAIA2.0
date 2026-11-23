@@ -167,10 +167,10 @@ export const OUTPUT_SEARCH_STYLE = `
 .osr .osr-tog button.on {color:#fff;background:var(--accent,#7c6aef);border-color:var(--accent,#7c6aef);position:relative;z-index:1}
 .osr .osr-tog button:not(.on):hover {color:var(--text-primary,#e8e8f0)}
 .osr-mk {opacity:.7;margin-right:1px}
-.osr-roots-pop {position:absolute;z-index:20;min-width:280px;max-width:min(460px,92%);padding:4px 0;background:var(--bg-card,#1a1a26);
+.osr-roots-pop {position:absolute;z-index:20;min-width:280px;max-width:min(460px,92%);overflow-y:auto;padding:4px 0;background:var(--bg-card,#1a1a26);
   border:1px solid var(--border-glow,#3d3d5c);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.45)}
 .osr-roots-pop .osr-rr {display:flex;align-items:center;gap:8px;padding:5px 12px;cursor:pointer;white-space:nowrap}
-.osr-roots-pop .osr-rr:hover {background:rgba(124,106,239,.22)}
+.osr-roots-pop .osr-rr:hover, .osr-roots-pop .osr-rr:focus-visible {background:rgba(124,106,239,.22);outline:none}
 .osr-roots-pop .osr-rr.dis {cursor:default;opacity:.6}
 .osr-roots-pop .osr-rr.dis:hover {background:none}
 .osr-roots-pop .osr-ck {width:14px;height:14px;flex:none;border:1px solid var(--border-glow,#3d3d5c);border-radius:3px;
@@ -318,14 +318,18 @@ export function highlightPrompt(prompt, chips, matched = []) {
 }
 
 // ── 두 범위의 항목을 한 모양으로 ───────────────────────────────────────────────
-function normAll(r) {
+// epoch = 이 행 번호를 준 색인 세대. 그림에서 나가는 요청은 모두 이것을 싣는다(압축 뒤 옛 번호는 거절된다).
+function normAll(r, epoch) {
+  const id = encodeURIComponent(`${r.root_id}:${r.path || ''}`);
+  const tail = epoch == null ? '' : `&epoch=${epoch}`;
   return {
-    key: `r${r.row}`, row: r.row, path: r.path || '', name: nameOf(r.path), saved: true,
+    key: `r${r.row}@${r.root_id}:${r.path || ''}#${epoch ?? ''}`, row: r.row, root: r.root_id, epoch, path: r.path || '', name: nameOf(r.path), saved: true,
     mtime: r.mtime, width: r.width, height: r.height, source: r.source, seed: r.seed, prompt: r.prompt || '',
-    thumb: size => `${API}/thumb?row=${r.row}&size=${size}`,
-    full: `${API}/file?row=${r.row}`,
+    thumb: size => `${API}/thumb?row=${r.row}&size=${size}&id=${id}${tail}`,
+    full: `${API}/file?row=${r.row}&id=${id}${tail}`,
   };
 }
+const epochQ = item => (item.epoch == null ? '' : `&epoch=${item.epoch}`);
 
 function normSession(r) {
   const file = String(r.file_path || '').replace(/\\/g, '/');
@@ -370,6 +374,8 @@ export function createOutputSearch({
     allRoots: [],
     local: false,
     items: [], count: 0, matched: [], matchedTotal: 0,
+    epoch: null,          // 지금 목록의 행 번호를 준 색인 세대
+    stale: false,         // 첫 색인이 끝났다 - 이 목록에 빠진 그림이 있을 수 있다(장수 모름)
     total: 0, unsaved: 0, pendingNew: 0,     // 이번 세션: 전체 장수 · 미저장 · 거르는 중에 온 새 그림
     loading: false, done: false, seq: 0,
     sel: new Set(), anchor: -1, current: null,
@@ -499,7 +505,7 @@ export function createOutputSearch({
   }
   const api = (path, body) => req(API + path, body);
 
-  let statusTimer = 0;
+  let statusTimer = 0, statusSeq = 0, destroyed = false;
   // 창이 보이는가 - 닫아 둔 창은 상태를 묻지 않는다(다시 열 때 poke 가 묻는다).
   const shown = () => host.isConnected && host.getClientRects().length > 0 && doc.visibilityState !== 'hidden';
   // 사람이 아직 목록을 만지지 않았다 - 맨 위 · 한 장만 고름 · 큰 보기 · 메뉴 · 끌기 없음.
@@ -510,12 +516,17 @@ export function createOutputSearch({
   function indexGrew(added) {
     if (isSession() || added <= 0) return;
     st.pendingNew += added;
+    if (st.ovCache) st.ovCache.fresh = (st.ovCache.fresh || 0) + added;
+    autoRefresh();
+  }
+  function autoRefresh() {
+    if (isSession() || !(st.pendingNew || st.stale)) return;
     if (!untouched()) { drawCount(); return; }
     if (autoTimer) return;
     // 처음 색인하는 동안은 2초마다 자란다 - 4초에 한 번만 다시 찾는다(그림이 깜박이지 않게).
     autoTimer = win.setTimeout(() => {
       autoTimer = 0;
-      if (isSession() || !st.pendingNew) return;
+      if (isSession() || !(st.pendingNew || st.stale)) return;
       if (st.loading || !untouched()) { drawCount(); return; }
       st.autoAt = Date.now();
       runQuery({keepCache: true});
@@ -523,9 +534,16 @@ export function createOutputSearch({
   }
   async function loadStatus() {
     win.clearTimeout(statusTimer);
+    const mine = ++statusSeq;
     let status;
-    try { status = await api('/status'); } catch (_) { statusTimer = win.setTimeout(loadStatus, 5000); return; }
+    try { status = await api('/status'); } catch (_) {
+      if (!destroyed && mine === statusSeq) statusTimer = win.setTimeout(loadStatus, 5000);
+      return;
+    }
+    if (destroyed || mine !== statusSeq) return;
     const wasPartial = st.partial;
+    const epochMoved = !isSession() && st.epoch != null && status.epoch != null && status.epoch !== st.epoch;
+    if (epochMoved) st.ovCache = null;
     st.partial = Boolean(status.partial);
     st.rows = status.live_rows || 0;
     // 행 수는 새로 넣을 때만 는다(압축하면 준다) - 는 만큼이 이 목록이 모르는 그림이다.
@@ -533,6 +551,19 @@ export function createOutputSearch({
     const added = st.indexRows == null ? 0 : rows - st.indexRows;
     st.indexRows = rows;
     st.allRoots = status.roots || [];
+    let rootsGone = false;
+    const liveIds = liveRoots().map(r => r.id);
+    if (st.knownRoots && st.knownRoots.some(id => !liveIds.includes(id))) {
+      st.ovCache = null;
+      if (!st.dir) rootsGone = true;
+    }
+    st.knownRoots = liveIds;
+    if (st.roots) {
+      const known = st.allRoots.filter(r => r.enabled && !r.shadowed).map(r => r.id);
+      const kept = new Set([...st.roots].filter(id => known.includes(id)));
+      const next = !kept.size || known.every(id => kept.has(id)) ? null : kept;
+      if (!next || next.size !== st.roots.size) { st.roots = next; rootsGone = true; }
+    }
     // 원격 화면에는 서버가 경로를 빼서 준다 - 그것으로 '이 PC' 인지 안다.
     st.local = st.allRoots.length > 0 && st.allRoots.every(r => typeof r.path === 'string');
     host.querySelectorAll('[data-local]').forEach(node => { node.hidden = !st.local; });
@@ -542,8 +573,21 @@ export function createOutputSearch({
     if (st.partial || status.running) statusTimer = win.setTimeout(loadStatus, 2000);
     // 쉬는 동안에도 전체 범위가 보이면 가끔 묻는다(외부 페이지 · 다른 곳에서 저장한 그림).
     else if (!isSession() && shown()) statusTimer = win.setTimeout(loadStatus, 10000);
-    if (wasPartial && !st.partial && !isSession()) runQuery();
-    else indexGrew(added);
+    const finished = wasPartial && !st.partial && !isSession();
+    if (finished) {
+      st.stale = true;
+      if (st.ovCache) st.ovCache.stale = true;
+    }
+    if (st.dir && !liveIds.includes(st.dir.root)) {
+      dropFolderEntry();
+      st.dir = null;
+      st.ovCache = null;
+      drawDrill();
+      rootsGone = true;
+    }
+    if ((rootsGone || epochMoved) && !isSession()) runQuery({keepCache: false});
+    else if (finished && untouched()) runQuery({keepCache: Boolean(st.dir)});
+    else { indexGrew(added); if (finished) drawCount(); }
   }
   // 저장 알림을 받으면 색인이 그 그림을 넣을 짬을 두고 묻는다.
   let pokeTimer = 0;
@@ -563,13 +607,15 @@ export function createOutputSearch({
     host.querySelectorAll('[data-saveas]').forEach(n => { n.hidden = !(session && session.canSaveAs?.()); });
   }
   // 창을 이번 세션으로 열었는데 비어 있으면 전체로 넘어간다(사용자 11-23). 여는 때 한 번만 - 사람이 고른 범위는 두고.
-  let autoAll = st.scope === 'session';
+  let autoAll = st.scope === 'session', autoAllTimer = 0, sessionTick = 0;
   function armAutoAll() {
-    autoAll = isSession();
-    if (autoAll && !st.loading && !st.total && !st.items.length) { autoAll = false; setScope('all'); }
+    // 받는 중이면 그 응답이 정한다. 아니면 지금 보이는 것으로 정하고 끝낸다(나중에 비워도 넘어가지 않게).
+    autoAll = isSession() && st.loading;
+    if (isSession() && !st.loading && !st.total && !st.items.length) setScope('all');
   }
   function setScope(scope) {
     autoAll = false;
+    win.clearTimeout(autoAllTimer);
     if (scope === st.scope) return;
     st.scope = scope === 'all' ? 'all' : 'session';
     st.pendingNew = 0;
@@ -608,16 +654,23 @@ export function createOutputSearch({
     drawSaved();
   }
   const typed = () => typedTag(input.value, st.mode === 'ex');
+  // 후보를 찾을 글자 - 앞의 * (정확) · ~ (부분) 표식을 뗀다.
+  function typedQuery() {
+    const t = typed();
+    const m = /^([*~])(.+)$/.exec(t.text);
+    return m ? {...t, text: m[2].trim(), exact: m[1] === '*'} : {...t, exact: false};
+  }
 
   let sugSeq = 0, sugTimer = 0, sugItems = [], sugAct = -1;
   function closeSug() { $('[data-sug]').hidden = true; sugItems = []; sugAct = -1; }
   function drawSug() {
     const box = $('[data-sug]');
-    const {text: q, ex} = typed();
+    const {text: q, ex, exact} = typedQuery();
     if (!q || st.textMode) { closeSug(); return; }
     // 줄마다 + 포함 · − 제외 - 줄 자체를 누르거나 Enter 면 지금 고른 쪽(앞에 - 를 쳤으면 제외).
     const pm = i => `<b data-sug-add="${i}" data-ex="0" title="포함">+</b><b data-sug-add="${i}" data-ex="1" title="제외">−</b>`;
-    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>${esc(q)} <i>이 글자가 든 태그 ${ex ? '제외' : '포함'}</i></span>`
+    const first = exact ? `*${esc(q)} <i>정확히 이 태그 ${ex ? '제외' : '포함'}</i>` : `${esc(q)} <i>이 글자가 든 태그 ${ex ? '제외' : '포함'}</i>`;
+    const rows = [`<div data-sug-i="-1" class="${sugAct < 0 ? 'act' : ''}"><span>${first}</span>`
       + `<span class="osr-sr"><i>Enter</i>${pm(-1)}</span></div>`];
     sugItems.forEach((item, i) => rows.push(
       `<div data-sug-i="${i}" class="${sugAct === i ? 'act' : ''}"><span>${esc(item.tag)}</span>`
@@ -626,7 +679,7 @@ export function createOutputSearch({
     box.hidden = false;
   }
   async function loadSug() {
-    const q = typed().text;
+    const q = typedQuery().text;
     const seq = ++sugSeq;
     if (!q || st.textMode) { closeSug(); return; }
     const {include, exclude} = chipQuery(st.chips);
@@ -829,7 +882,7 @@ export function createOutputSearch({
   // 메타 주소 - 전체 범위는 색인 행, 이번 세션은 결과 메뉴와 같은 뷰어 주소.
   function imageRef(item) {
     const metadataUrl = item.row != null
-      ? `${API}/metadata?row=${item.row}`
+      ? `${API}/metadata?row=${item.row}${epochQ(item)}`
       : (item.rel ? `/api/viewer/meta?path=${encodeURIComponent(item.rel)}&full=1` : `${HISTORY}/meta/${encodeURIComponent(item.hid)}?full=1`);
     return {metadataUrl, label: item.name || item.path || '', imageUrl: item.full || ''};
   }
@@ -898,8 +951,8 @@ export function createOutputSearch({
   }
   // 찾을 폴더 = 색인한 뿌리 폴더들 - 단추 하나로 접고, 누르면 체크 목록(사용자 11-23: 칩만으로는 뜻을 몰랐다).
   const liveRoots = () => st.allRoots.filter(r => r.enabled && !r.unreachable && !r.shadowed);
-  let rootsPop = null;
-  function closeRootsPop() { rootsPop?.remove(); rootsPop = null; }
+  let rootsPop = null, rootsPopHtml = '';
+  function closeRootsPop() { rootsPop?.remove(); rootsPop = null; rootsPopHtml = ''; }
   function drawRoots() {
     const btn = $('[data-roots-btn]');
     const live = liveRoots();
@@ -916,12 +969,20 @@ export function createOutputSearch({
         return `<div class="osr-rr dis" title="연결 안 됨"><span class="osr-ck">!</span>${esc(rootLabel(r))} ⚠ 연결 안 됨${where}</div>`;
       }
       const on = !st.roots || st.roots.has(r.id);
-      const rm = st.local && r.kind === 'user' ? `<span class="osr-x" data-rmroot="${r.id}" title="색인에서 빼기">×</span>` : '';
-      return `<div class="osr-rr${on ? ' on' : ''}" data-root="${r.id}" role="menuitemcheckbox" aria-checked="${on}">`
+      const rm = st.local && r.kind === 'user'
+        ? `<span class="osr-x" data-rmroot="${r.id}" role="button" tabindex="0" title="색인에서 빼기">×</span>` : '';
+      return `<div class="osr-rr${on ? ' on' : ''}" data-root="${r.id}" role="menuitemcheckbox" tabindex="0" aria-checked="${on}">`
         + `<span class="osr-ck">${on ? '✓' : ''}</span>${esc(rootLabel(r))}${where}${rm}</div>`;
     });
-    rootsPop.innerHTML = `<div class="osr-rnote">체크한 폴더에서만 찾습니다</div>${rows.join('')}`
-      + (st.local ? '<div class="osr-rr osr-radd" data-act="addroot">＋ 다른 폴더도 찾기…</div>' : '');
+    const html = `<div class="osr-rnote">체크한 폴더에서만 찾습니다</div>${rows.join('')}`
+      + (st.local ? '<div class="osr-rr osr-radd" data-act="addroot" role="menuitem" tabindex="0">＋ 다른 폴더도 찾기…</div>' : '');
+    if (html === rootsPopHtml) return;
+    rootsPopHtml = html;
+    const had = doc.activeElement && rootsPop.contains(doc.activeElement) ? doc.activeElement : null;
+    const sel = had && (had.dataset.root ? `[data-root="${had.dataset.root}"]`
+      : had.dataset.rmroot ? `[data-rmroot="${had.dataset.rmroot}"]` : had.dataset.act ? `[data-act="${had.dataset.act}"]` : '');
+    rootsPop.innerHTML = html;
+    if (sel) (rootsPop.querySelector(sel) || $('[data-roots-btn]'))?.focus();
   }
   function openRootsPop() {
     if (rootsPop) { closeRootsPop(); return; }
@@ -929,12 +990,32 @@ export function createOutputSearch({
     rootsPop = doc.createElement('div');
     rootsPop.className = 'osr-roots-pop';
     rootsPop.setAttribute('role', 'menu');
+    rootsPop.addEventListener('keydown', event => {
+      const row = event.target.closest?.('[data-root], [data-rmroot], [data-act="addroot"]');
+      if (!row || (event.key !== 'Enter' && event.key !== ' ')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      row.click();   // 다시 그려도 fillRootsPop 이 고르던 줄에 초점을 둔다
+    });
     host.appendChild(rootsPop);
     fillRootsPop();
+    placeRootsPop();
+  }
+  function placeRootsPop() {
+    if (!rootsPop) return;
+    Object.assign(rootsPop.style, {top: '', bottom: '', maxHeight: ''});
     const box = host.getBoundingClientRect();
     const b = $('[data-roots-btn]').getBoundingClientRect();
     rootsPop.style.left = `${Math.max(0, Math.min(b.left - box.left, host.clientWidth - rootsPop.offsetWidth - 4))}px`;
-    rootsPop.style.top = `${b.bottom - box.top + 3}px`;
+    const below = host.clientHeight - (b.bottom - box.top) - 10;
+    const above = b.top - box.top - 10;
+    if (below < Math.min(rootsPop.offsetHeight, 200) && above > below) {
+      rootsPop.style.bottom = `${host.clientHeight - (b.top - box.top) + 3}px`;
+      rootsPop.style.maxHeight = `${Math.max(40, above)}px`;
+    } else {
+      rootsPop.style.top = `${b.bottom - box.top + 3}px`;
+      rootsPop.style.maxHeight = `${Math.max(40, below)}px`;
+    }
   }
   function drawCount() {
     const node = $('[data-count]');
@@ -948,7 +1029,8 @@ export function createOutputSearch({
       let text = overview() ? `폴더 ${fmt(st.folderCount)} · ${fmt(st.count)}장` : `${fmt(st.count)}장`;
       if (st.partial) text += ` · 색인 중 ${fmt(st.rows)}`;
       node.innerHTML = esc(text) + (st.pendingNew
-        ? ` · <span class="osr-link" data-act="refreshq" title="다시 찾기">새로 색인 ${fmt(st.pendingNew)} ↻</span>` : '');
+        ? ` · <span class="osr-link" data-act="refreshq" title="다시 찾기">새로 색인 ${fmt(st.pendingNew)} ↻</span>`
+        : st.stale ? ' · <span class="osr-link" data-act="refreshq" title="색인이 끝났습니다 - 다시 찾기">색인 끝 ↻</span>' : '');
       node.title = st.matchedTotal ? `부분 일치로 펼친 태그 ${st.matchedTotal}개: ${st.matched.slice(0, 30).join(', ')}` : `${fmt(st.items.length)}장 불러옴`;
     }
     drawScope();
@@ -1023,7 +1105,7 @@ export function createOutputSearch({
     if (!info || !overview()) return;
     st.ovCache = {items: st.items, folderOrder: st.folderOrder, folderInfo: st.folderInfo, folderCount: st.folderCount,
       count: st.count, done: st.done, matched: st.matched, matchedTotal: st.matchedTotal,
-      scroll: list.scrollTop, current: st.current};
+      scroll: list.scrollTop, current: st.current, pendingNew: st.pendingNew, stale: st.stale, epoch: st.epoch};
     st.dir = {...info};
     pushFolderEntry();
     lightbox.close();
@@ -1038,13 +1120,15 @@ export function createOutputSearch({
     st.dir = null;
     st.ovCache = null;
     drawDrill();
-    if (!cache || prefs.view !== 'folder') { runQuery(); return; }
+    if (!cache || prefs.view !== 'folder' || cache.epoch !== st.epoch) { runQuery(); return; }
     st.seq += 1;
     lightbox.close();
     Object.assign(st, {items: cache.items, folderOrder: cache.folderOrder, folderInfo: cache.folderInfo,
       folderCount: cache.folderCount, count: cache.count, done: cache.done, matched: cache.matched,
       matchedTotal: cache.matchedTotal, loading: false, cardsDrawn: 0});
     st.sel.clear(); st.anchor = -1; st.current = null;
+    st.pendingNew = (cache.pendingNew || 0) + (cache.fresh || 0);
+    st.stale = Boolean(cache.stale);
     list.innerHTML = '';
     appendTiles(0);
     list.scrollTop = cache.scroll;
@@ -1052,6 +1136,7 @@ export function createOutputSearch({
     else { drawSel(); drawDetail(); }
     drawCount();
     list.focus({preventScroll: true});
+    autoRefresh();
   }
   async function runQuery({keepCache = false} = {}) {
     const seq = ++st.seq;
@@ -1062,22 +1147,41 @@ export function createOutputSearch({
     st.items = []; st.done = false; st.loading = false;
     st.sel.clear(); st.anchor = -1; st.current = null;
     st.pendingNew = 0;
+    st.stale = false;
     list.scrollTop = 0;
     list.innerHTML = '';
     drawSel();
     drawDetail();
     await loadMore(seq);
   }
-  async function loadMore(seq = st.seq) {
+  let moreP = null;
+  function loadMore(seq = st.seq) {
+    if (st.loading && seq === st.seq && moreP) return moreP;
+    const p = loadMoreNow(seq);
+    if (st.loading) {
+      moreP = p;
+      p.finally(() => { if (moreP === p) moreP = null; });
+    }
+    return p;
+  }
+  async function loadMoreNow(seq) {
     if (st.loading || st.done || seq !== st.seq) return;
     st.loading = true;
     drawTail();
+    let again = '';
     try {
       const session = isSession();
       const cards = overview();
+      const tick = sessionTick, from = st.items.length;
       const data = await req(session ? `${HISTORY}/query` : cards ? `${API}/folders` : `${API}/query`,
-        queryBody(st.items.length));
+        queryBody(from));
       if (seq !== st.seq) return;
+      if (session && tick !== sessionTick) { again = from ? 'more' : 'query'; return; }
+      if (!session) {
+        if (from && data.epoch !== st.epoch) { again = 'fresh'; return; }
+        st.epoch = data.epoch;
+      }
+      const norm = r => (session ? normSession(r) : normAll(r, data.epoch));
       let items;
       if (cards) {
         items = [];
@@ -1086,18 +1190,24 @@ export function createOutputSearch({
           if (st.folderInfo.has(f.dir_id)) continue;
           st.folderInfo.set(f.dir_id, {id: f.dir_id, rel: f.rel || '', root: f.root_id, count: f.count || 0});
           st.folderOrder.push(f.dir_id);
-          for (const r of f.items || []) items.push({...normAll(r), dir: f.dir_id});
+          for (const r of f.items || []) items.push({...norm(r), dir: f.dir_id});
         }
         st.folderCount = data.folder_count || 0;
         st.done = !folders.length || st.folderOrder.length >= st.folderCount;
-      } else items = (data.items || []).map(session ? normSession : normAll);
+      } else items = (data.items || []).map(norm);
       st.count = data.count || 0;
       st.matched = data.matched || [];
       st.matchedTotal = data.matched_total || 0;
       if (session) { st.total = data.total || 0; st.unsaved = data.unsaved || 0; }
       if (session && autoAll) {
         autoAll = false;
-        if (!st.total) { win.setTimeout(() => { if (isSession() && !st.total) setScope('all'); }, 0); return; }
+        if (!st.total && !items.length) {
+          // 그 사이 새 그림이 왔으면(웹소켓) 넘어가지 않는다.
+          autoAllTimer = win.setTimeout(() => {
+            if (isSession() && !st.total && !st.items.length && !st.pendingNew) setScope('all');
+          }, 0);
+          return;
+        }
       }
       const known = new Set(st.items.map(it => it.key));
       const start = st.items.length;
@@ -1113,6 +1223,7 @@ export function createOutputSearch({
     } finally {
       if (seq === st.seq) {
         st.loading = false; drawTail(); drawCount();
+        if (st.pendingNew) autoRefresh();
         if (lightbox.isOpen()) {
           const viewing = lightbox.currentItem()?.key;
           lightbox.setItems(lbItems(), viewing);
@@ -1120,6 +1231,10 @@ export function createOutputSearch({
           const at = indexOfKey(viewing);
           if (at >= 0 && st.current !== at) select(at, {});
         }
+      }
+      // eslint-disable-next-line no-unsafe-finally -- 다시 받기를 부른 쪽이 기다리게 그 약속을 돌려준다
+      if (again && seq === st.seq) {
+        return again === 'more' ? loadMore(seq) : runQuery({keepCache: again === 'query' && Boolean(st.dir)});
       }
     }
     // 첫 장이 화면을 다 못 채우면 스크롤이 생기지 않는다 - 그때는 바로 더 부른다.
@@ -1362,7 +1477,7 @@ export function createOutputSearch({
 
   // ── 상세 ──────────────────────────────────────────────────────────────────
   async function fullMeta(item) {
-    if (item.row != null) return api(`/meta?row=${item.row}`);
+    if (item.row != null) return api(`/meta?row=${item.row}${epochQ(item)}`);
     const meta = await req(`${HISTORY}/meta/${encodeURIComponent(item.hid)}`);
     const chars = Array.isArray(meta.characters) ? meta.characters : [];
     return {...meta, characters: chars.map(c => (typeof c === 'string' ? c : (c && (c.prompt || c.caption)) || '')).filter(Boolean)};
@@ -1439,8 +1554,11 @@ export function createOutputSearch({
     for (let k = 0; k < targets.length; k += 200) {
       const part = targets.slice(k, k + 200);
       try {
-        const data = await api('/delete', {rows: part.map(t => t.row)});
-        (data.deleted || []).forEach(row => deleted.add(`r${row}`));
+        const body = {rows: part.map(t => t.row), expect: part.map(t => [t.root, t.path])};
+        if (part[0].epoch != null) body.epoch = part[0].epoch;
+        const data = await api('/delete', body);
+        const keyOf = new Map(part.map(t => [t.row, t.key]));
+        (data.deleted || []).forEach(row => { if (keyOf.has(row)) deleted.add(keyOf.get(row)); });
         failed.push(...(data.failed || []));
       } catch (error) {
         toast(error.message, 'error');
@@ -1543,7 +1661,7 @@ export function createOutputSearch({
   }
   async function locate(item) {
     try {
-      if (item.row != null) await api('/open-location', {row: item.row});
+      if (item.row != null) await api('/open-location', item.epoch == null ? {row: item.row} : {row: item.row, epoch: item.epoch});
       else await req(`${HISTORY}/open-location`, {history_id: item.hid});
     } catch (error) {
       toast(error.message, 'error');
@@ -1706,7 +1824,7 @@ export function createOutputSearch({
       case 'fav-save': await saveFavorite(); break;
       case 'rootsmenu': openRootsPop(); break;
       case 'folders-back': folderBack(); break;
-      case 'refreshq': runQuery(); break;
+      case 'refreshq': runQuery({keepCache: Boolean(st.dir)}); break;
       case 'addroot': closeRootsPop(); $('[data-addroot-row]').hidden = false; $('[data-rootpath]').focus(); break;
       case 'addroot-cancel': $('[data-addroot-row]').hidden = true; break;
       case 'addroot-ok': await addRoot(); break;
@@ -1756,7 +1874,12 @@ export function createOutputSearch({
   });
   host.addEventListener('keydown', event => {
     if (menu && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); }
-    else if (rootsPop && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRootsPop(); }
+    else if (rootsPop && event.key === 'Escape') {
+      event.preventDefault(); event.stopPropagation();
+      const inside = rootsPop.contains(doc.activeElement);
+      closeRootsPop();
+      if (inside) $('[data-roots-btn]')?.focus();
+    }
     else if (event.altKey && event.key === 'ArrowLeft' && !isSession() && st.dir && !lightbox.isOpen()) {
       event.preventDefault(); folderBack();
     }
@@ -1913,7 +2036,7 @@ export function createOutputSearch({
 
   // 좁은 창에서는 상세를 접는다(목록이 먼저다).
   const ro = typeof win.ResizeObserver === 'function'
-    ? new win.ResizeObserver(() => { host.classList.toggle('narrow', host.clientWidth < 620); drawMore(); }) : null;
+    ? new win.ResizeObserver(() => { host.classList.toggle('narrow', host.clientWidth < 620); drawMore(); placeRootsPop(); }) : null;
   ro?.observe(host);
 
   drawChips();
@@ -1929,11 +2052,15 @@ export function createOutputSearch({
   win.addEventListener('focus', onFocus);
 
   return {
-    refresh() { loadStatus(); loadSaved(); runQuery(); },
+    refresh() { loadStatus(); loadSaved(); runQuery({keepCache: Boolean(st.dir)}); },
     /** 창을 다시 열었다 - 닫혀 있는 동안 자란 색인을 본다. */
     poke() { poke(0); },
     /** 창을 이번 세션으로 열었다 - 비어 있으면 전체로. */
     armAutoAll,
+    /** 창을 숨겼다 - 펼친 폴더의 기록 칸을 걷는다. */
+    parkNav() { if (st.dir) dropFolderEntry(); },
+    /** 다시 보였다 - 펼친 폴더가 있으면 기록 칸을 다시 올린다. */
+    resumeNav() { if (st.dir) pushFolderEntry(); },
     focus() { input.focus(); },
     setScope,
     scope: () => st.scope,
@@ -1956,6 +2083,7 @@ export function createOutputSearch({
     },
     /** 이번 세션의 실시간 알림(앱의 웹소켓) - 'new' · 'removed' · 'cleared'. */
     sessionEvent(type, payload = {}) {
+      sessionTick += 1;
       if (type === 'removed') {
         if (payload.rel_path && isSession()) removeKeys(new Set([payload.rel_path]));
         // 서버가 준 남은 장수가 진실이다(다른 창 · 전체 범위에서 지운 것도 여기로 온다).
@@ -1988,7 +2116,9 @@ export function createOutputSearch({
     },
     saveShortcut,
     destroy() {
+      destroyed = true;
       win.clearTimeout(statusTimer); win.clearTimeout(pokeTimer); win.clearTimeout(autoTimer); win.clearTimeout(recentTimer); ro?.disconnect(); lightbox.close(); host.innerHTML = '';
+      win.clearTimeout(autoAllTimer);
       win.removeEventListener('focus', onFocus);
       if (st.dir) dropFolderEntry();
       win.removeEventListener('popstate', onPopState);

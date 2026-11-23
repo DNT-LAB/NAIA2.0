@@ -51,6 +51,20 @@ class _Reader(IndexStore):
         self._db.row_factory = sqlite3.Row
 
 
+def _identity(file):
+    """화면이 아는 이 행의 이름 - (뿌리 id, 뿌리 안 경로). 검색 결과의 root_id · path 와 같은 식이다."""
+    return file.root_id, (Path(file.rel) / file.name).as_posix()
+
+
+def _unchanged(file):
+    """디스크의 파일이 색인한 그대로인가(크기 · 수정 시각)."""
+    try:
+        st = file.path.stat()
+    except OSError:
+        return False
+    return (st.st_size, st.st_mtime_ns) == (file.size, file.mtime_ns)
+
+
 class OutputIndexService:
     def __init__(self, context):
         self.context = context
@@ -70,6 +84,7 @@ class OutputIndexService:
         self._bits = None
         self._partial = True
         self._pending = 0
+        self._epoch = 0  # 행 번호의 세대 - store.epoch() 를 따른다
         self._current = None
         self._error = None
 
@@ -163,7 +178,7 @@ class OutputIndexService:
         except Exception:
             pass
 
-    def delete_rows(self, rows, move_to_trash):
+    def delete_rows(self, rows, move_to_trash, expect=None, epoch=None):
         from .scanner import safe_file
 
         # Resolve the selection at one set of row numbers. Compaction may run
@@ -172,12 +187,24 @@ class OutputIndexService:
             with self._cv:
                 if self._stop:
                     raise RuntimeError("index worker stopped")
+            if self._stale(epoch):
+                return {"ok": False, "deleted": [], "failed": [{"row": row, "error": "list changed - search again"}
+                                                               for row in rows]}
             files = [(row, self.file_path(row, with_identity=True)) for row in rows]
+        # 화면이 본 (뿌리, 경로) 와 지금 그 행의 것이 다르면 지우지 않는다 - 목록을 받은 뒤 압축이
+        # 행 번호를 다시 매겼으면 옛 번호가 **다른 그림**을 가리킨다(Codex 리뷰 11-23).
+        wanted = dict(zip(rows, expect)) if expect is not None else {}
         deleted, failed, forgotten = [], [], []
         try:
             for row, file in files:
                 if file is None or safe_file(file.root_path, Path(file.rel) / file.name) is None:
                     failed.append({"row": row, "error": "not found"})
+                elif row in wanted and wanted[row] != _identity(file):
+                    failed.append({"row": row, "error": "list changed - search again"})
+                elif not _unchanged(file):
+                    # 화면이 본 것은 색인한 그 그림이다 - 그 뒤 덮어쓴 파일은 지우지 않고 다시 색인한다.
+                    failed.append({"row": row, "error": "changed on disk - search again"})
+                    self.note_saved(file.path)
                 elif move_to_trash(file.path):
                     deleted.append(row)
                     forgotten.append(file)
@@ -381,6 +408,7 @@ class OutputIndexService:
             bits = IndexBits(store.iter_rows())
             with self._lock:
                 self._bits = bits
+                self._epoch = store.epoch()
             self._loop(store)
         except Exception as exc:
             with self._lock:
@@ -483,6 +511,7 @@ class OutputIndexService:
                     return
             if store.compact():
                 self._rebuild_locked(store)
+                self._epoch = store.epoch()
 
     @contextmanager
     def _reader(self):
@@ -494,7 +523,11 @@ class OutputIndexService:
                     yield reader
 
     def _progress(self):
-        return {"partial": self._partial, "pending_dirs": self._pending}
+        return {"partial": self._partial, "pending_dirs": self._pending, "epoch": self._epoch}
+
+    def _stale(self, epoch):
+        """화면이 받은 행 번호가 지금 세대의 것이 아니다(그 사이 압축). self._lock 안에서 부른다."""
+        return epoch is not None and epoch != self._epoch
 
     def status(self):
         with self._reader() as reader:
@@ -582,20 +615,20 @@ class OutputIndexService:
     def _visible(self, root_id):
         return root_id in self._roots and root_id not in self._hidden()
 
-    def metadata(self, row):
+    def metadata(self, row, epoch=None):
         with self._reader() as reader:
-            rows = reader.fetch([row]) if reader and 0 <= row < self._bits.n_rows else []
+            rows = reader.fetch([row]) if reader and not self._stale(epoch) and 0 <= row < self._bits.n_rows else []
             if not rows or not self._visible(rows[0]["root_id"]):
                 return None
             r = rows[0]
             return {**self._item(r), "model": r["model"], "prompt": r["prompt"], "negative": r["negative"],
                     "characters": r["chars"], "flags": [name for bit, name in _FLAGS.items() if r["flags"] & bit]}
 
-    def file_path(self, row, *, with_identity=False):
+    def file_path(self, row, *, with_identity=False, epoch=None):
         from . import scanner
 
         with self._reader() as reader:
-            if reader is None or not 0 <= row < self._bits.n_rows:
+            if reader is None or self._stale(epoch) or not 0 <= row < self._bits.n_rows:
                 return None
             r = reader._db.execute(
                 "SELECT root_id,dir_id,rel,name,size,mtime_ns FROM files JOIN dirs ON dirs.id=files.dir_id "
@@ -608,11 +641,18 @@ class OutputIndexService:
                 return _IndexedFile(path=path, root_path=root, **r)
             return path
 
-    def thumbnail(self, row, size):
+    def checked_path(self, row, expect=None, epoch=None):
+        """행의 파일 - expect(뿌리 id, 경로) 가 있으면 지금 그 행이 그 파일일 때만."""
+        file = self.file_path(row, with_identity=True, epoch=epoch)
+        if file is None or (expect is not None and _identity(file) != expect):
+            return None
+        return file.path
+
+    def thumbnail(self, row, size, expect=None, epoch=None):
         from .thumbs import ThumbnailCache
 
-        file = self.file_path(row, with_identity=True)
-        if file is None:
+        file = self.file_path(row, with_identity=True, epoch=epoch)
+        if file is None or (expect is not None and _identity(file) != expect):
             return None
         with self._lock:
             if self._thumbs is None:

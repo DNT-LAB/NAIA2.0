@@ -43,7 +43,26 @@ def _forbidden():
     return JSONResponse({"ok": False, "error": "Output index changes require a loopback client."}, status_code=403)
 
 
-def _delete(service, rows, context):
+def _file_id(value):
+    """'뿌리id:경로' -> (int, str). 화면이 본 그림의 이름표다."""
+    if value is None:
+        return None
+    root_id, sep, rel = value.partition(":")
+    if not sep or not root_id.isascii() or not root_id.isdigit() or len(root_id) > 18:
+        raise HTTPException(422, "Expected id as root_id:path")
+    return int(root_id), rel
+
+
+def _int_or_none(value):
+    """본문의 정수 하나(epoch) - 없으면 None. bool 은 정수가 아니다."""
+    if value is None:
+        return None
+    if type(value) is not int:
+        raise HTTPException(422, "Expected an integer epoch")
+    return value
+
+
+def _delete(service, rows, context, expect=None, epoch=None):
     from app.backend.server.result_display_routes import _move_to_trash
 
     removed_paths = set()
@@ -54,7 +73,7 @@ def _delete(service, rows, context):
         removed_paths.add(os.path.normcase(os.path.abspath(path)))
         return True
 
-    result = service.delete_rows(rows, trash)
+    result = service.delete_rows(rows, trash, expect, epoch)
     store = getattr(context, "result_store", None)
     payloads = []
     if store is not None:
@@ -68,20 +87,20 @@ def _delete(service, rows, context):
     return result, payloads
 
 
-def _read_metadata(service, row, context):
+def _read_metadata(service, row, context, epoch=None):
     from app.backend.server.result_display_routes import (
         _metadata_for_disk_image, _with_current_wildcard_frozen_state,
     )
 
-    path = service.file_path(row)
+    path = service.file_path(row, epoch=epoch)
     if path is None:
         raise FileNotFoundError("Image not found")
     payload = _metadata_for_disk_image(path, path.name, include_full=True)
     return _with_current_wildcard_frozen_state(context, payload)
 
 
-def _open_location(service, row):
-    path = service.file_path(row)
+def _open_location(service, row, epoch=None):
+    path = service.file_path(row, epoch=epoch)
     if path is None:
         raise HTTPException(404, "Image not found")
     if sys.platform == "win32":
@@ -181,21 +200,25 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
         return await run_in_thread(service().suggest, q, limit, include, exclude)
 
     @app.get("/api/output-index/file")
-    async def file(request: Request, row: int):
-        if len(request.query_params.multi_items()) != 1:
+    async def file(request: Request, row: int, id: str | None = None, epoch: int | None = None):
+        params = request.query_params
+        if params.keys() - {"row", "id", "epoch"} or len(params.multi_items()) != len(params):
             raise HTTPException(422, "Expected a row number only")
-        path = await run_in_thread(service().file_path, row)
+        path = await run_in_thread(service().checked_path, row, _file_id(id), epoch)
         if path is None:
             raise HTTPException(404, "Image not found")
         return FileResponse(path)
 
     @app.get("/api/output-index/thumb")
-    async def thumb(request: Request, row: int, size: Literal["128", "192", "256", "384"] = "256"):
+    async def thumb(request: Request, row: int, size: Literal["128", "192", "256", "384"] = "256", id: str | None = None,
+                    epoch: int | None = None):
         params = request.query_params
-        if params.keys() - {"row", "size"} or len(params.multi_items()) != len(params):
+        if params.keys() - {"row", "size", "id", "epoch"} or len(params.multi_items()) != len(params):
             raise HTTPException(422, "Expected a row and optional size")
+        # id = 화면이 본 '뿌리id:경로' - 지금 그 행이 다른 그림이면 404(캐시에 남의 그림이 붙지 않게).
+        expect = _file_id(id)
         try:
-            data = await run_in_thread(service().thumbnail, row, int(size))
+            data = await run_in_thread(service().thumbnail, row, int(size), expect, epoch)
         except (OSError, ValueError, Image.DecompressionBombError):
             # 깨진 파일 · 지워진 파일 - 격자 한 칸이 500 으로 콘솔을 채우지 않게 404 로 둔다.
             data = None
@@ -204,18 +227,19 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
         return Response(data, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/api/output-index/meta")
-    async def meta(row: int):
-        result = await run_in_thread(service().metadata, row)
+    async def meta(row: int, epoch: int | None = None):
+        result = await run_in_thread(service().metadata, row, epoch)
         if result is None:
             raise HTTPException(404, "Image not found")
         return result
 
     @app.get("/api/output-index/metadata")
-    async def metadata(request: Request, row: int):
-        if len(request.query_params.multi_items()) != 1:
+    async def metadata(request: Request, row: int, epoch: int | None = None):
+        params = request.query_params
+        if params.keys() - {"row", "epoch"} or len(params.multi_items()) != len(params):
             raise HTTPException(422, "Expected a row number only")
         try:
-            return await run_in_thread(_read_metadata, service(), row, context)
+            return await run_in_thread(_read_metadata, service(), row, context, epoch)
         except FileNotFoundError as exc:
             raise HTTPException(404, "Image not found") from exc
         except Exception as exc:
@@ -229,10 +253,21 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
             return _forbidden()
         body = await object_body(request)
         rows = body.get("rows")
-        if (body.keys() != {"rows"} or not isinstance(rows, list) or not 1 <= len(rows) <= 200
+        if (not {"rows"} <= body.keys() <= {"rows", "expect", "epoch"} or not isinstance(rows, list) or not 1 <= len(rows) <= 200
                 or any(type(row) is not int for row in rows) or len(set(rows)) != len(rows)):
             raise HTTPException(422, "Expected 1 to 200 unique integer rows")
-        result, payloads = await change(_delete, service(), rows, context)
+        # expect = 화면이 본 [뿌리 id, 경로] - 행마다 하나. 있으면 다른 그림을 지우지 않게 대조한다.
+        expect = body.get("expect")
+        if "expect" in body:
+            if (not isinstance(expect, list) or len(expect) != len(rows)
+                    or any(not isinstance(e, list) or len(e) != 2 or type(e[0]) is not int
+                           or not isinstance(e[1], str) for e in expect)):
+                raise HTTPException(422, "Expected one [root_id, path] per row")
+            expect = [(e[0], e[1]) for e in expect]
+        epoch = _int_or_none(body.get("epoch")) if "epoch" in body else None
+        if "epoch" in body and epoch is None:
+            raise HTTPException(422, "Expected an integer epoch")
+        result, payloads = await change(_delete, service(), rows, context, expect, epoch)
         if broadcast_json is not None and clients is not None and payloads:
             for payload in payloads:
                 await broadcast_json(clients, payload)
@@ -244,6 +279,8 @@ def register_output_index_routes(app: FastAPI, context, *, run_in_thread, client
         if not _is_local_request(request):
             return _forbidden()
         body = await object_body(request)
-        if body.keys() != {"row"} or type(body["row"]) is not int:
+        if not {"row"} <= body.keys() <= {"row", "epoch"} or type(body["row"]) is not int:
             raise HTTPException(422, "Expected an integer row")
-        return await run_in_thread(_open_location, service(), body["row"])
+        if "epoch" in body and type(body["epoch"]) is not int:
+            raise HTTPException(422, "Expected an integer epoch")
+        return await run_in_thread(_open_location, service(), body["row"], body.get("epoch"))

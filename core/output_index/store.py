@@ -48,6 +48,8 @@ def _setup(db: sqlite3.Connection) -> None:
         db.executemany("INSERT INTO meta VALUES (?,?)", {
             "schema_version": SCHEMA_VERSION, "created_at": str(time.time()),
             "rows": "0", "dead": "0", "vocab_version": "0",
+            # 행 번호의 세대 - 새 DB 마다 다른 값에서 시작하고 압축마다 1 오른다(옛 화면의 행 번호를 알아본다).
+            "epoch": str(int(time.time() * 1000)),
         }.items())
 
 
@@ -103,10 +105,19 @@ class IndexStore:
     def add_root(self, path: str | Path, kind: str, enabled: bool = True) -> int:
         with self._db:
             # Removed roots can still be referenced by historical (dead) rows.
+            # 압축은 지운 뿌리의 dirs 를 버린다 - 내준 가장 큰 id 를 meta 에도 적어 두어야 다시 내주지 않는다
+            # (옛 화면의 (뿌리 id, 경로) 가 새 뿌리의 같은 이름 파일과 겹치면 다른 그림을 지운다).
             self._db.execute("INSERT INTO roots VALUES (1+max((SELECT coalesce(max(id),0) FROM roots),"
-                             "(SELECT coalesce(max(root_id),0) FROM dirs)),?,?,?,?) "
+                             "(SELECT coalesce(max(root_id),0) FROM dirs),"
+                             "(SELECT coalesce(max(CAST(value AS INTEGER)),0) FROM meta WHERE key='last_root')),?,?,?,?) "
                              "ON CONFLICT(path) DO NOTHING", (str(path), kind, enabled, time.time()))
-            return self._db.execute("SELECT id FROM roots WHERE path=?", (str(path),)).fetchone()[0]
+            root_id = self._db.execute("SELECT id FROM roots WHERE path=?", (str(path),)).fetchone()[0]
+            self._note_root_id(root_id)
+            return root_id
+
+    def _note_root_id(self, root_id: int) -> None:
+        self._db.execute("INSERT INTO meta VALUES ('last_root',?) ON CONFLICT(key) DO UPDATE SET "
+                         "value=max(CAST(value AS INTEGER),CAST(excluded.value AS INTEGER))", (int(root_id),))
 
     def roots(self) -> list[dict]:
         return [dict(r) for r in self._db.execute("SELECT * FROM roots ORDER BY id")]
@@ -123,6 +134,7 @@ class IndexStore:
             changed = self._db.execute("UPDATE files SET flags=flags & ~1 WHERE flags & 1 AND "
                                        "dir_id IN (SELECT id FROM dirs WHERE root_id=?)", (root_id,))
             self._bump("dead", changed.rowcount)
+            self._note_root_id(root_id)
             self._db.execute("DELETE FROM roots WHERE id=?", (root_id,))
 
     def get_or_create_dir(self, root_id: int, rel: str) -> int:
@@ -225,6 +237,10 @@ class IndexStore:
         columns = ",".join(f"count(CASE WHEN flags & {bit} THEN 1 END)" for bit in flags)
         return dict(zip(flags, self._db.execute(f"SELECT {columns} FROM files WHERE flags & 1").fetchone()))
 
+    def epoch(self) -> int:
+        row = self._db.execute("SELECT value FROM meta WHERE key='epoch'").fetchone()
+        return int(row[0]) if row else 0
+
     def needs_compaction(self) -> bool:
         stats = dict(self._db.execute("SELECT key,value FROM meta WHERE key IN ('rows','dead')"))
         return int(stats["dead"]) > 5000 and int(stats["dead"]) * 4 > int(stats["rows"])
@@ -245,6 +261,12 @@ class IndexStore:
                         dest.execute(f"INSERT INTO main.{table} SELECT * FROM old.{table}")
                     dest.execute("INSERT INTO main.dirs SELECT d.* FROM old.dirs d JOIN old.roots r ON r.id=d.root_id")
                     dest.execute("INSERT OR REPLACE INTO main.meta SELECT * FROM old.meta")
+                    dest.execute("INSERT OR REPLACE INTO main.meta VALUES ('epoch', 1+(SELECT coalesce("
+                                 "max(CAST(value AS INTEGER)),0) FROM old.meta WHERE key='epoch'))")
+                    dest.execute("INSERT OR REPLACE INTO main.meta VALUES ('last_root', max("
+                                 "(SELECT coalesce(max(id),0) FROM old.roots),"
+                                 "(SELECT coalesce(max(root_id),0) FROM old.dirs),"
+                                 "(SELECT coalesce(max(CAST(value AS INTEGER)),0) FROM old.meta WHERE key='last_root')))")
                     dest.execute(f"INSERT INTO main.files SELECT row_number() OVER (ORDER BY row)-1,"
                                  f"{_FILE_FIELDS} FROM old.files WHERE flags & 1 ORDER BY row")
                     dest.execute("UPDATE main.meta SET value=(SELECT count(*) FROM main.files) WHERE key='rows'")

@@ -5202,7 +5202,7 @@ const optBoxes = {
   show_comfyui_server_console: $('optShowComfyServerConsole'),
   disable_tag_autocomplete: $('optDisableTagAutocomplete'),
   disable_tag_autocomplete_remote: $('optDisableTagAutocompleteRemote'),
-  // Settings > 생성 - 로컬 생성(ComfyUI · WEBUI) 시간 초과를 Auto Gen 중에 3회까지 다시 보낸다.
+  // Settings > 생성 - 로컬 생성(ComfyUI · WEBUI) 시간 초과를 Auto Gen 중에 다시 보낸다(처음 포함 3회까지).
   local_timeout_retry_in_auto_gen: $('optLocalTimeoutRetry'),
 };
 // 하단 옵션 줄의 톱니 > 확장 기능. 체크 줄을 **옵션 통로에 그대로 물린다**(`optBoxes` 에 등록) - 켜고 끄기 ·

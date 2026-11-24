@@ -37,7 +37,7 @@ REMOTE_OPTION_DEFAULTS = {
     # 원격 접속(LAN · Tailscale · Cloudflared) 화면은 짝 옵션을 켰을 때만 같이 꺼진다(비추천 - 손가락 입력에 특히 쓸모 있다).
     "disable_tag_autocomplete": False,
     "disable_tag_autocomplete_remote": False,
-    # 로컬 생성(ComfyUI · WEBUI)이 시간 제한을 넘겼을 때 Auto Gen 이 도는 중이면 같은 장을 3회까지 다시 보낸다
+    # 로컬 생성(ComfyUI · WEBUI)이 시간 제한을 넘겼을 때 Auto Gen 이 도는 중이면 같은 장을 처음 포함 3회까지 보낸다
     # (Settings > 생성 · 사용자 지정 2026-11-24). 기본 꺼짐 = 한 번 넘으면 멈추고 안내한다.
     local_generation_timeout.RETRY_OPTION_KEY: False,
 }

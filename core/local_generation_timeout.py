@@ -17,7 +17,8 @@ import math
 from typing import Any, Optional
 
 OPTION_KEY = "local_generation_timeout_seconds"
-# Auto Gen 이 도는 중에 시간 초과가 나면 같은 장을 3회까지 다시 보낸다(기본 꺼짐 - 사용자 지정 2026-11-24).
+# Auto Gen 이 도는 중에 시간 초과가 나면 같은 장을 다시 보낸다 - 처음 포함 3회까지(call_generation_api 의 max_retries ·
+# 기본 꺼짐 · 사용자 지정 2026-11-24).
 RETRY_OPTION_KEY = "local_timeout_retry_in_auto_gen"
 DEFAULT_SECONDS = 180
 OFF = 0

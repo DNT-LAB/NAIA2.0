@@ -1514,7 +1514,7 @@
                   <input type="number" class="settings-num-input" data-local-timeout-input min="30" max="7200" step="10"
                          inputmode="numeric" value="180" aria-label="로컬 생성 시간 제한(초) 직접 입력"> 초</label>
               </div>
-              <p class="settings-toggle-desc">그림 한 장을 이 시간까지 기다리고, 넘기면 그 작업을 멈춥니다(Auto Gen 도 멈춤). 사양이 낮아 오래 걸리면 늘리거나 끄세요(Off = 제한 없음). <span class="settings-toggle-note">NAI 에는 적용되지 않습니다.</span></p>
+              <p class="settings-toggle-desc">그림 한 장을 이 시간까지 기다리고, 넘기면 그 작업을 멈춥니다(Auto Gen 도 멈춤). 사양이 낮아 오래 걸리면 늘리거나 끄세요(Off = 제한 없음). <span class="settings-toggle-note">NAI 에는 적용되지 않습니다. WEBUI 는 멈출 방법이 없어, Off 에서 서버가 멈추면 NAIA 를 다시 켜야 합니다.</span></p>
             </div>
             <div class="settings-toggle-row settings-subrow">
               <button type="button" class="opt-toggle settings-toggle" id="optLocalTimeoutRetry"
@@ -1523,7 +1523,7 @@
                 <span class="opt-box" aria-hidden="true"></span>
                 <span class="opt-label">Auto Gen 중 시간 초과면 재시도</span>
               </button>
-              <p class="settings-toggle-desc">Auto Gen 이 도는 중에 시간 제한을 넘기면 같은 장을 3회까지 다시 보냅니다. 끄면 한 번 넘을 때 멈추고 알려 줍니다. <span class="settings-toggle-note">WEBUI 는 넘긴 작업을 멈추지 못해 다시 보낸 장이 그 뒤에 줄을 섭니다.</span></p>
+              <p class="settings-toggle-desc">Auto Gen 이 도는 중에 시간 제한을 넘기면 같은 장을 다시 보냅니다(처음 포함 3회까지). 끄면 한 번 넘을 때 멈추고 알려 줍니다. <span class="settings-toggle-note">WEBUI 는 넘긴 작업을 멈추지 못해 다시 보낸 장이 그 뒤에 줄을 섭니다.</span></p>
             </div>
           </div>
           <div class="settings-group">

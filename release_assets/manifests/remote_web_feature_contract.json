@@ -207,6 +207,8 @@
         "app/backend/server/state_routes.py",
         "core/web_session_context.py",
         "core/local_generation_cancel.py",
+        "core/local_generation_timeout.py",
+        "app/web/remote/js/features/localTimeoutSetting.mjs",
         "app/web/remote/js/features/queuePanel.mjs",
         "app/web/remote/js/features/setupController.mjs"
       ],

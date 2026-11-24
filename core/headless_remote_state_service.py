@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from core import local_generation_timeout
 from core.nai_model_contract import resolve_nai_model_for_context
 
 
@@ -36,6 +37,9 @@ REMOTE_OPTION_DEFAULTS = {
     # 원격 접속(LAN · Tailscale · Cloudflared) 화면은 짝 옵션을 켰을 때만 같이 꺼진다(비추천 - 손가락 입력에 특히 쓸모 있다).
     "disable_tag_autocomplete": False,
     "disable_tag_autocomplete_remote": False,
+    # 로컬 생성(ComfyUI · WEBUI)이 시간 제한을 넘겼을 때 Auto Gen 이 도는 중이면 같은 장을 3회까지 다시 보낸다
+    # (Settings > 생성 · 사용자 지정 2026-11-24). 기본 꺼짐 = 한 번 넘으면 멈추고 안내한다.
+    local_generation_timeout.RETRY_OPTION_KEY: False,
 }
 # **세션 옵션** - 프로그램이 도는 동안만 산다. 다시 켜면 전부 기본값(꺼짐)이다.
 # ⚠️ **어디에도 저장하지 않는다**(사용자 지정 2026-10-10: "기억은 휘발성으로 어디에도 저장되지 않아야").
@@ -193,6 +197,13 @@ class HeadlessRemoteStateService:
             self._session_options()[key] = self.coerce_bool(value)
             self.context.publish("remote_options_changed", self.get_options())
             return
+        if key == local_generation_timeout.OPTION_KEY:
+            # 숫자 설정(초 · 0 = Off) - 불린 옵션 통로(remote_options)에 넣지 않는다. 매 요청의 파라미터(-> 그림의
+            # 생성 정보)로 실리지 않고, 저장은 remote_web 상태의 따로 된 키다(headless_remote_ui_state_service).
+            setattr(self.context, key, local_generation_timeout.normalize_seconds(value))
+            self.context.save_remote_ui_state()
+            self.context.publish("remote_options_changed", self.get_options())
+            return
         if key not in REMOTE_OPTION_DEFAULTS:
             return
         self.context.remote_options[key] = self.coerce_bool(value)
@@ -216,6 +227,8 @@ class HeadlessRemoteStateService:
         options = self.persistent_options()
         session = self._session_options()
         options.update({key: bool(session.get(key, default)) for key, default in SESSION_OPTION_DEFAULTS.items()})
+        # 숫자 설정 하나(초 · 0 = Off)도 같은 options 메시지로 화면에 간다 - 화면은 불린만 스위치에 붙인다.
+        options[local_generation_timeout.OPTION_KEY] = local_generation_timeout.configured_seconds(self.context)
         return options
 
     def set_param(self, key: str, value: Any, *, notify: bool = True) -> None:

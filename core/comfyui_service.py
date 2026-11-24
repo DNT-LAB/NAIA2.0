@@ -8,10 +8,13 @@ from io import BytesIO
 
 # combo 선택지 추출은 legacy/V3 두 스키마를 아는 이 헬퍼 하나로 모은다.
 from core.headless_api_option_service import extract_combo_options
+from core.local_generation_timeout import DEFAULT_SECONDS, timeout_message
 
 # 한 장을 기다리는 한도(초). 넘기면 작업을 멈추고 큐에서 정리한다 — 예전엔 기다림만 끝내고 작업은 ComfyUI 에 남겨,
 # 다음 생성이 그 뒤에 줄을 섰다(사용자 제보 2026-11-10).
-GENERATION_TIMEOUT_SECONDS = 180
+# 이 값은 부르는 쪽이 한도를 주지 않을 때의 기본이다 - 실제 생성은 Settings > 생성의 값을 넘긴다
+# (core/local_generation_timeout.py · 0 = Off = 제한 없음).
+GENERATION_TIMEOUT_SECONDS = DEFAULT_SECONDS
 
 
 class ComfyUIService:
@@ -96,19 +99,21 @@ class ComfyUIService:
         """prompt_id 가 끝나기를 기다린다(순수 HTTP 폴링, 0.5초마다 /history).
 
         반환: ``"success"`` · ``"error"``(ComfyUI 가 실패로 끝냄) · ``"timeout"``(한도 초과 — 작업은 아직 살아 있다)
+        · timeout 이 0 이하면 제한 없이 기다린다(Settings 의 Off).
         · ``"cancelled"``(cancel_event 가 세워짐). 쉬는 동안 cancel_event 를 기다리므로 중단에 곧바로 깬다.
         시간 초과 · 중단 뒤의 정리(cancel_prompt)는 부르는 쪽(generate_image)이 한다."""
         print(f"🔄 워크플로우 완료 대기 시작 (HTTP 폴링): {prompt_id}")
         self.last_error_detail = ""
         start_time = time.monotonic()
         last_progress = 0
+        unlimited = not timeout or timeout <= 0
         try:
             while True:
                 if cancel_event is not None and cancel_event.is_set():
                     print(f"[ComfyUI] wait cancelled prompt_id={prompt_id}", flush=True)
                     return "cancelled"
                 elapsed = time.monotonic() - start_time
-                if elapsed >= timeout:
+                if not unlimited and elapsed >= timeout:
                     print("❌ 워크플로우 완료 대기 시간 초과")
                     return "timeout"
                 try:
@@ -142,8 +147,11 @@ class ComfyUIService:
                 except Exception as poll_e:
                     print(f"⚠️ 폴링 체크 실패: {poll_e}")
 
-                remaining = timeout - (time.monotonic() - start_time)
-                delay = min(self.POLL_INTERVAL_SECONDS, max(0.0, remaining))
+                if unlimited:
+                    delay = self.POLL_INTERVAL_SECONDS
+                else:
+                    remaining = timeout - (time.monotonic() - start_time)
+                    delay = min(self.POLL_INTERVAL_SECONDS, max(0.0, remaining))
                 if cancel_event is not None:
                     cancel_event.wait(delay)
                 else:
@@ -389,8 +397,8 @@ class ComfyUIService:
         """완전한 이미지 생성 파이프라인.
 
         cancel_event(threading.Event)가 세워지면 내 작업만 정리하고 ``{'status': 'cancelled'}`` 를 돌려준다 — 오류가 아니다.
-        한도(timeout, 기본 GENERATION_TIMEOUT_SECONDS)를 넘기면 같은 정리를 하고 ``no_retry`` 오류를 돌려준다
-        (같은 작업을 다시 보내도 또 넘긴다)."""
+        한도(timeout, 기본 GENERATION_TIMEOUT_SECONDS · 0 = 제한 없음)를 넘기면 같은 정리를 하고 ``no_retry`` 오류를
+        돌려준다(같은 작업을 다시 보내도 또 넘긴다 - Auto Gen 의 재시도 체크박스만 예외, call_generation_api)."""
         from core.local_generation_cancel import CANCELLED_MESSAGE
 
         if timeout is None:
@@ -423,9 +431,10 @@ class ComfyUIService:
             print(f"[ComfyUI] timeout after {timeout:g}s prompt_id={prompt_id} cleanup={cleanup}", flush=True)
             return {
                 'status': 'error',
-                'message': (f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 의 작업은 멈추지 못했습니다(ComfyUI 에서 확인해 주세요)'
-                            if cleanup == "failed" else
-                            f'워크플로우 실행 시간 초과({timeout:g}초) - ComfyUI 에서 이 작업을 멈추고 큐에서 정리했습니다'),
+                'message': timeout_message(
+                    'ComfyUI', timeout,
+                    'ComfyUI 의 작업은 멈추지 못했습니다(ComfyUI 에서 확인해 주세요)' if cleanup == "failed" else
+                    'ComfyUI 에서 이 작업을 멈추고 큐에서 정리했습니다'),
                 'no_retry': True,
                 'timeout': True,
                 'prompt_id': prompt_id,

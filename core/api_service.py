@@ -19,6 +19,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from typing import Dict, Any, List, Optional
 from core.comfyui_service import ComfyUIService
+from core import local_generation_timeout
 from core.wildcard_processor import request_character_overrides
 from core.anima_engine.prompt_loras import split_lora_lines
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
@@ -419,6 +420,10 @@ def _nai_unsupported_director_reference_message(status_code: int, body: str) -> 
         return V5_CHARACTER_REFERENCE_UNSUPPORTED
     match = re.search(r'"message"\s*:\s*"([^"]+)"', text)
     return f"이 모델은 Character Reference 를 지원하지 않습니다: {match.group(1) if match else text}"
+
+
+# WEBUI 연결 단계의 한도(초). 생성 한도(Settings)와 따로 둔다 - Off 여도 꺼진 서버에 매달리지 않게.
+WEBUI_CONNECT_TIMEOUT_SECONDS = 30
 
 
 class APIService:
@@ -936,6 +941,9 @@ class APIService:
         #    서버가 이미 생성했을 수 있다. 그때 Auto Gen 이 멈추던 예전 동작을 그대로 둔다(사용자 지시 2026-10-23:
         #    드문 경우를 위해 잘 쓰던 사람이 피해를 보면 안 된다).
         all_attempts_transient = True
+        # 로컬 생성(ComfyUI · WEBUI)의 시간 초과를 Auto Gen 재시도 체크박스로 다시 보냈나 - 그러면 마지막 시도의
+        # EPS<->ANIMA 자동 전환을 하지 않는다(시간 초과는 모드가 틀려서가 아니다).
+        timed_out_attempts = 0
 
         result = None
         for attempt in range(1, max_retries + 1):
@@ -946,7 +954,7 @@ class APIService:
                 print(f"[RETRY] 재시도 {attempt}/{max_retries}...")
             # 2회 실패 후 마지막 시도에서만 EPS↔ANIMA 자동 전환. 성공 시에만 result에
             # 스왑 정보를 실어(호출부가 UI 확정 + 노란 경고 토스트 처리).
-            if comfyui_swap_eligible and attempt == max_retries and pending_swap is None:
+            if comfyui_swap_eligible and attempt == max_retries and pending_swap is None and not timed_out_attempts:
                 pending_swap = self._swap_comfyui_sampling_mode(parameters)
                 if pending_swap:
                     print(
@@ -978,6 +986,17 @@ class APIService:
                     print(f"[WARNING] API 오류 응답 (시도 {attempt}/{max_retries}): {error_msg}")
                     # 다시 보내면 안 되는 실패(NAI Connection Lost - 이미 과금됐을 수 있다)는 그대로 돌려준다
                     if result.get('no_retry'):
+                        # 로컬 생성의 시간 초과만 예외 - Auto Gen 이 도는 중이고 Settings > 생성의 재시도 체크박스가
+                        # 켜져 있으면 같은 장을 다시 보낸다(사용자 지정 2026-11-24). NAI 는 timeout 표식을 달지 않는다.
+                        if (result.get('timeout') and api_mode in ("COMFYUI", "WEBUI")
+                                and local_generation_timeout.retry_timeout_in_auto_gen(self.app_context)):
+                            timed_out_attempts += 1
+                            all_attempts_transient = False
+                            if attempt < max_retries:
+                                print(f"[RETRY] local generation timeout - retry in Auto Gen ({attempt}/{max_retries})", flush=True)
+                                _retry_wait(1)
+                                continue
+                            return {'status': 'error', 'message': f"{error_msg} ({attempt}회 시도)"}
                         return {'status': 'error', 'message': error_msg}
 
                     # HTTP 520 등 서버 오류는 재시도 가능
@@ -2180,6 +2199,14 @@ class APIService:
             session.mount("https://", _Tls12HttpAdapter())
         return session
 
+    def _local_generation_timeout_seconds(self) -> Optional[int]:
+        """로컬 생성(ComfyUI · WEBUI) 한 장의 한도 - Settings > 생성의 값을 **부르는 순간** context 에서 읽는다.
+
+        0 = Off(제한 없음). context 가 이 값을 모르면(옛 AppContext · 시험의 None) ``None`` - 각 길목의 기본을 쓴다."""
+        if not hasattr(self.app_context, local_generation_timeout.OPTION_KEY):
+            return None
+        return local_generation_timeout.configured_seconds(self.app_context)
+
     def _call_webui_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """
         Stable Diffusion WebUI API를 호출합니다.
@@ -2272,9 +2299,29 @@ class APIService:
             self.app_context.store_api_payload(payload, "WEBUI")
 
             headers = {"Content-Type": "application/json"}
+            # 한 장을 기다리는 한도 = Settings > 생성의 값(기본 180초 · Off = 제한 없음). 예전엔 300초 고정에 넘기면
+            # 같은 장을 세 번 다시 보냈다 - WEBUI 는 버려진 첫 장을 계속 돌려 다음 장이 그 뒤에 줄만 섰다.
+            # ⚠️ requests 의 읽기 한도는 '바이트 사이' 시간이다. WEBUI 는 그림이 다 돼야 답을 보내므로 곧 한 장의 시간이다.
+            webui_timeout = self._local_generation_timeout_seconds()
+            if webui_timeout is None:
+                webui_timeout = local_generation_timeout.DEFAULT_SECONDS
             # HTTP 세션을 사용하여 연결 정리
             with requests.Session() as session:
-                response = session.post(api_endpoint, headers=headers, json=payload, timeout=300)
+                try:
+                    response = session.post(
+                        api_endpoint, headers=headers, json=payload,
+                        timeout=(WEBUI_CONNECT_TIMEOUT_SECONDS, webui_timeout or None),
+                    )
+                except requests.exceptions.ReadTimeout:
+                    self._cleanup_http_threads()
+                    print(f"[WEBUI] timeout after {webui_timeout:g}s", flush=True)
+                    return {
+                        'status': 'error',
+                        'message': local_generation_timeout.timeout_message(
+                            'WEBUI', webui_timeout, 'WEBUI 에서는 그 작업이 끝날 때까지 계속 돌 수 있습니다'),
+                        'no_retry': True,
+                        'timeout': True,
+                    }
                 # 세션 정리
                 session.close()
                 if hasattr(session, 'adapters'):
@@ -2771,6 +2818,7 @@ class APIService:
                 extra_pnginfo=extra_pnginfo,
                 preferred_output_node_id=params.get("_comfyui_output_node_id"),
                 cancel_event=cancel_handle.event if cancel_handle is not None else None,
+                timeout=self._local_generation_timeout_seconds(),
             )
 
             # 중단은 오류가 아니다 · 시간 초과는 다시 보내지 않는다 — 표식을 그대로 위로 넘긴다(아래 raise 는 표식을 지운다).

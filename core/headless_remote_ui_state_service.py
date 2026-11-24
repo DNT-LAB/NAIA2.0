@@ -12,6 +12,7 @@ from core.headless_remote_state_service import (
     HeadlessRemoteStateService,
     SUPPORTED_API_MODES,
 )
+from core import local_generation_timeout
 from core.safe_json_file import read_json_safely, write_json_safely
 
 
@@ -169,6 +170,9 @@ def _normalize_state(raw: Any) -> dict[str, Any]:
         "prompt_planes": prompt_planes,
         "auto_save_state": _normalize_mapping(state.get("auto_save_state")),
         "save_directory_state": _normalize_save_directory_state(state.get("save_directory_state")),
+        # 로컬 생성 한도(초 · 0 = Off). 옛 파일에 없으면 기본 180(core/local_generation_timeout.py).
+        local_generation_timeout.OPTION_KEY: local_generation_timeout.normalize_seconds(
+            state.get(local_generation_timeout.OPTION_KEY)),
     }
 
 
@@ -200,6 +204,7 @@ def apply_remote_ui_state(context: Any) -> dict[str, Any]:
     }
     context.prompt_planes = prompt_planes
     context.remote_options.update(state["remote_options"])
+    setattr(context, local_generation_timeout.OPTION_KEY, state[local_generation_timeout.OPTION_KEY])
     # Restore per-mode parameter planes and activate the saved mode's plane.
     # Mutate the existing remote_params dict (rather than replacing it) so any
     # values set before apply survive, then register it as the active plane.
@@ -335,6 +340,7 @@ def save_remote_ui_state(context: Any) -> dict[str, Any]:
         }),
         "auto_save_state": _json_safe(dict(context.auto_save_state or {})),
         "save_directory_state": _json_safe(dict(context.save_directory_state or {})),
+        local_generation_timeout.OPTION_KEY: local_generation_timeout.configured_seconds(context),
     }
     # A reference-only NAI visit must not replace the user's last connected mode.
     from core.generation_access_policy import access_policy

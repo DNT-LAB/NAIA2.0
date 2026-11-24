@@ -21,6 +21,7 @@ from core.headless_remote_state_service import (
     REMOTE_OPTION_DEFAULTS, SESSION_OPTION_DEFAULTS, SUPPORTED_API_MODES,
 )
 from core.headless_result_service import HeadlessResultStore
+from core.local_generation_timeout import DEFAULT_SECONDS as LOCAL_GENERATION_TIMEOUT_DEFAULT
 from core.headless_search_state_service import DEFAULT_ACTIVE_RATINGS
 from core.headless_token_store import InMemoryTokenManager, TokenStore
 from core.pipeline_run_registry import PipelineRunRegistry, PromptPipelineRun
@@ -57,6 +58,8 @@ class WebSessionContext:
     # 기록하지 않는다. 사용자가 직접 켜야만 ON이며 앱 내장 엔진 · 모델이 준비됐을 때만 enable 가능.
     ollama_auto_boost: bool = False
     remote_options: dict[str, bool] = field(default_factory=lambda: dict(REMOTE_OPTION_DEFAULTS))
+    # 로컬 생성(ComfyUI · WEBUI) 한 장을 기다리는 한도(초 · 0 = Off). Settings > 생성 · core/local_generation_timeout.py
+    local_generation_timeout_seconds: int = LOCAL_GENERATION_TIMEOUT_DEFAULT
     # 세션 옵션 - 프로그램이 도는 동안만 산다. 저장하지 않는다(headless_remote_state_service.SESSION_OPTION_DEFAULTS).
     session_options: dict[str, bool] = field(default_factory=lambda: dict(SESSION_OPTION_DEFAULTS))
     remote_params: dict[str, Any] = field(default_factory=dict)

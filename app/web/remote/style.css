@@ -21724,6 +21724,14 @@ body.detached-module .mod-grid-3 {
 .settings-seg button + button { border-left: 1px solid var(--border); }
 .settings-seg button.is-on { background: var(--accent-blue); color: #fff; }
 .settings-seg.is-disabled { opacity: 0.45; }
+/* Settings > 생성 > 로컬 생성 시간 제한(localTimeoutSetting.mjs) - 이름 옆 표는 '로컬 모드에만' 을 알린다. */
+.settings-mode-pill { font-size: 11px; padding: 1px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); }
+.settings-local-timeout-custom { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); }
+.settings-num-input {
+  width: 76px; padding: 4px 8px; background: var(--bg-deep); border: 1px solid var(--border-dim); border-radius: 6px;
+  color: var(--text-primary); font-family: var(--font-mono); font-size: 12px;
+}
+.settings-num-input:disabled { opacity: 0.45; }
 
 /* ===== Settings > 폰트 (fontSettingsPanel.mjs) ===== */
 .font-settings { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }

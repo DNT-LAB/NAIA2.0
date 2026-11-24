@@ -3533,6 +3533,23 @@ const fontSettingsPanelReady = import('./js/features/fontSettingsPanel.mjs?v=202
     console.error('Failed to initialize font settings panel module', error);
   });
 
+// Settings > Global > 생성 > 로컬 생성 시간 제한(ComfyUI · WEBUI · 초 · 0 = Off). 값은 서버가 쥔다 -
+// options 메시지로 받아 그리고(syncOptions), 바꾸면 같은 set_option 명령으로 보낸다.
+var localTimeoutSetting = null;
+var lastLocalTimeoutSeconds = null;
+import('./js/features/localTimeoutSetting.mjs?v=20261124-localtimeout')
+  .then(({createLocalTimeoutSetting}) => {
+    localTimeoutSetting = createLocalTimeoutSetting({
+      root: $('localTimeoutSetting'),
+      send: (key, value) => {
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({type: 'set_option', key, value}));
+        else showToast('서버와 연결되지 않아 저장하지 못했습니다', 'error');
+      },
+    });
+    if (lastLocalTimeoutSeconds !== null) localTimeoutSetting.sync(lastLocalTimeoutSeconds);
+  })
+  .catch(error => console.error('Failed to initialize local timeout setting', error));
+
 // Settings > Global > UI 확대 · 축소. 배율의 주인은 앱 껍데기다(Ctrl+± · Ctrl+휠과 같은 값) -
 // 이 화면은 그 값을 비추고, 고르면 껍데기에 청한다. 브라우저 탭 · 옛 껍데기에서는 슬라이더가 꺼진다.
 import('./js/features/uiZoomSetting.mjs?v=20261010-uizoom')
@@ -5185,6 +5202,8 @@ const optBoxes = {
   show_comfyui_server_console: $('optShowComfyServerConsole'),
   disable_tag_autocomplete: $('optDisableTagAutocomplete'),
   disable_tag_autocomplete_remote: $('optDisableTagAutocompleteRemote'),
+  // Settings > 생성 - 로컬 생성(ComfyUI · WEBUI) 시간 초과를 Auto Gen 중에 3회까지 다시 보낸다.
+  local_timeout_retry_in_auto_gen: $('optLocalTimeoutRetry'),
 };
 // 하단 옵션 줄의 톱니 > 확장 기능. 체크 줄을 **옵션 통로에 그대로 물린다**(`optBoxes` 에 등록) - 켜고 끄기 ·
 // 서버 동기 · 다른 창과의 맞춤이 세 단추와 같은 길로 간다. 줄은 팝업이 만들어 돌려준다.
@@ -11235,6 +11254,11 @@ function syncOptions(m) {
   // Auto-save 상태 동기화
   if ('auto_save' in m) {
     if (autoSavePanel) autoSavePanel.syncEnabled(m.auto_save);
+  }
+  // 로컬 생성 시간 제한(초 · 0 = Off) - 숫자라 스위치 통로가 아니라 그 칸이 그린다. 모듈보다 먼저 오면 기억해 둔다.
+  if ('local_generation_timeout_seconds' in m) {
+    lastLocalTimeoutSeconds = m.local_generation_timeout_seconds;
+    localTimeoutSetting?.sync(lastLocalTimeoutSeconds);
   }
 }
 

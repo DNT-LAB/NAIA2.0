@@ -1,14 +1,17 @@
 """프롬프트의 `ref:` 호출 - 보관함 그림을 **그 장에만** Character Reference 칸으로 더한다(사용자 지시 2026-11-25).
 
-문법(쉼표로 나뉜 한 조각 전체가 호출이어야 한다):
-    ref:폴더:이름[:강도]      폴더의 그 그림(이름 = 보관함에 보이는 이름 · 대소문자 무시 · 또는 해시 앞 6자 이상)
-    ref:__폴더__[:강도]       폴더에서 무작위 한 장
-    ref:__*폴더__[:강도]      폴더를 차례로(장마다 다음 그림 · 프로세스가 살아 있는 동안)
-강도를 빼면 1.0(사용자 결정). 폴더 이름은 세 분류(캐릭터 · 의상 · 스타일)를 통틀어 하나라 분류는 폴더가 정한다.
+문법(쉼표로 나뉜 한 조각 전체가 호출이어야 한다) - 분류 -> 폴더 -> 그림(사용자 2026-11-25):
+    ref:분류:이름[:강도]          분류의 그 그림(이름 = 보관함에 보이는 이름 · 대소문자 무시 · 또는 해시 앞 6자 이상)
+    ref:분류:__폴더__[:강도]      분류 안 그 폴더에서 무작위 한 장
+    ref:분류:__*폴더__[:강도]     그 폴더를 차례로(장마다 다음 그림 · 프로세스가 살아 있는 동안)
+    ref:__분류__[:강도] · ref:__*분류__[:강도]   분류 전체에서 무작위 · 차례로
+분류 = 캐릭터 · 의상 · 스타일. 폴더는 분류 아래에서만 부른다 - 옛 `ref:폴더:이름` · `ref:__폴더__` 는 새 글을 알려 주고 멈춘다.
+강도를 빼면 1.0(사용자 결정).
 
-종류: 의상 폴더 = Outfit(costume) · 스타일 폴더 = Style · 캐릭터 폴더 = **Character 고정**(사용자 2026-11-25) - 폴더 이름 뒤
-`&스타일` = Char&Style · `&의상` = 같은 옷 유지(Prefer same outfit · V5). 예: `ref:캐릭터&스타일&의상:무무` · `ref:__인물&스타일__`.
-보관 그림에 저장된 종류는 프롬프트 호출에 쓰지 않는다 - 글에 적힌 것이 곧 보낸 것이다. 의상 · 스타일 폴더에 `&` 를 붙이면 멈춘다.
+종류: 의상 = Outfit(costume) · 스타일 = Style · 캐릭터 = **Character 고정**(사용자 2026-11-25) - 분류 이름 뒤
+`&스타일` = Char&Style · `&의상` = 같은 옷 유지(Prefer same outfit · V5). 예: `ref:캐릭터&스타일&의상:__STEL_ABYSS__` ·
+`ref:캐릭터&의상:무무`. 보관 그림에 저장된 종류는 프롬프트 호출에 쓰지 않는다 - 글에 적힌 것이 곧 보낸 것이다.
+의상 · 스타일에 `&` 를 붙이면 멈춘다.
 Fidelity(V4.5)는 그림에 저장된 값. 그림은 보관함 원본(images/<해시>.png) - 모델에 맞추기는 요청 목의 adapt_payload 가 한다.
 
 활성 칸은 건드리지 않는다 - 요청에만 칸을 덧붙인다(활성 칸에 더하기 · 사용자 결정).
@@ -31,6 +34,8 @@ REF_PREFIX = "ref:"
 STRENGTH_DEFAULT = 1.0
 GROUP_TYPE = {"outfit": "costume", "style": "style"}
 _WILD = re.compile(r"__(\*?)(.+?)__(?::\s*(.*))?", re.S)
+_SUB_WILD = re.compile(r"__(\*?)(.+?)__", re.S)          # `ref:분류:__폴더__` 의 폴더 자리
+GROUP_HEADS = ("캐릭터", "의상", "스타일")                 # 호출의 맨 앞 = 분류 이름
 # 캐릭터 폴더 이름 뒤의 종류 말(사용자 2026-11-25) - 순서는 이 차례로 적는다(자동완성 · 기록)
 MOD_STYLE, MOD_OUTFIT = "스타일", "의상"
 _MODS = (MOD_STYLE, MOD_OUTFIT)
@@ -56,6 +61,7 @@ def parse_ref_token(text: str) -> dict[str, Any]:
     # 마지막 다듬기가 괄호를 `\(` 로 감싼다 - 이름의 괄호는 글 그대로 읽는다
     body = token[4:].strip().replace("\\(", "(").replace("\\)", ")")
     match = _WILD.fullmatch(body)
+    sub_folder = ""
     if match:
         mode = "sequential" if match.group(1) else "random"
         folder, name, strength_text = match.group(2).strip(), "", match.group(3)
@@ -65,6 +71,11 @@ def parse_ref_token(text: str) -> dict[str, Any]:
             raise RefPromptError(f"'{token}' - ref:폴더:이름[:강도] 또는 ref:__폴더__[:강도] 로 쓰세요")
         mode, folder, name = "name", parts[0], parts[1]
         strength_text = parts[2] if len(parts) == 3 else None
+        inner = _SUB_WILD.fullmatch(name)
+        if inner:
+            mode, sub_folder, name = ("sequential" if inner.group(1) else "random"), inner.group(2).strip(), ""
+            if not sub_folder:
+                raise RefPromptError(f"'{token}' - 폴더 이름이 비었습니다")
     if not folder:
         raise RefPromptError(f"'{token}' - 폴더 이름이 비었습니다")
     base, *mods = [piece.strip() for piece in folder.split("&")]
@@ -78,7 +89,8 @@ def parse_ref_token(text: str) -> dict[str, Any]:
             raise RefPromptError(f"'{token}' - 강도는 0 이상이어야 합니다")
         strength = min(STRENGTH_STORE_MAX, strength)
     return {"token": token, "mode": mode, "folder": folder, "base": base, "mods": tuple(mods), "name": name,
-            "strength": strength, "style": False, "outfit": False, "suffix": ""}
+            "strength": strength, "style": False, "outfit": False, "suffix": "",
+            "sub": sub_folder if mode != "name" and match is None else ""}
 
 
 def mods_suffix(style: bool, outfit: bool) -> str:
@@ -104,7 +116,7 @@ def find_call_folder(folders: dict[str, dict[str, Any]], call: dict[str, Any]) -
     if bad:
         raise RefPromptError(f"'{call['token']}' - '&{bad[0]}' 은 모르는 말입니다 - &{MOD_STYLE} · &{MOD_OUTFIT} 만 붙습니다")
     if folder["group"] != "character":
-        raise RefPromptError(f"'{call['token']}' - &{MOD_STYLE} · &{MOD_OUTFIT} 은 캐릭터 폴더에만 붙습니다")
+        raise RefPromptError(f"'{call['token']}' - &{MOD_STYLE} · &{MOD_OUTFIT} 은 캐릭터 분류에만 붙습니다")
     call["style"], call["outfit"] = MOD_STYLE in mods, MOD_OUTFIT in mods
     call["suffix"] = mods_suffix(call["style"], call["outfit"])
     return folder
@@ -198,7 +210,7 @@ def resolved_call(frame: dict[str, Any], folder_items: list[dict[str, Any]]) -> 
     """고른 그림을 다시 같은 그림으로 부르는 글 - 와일드카드 호출을 기록에 남길 때(파생 요청이 다시 굴리지 않게)."""
     name = call_names(folder_items).get(frame["file_hash"]) or str(frame["file_hash"])
     strength = "" if frame["strength"] == STRENGTH_DEFAULT else f":{frame['strength']:g}"
-    return f"ref:{frame['folder']}{frame.get('suffix') or ''}:{name}{strength}"
+    return f"ref:{frame.get('head') or frame['folder']}{frame.get('suffix') or ''}:{name}{strength}"
 
 
 def check_pickable(call: dict[str, Any], folder: dict[str, Any]) -> None:
@@ -222,14 +234,43 @@ def resolve_ref_call(library: Any, token: str, *, folders: dict[str, dict[str, A
     return frame_for(library, call, folder)
 
 
+def is_group_head(folder: dict[str, Any]) -> bool:
+    """호출의 맨 앞에 오는 분류(분류 전체 폴더 · 분류 이름을 쓰는 옛 폴더) - 사용자 폴더는 그 아래(`__폴더__`)에만 온다."""
+    return bool(folder.get("virtual")) or folder["name"].casefold() in GROUP_HEADS
+
+
+def _old_form_error(call: dict[str, Any], folders: dict[str, dict[str, Any]]) -> RefPromptError:
+    """맨 앞이 분류가 아니다 - 옛 글(`ref:폴더:이름` · `ref:__폴더__`)이면 새 글을 알려 준다."""
+    exact = folders.get(call["folder"].casefold())
+    target = exact or folders.get(call["base"].casefold())
+    if target is not None and not is_group_head(target):
+        group = GROUP_LABEL.get(target["group"], target["group"])
+        mods = "" if target is exact else "".join("&" + mod for mod in call["mods"])
+        tail = call["name"] if call["mode"] == "name" else (
+            f"__{'*' if call['mode'] == 'sequential' else ''}{target['name']}__")
+        return RefPromptError(f"'{call['token']}' - 폴더는 분류 아래에서 부릅니다 - ref:{group}{mods}:{tail} 처럼 쓰세요")
+    return RefPromptError(f"'{call['token']}' - '{call['base']}' 은 분류가 아닙니다 - "
+                          "ref:캐릭터: · ref:의상: · ref:스타일: 로 시작합니다")
+
+
 def locate_ref_call(token: str, folders: dict[str, dict[str, Any]], scope: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """호출의 폴더를 찾고 부를 수 있는 자리인지 본다 - 그림은 아직 안 고른다(차례가 안 넘어간다)."""
+    """호출의 분류 · 폴더를 찾고 부를 수 있는 자리인지 본다 - 그림은 아직 안 고른다(차례가 안 넘어간다).
+    돌려주는 폴더 = 그림을 고를 곳(`__폴더__` 면 그 폴더 · 아니면 분류 전체) · 분류는 call["head"]."""
     call = parse_ref_token(token)
-    folder = find_call_folder(folders, call)
-    if folder is None:
-        raise RefPromptError(f"'{call['token']}' - 폴더 '{call['folder']}' 이 보관함에 없습니다")
-    if scope != "char" and folder["group"] == "character":
-        raise RefPromptError(f"'{call['token']}' - 캐릭터 분류 폴더는 캐릭터 프롬프트 칸에서만 부를 수 있습니다")
+    heads = {key: folder for key, folder in folders.items() if is_group_head(folder)}
+    head = find_call_folder(heads, call)
+    if head is None:
+        raise _old_form_error(call, folders)
+    folder = head
+    if call["sub"]:
+        wanted = call["sub"].casefold()
+        folder = next((f for f in folders.values() if not is_group_head(f) and f["group"] == head["group"]
+                       and f["name"].casefold() == wanted), None)
+        if folder is None:
+            raise RefPromptError(f"'{call['token']}' - {head['name']} 분류에 폴더 '{call['sub']}' 이 없습니다")
+    call["head"] = head
+    if scope != "char" and head["group"] == "character":
+        raise RefPromptError(f"'{call['token']}' - 캐릭터 분류는 캐릭터 프롬프트 칸에서만 부를 수 있습니다")
     return call, folder
 
 
@@ -262,6 +303,7 @@ def frame_for(library: Any, call: dict[str, Any], folder: dict[str, Any]) -> dic
         "display_name": str(item.get("display_name") or ""),
         "name": str(item.get("display_name") or file_hash),
         "reference_type": _reference_type(folder["group"], call),
+        "head": (call.get("head") or folder)["name"],
         "suffix": call.get("suffix") or "",
         "strength": call["strength"],
         "secondary_strength": round((1.0 - fidelity) * 20) / 20.0,
@@ -269,7 +311,8 @@ def frame_for(library: Any, call: dict[str, Any], folder: dict[str, Any]) -> dic
         "uc": uc,
         "image_data": image_data,
     }
-    frame["call"] = resolved_call(frame, folder["items"])
+    # 기록 글은 분류 이름으로(`ref:캐릭터:이름`) - 이름은 분류 안에서 하나인 것으로
+    frame["call"] = resolved_call(frame, (call.get("head") or folder)["items"])
     return frame
 
 
@@ -523,7 +566,8 @@ def describe_ref_call(library: Any, token: str, scope: str = "") -> dict[str, An
     try:
         call, folder = locate_ref_call(str(token or "").strip(), _folder_index(library), scope)
         reference_type = _reference_type(folder["group"], call)
-        base = {"ok": True, "token": call["token"], "folder": folder["name"] + call["suffix"],
+        where = call["head"]["name"] + call["suffix"] + (f" › {folder['name']}" if call["sub"] else "")
+        base = {"ok": True, "token": call["token"], "folder": where,
                 "group": GROUP_LABEL.get(folder["group"], folder["group"]), "strength": call["strength"],
                 "type": TYPE_LABEL.get(reference_type, reference_type)}
         if call["mode"] != "name":
@@ -545,12 +589,12 @@ def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
 
 
 def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "") -> list[dict[str, Any]]:
-    """`ref:` 뒤에 친 글로 후보를 낸다.
-    - `폴더`(콜론 전): 맞는 폴더(-> ref:폴더: 로 이어 치기) + 이름이 맞는 그림(-> ref:폴더:이름)
-    - `__` · `__*`: 폴더 무작위 · 차례 호출
-    - `폴더:이름`: 그 폴더의 그림(이름을 비우면 무작위 · 차례 호출도 맨 위에)
+    """`ref:` 뒤에 친 글로 후보를 낸다 - 분류 -> 폴더 -> 그림(사용자 2026-11-25).
+    - (빈 글) 분류 셋(캐릭터 아래 종류 줄 셋) · 글을 치면 분류 · 폴더(`ref:분류:__폴더__`) · 그림(`ref:분류:이름`)
+    - `__` · `__*`: 분류 전체 무작위 · 차례 + 이름이 맞는 폴더의 호출
+    - `분류:` 다음: 분류 전체 무작위 · 차례 · 그 분류의 폴더(`__폴더__` · `__*폴더__`) · 그림 - 줄에는 콜론 뒤만 보인다
     - 강도(`:1.5`)를 치는 중이면 후보 없음.
-    `scope="main"`(메인 · 앞뒤 고정 칸) = 캐릭터 분류 폴더는 빼고(거기서 못 부른다 · 사용자 결정)."""
+    `scope="main"`(메인 · 앞뒤 고정 칸) = 캐릭터 분류는 빼고(거기서 못 부른다 · 사용자 결정)."""
     text = str(query or "").strip()
     parts = text.split(":")
     if len(parts) >= 3:
@@ -558,6 +602,12 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     folders = library.callable_folders()
     if scope == "main":
         folders = [folder for folder in folders if folder["group"] != "character"]
+    heads = [folder for folder in folders if is_group_head(folder)]
+    subs = [folder for folder in folders if not is_group_head(folder)]
+    head_of: dict[str, dict[str, Any]] = {}
+    for head in heads:                       # 분류마다 머리 하나 - 분류 전체 폴더가 먼저
+        if head.get("virtual") or head["group"] not in head_of:
+            head_of[head["group"]] = head
     ranked: list[tuple[int, int, dict[str, Any]]] = []
     names_by_folder: dict[str, dict[str, str]] = {}
 
@@ -567,8 +617,8 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
         return names_by_folder[folder["id"]]
 
     def wild_ok(folder, sequential):
-        # 그림이 없으면 반드시 실패한다(2차 #9) · `*` 로 시작하는 옛 폴더의 무작위는 `ref:__*폴더__` 가 되어
-        # 다른 폴더의 차례 호출로 읽힌다 - 그 줄은 안 낸다(2차 #3 · 차례는 `ref:__**폴더__` 로 맞게 읽힌다)
+        # 그림이 없으면 반드시 실패한다(2차 #9) · `*` 로 시작하는 옛 폴더의 무작위는 `__*폴더__` 가 되어
+        # 차례 호출로 읽힌다 - 그 줄은 안 낸다(2차 #3 · 차례는 `__**폴더__` 로 맞게 읽힌다)
         has = any(item.get("has_image", True) for item in folder["items"])
         return has and (sequential or not folder["name"].startswith("*"))
 
@@ -576,130 +626,174 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
         reference_type = _reference_type(folder["group"], {"style": style, "outfit": outfit})
         return TYPE_LABEL.get(reference_type, reference_type)
 
-    def folder_row(folder):
-        count = len(folder["items"])
-        whole = "분류 전체 · " if folder.get("virtual") else ""
-        kind = f"{type_of(folder)} · " if folder["group"] == "character" else ""
-        return {"tag": folder["name"], "value": f"ref:{folder['name']}:", "_wc_type": "ref_folder", "cat": "",
-                "group": GROUP_LABEL.get(folder["group"], folder["group"]),
-                "desc": f"{kind}{count}장" if kind else f"{whole}{count}장",
-                "preview": f"{kind}{whole}{count}장 - 고르면 그림 이름을 이어서 고릅니다", "thumbs": _thumbs(folder)}
+    def group_of(folder):
+        return GROUP_LABEL.get(folder["group"], folder["group"])
 
-    def variant_row(folder, suffix, style, outfit):
-        # 캐릭터 폴더의 종류 줄(사용자 2026-11-25) - 그림을 고르기 전에 종류를 정한다 · 들여 쓴다(ref_variant)
-        kind = type_of(folder, style, outfit)
-        return {"tag": folder["name"] + suffix, "value": f"ref:{folder['name']}{suffix}:", "_wc_type": "ref_folder",
+    def head_row(head):
+        count = len(head["items"])
+        return {"tag": head["name"], "value": f"ref:{head['name']}:", "_wc_type": "ref_folder", "cat": "",
+                "group": group_of(head), "desc": f"{type_of(head)} · {count}장",
+                "preview": f"{type_of(head)} · {count}장 - 고르면 폴더 · 그림을 이어서 고릅니다", "thumbs": _thumbs(head)}
+
+    def variant_row(head, suffix, style, outfit):
+        # 캐릭터 분류의 종류 줄(사용자 2026-11-25) - 폴더 · 그림을 고르기 전에 종류를 정한다 · 들여 쓴다(ref_variant)
+        kind = type_of(head, style, outfit)
+        return {"tag": head["name"] + suffix, "value": f"ref:{head['name']}{suffix}:", "_wc_type": "ref_folder",
                 # 줄 오른쪽 설명은 없다(사용자 2026-11-25 - 이름이 잘렸다) · 종류는 미리보기 칸에만
-                "cat": "", "group": GROUP_LABEL.get(folder["group"], folder["group"]), "desc": "",
-                "ref_variant": True, "thumbs": _thumbs(folder),
-                "preview": f"보내는 종류 {kind} · {len(folder['items'])}장 - 고르면 그림 이름을 이어서 고릅니다"}
+                "cat": "", "group": group_of(head), "desc": "", "ref_variant": True, "thumbs": _thumbs(head),
+                "preview": f"보내는 종류 {kind} · {len(head['items'])}장 - 고르면 폴더 · 그림을 이어서 고릅니다"}
 
-    def wild_row(folder, sequential, suffix="", style=False, outfit=False):
+    def group_wild_row(head, sequential, suffix="", style=False, outfit=False):
         mark = "*" if sequential else ""
-        kind = f"{type_of(folder, style, outfit)} · " if folder["group"] == "character" else ""
-        return {"tag": f"__{mark}{folder['name']}{suffix}__", "value": f"ref:__{mark}{folder['name']}{suffix}__",
-                "_wc_type": "ref_wild", "cat": "", "group": GROUP_LABEL.get(folder["group"], folder["group"]),
-                "desc": "차례로" if sequential else "무작위",
-                "preview": kind + ("장마다 다음 그림" if sequential else "장마다 무작위 한 장")
-                           + f" · {len(folder['items'])}장 · 끝에 :1.5 처럼 강도(생략 = 1.0)",
+        return {"tag": f"__{mark}{head['name']}{suffix}__", "value": f"ref:__{mark}{head['name']}{suffix}__",
+                "_wc_type": "ref_wild", "cat": "", "group": group_of(head),
+                "desc": "분류 전체 차례로" if sequential else "분류 전체 무작위",
+                "preview": f"{type_of(head, style, outfit)} · "
+                           + ("장마다 다음 그림" if sequential else "장마다 무작위 한 장")
+                           + f" · {len(head['items'])}장 · 끝에 :1.5 처럼 강도(생략 = 1.0)",
+                "thumbs": _thumbs(head)}
+
+    def sub_row(head, folder, sequential, suffix="", style=False, outfit=False):
+        mark = "*" if sequential else ""
+        count = len(folder["items"])
+        return {"tag": f"{head['name']}{suffix}:__{mark}{folder['name']}__",
+                "value": f"ref:{head['name']}{suffix}:__{mark}{folder['name']}__",
+                "_wc_type": "ref_wild", "cat": "", "group": group_of(head),
+                "desc": f"{'차례로' if sequential else '무작위'} · {count}장",
+                "preview": f"{type_of(head, style, outfit)} · 폴더 {folder['name']} · "
+                           + ("장마다 다음 그림" if sequential else "장마다 무작위 한 장")
+                           + " · 끝에 :1.5 처럼 강도(생략 = 1.0)",
                 "thumbs": _thumbs(folder)}
 
-    def item_row(folder, item, suffix="", style=False, outfit=False):
-        kind = type_of(folder, style, outfit)
-        return {"tag": f"{folder['name']}{suffix}:{item.get('display_name') or item.get('file_hash')}",
-                "value": f"ref:{folder['name']}{suffix}:"
-                         f"{names_of(folder).get(item.get('file_hash'), item.get('file_hash'))}",
-                "_wc_type": "ref_item", "cat": "",
-                "group": GROUP_LABEL.get(folder["group"], folder["group"]),
+    def item_row(head, item, suffix="", style=False, outfit=False):
+        kind = type_of(head, style, outfit)
+        return {"tag": f"{head['name']}{suffix}:{item.get('display_name') or item.get('file_hash')}",
+                "value": f"ref:{head['name']}{suffix}:"
+                         f"{names_of(head).get(item.get('file_hash'), item.get('file_hash'))}",
+                "_wc_type": "ref_item", "cat": "", "group": group_of(head),
                 "desc": kind, "preview": f"{kind} · 끝에 :1.5 처럼 강도(생략 = 1.0)",
                 "thumb": str(item.get("thumbnail_url") or ""),
                 # 미리보기 칸 아래에 보일 '넣는 글'(사용자 2026-11-25) · 캐릭터는 `&의상` 이 없으면 같은 옷 유지를 끈다
-                "same_outfit_off": folder["group"] == "character" and not outfit, **item_text(item, folder["group"])}
+                "same_outfit_off": head["group"] == "character" and not outfit, **item_text(item, head["group"])}
 
-    index_by_name = {folder["name"].casefold(): folder for folder in folders}
+    def subs_in(head):
+        return [folder for folder in subs if folder["group"] == head["group"]]
 
     if len(parts) == 2:
         call = {"token": "ref:" + text, "folder": parts[0].strip(), "base": parts[0].split("&")[0].strip(),
                 "mods": tuple(piece.strip() for piece in parts[0].split("&")[1:]), "style": False, "outfit": False,
                 "suffix": ""}
         try:
-            folder = find_call_folder(index_by_name, call)
+            head = find_call_folder({h["name"].casefold(): h for h in heads}, call)
         except RefPromptError:
             return []
-        if folder is None:
+        if head is None:
             return []
         mods = (call["suffix"], call["style"], call["outfit"])
-        needle = parts[1].strip().casefold()
-        if not needle:
-            ranked += [(-1, n, wild_row(folder, seq, *mods)) for n, seq in enumerate((False, True))
-                       if wild_ok(folder, seq)]
-        for index, item in enumerate(folder["items"]):
-            rank = _rank(str(item.get("display_name") or ""), needle)
-            if rank is None and len(needle) >= 2 and str(item.get("file_hash") or "").startswith(needle):
-                rank = 2
-            if rank is not None:
-                row = item_row(folder, item, *mods)
-                # 폴더를 이미 친 단계 = 줄에는 그림 이름만(사용자 2026-11-25) - 넣는 글은 value 전체 · 종류는 미리보기에
-                call_name = row["value"].split(":", 2)[2]
-                display = str(item.get("display_name") or "")
-                # 이름이 겹치면 넣는 글은 해시 앞자리다 - 이름만 보이면 어느 쪽인지 모른다(리뷰 #11)
-                row["label"] = (f"{display} · {call_name}" if display and display.casefold() != call_name.casefold()
-                                else call_name)
-                row["desc"] = ""
-                ranked.append((rank, index, row))
+        rest = parts[1].strip()
+        cut = len(f"ref:{head['name']}{call['suffix']}:")
+
+        def short(row):
+            row["label"] = row["value"][cut:]          # 분류를 친 단계 = 줄에는 콜론 뒤만(사용자 2026-11-25)
+            return row
+
+        if rest.startswith("__"):
+            sequential_only = rest.startswith("__*")
+            needle = rest[3 if sequential_only else 2:].rstrip("_").strip().casefold()
+            for index, folder in enumerate(subs_in(head)):
+                rank = _rank(folder["name"], needle)
+                if rank is None:
+                    continue
+                for n, seq in enumerate((True,) if sequential_only else (False, True)):
+                    if wild_ok(folder, seq):
+                        ranked.append((rank, index * 2 + n, short(sub_row(head, folder, seq, *mods))))
+        else:
+            needle = rest.casefold()
+            if not needle:
+                ranked += [(-1, n, group_wild_row(head, seq, *mods)) for n, seq in enumerate((False, True))
+                           if wild_ok(head, seq)]
+            for index, folder in enumerate(subs_in(head)):
+                rank = _rank(folder["name"], needle)
+                if rank is not None:
+                    ranked += [(rank, index * 2 + n, short(sub_row(head, folder, seq, *mods)))
+                               for n, seq in enumerate((False, True)) if wild_ok(folder, seq)]
+            for index, item in enumerate(head["items"]):
+                rank = _rank(str(item.get("display_name") or ""), needle)
+                if rank is None and len(needle) >= 2 and str(item.get("file_hash") or "").startswith(needle):
+                    rank = 2
+                if rank is not None:
+                    row = item_row(head, item, *mods)
+                    call_name = row["value"][cut:]
+                    display = str(item.get("display_name") or "")
+                    if display == str(item.get("file_hash") or ""):
+                        display = ""                      # 이름 없는 그림 = 해시 앞자리만(해시 전체를 또 보이지 않는다)
+                    # 이름이 겹치면 넣는 글은 해시 앞자리다 - 이름만 보이면 어느 쪽인지 모른다(리뷰 #11)
+                    row["label"] = (f"{display} · {call_name}" if display and display.casefold() != call_name.casefold()
+                                    else call_name)
+                    row["desc"] = ""
+                    ranked.append((rank, 10_000 + index, row))
     elif text.startswith("__"):
         sequential = text.startswith("__*")
         needle = text[3 if sequential else 2:].rstrip("_").strip().casefold()
-        for index, folder in enumerate(folders):
-            rank = _rank(folder["name"], needle)
-            if rank is not None and wild_ok(folder, sequential):
-                ranked.append((rank, index * 4, wild_row(folder, sequential)))
+        for index, head in enumerate(heads):
+            rank = _rank(head["name"], needle)
+            if rank is not None and wild_ok(head, sequential):
+                ranked.append((rank, index * 4, group_wild_row(head, sequential)))
             # `__캐릭터&` 처럼 종류 말을 치는 중이면 그 와일드카드 줄
-            if "&" in needle and folder["group"] == "character" and wild_ok(folder, sequential):
+            if "&" in needle and head["group"] == "character" and wild_ok(head, sequential):
                 for n, (suffix, style, outfit) in enumerate(CHAR_VARIANTS):
-                    if (folder["name"] + suffix).casefold() in index_by_name:
-                        continue        # 그 이름의 옛 폴더가 있다 - 글이 그 폴더로 읽힌다(리뷰 #3)
-                    variant_rank = _rank(folder["name"] + suffix, needle)
+                    variant_rank = _rank(head["name"] + suffix, needle)
                     if variant_rank is not None:
                         ranked.append((variant_rank, index * 4 + 1 + n,
-                                       wild_row(folder, sequential, suffix, style, outfit)))
+                                       group_wild_row(head, sequential, suffix, style, outfit)))
+        # 폴더 이름을 쳤다면 그 분류 아래의 폴더 호출로(`ref:__STEL` -> ref:캐릭터:__STEL_ABYSS__)
+        if needle:
+            for index, folder in enumerate(subs):
+                rank = _rank(folder["name"], needle)
+                head = head_of.get(folder["group"])
+                if rank is not None and head is not None and wild_ok(folder, sequential):
+                    ranked.append((rank, 1_000 + index, sub_row(head, folder, sequential)))
     else:
         needle = text.casefold()
-        for index, folder in enumerate(folders):
-            rank = _rank(folder["name"], needle)
+        head_part = needle.split("&", 1)[0].strip() if "&" in needle else ""
+        for index, head in enumerate(heads):
+            rank = _rank(head["name"], needle)
             if rank is not None:
-                ranked.append((rank, index * 6, folder_row(folder)))
-            # 캐릭터 폴더 = 바로 아래에 종류 줄 셋(분류 전체 폴더는 늘 · 내 폴더는 이름을 칠 때) - 7줄이 한 화면에 든다
-            # ⚠️ 종류 말(`의상` · `스타일`)만 쳐도 `캐릭터&의상` 이 걸렸다(사용자 2026-11-25 '의상에 캐릭터 데이터') -
-            #    폴더 이름이 맞을 때만 · `&` 를 친 뒤에는 `&` 앞이 폴더 이름에 맞을 때만 종류 말까지 맞춘다.
-            head = needle.split("&", 1)[0].strip() if "&" in needle else ""
-            if folder["group"] == "character" and (folder.get("virtual") or needle):
+                ranked.append((rank, index * 6, head_row(head)))
+            # 캐릭터 분류 = 바로 아래에 종류 줄 셋 - 분류 이름이 맞을 때만 · `&` 를 친 뒤에는 `&` 앞이 맞을 때만
+            # (종류 말만 쳐도 `캐릭터&의상` 이 걸렸다 - 사용자 2026-11-25 '의상에 캐릭터 데이터')
+            if head["group"] == "character":
                 for n, (suffix, style, outfit) in enumerate(CHAR_VARIANTS):
-                    if (folder["name"] + suffix).casefold() in index_by_name:
-                        continue        # 그 이름의 옛 폴더가 있다 - 글이 그 폴더로 읽힌다(리뷰 #3)
                     if rank is not None:
                         variant_rank = rank
-                    elif head and _rank(folder["name"], head) is not None:
-                        variant_rank = _rank(folder["name"] + suffix, needle)
+                    elif head_part and _rank(head["name"], head_part) is not None:
+                        variant_rank = _rank(head["name"] + suffix, needle)
                     else:
                         variant_rank = None
                     if variant_rank is not None:
-                        ranked.append((variant_rank, index * 6 + 1 + n, variant_row(folder, suffix, style, outfit)))
-            # 폴더 이름을 치는 중이면 그 폴더의 무작위 · 차례 호출도 바로 아래에(사용자 2026-11-25 - `ref:캐릭터`)
+                        ranked.append((variant_rank, index * 6 + 1 + n, variant_row(head, suffix, style, outfit)))
             if rank is not None and needle:
-                ranked += [(rank, index * 6 + 4 + n, wild_row(folder, seq))
-                           for n, seq in enumerate((False, True)) if wild_ok(folder, seq)]
+                ranked += [(rank, index * 6 + 4 + n, group_wild_row(head, seq))
+                           for n, seq in enumerate((False, True)) if wild_ok(head, seq)]
         if needle:
-            order = len(folders) * 6
-            for folder in folders:
-                for item in folder["items"]:
+            order = len(heads) * 6
+            # 폴더 이름을 바로 쳐도 그 분류 아래의 폴더 호출로(사용자 2026-11-25 - 폴더는 분류에 속한다)
+            for folder in subs:
+                rank = _rank(folder["name"], needle)
+                head = head_of.get(folder["group"])
+                if rank is not None and head is not None:
+                    for seq in (False, True):
+                        if wild_ok(folder, seq):
+                            ranked.append((rank, order, sub_row(head, folder, seq)))
+                            order += 1
+            for head in heads:
+                for item in head["items"]:
                     rank = _rank(str(item.get("display_name") or ""), needle)
                     if rank is not None:
-                        ranked.append((rank + 4, order, item_row(folder, item)))
+                        ranked.append((rank + 4, order, item_row(head, item)))
                         order += 1
     ranked.sort(key=lambda entry: (entry[0], entry[1]))
     return [row for _, _, row in ranked[:limit]]
-
 
 def describe(frames: list[dict[str, Any]]) -> str:
     return " · ".join(f"{f['folder']}:{f['name']}({f['reference_type']} {f['strength']:g})" for f in frames)

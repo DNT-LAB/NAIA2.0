@@ -420,7 +420,8 @@ class RefVibeLibrary:
     @staticmethod
     def _ref_calls(data, storage):
         """보관 그림마다 프롬프트에서 **그 그림 하나**를 부르는 말(못 부르면 빈 글) - callable_folders 와 같은 소속 ·
-        core/ref_prompt_resolver.call_names 와 같은 이름 규칙. 폴더에 든 그림은 그 폴더로, 아니면 분류 이름으로."""
+        core/ref_prompt_resolver.call_names 와 같은 이름 규칙. 늘 분류 이름으로(`ref:캐릭터:이름` - 폴더는 분류 아래 ·
+        사용자 2026-11-25) · 분류 이름을 쓰는 옛 폴더가 있으면 그 폴더가 분류 자리다."""
         from core.ref_prompt_resolver import call_names
 
         kind = "character_reference"
@@ -436,7 +437,9 @@ class RefVibeLibrary:
             group = item_group(meta)
             by_folder.setdefault((meta.get("category", ""), group), []).append(row)
             by_group.setdefault(group, []).append(row)
-        folders = [(c["name"], by_folder.get((c["id"], category_group(c)), [])) for c in categories]
+        heads = {name.casefold() for name in GROUP_FOLDER_NAMES.values()}
+        folders = [(c["name"], by_folder.get((c["id"], category_group(c)), [])) for c in categories
+                   if c["name"].casefold() in heads]
         taken = {c["name"].casefold() for c in categories}
         folders += [(name, by_group.get(group, [])) for group, name in GROUP_FOLDER_NAMES.items()
                     if name.casefold() not in taken]

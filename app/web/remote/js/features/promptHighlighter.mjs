@@ -278,7 +278,7 @@ export function createPromptHighlighter({
         `<span class="prompt-token-slash">${escHtml(core)}</span>` +
         escHtml(trailing);
     }
-    // `ref:폴더:이름` = REFERENCE 보관함 호출 - 링크처럼 보인다(마우스를 올리면 refHoverCard 가 그림 · 넣는 글을 띄운다).
+    // `ref:분류:이름` · `ref:분류:__폴더__` = REFERENCE 보관함 호출 - 링크처럼 보인다(마우스를 올리면 refHoverCard 가 그림 · 넣는 글을 띄운다).
     if (/^ref:\S/i.test(core)) {
       return escHtml(leading) +
         `<span class="prompt-token-ref">${escHtml(core)}</span>` +

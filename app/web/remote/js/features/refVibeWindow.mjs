@@ -758,7 +758,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
 
   // ── 상위 분류(사용자 지시 2026-11-25) ──
   //  캐릭터는 한 번 쓰고 마는 일이 많고 의상 · 스타일은 거듭 쓴다 - 셋을 나눠 각자 폴더로 묶는다.
-  //  폴더에 든 그림은 프롬프트의 `ref:폴더:이름[:강도]` · `ref:__폴더__` · `ref:__*폴더__` 로 부른다(강도 생략 = 1.0).
+  //  프롬프트에서는 분류 -> 폴더 -> 그림으로 부른다: `ref:분류:이름[:강도]` · `ref:분류:__폴더__` · `ref:분류:__*폴더__`
+  //  · 분류 전체 `ref:__분류__`(강도 생략 = 1.0 · 사용자 2026-11-25 - 폴더는 분류에 속한다).
   //  분류는 보관 그림의 자기 필드 - 활성 칸의 종류 드롭다운과 따로다. ANIMA(Ref Adapter)는 종류가 없어 나누지 않는다.
   const CR_GROUPS = [['character', '캐릭터'], ['outfit', '의상'], ['style', '스타일']];
   function crGrouped() { return tab === 'cr' && !isAnima(); }
@@ -772,18 +773,12 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       + `${label}<b>${counts[group] ?? ''}</b></button>`).join('');
   }
 
-  /** 이 보관 그림을 프롬프트에서 부르는 말. 이름에 `:` `,` 가 있으면 해시 앞 8자로.
-   *  폴더 밖(미분류)이면 분류 이름(`ref:캐릭터:` - 그 분류 그림 전체)으로 부른다(사용자 2026-11-25).
-   *  옛 폴더가 이미 그 분류 이름을 쓰고 있으면 그 폴더가 이겨서 못 부른다(빈 글). */
+  /** 이 보관 그림을 프롬프트에서 부르는 말 - 늘 분류 이름으로(`ref:캐릭터:이름` · 사용자 2026-11-25).
+   *  이름에 `:` `,` 가 있으면 해시 앞 8자로. */
   function refCall(item) {
-    // 서버가 정한 호출이 있으면 그것(다른 분류의 옛 폴더 · 이름 겹침 · 해시 충돌까지 생성과 같은 규칙 · Codex 리뷰 2차)
+    // 서버가 정한 호출이 있으면 그것(이름 겹침 · 해시 충돌까지 생성과 같은 규칙 · Codex 리뷰 2차)
     if (typeof item.ref_call === 'string') return item.ref_call;
-    let folder = categoryName(String(item.category || ''));
-    if (!folder) {
-      const label = CR_GROUPS.find(([g]) => g === item.group)?.[1] || '';
-      const taken = lib.cr.categories.some(c => String(c.name || '').toLowerCase() === label.toLowerCase());
-      folder = label && !taken ? label : '';
-    }
+    const folder = CR_GROUPS.find(([g]) => g === item.group)?.[1] || '';
     if (!folder) return '';
     const name = itemName(item);
     const unnamed = !name || name === String(item.file_hash || '');   // 이름 없는 그림은 해시 앞 8자로 짧게
@@ -1239,7 +1234,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   }
 
   async function newCategory() {
-    const name = await promptDialog(crGrouped() ? `${groupLabel(lib.cr.group)} 폴더 이름 - ref:이름: 으로 부릅니다(: , __ 는 못 씁니다)` : '카테고리 이름',
+    const name = await promptDialog(crGrouped() ? `${groupLabel(lib.cr.group)} 폴더 이름 - ref:${groupLabel(lib.cr.group)}:__이름__ 으로 부릅니다(: , __ & 는 못 씁니다)` : '카테고리 이름',
       {title: crGrouped() ? `새 ${groupLabel(lib.cr.group)} 폴더` : '새 카테고리', placeholder: crGrouped() && lib.cr.group === 'outfit' ? '외출복' : '인물 톤'});
     if (!name || !String(name).trim()) return '';
     const before = new Set(lib[tab].categories.map(c => c.id));

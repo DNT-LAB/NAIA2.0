@@ -2214,7 +2214,7 @@ export function createTagAssistController({
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
-    // `ref:폴더:이름` - REFERENCE 보관함 호출(2026-11-25). 콜론까지만 쳐도 폴더 목록이 뜬다.
+    // `ref:분류:이름` · `ref:분류:__폴더__` - REFERENCE 보관함 호출(2026-11-25). `ref:` 만 쳐도 분류 셋이 뜬다.
     // 부정 칸(캐릭터 네거티브 · 세션 · 벤치 Negative 등)은 `ref:` 를 풀지 않는다 - 후보도 안 띄운다(Codex 리뷰 #11 · 2차 #8).
     // 판정은 **원문 토큰**으로 - 괄호로 감싼 `(ref:…)` 는 호출이 아니고, 숫자 폴더 `ref:123:86` 은 가중치처럼 보여도
     // 호출이다(2차 #6).
@@ -3188,8 +3188,8 @@ export function createTagAssistController({
       const displayTag = wcType === 'preset_path'
         ? (r.tag || r.label || r.prompt || r.value || '')
         : (wcType === 'preset_status' || wcType === 'lora_status' ? (r.desc || r.tag || '')
-          // `ref:폴더:` 다음의 그림 줄은 이름만(서버가 label 을 준다 · 사용자 2026-11-25)
-          : (wcType === 'ref_item' && r.label ? r.label : prefix + r.tag + suffix));
+          // `ref:분류:` 다음의 폴더 · 그림 줄은 콜론 뒤만(서버가 label 을 준다 · 사용자 2026-11-25)
+          : (REF_AC_TYPES.has(wcType) && r.label ? r.label : prefix + r.tag + suffix));
       const metaText = wcType === 'chunk'
         ? (r.group || '')
         : (wcType === 'lora_status' ? '' : (wcType ? (r.desc || '') : fmtCount(r.count)));
@@ -3358,7 +3358,7 @@ export function createTagAssistController({
     const refInfo = /^ref:/i.test(String(info.raw || '').trim())
       ? {...info, coreStart: 0, coreEnd: String(info.raw).length} : info;
     if (r._wc_type === 'ref_folder') {
-      // 폴더를 고르면 `ref:폴더:` 까지 넣고 그 폴더의 그림을 이어서 띄운다
+      // 분류를 고르면 `ref:분류:` 까지 넣고 그 분류의 폴더 · 그림을 이어서 띄운다
       swapToken(target, refInfo, r.value || `ref:${r.tag}:`);
       window.setTimeout(() => scheduleAutocomplete({force: true, target}), 0);
       return;

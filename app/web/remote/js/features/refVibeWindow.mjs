@@ -601,7 +601,7 @@ export function createRefVibeWindow({
         + `<span class="rvw-name">R${index + 1} · ${escHtml(frameName(frame))}</span>`
         + (where ? `<span class="rvw-pos">${where}</span>` : '')
         + acpChip(frame)
-        + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`
+        + `<button type="button" class="rvw-x is-remove" data-rvw-remove="${index}" aria-label="빼기" data-naia-title="활성 칸에서 뺍니다 - 보관함에는 남습니다"><span aria-hidden="true">−</span>빼기</button></div>`
         + acpDetail(frame);
     }).join('');
     const settings = anima.settings || {};
@@ -674,7 +674,7 @@ export function createRefVibeWindow({
       + `<input type="range" class="rvw-range" min="-100" max="100" step="1" value="${Math.round(Number(rs) * 100)}" data-rvw-rs="${index}">`
       + `<span class="rvw-v" data-rvw-rs-out="${index}">${rs}</span>`
       + `<button type="button" class="rvw-ie${hasIe ? '' : ' is-pending'}" data-rvw-open="${index}" data-naia-title="${hasIe ? '이 IE 로 인코딩되어 있습니다' : '이 IE 는 아직 인코딩되지 않았습니다 - 펼쳐서 인코딩'}">IE ${ie}</button>`
-      + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
+      + `<button type="button" class="rvw-x is-remove" data-rvw-remove="${index}" aria-label="빼기" data-naia-title="활성 칸에서 뺍니다 - 보관함에는 남습니다"><span aria-hidden="true">−</span>빼기</button></div>`;
     if (!open) return head;
     const chips = keys.map(k => `<button type="button" class="rvw-chip${Math.abs(k - Number(ie)) < 1e-6 ? ' on' : ''}" data-rvw-iechip="${index}" data-ie="${fmt(k)}">${fmt(k)}</button>`).join('');
     const locked = frame.is_no_image || frame.no_source;
@@ -735,7 +735,7 @@ export function createRefVibeWindow({
       + `<span class="rvw-crth" data-rvw-crth="${index}" aria-label="${name}">${thumbHtml(frame)}</span>`
       + typeCell
       + slider('strength', strength, max)
-      + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
+      + `<button type="button" class="rvw-x is-remove" data-rvw-remove="${index}" aria-label="빼기" data-naia-title="활성 칸에서 뺍니다 - 보관함에는 남습니다"><span aria-hidden="true">−</span>빼기</button></div>`;
     return head + (sub
       ? `<div class="rvw-crsub${live}" data-rvw-cr-detail="${index}">${keep ? `<div class="rvw-line">${keep}</div>` : ''}${fidelity}</div>`
       : '');
@@ -1146,6 +1146,22 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       renderActive();
     } catch (error) {
       showToast(`이름을 못 바꿨습니다: ${error.message || error}`, 'error');
+    }
+  }
+
+  // 보관 그림 복제(사용자 2026-11-25) - 같은 그림을 프롬프트만 바꿔 따로 쓰려고. 사본은 최근순에서 원본 바로 앞.
+  async function duplicateSelected() {
+    const item = selectedItem();
+    if (!item || tab !== 'cr') return;
+    try {
+      const data = await api('/api/ref-vibe/library/duplicate', {method: 'POST',
+        body: {kind: API_KIND.cr, file_hash: item.file_hash}});
+      const made = data.item || data;
+      lib.cr.selected = String(made.file_hash || '');
+      await loadLibrary(true);
+      showToast(`복제본을 만들었습니다: ${itemName(made)}`, 'info');
+    } catch (error) {
+      showToast(`복제본을 못 만들었습니다: ${error.message || error}`, 'error');
     }
   }
 
@@ -2235,6 +2251,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       : `<button type="button" class="rvw-menu-i" data-rvw-menu="apply"><span class="rvw-menu-mark">▶</span>적용</button>`
         + (hasPrompt ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:both"><span class="rvw-menu-mark">▶</span>REF+프롬프트 적용</button>` : ''))
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
+      + (tab === 'cr' ? `<button type="button" class="rvw-menu-i" data-rvw-menu="dup"><span class="rvw-menu-mark">⧉</span>복제본 만들기</button>` : '')
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
       + groupRows(item)
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
@@ -2252,6 +2269,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       if (op === 'apply') applySelected();
       else if (op === 'release') releaseSelected();
       else if (op === 'rename') renameSelected();
+      else if (op === 'dup') duplicateSelected();
       else if (op === 'fav') setFavorite(item.file_hash, !item.favorite);
       else if (op === 'delete') deleteSelected();
       else if (op === 'newcat') { const made = await newCategory(); if (made) moveTo([item.file_hash], made); }
@@ -2471,11 +2489,19 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       renderActive();
       const applied = appliedSig();
       if (applied !== lastAppliedSig[tab] && !inClusters()) { lastAppliedSig[tab] = applied; renderStore(); }
-      if (before !== undefined && before !== sig && tab === 'vibe' && !inClusters()) loadLibrary(true);
+      // CR = 목록에 없는 그림이 칸에 새로 들어왔을 때만(업로드 · 붙여넣기 - 사용자 2026-11-25 '창을 다시 열어야 보였다')
+      if (before !== undefined && before !== sig && !inClusters()
+          && (tab === 'vibe' || addedHashes(before, sig).some(hash => !lib[tab].items.some(item => item.file_hash === hash)))) {
+        loadLibrary(true);
+      }
     }
   }
   const lastFrameSig = {};
   const lastAppliedSig = {};
+  function addedHashes(before, sig) {
+    const old = new Set(String(before || '').split('|').map(part => part.split(':')[0]));
+    return String(sig || '').split('|').map(part => part.split(':')[0]).filter(hash => hash && !old.has(hash));
+  }
   function frameSig(state) {
     return (state?.frames || []).map(f => `${f.file_hash}:${(f.encoding_keys || []).length}`).join('|');
   }

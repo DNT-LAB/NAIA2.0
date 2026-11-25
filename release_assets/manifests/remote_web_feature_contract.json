@@ -975,6 +975,7 @@
         {"method": "POST", "path": "/api/ref-vibe/library/extract-features", "smoke": "external_live"},
         {"method": "POST", "path": "/api/ref-vibe/library/category", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/move", "smoke": "state_mutation"},
+        {"method": "POST", "path": "/api/ref-vibe/library/duplicate", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/delete", "smoke": "state_mutation"},
         {"method": "GET", "path": "/api/ref-vibe/clusters", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ref-vibe/clusters", "smoke": "state_mutation"}

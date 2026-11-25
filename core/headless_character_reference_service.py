@@ -343,7 +343,15 @@ class HeadlessCharacterReferenceService:
             if existing is not None:
                 slot = context.character_reference_frames.index(existing) + 1
                 return [context._toast(f"이미 R{slot} 칸에 있는 이미지입니다.", level="info"), self.module_state()]
+            stored = context._existing_save_path("character_reference", "images", f"{frame['file_hash']}.png").is_file()
             self.save_storage(frame)
+            # 의상 · 스타일 칸에서 올린 새 그림은 그 분류의 미분류로(사용자 2026-11-25) - 이미 보관함에 있던 그림은 그대로
+            upload_group = {"costume": "outfit", "style": "style"}.get(upload_type)
+            if upload_group and not stored:
+                try:
+                    get_ref_vibe_library(context).edit_item("character_reference", frame["file_hash"], group=upload_group)
+                except Exception as exc:      # noqa: BLE001 - 분류만 못 정했다(그림 · 칸은 그대로)
+                    print(f"[CharacterReference] upload group not set: {exc}")
             context.character_reference_frames.append(frame)
         elif key.startswith("remove_frame_"):
             index = context._index_from_key(key, "remove_frame_")

@@ -11,6 +11,7 @@ import copy
 import json
 import math
 import os
+import re
 import shutil
 from pathlib import Path
 import tempfile
@@ -803,6 +804,65 @@ class RefVibeLibrary:
             return {"ok": True, **split, "elapsed_ms": result.elapsed_ms}
         finally:
             self._extract_lock.release()
+
+    def duplicate_character(self, file_hash):
+        """보관 그림의 복제본(우클릭 · 사용자 2026-11-25) - 같은 그림을 프롬프트만 바꿔 따로 쓰려고.
+
+        보관함은 그림 내용(해시)으로 항목을 가른다 - 픽셀 하나의 값을 1 바꾼 사본을 새 그림으로 넣는다(눈 · 생성에 차이 없음).
+        이름 · 캐릭터 프롬프트 · 호출 프롬프트 · 분류 · 카테고리 · 종류를 옮긴다(즐겨찾기 · 마지막 사용은 아니다).
+        이름 = `원본_2`(사용자 결정) - 이미 있으면 `_3` ... · 최근순에서 원본 바로 앞에 놓인다.
+        """
+        from PIL import Image
+
+        from core.headless_image_utils import image_hash, image_to_png_bytes
+
+        kind = "character_reference"
+        file_hash = safe_component(file_hash)
+        with self._lock:
+            data = self._read()
+            source = self._item(data, kind, file_hash)
+            root, image_path = self._character_image(file_hash)
+            with Image.open(image_path) as opened:
+                image = opened.convert("RGBA")
+            roots = self._roots(kind)
+            listing = self._listing(data, kind, _unbounded=True)["items"]
+            taken = {str(item["file_hash"]) for item in listing} | set(data[kind]["items"])
+            width, height = image.size
+            for spot in range(min(256, width * height)):
+                x, y = spot % width, spot // width
+                red, green, blue, alpha = image.getpixel((x, y))
+                twin = image.copy()
+                twin.putpixel((x, y), (red - 1 if red else 1, green, blue, alpha))
+                png = image_to_png_bytes(twin)
+                new_hash = image_hash(png)
+                if new_hash not in taken and not any((r / "images" / (new_hash + ".png")).exists() for r in roots):
+                    break
+            else:
+                raise LibraryError("복제본을 만들지 못했습니다(같은 사본이 너무 많습니다)", 409)
+            primary = self.context._save_path(kind)
+            target = primary / "images" / (new_hash + ".png")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(png)
+            meta_source = self._character_meta_path(file_hash, root)
+            metadata = self._json(meta_source) if meta_source.is_file() else {}
+            if metadata:
+                metadata.update(file_hash=new_hash, file_name=target.name)
+                self._atomic_write(primary / "metadata" / (new_hash + ".json"), metadata)
+            item = copy.deepcopy(data[kind]["items"].get(file_hash) or {"category": ""})
+            for key in ("favorite", "last_used_at"):
+                item.pop(key, None)
+            item["created_at"] = finite(source.get("created_at"), time.time()) + 0.001
+            base = str(source.get("display_name") or "")
+            if base and base != file_hash and base != Path(str(source.get("file_name") or "")).stem:
+                base = re.sub(r"_\d+$", "", base)[:76]
+                names = {str(i.get("display_name") or "").casefold() for i in listing}
+                number = 2
+                while f"{base}_{number}".casefold() in names:
+                    number += 1
+                item["name"] = f"{base}_{number}"
+            data[kind]["items"][new_hash] = item
+            self._write(data)
+            return self._item(data, kind, new_hash)
 
     def delete_character(self, file_hash):
         file_hash = safe_component(file_hash)

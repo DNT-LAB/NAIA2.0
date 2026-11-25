@@ -179,6 +179,13 @@ def register_module_storage_routes(
             return JSONResponse({"error": "Cluster deletion is loopback only"}, status_code=403)
         return await clusters_call("change_cluster", body)
 
+    @app.post("/api/ref-vibe/library/duplicate")
+    async def api_ref_vibe_duplicate(body: dict):
+        # 보관 그림 복제(우클릭 · 사용자 2026-11-25) - 같은 그림을 다른 프롬프트로 따로 쓰려고
+        if body.get("kind") != "character_reference":
+            return JSONResponse({"error": "Only Character Reference items can be duplicated"}, status_code=400)
+        return await library_call("duplicate_character", body.get("file_hash"))
+
     @app.post("/api/ref-vibe/library/delete")
     async def api_ref_vibe_delete(request: Request, body: dict):
         if not is_loopback_host(request.client.host if request.client else ""):

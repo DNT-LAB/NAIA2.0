@@ -32661,6 +32661,12 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
   color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0;
 }
 .rvw-en:hover, .rvw-x:hover { background: rgba(255,255,255,.07); color: var(--text-primary); }
+/* 활성 칸 빼기 단추 - 눈에 띄게 '− 빼기'(사용자 2026-11-25 · 왼쪽 ✘ 켜기/끄기와 헷갈리지 않게 글자로) */
+.rvw-x.is-remove {
+  width: 56px; height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  border: 1px solid rgba(224,90,102,.7); background: rgba(224,90,102,.14); color: #ff9aa4; font-size: 12px;
+}
+.rvw-x.is-remove:hover { background: rgba(224,90,102,.3); color: #ffd0d5; }
 .rvw-th { flex: 0 0 auto; width: 32px; height: 32px; border-radius: 4px; object-fit: cover; background: #1a1a26; }
 .rvw-th.is-empty { display: inline-flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 9px; border: 1px dashed var(--border-glow); }
 .rvw-name {
@@ -32698,7 +32704,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-line.is-crfid .rvw-range { margin-left: 16px; accent-color: #8b8b99; }
 .rvw-crth { cursor: zoom-in; }
 .rvw-row.is-cr .rvw-en:disabled { cursor: not-allowed; opacity: .5; }
-.rvw-x-pad { flex: 0 0 auto; width: 20px; }
+.rvw-x-pad { flex: 0 0 auto; width: 56px; }
 .rvw-detail { padding: 4px 8px 6px 36px; background: rgba(124,106,239,.05); border-bottom: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
 .rvw-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rvw-hint { color: var(--text-dim); font-size: 10.5px; }

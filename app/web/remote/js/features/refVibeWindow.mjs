@@ -23,6 +23,8 @@ function crCharType(base, keep) {
   if (base === 'character&style') return keep ? 'character&style' : 'character&style_anyoutfit';
   return keep ? 'character_mainoutfit' : 'character';
 }
+// 나가는 칸 - 켜 두었어도 이 모델이 못 받는 칸(V4.5 의 Outfit · 서버가 is_blocked 로 알린다)은 꺼진 것으로 센다.
+const frameOn = frame => Boolean(frame && frame.is_enabled && !frame.is_blocked);
 const CR_PROFILE_FALLBACK = {strength_max: 1, fidelity: true, outfit: false};
 const PAGE = 60;
 const KINDS = {vibe: 'vibe_transfer', cr: 'character_reference'};
@@ -131,7 +133,7 @@ export function createRefVibeWindow({
 
   function enabledCount(moduleId) {
     const state = getModuleState(moduleId);
-    return (state?.frames || []).filter(frame => frame.is_enabled).length;
+    return (state?.frames || []).filter(frameOn).length;
   }
 
   // 퀵 패널은 높이가 고정이 아니다(슬롯 수 · 펼침) - 크기가 바뀌면 알약이 따라 내려간다.
@@ -307,7 +309,7 @@ export function createRefVibeWindow({
     const vibeState = getModuleState(KINDS.vibe);
     const crState = getModuleState(KINDS.cr);
     const vibeOn = (vibeState?.frames || []).filter(f => f.is_enabled).length;
-    const crOn = (crState?.frames || []).filter(f => f.is_enabled).length;
+    const crOn = (crState?.frames || []).filter(frameOn).length;
     const vibeMax = Number(vibeState?.max_frames || 16);
     panel.slot.querySelectorAll('[data-rvw-tab]').forEach(button => {
       const key = button.dataset.rvwTab;
@@ -377,8 +379,8 @@ export function createRefVibeWindow({
     const profile = state.cr_profile || CR_PROFILE_FALLBACK;
     const rows = frames.map((frame, index) => (tab === 'vibe' ? vibeRow(frame, index) : crRow(frame, index, profile))).join('');
     const max = tab === 'vibe' ? Number(state.max_frames || 16) : 0;
-    if (tab === 'cr' && !profile.outfit && frames.some(frame => frame.reference_type === 'costume' && frame.is_enabled)) {
-      notices.push('Outfit 은 V5 전용입니다 - 지금 모델에서는 생성할 때 빠집니다.');
+    if (tab === 'cr' && frames.some(frame => frame.is_blocked)) {
+      notices.push('Outfit 은 V5 전용 - 이 모델에선 꺼 둡니다(V5 면 다시 켜짐).');
     }
     host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${frames.length}${max ? ` / ${max}` : ''}</span>`
       + `<span class="rvw-sec-tools">${tools}</span></div>`
@@ -666,7 +668,7 @@ export function createRefVibeWindow({
   //  · Fidelity 는 그 모델이 쓸 때만(V5 웹은 숨긴다). 값을 모델 상한으로 자르는 것은 서버의 요청 목이 한다.
   //  조작은 펼치지 않고 줄마다 다 보인다(사용자 지시 2026-11-25 - 공홈 Precise Reference 처럼 한 번에 제어).
   function crRow(frame, index, profile = CR_PROFILE_FALLBACK) {
-    const live = frame.is_enabled ? ' is-live' : ' is-off';
+    const live = frameOn(frame) ? ' is-live' : ' is-off';
     const type = String(frame.reference_type || 'character&style');
     const isChar = crIsCharType(type);
     const shownType = isChar ? crCharBase(type) : type;
@@ -695,7 +697,9 @@ export function createRefVibeWindow({
     const sub = keep || fidelity;
     const name = `R${index + 1} · ${escHtml(frameName(frame))}`;
     const head = `<div class="rvw-row is-cr${live}${sub ? ' has-sub' : ''}" data-rvw-row="${index}">`
-      + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
+      + (frame.is_blocked
+        ? `<button type="button" class="rvw-en" disabled aria-label="V5 전용" data-naia-title="Outfit 은 V5 전용 - V5 로 바꾸면 다시 켜집니다">✘</button>`
+        : `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`)
       + `<span class="rvw-crth" data-rvw-crth="${index}" aria-label="${name}">${thumbHtml(frame)}</span>`
       + typeCell
       + slider('strength', strength, max)
@@ -1947,7 +1951,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   //  Char&Style · Character 끼리 옮길 때는 '같은 옷 유지' 를 이어 간다(Style · Outfit 에서 오면 웹 기본 = 켬).
   const ITEM_TYPES = [['character&style', 'Char&Style'], ['character', 'Character'], ['style', 'Style'], ['costume', 'Outfit (V5)']];
   function typeRows(item) {
-    if (tab !== 'cr') return '';
+    // ANIMA(Ref Adapter v2)는 종류가 없다 - 칸은 그림 + 캐릭터 프롬프트뿐
+    if (tab !== 'cr' || isAnima()) return '';
     const type = String(item.settings?.reference_type || 'character&style');
     const shown = crIsCharType(type) ? crCharBase(type) : type;
     return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">종류</div>`

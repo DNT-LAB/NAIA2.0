@@ -223,6 +223,11 @@ class HeadlessCharacterReferenceService:
         display_names = get_ref_vibe_library(self.context).display_names(
             "character_reference", [f.get("file_hash", "") for f in self.context.character_reference_frames]
         )
+        profile = self._cr_profile_payload()
+        anima = self._anima_block()
+        # Outfit 을 못 받는 모델(V4.5)에선 Outfit 칸을 꺼 둔 것처럼 보인다(사용자 지시 2026-11-25). 켬 설정은 그대로 -
+        # 요청 목(adapt_payload)이 어차피 뺀다 · V5 로 돌아가면 다시 켜진 채다. ANIMA 칸은 NAI 사양과 무관하다.
+        no_outfit = anima is None and profile is not None and not profile.get("outfit")
         frames = []
         for index, frame in enumerate(self.context.character_reference_frames):
             frames.append({
@@ -235,10 +240,10 @@ class HeadlessCharacterReferenceService:
                 "strength": _as_float(frame.get("strength"), 1.0),
                 "fidelity": _as_float(frame.get("fidelity"), 0.8),
                 "thumbnail": frame.get("thumbnail", ""),
+                "is_blocked": no_outfit and frame.get("reference_type") == "costume",
             })
         state = {"is_naid45": self.context._is_naid45_model(), "frames": frames,
-                 "cr_profile": self._cr_profile_payload()}
-        anima = self._anima_block()
+                 "cr_profile": profile}
         if anima is not None:
             state["anima"] = anima
             # ANIMA 줄은 칸마다 그 그림의 캐릭터 프롬프트를 보여 주고 고친다(사용자 지시 2026-11-05) - 저장은 그림 쪽

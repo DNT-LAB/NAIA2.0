@@ -32642,6 +32642,7 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 /* Fidelity 는 V4.5 사양 - 회색 · 살짝 들여서 Strength 아래 딸린 값으로 보이게 */
 .rvw-line.is-crfid .rvw-range { margin-left: 16px; accent-color: #8b8b99; }
 .rvw-crth { cursor: zoom-in; }
+.rvw-row.is-cr .rvw-en:disabled { cursor: not-allowed; opacity: .5; }
 .rvw-x-pad { flex: 0 0 auto; width: 20px; }
 .rvw-detail { padding: 4px 8px 6px 36px; background: rgba(124,106,239,.05); border-bottom: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
 .rvw-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

@@ -466,7 +466,8 @@ export function createModuleBadges({
     const badge = document.getElementById('badgeCharRef');
     if (!badge || !btn) return;
 
-    const enabledCount = (m.frames || []).filter(frame => frame.is_enabled).length;
+    // is_blocked = 켜 두었어도 이 모델이 못 받는 칸(V4.5 의 Outfit · 2026-11-25) - 나가지 않으니 세지 않는다
+    const enabledCount = (m.frames || []).filter(frame => frame.is_enabled && !frame.is_blocked).length;
     activatedCounts.reference = enabledCount;
     if (!enabledCount) {
       badge.classList.add('hidden');

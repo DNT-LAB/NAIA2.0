@@ -62,6 +62,9 @@ def clean_encodings(value: Any) -> dict[str, str]:
 #    활성 칸에서 종류를 바꿔도 보관 그림이 다른 분류로 옮겨지지 않는다(활성 칸과 보관함은 따로).
 #  - 폴더(카테고리)도 분류를 가진다. 이름은 **세 분류를 통틀어** 겹치지 않는다(`ref:이름` 이 어느 쪽인지 알아야 한다).
 CR_GROUPS = ("character", "outfit", "style")
+# 분류 이름 = 그 분류 그림 전체를 가리키는 폴더(`ref:캐릭터:이름` · 미분류도 부른다 · 사용자 2026-11-25).
+# 그래서 사용자 폴더 이름으로는 못 쓴다(옛 폴더가 이미 이 이름이면 그 폴더가 이긴다).
+GROUP_FOLDER_NAMES = {"character": "캐릭터", "outfit": "의상", "style": "스타일"}
 GROUP_DEFAULT_TYPE = {"outfit": "costume", "style": "style"}
 CALL_NAME_FORBIDDEN = (":", ",", "__")
 
@@ -415,7 +418,7 @@ class RefVibeLibrary:
 
     def callable_folders(self):
         """`ref:` 로 부를 수 있는 폴더(Character Reference) - [{id, name, group, items}] · 그림은 이름순.
-        폴더 밖(미분류) 그림은 부를 수 없다(core/ref_prompt_resolver.py)."""
+        사용자 폴더 뒤에 분류마다 분류 이름의 폴더(그 분류 그림 전체 · 미분류 포함 · virtual)를 하나씩 붙인다."""
         kind = "character_reference"
         with self._lock:
             data = self._read()
@@ -426,8 +429,14 @@ class RefVibeLibrary:
                 if not page:
                     break
                 items += page
-        return [{"id": c["id"], "name": c["name"], "group": c["group"],
-                 "items": [i for i in items if i["category"] == c["id"]]} for c in first["categories"]]
+        folders = [{"id": c["id"], "name": c["name"], "group": c["group"],
+                    "items": [i for i in items if i["category"] == c["id"]]} for c in first["categories"]]
+        taken = {folder["name"].casefold() for folder in folders}
+        for group, name in GROUP_FOLDER_NAMES.items():
+            if name.casefold() not in taken:
+                folders.append({"id": f"group:{group}", "name": name, "group": group, "virtual": True,
+                                "items": [i for i in items if i.get("group") == group]})
+        return folders
 
     def character_image_path(self, file_hash):
         """보관 그림 원본(images/<해시>.png) 경로 - 없으면 LibraryError(404)."""
@@ -509,6 +518,9 @@ class RefVibeLibrary:
                     problem = callable_name_problem(name)
                     if problem:
                         raise LibraryError(problem)
+                    if name.casefold() in {n.casefold() for n in GROUP_FOLDER_NAMES.values()}:
+                        raise LibraryError(f"'{name}' 은 분류 이름이라 폴더 이름으로 못 씁니다"
+                                           f"(ref:{name}: 은 그 분류 그림 전체를 부릅니다)")
                 # 세 분류를 통틀어 하나(대소문자 무시) - `ref:폴더` 가 어느 분류인지 이름만으로 안다
                 if any(g["name"].casefold() == name.casefold() and g is not category for g in categories):
                     raise LibraryError("Category name already exists", 409)

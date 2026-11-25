@@ -740,12 +740,20 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       + `${label}<b>${counts[group] ?? ''}</b></button>`).join('');
   }
 
-  /** 이 보관 그림을 프롬프트에서 부르는 말. 폴더에 없으면 못 부른다(빈 글). 이름에 `:` `,` 가 있으면 해시 앞 8자로. */
+  /** 이 보관 그림을 프롬프트에서 부르는 말. 이름에 `:` `,` 가 있으면 해시 앞 8자로.
+   *  폴더 밖(미분류)이면 분류 이름(`ref:캐릭터:` - 그 분류 그림 전체)으로 부른다(사용자 2026-11-25).
+   *  옛 폴더가 이미 그 분류 이름을 쓰고 있으면 그 폴더가 이겨서 못 부른다(빈 글). */
   function refCall(item) {
-    const folder = categoryName(String(item.category || ''));
+    let folder = categoryName(String(item.category || ''));
+    if (!folder) {
+      const label = CR_GROUPS.find(([g]) => g === item.group)?.[1] || '';
+      const taken = lib.cr.categories.some(c => String(c.name || '').toLowerCase() === label.toLowerCase());
+      folder = label && !taken ? label : '';
+    }
     if (!folder) return '';
     const name = itemName(item);
-    const safe = name && !/[:,]/.test(name) ? name : String(item.file_hash || '').slice(0, 8);
+    const unnamed = !name || name === String(item.file_hash || '');   // 이름 없는 그림은 해시 앞 8자로 짧게
+    const safe = !unnamed && !/[:,]/.test(name) ? name : String(item.file_hash || '').slice(0, 8);
     return `ref:${folder}:${safe}`;
   }
 

@@ -140,7 +140,7 @@ def resolved_call(frame: dict[str, Any], folder_items: list[dict[str, Any]]) -> 
     이름이 갈라지는 글자를 품었거나 폴더에 같은 이름이 또 있으면 해시 앞 8자로."""
     name = str(frame.get("display_name") or "")
     same = [i for i in folder_items if str(i.get("display_name") or "").casefold() == name.casefold()]
-    if not name or any(mark in name for mark in (":", ",", "__")) or len(same) != 1:
+    if not name or name == frame["file_hash"] or any(mark in name for mark in (":", ",", "__")) or len(same) != 1:
         name = str(frame["file_hash"])[:8]
     strength = "" if frame["strength"] == STRENGTH_DEFAULT else f":{frame['strength']:g}"
     return f"ref:{frame['folder']}:{name}{strength}"
@@ -354,7 +354,8 @@ def _rank(text: str, needle: str) -> int | None:
 
 def _call_name(item: dict[str, Any]) -> str:
     name = str(item.get("display_name") or "")
-    return name if name and not any(mark in name for mark in (":", ",")) else str(item.get("file_hash") or "")[:8]
+    unnamed = not name or name == str(item.get("file_hash") or "")
+    return name if not unnamed and not any(mark in name for mark in (":", ",")) else str(item.get("file_hash") or "")[:8]
 
 
 def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
@@ -379,9 +380,10 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
 
     def folder_row(folder):
         count = len(folder["items"])
+        whole = "분류 전체 · " if folder.get("virtual") else ""
         return {"tag": folder["name"], "value": f"ref:{folder['name']}:", "_wc_type": "ref_folder", "cat": "",
-                "group": GROUP_LABEL.get(folder["group"], folder["group"]), "desc": f"{count}장",
-                "preview": f"{count}장 - 고르면 그림 이름을 이어서 고릅니다", "thumbs": _thumbs(folder)}
+                "group": GROUP_LABEL.get(folder["group"], folder["group"]), "desc": f"{whole}{count}장",
+                "preview": f"{whole}{count}장 - 고르면 그림 이름을 이어서 고릅니다", "thumbs": _thumbs(folder)}
 
     def wild_row(folder, sequential):
         mark = "*" if sequential else ""

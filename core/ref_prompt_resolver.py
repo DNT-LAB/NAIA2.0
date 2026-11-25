@@ -371,14 +371,45 @@ def finish_main_prompt(prompt: Any, cache: dict) -> Any:
 
 
 def ref_picks(cache: dict) -> list[dict[str, Any]]:
-    """생성 정보에 남길 짧은 기록(그림 base64 는 안 남긴다)."""
-    keys = ("token", "scope", "slot", "folder", "name", "file_hash", "reference_type", "strength", "blocked")
+    """생성 정보에 남길 짧은 기록(그림 base64 는 안 남긴다) - 히스토리 '레퍼런스 정보' 가 읽는다."""
+    keys = ("token", "mode", "call", "scope", "slot", "group", "folder", "name", "file_hash", "reference_type",
+            "strength", "blocked")
     picks = []
     for frame in (cache or {}).values():
         pick = {key: frame.get(key) for key in keys}
-        pick["prompt_applied"] = bool(frame.get("prompt") or frame.get("uc")) and not frame.get("blocked")
+        secondary = frame.get("secondary_strength")
+        pick["fidelity"] = round(1.0 - float(secondary), 2) if isinstance(secondary, (int, float)) else None
+        applied = not frame.get("blocked")
+        pick["prompt_applied"] = bool(frame.get("prompt") or frame.get("uc")) and applied
+        pick["prompt"] = str(frame.get("prompt") or "") if applied else ""
+        pick["uc"] = str(frame.get("uc") or "") if applied else ""
         picks.append(pick)
     return picks
+
+
+def executed_reference_slots(params: dict[str, Any], profile: Any, *, inpainting: bool = False) -> list[dict[str, Any]]:
+    """CR 모듈 칸 기록(`_reference_slots`)에 '실제로 갔는가' 를 붙인다. 목록 길이가 안 맞으면(다른 길이 실은
+    레퍼런스 · 옛 기록) 남기지 않는다 - 엉뚱한 칸을 보여 주느니 없는 편이 낫다."""
+    from core.nai_character_reference_spec import wire_type
+
+    slots = params.get("_reference_slots")
+    images = params.get("director_reference_images")
+    if not isinstance(slots, list) or not slots or not isinstance(images, list) or len(images) != len(slots):
+        return []
+    out = []
+    for slot in slots:
+        if not isinstance(slot, dict):
+            return []
+        if profile is None:
+            reason = "이 모델은 Character Reference 를 받지 않는다"
+        elif inpainting and not profile.inpaint:
+            reason = "V5 인페인트는 Character Reference 를 받지 않는다"
+        elif wire_type(slot.get("reference_type"), profile) is None:
+            reason = "이 모델은 Outfit 을 받지 않는다"
+        else:
+            reason = ""
+        out.append({**slot, "blocked": reason})
+    return out
 
 
 def append_to_director_lists(api_parameters: dict[str, Any], frames: list[dict[str, Any]]) -> None:

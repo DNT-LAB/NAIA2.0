@@ -736,6 +736,10 @@ class APIService:
 
     @generation_operation
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
+        if isinstance(parameters, dict):
+            # 히스토리에서 다시 보낸 요청에는 그 그림의 레퍼런스 기록이 실려 온다 - 이번 장 것만 남게 비운다
+            parameters.pop('_executed_reference_slots', None)
+            parameters.pop('ref_prompt_picks', None)
         try:
             return self._call_generation_api(parameters, progress_callback=progress_callback,
                                              preview_callback=preview_callback)
@@ -2039,6 +2043,12 @@ class APIService:
             # V5 는 마스크가 있으면 CR 을 안 싣는다(웹 charRefInpainting=false · 2026-11-25) - 인페인트 강도 미러도 건너뛴다.
             from core.nai_character_reference_spec import adapt_payload as _adapt_cr_payload, cr_profile as _cr_profile
             _cr_prof = _cr_profile(model_spec)
+            # 히스토리 '레퍼런스 정보' - 모듈 칸이 이 모델 · 작업에서 실제로 갔는지(재시도 · 다시 생성마다 새로)
+            from core.ref_prompt_resolver import executed_reference_slots as _executed_reference_slots
+            params.pop('_executed_reference_slots', None)
+            _slot_record = _executed_reference_slots(params, _cr_prof, inpainting=(action_type == "infill"))
+            if _slot_record:
+                params['_executed_reference_slots'] = _slot_record
             if _cr_prof is not None and (action_type != "infill" or _cr_prof.inpaint):
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:

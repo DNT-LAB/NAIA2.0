@@ -473,7 +473,9 @@ class HeadlessCharacterReferenceService:
         self._ensure_loaded()
         if not context._is_naid45_model():
             return {}
-        enabled = [frame for frame in list(context.character_reference_frames) if frame.get("is_enabled")]
+        # 칸 번호(1부터)는 꺼 둔 칸까지 센다 - 화면의 칸 차례와 같게
+        enabled = [(index + 1, frame) for index, frame in enumerate(list(context.character_reference_frames))
+                   if frame.get("is_enabled")]
         if not enabled:
             return {}
         descriptions = []
@@ -481,7 +483,8 @@ class HeadlessCharacterReferenceService:
         ie = []
         strengths = []
         fidelities = []
-        for frame in enabled:
+        slots = []
+        for slot, frame in enabled:
             image_data = str(frame.get("image_data") or "")
             if not image_data:
                 continue
@@ -498,8 +501,22 @@ class HeadlessCharacterReferenceService:
             fidelity = 1.0 - max(0.0, min(1.0, _as_float(frame.get("fidelity"), 0.8)))
             fidelities.append(round(fidelity * 20) / 20.0)
             strengths.append(strength)
+            # 히스토리 '레퍼런스 정보' 용 - 목록과 같은 차례 · api_service 가 실제로 보냈는지를 붙여 남긴다
+            slots.append({
+                "slot": slot,
+                "file_hash": str(frame.get("file_hash") or ""),
+                "reference_type": str(frame.get("reference_type") or "character&style"),
+                "strength": strength,
+                "fidelity": round(max(0.0, min(1.0, _as_float(frame.get("fidelity"), 0.8))), 2),
+            })
         if not descriptions:
             return {}
+        try:
+            names = get_ref_vibe_library(context).display_names("character_reference", [s["file_hash"] for s in slots])
+        except Exception:      # noqa: BLE001 - 이름은 보여 주기용이다. 못 읽어도 생성은 간다
+            names = {}
+        for entry in slots:
+            entry["name"] = names.get(entry["file_hash"], "") or entry["file_hash"][:16]
         return {
             "director_reference_descriptions": descriptions,
             "director_reference_images": images,
@@ -509,4 +526,5 @@ class HeadlessCharacterReferenceService:
             "controlnet_strength": 1,
             "inpaintImg2ImgStrength": 1,
             "normalize_reference_strength_multiple": True,
+            "_reference_slots": slots,
         }

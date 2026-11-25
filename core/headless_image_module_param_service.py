@@ -25,6 +25,8 @@ CHARACTER_REFERENCE_LIVE_REFETCH_KEYS = (
     "director_reference_information_extracted",
     "director_reference_strength_values",
     "director_reference_secondary_strength_values",
+    # 위 목록과 같이 사는 칸 기록(히스토리 '레퍼런스 정보') - 함께 걷어야 끈 뒤 옛 칸이 안 남는다
+    "_reference_slots",
 )
 
 # Vibe Transfer 도 char-ref 와 동일 클래스 — Auto Gen 매 반복마다 라이브 모듈 프레임 상태(교체/

@@ -961,6 +961,7 @@
         "app/web/remote/js/features/imageModulePanels.mjs",
         "app/web/remote/js/features/refVibeWindow.mjs",
         "app/web/remote/js/features/refHoverCard.mjs",
+        "app/web/remote/js/features/refHistoryWindow.mjs",
         "app/web/remote/js/features/animaCharPrompt.mjs"
       ],
       "legacy_dependency": "none",

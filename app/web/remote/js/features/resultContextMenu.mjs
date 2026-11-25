@@ -1,6 +1,8 @@
 const ACTION_METADATA = 'show_metadata';
 const ACTION_SHOW_PAYLOAD = 'show_payload';     // 우측 팝업: 풀 페이로드를 읽기좋은 HTML로
 const ACTION_SHOW_WILDCARDS = 'show_wildcards';  // 우측 팝업: 블록별 적용 와일드카드(없으면 숨김)
+// 이 그림에 실은 레퍼런스(CR 모듈 칸 · ref: 호출) - 기록이 없는 그림(바깥 · 디스크 전용)은 숨긴다(사용자 2026-11-25)
+const ACTION_SHOW_REFERENCES = 'show_references';
 const ACTION_PASTE_IMAGE = 'paste_image';
 const ACTION_IMAGE_ACTION = 'image_action';
 const ACTION_LOAD_PROMPT = 'load_prompt';
@@ -37,6 +39,7 @@ const DEFAULT_CAPABILITIES = {
   restore_params: false,
   metadata: false,
   has_wildcards: false,
+  has_references: false,
   paste_image: true,
   image_action: false,
   open_file: false,
@@ -129,6 +132,7 @@ const MAIN_IMAGE_MENU = [
   },
   {label: 'Payload 확인', action: ACTION_SHOW_PAYLOAD, capability: 'metadata'},
   {label: '와일드카드', action: ACTION_SHOW_WILDCARDS, capability: 'has_wildcards', hideWhenDisabled: true},
+  {label: '레퍼런스 정보', action: ACTION_SHOW_REFERENCES, capability: 'has_references', hideWhenDisabled: true},
   {type: 'separator'},
   {
     label: 'NAI 도구',
@@ -193,6 +197,7 @@ const THUMBNAIL_MENU = [
   },
   {label: 'Payload 확인', action: ACTION_SHOW_PAYLOAD, capability: 'metadata'},
   {label: '와일드카드', action: ACTION_SHOW_WILDCARDS, capability: 'has_wildcards', hideWhenDisabled: true},
+  {label: '레퍼런스 정보', action: ACTION_SHOW_REFERENCES, capability: 'has_references', hideWhenDisabled: true},
   {
     label: 'NAI 도구',
     modes: ['NAI'],
@@ -290,6 +295,8 @@ export function createResultContextMenu({
   onSaveSnapshot = null,
   onSetPresetThumbnail = null,
   onDelete = null,
+  // (generationParams, context) => void - 히스토리 '레퍼런스 정보' 창(refHistoryWindow)
+  onShowReferences = null,
   getWildcardFreezeState = () => ({}),
   setWildcardFreezeState = null,
   onToggleWildcardFreeze = null,
@@ -441,6 +448,9 @@ export function createResultContextMenu({
     }
     if (item.action === ACTION_SHOW_WILDCARDS) {
       return hasCapability(context, 'has_wildcards');
+    }
+    if (item.action === ACTION_SHOW_REFERENCES) {
+      return typeof onShowReferences === 'function' && hasCapability(context, 'has_references');
     }
     if (item.action === ACTION_PASTE_IMAGE) {
       return hasCapability(context, 'paste_image');
@@ -746,6 +756,8 @@ export function createResultContextMenu({
           showPayload(context);
         } else if (action === ACTION_SHOW_WILDCARDS) {
           showWildcards(context);
+        } else if (action === ACTION_SHOW_REFERENCES) {
+          showReferences(context);
         } else if (action === ACTION_PASTE_IMAGE) {
           onPasteImage();
         } else if (action === ACTION_OPEN_LOCATION) {
@@ -1234,6 +1246,17 @@ export function createResultContextMenu({
     } catch (error) {
       console.error('Failed to load wildcards', error);
       showToast('Failed to load wildcards', 'error');
+    }
+  }
+
+  async function showReferences(context) {
+    try {
+      const data = await fetchFullMeta(context);
+      if (!data) { showToast('No image is selected', 'error'); return; }
+      onShowReferences(rawFromMeta(data).generation_params || {}, context);
+    } catch (error) {
+      console.error('Failed to load references', error);
+      showToast('레퍼런스 정보를 읽지 못했습니다', 'error');
     }
   }
 

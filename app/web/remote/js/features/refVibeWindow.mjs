@@ -250,14 +250,23 @@ export function createRefVibeWindow({
 
   function isOpen() { return !!panel?.isOpen(); }
 
-  /** 열기. `toggle` 이면 같은 탭으로 열려 있을 때 닫는다(런처 단추를 두 번 누르는 손버릇). */
-  function show({tab: nextTab = '', toggle = false} = {}) {
+  /** 열기. `toggle` 이면 같은 탭으로 열려 있을 때 닫는다(런처 단추를 두 번 누르는 손버릇).
+   *  `find` = {group, fileHash} - Char Ref 보관함에서 그 그림을 찾아 보여 준다(히스토리 '레퍼런스 정보' 의 [보관함]). */
+  function show({tab: nextTab = '', toggle = false, find = null} = {}) {
     return ensurePanel().then(() => {
       // ANIMA · V5 에는 Char Ref 탭뿐 - 무엇을 달라 해도 그 탭(기억된 탭은 그대로 - 4.5 로 돌아가면 그 탭)
       const crOnly = vibeHidden();
       const wanted = crOnly ? 'cr' : (nextTab === 'cr' || nextTab === 'vibe' ? nextTab : tab);
       if (toggle && panel.isOpen() && wanted === (crOnly ? 'cr' : tab)) { panel.close(); return; }
       setTab(wanted, {quiet: true});
+      if (find && wanted === 'cr') {
+        const state = lib.cr;
+        if (crGrouped() && CR_GROUPS.some(([group]) => group === find.group)) state.group = find.group;
+        state.filter = 'all';
+        state.categoryId = '';
+        state.q = String(find.fileHash || '');
+        state.selected = String(find.fileHash || '');
+      }
       panel.open();
       // 이번 실행 첫 열기는 결과 칸 가운데로(사용자 지시 2026-10-23). 공용 규칙(FN | Result 경계)은 퀵 슬롯 ·
       // 이 알약을 덮었다. 그 뒤(같은 실행 - F5 포함)로는 사용자가 옮긴 자리를 따른다.

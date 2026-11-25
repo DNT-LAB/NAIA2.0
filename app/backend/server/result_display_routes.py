@@ -430,6 +430,15 @@ def _has_wildcards(prompt_context: Any) -> bool:
     return bool(isinstance(wildcards, dict) and (wildcards.get("history") or wildcards.get("state")))
 
 
+def _has_references(generation_params: Any) -> bool:
+    """이 그림에 레퍼런스 기록(CR 모듈 칸 · ref: 호출)이 있는가 - 우클릭 '레퍼런스 정보' 게이트.
+    이 세션의 히스토리 항목만 가진다(디스크 전용 · 바깥 그림은 False - 메뉴가 안 뜬다)."""
+    if not isinstance(generation_params, dict):
+        return False
+    return any(isinstance(generation_params.get(key), list) and generation_params.get(key)
+               for key in ("_executed_reference_slots", "ref_prompt_picks"))
+
+
 def _current_wildcard_frozen_state(context: WebSessionContext) -> dict[str, Any]:
     try:
         service = context._wildcard_service()
@@ -528,6 +537,7 @@ def _build_current_result_asset_payload(context: WebSessionContext) -> dict[str,
             "delete": bool(item),
             # Wildcard Watch '와일드카드' 항목 게이트 — 적용된 와일드카드가 있을 때만 노출.
             "has_wildcards": _has_wildcards(prompt_context),
+            "has_references": _has_references(getattr(item, "generation_params", None) if item else None),
         },
     }
 
@@ -597,6 +607,7 @@ def _build_saved_result_asset_payload(context: WebSessionContext, rel_path: str)
             "delete": bool(item),
             # Wildcard Watch '와일드카드' 항목 게이트(in-session 항목 한정; 디스크 전용은 False).
             "has_wildcards": _has_wildcards(getattr(item, "prompt_context", None) if item else None),
+            "has_references": _has_references(getattr(item, "generation_params", None) if item else None),
         },
     }
 

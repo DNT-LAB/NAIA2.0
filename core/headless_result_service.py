@@ -245,6 +245,12 @@ class HeadlessResultStore:
             params.pop("_session_pool_executed", None)
             if executed.get("_session_pool_executed"):
                 params["_session_pool_executed"] = True
+            # 레퍼런스 기록(우클릭 '레퍼런스 정보') - CR 모듈 칸 · ref: 호출. 그림 base64 는 없다.
+            for key in ("_executed_reference_slots", "ref_prompt_picks"):
+                params.pop(key, None)
+                value = executed.get(key)
+                if isinstance(value, list) and value:
+                    params[key] = [dict(entry) for entry in value if isinstance(entry, dict)]
         # WEBUI custom payload is a LIVE editor/session setting (remote_params), not a per-image
         # baked param. Never persist it into a stored result, so EVERY replay path (Result Enhance,
         # history replay/reopen, queue 'original', and any future one) injects the user's CURRENT

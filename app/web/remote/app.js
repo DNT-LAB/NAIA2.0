@@ -2295,7 +2295,20 @@ import('./js/features/downloadDock.mjs?v=20261022-dock1')
 import('./js/features/mobileFullscreen.mjs?v=20261030-mfs4')
   .then(({createMobileFullscreen}) => createMobileFullscreen({document, window}))
   .catch(error => console.error('Failed to initialize mobile fullscreen module', error));
-const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261123-loadgate')
+// 히스토리 '레퍼런스 정보' 창 - 처음 열 때 읽는다(우클릭 메뉴가 부른다 · 사용자 2026-11-25)
+let refHistoryWindowReady = null;
+function openRefHistoryWindow(generationParams) {
+  refHistoryWindowReady ||= import('./js/features/refHistoryWindow.mjs?v=20261125-refhist')
+    .then(({createRefHistoryWindow}) => createRefHistoryWindow({
+      document, window, escHtml,
+      loadDraggablePanel: () => import('./js/features/draggablePanel.mjs?v=20260926-childalign'),
+      // [Reference] = REFERENCE 창(Char Ref 탭) · 줄의 [보관함] = 그 그림을 찾아서
+      openReference: find => refVibeWindowReady.then(() => refVibeWindow?.show({tab: 'cr', find})),
+    }));
+  refHistoryWindowReady.then(win => win.open(generationParams))
+    .catch(error => { console.error('Failed to open reference info', error); showToast('레퍼런스 정보를 열지 못했습니다', 'error'); });
+}
+const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=20261125-refhist')
   .then(({createResultContextMenu}) => {
     resultContextMenu = createResultContextMenu({
       document,
@@ -2313,6 +2326,7 @@ const resultContextMenuReady = import('./js/features/resultContextMenu.mjs?v=202
       },
       onShowMetadata: context => callResultImageAction('showMetadataInTab', context) || false,
       onShowMetadataDetached: openMetadataDetachedFromContext,
+      onShowReferences: openRefHistoryWindow,
       onImageAction: (context, action) => callResultImageAction('requestContextImageAction', context, action),
       onLoadPrompt: context => callResultImageAction('loadPromptFromContext', context),
       onRerollPrompt: context => callResultImageAction('rerollPromptFromContext', context),
@@ -3333,7 +3347,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-rvw2')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-refhist')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,

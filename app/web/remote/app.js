@@ -14412,6 +14412,8 @@ function onModuleState(m) {
     m = peFieldHub?.reconcileIncoming(m) || m;
   }
   if (m.module_id) moduleStateCache.set(m.module_id, m);
+  // 캐릭터 · PE 칸이 화면 밖에서 바뀌어도(다른 창 · 씬 불러오기 · 서버) bypass 체크박스가 따라간다 - input 만 보면 남는다
+  if (m.module_id === 'character' || m.module_id === 'prompt_engineering') syncRefBypassVisibility();
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);

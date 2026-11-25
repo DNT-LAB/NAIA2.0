@@ -46,6 +46,7 @@ export function createRefVibeWindow({
   isToolUnsupported = () => false,   // (moduleId) => bool  모델 능력 / NAID3 / 모드
   isInteractive = () => false,
   isAnima = () => false,     // 내장 ANIMA - Char Ref 만 · Ref Adapter v2(사용자 지정 2026-11-05)
+  usesRefCalls = () => false, // () => 프롬프트 칸 어딘가에 `ref:` 호출이 있나 - 있을 때만 bypass 체크박스(2026-11-25)
   installRefAdapter = async () => ({}),
   readPrefix = () => null,   // () => 선행 고정(PE pre_prompt) 글 · 모르면 null - 옛 [불러오기] 덩어리를 찾는다
   writePrefix = () => false, // (text) => 보냈는가 - 그 덩어리를 걷는다
@@ -89,7 +90,17 @@ export function createRefVibeWindow({
     pill.innerHTML = `<button type="button" class="rvp-box" data-rvp-toggle>`
       + `<span class="rvp-caret" aria-hidden="true">▸</span><span class="rvp-title">REFERENCE</span>`
       + `<span class="rvp-note" data-rvp-note hidden></span>`
-      + `<span class="rvp-count" data-rvp-count hidden></span></button>`;
+      + `<span class="rvp-count" data-rvp-count hidden></span></button>`
+      // REFERENCE bypass(사용자 2026-11-25) - 켜면 `ref:` 를 부른 장에는 이 칸들을 안 보낸다(칸은 그대로 · 서버가 장마다 판정)
+      + `<label class="rvp-bypass" data-rvp-bypass hidden`
+      + ` title="켜면 ref: 를 부른 장에는 REFERENCE 칸을 보내지 않고 ref: 호출만 보냅니다 (칸은 그대로)">`
+      + `<input type="checkbox" data-rvp-bypass-box><span>bypass</span></label>`;
+    pill.addEventListener('change', event => {
+      const box = event.target.closest('[data-rvp-bypass-box]');
+      if (!box) return;
+      setModuleParam(KINDS.cr, 'bypass', box.checked ? 'true' : 'false');
+      pill.classList.toggle('is-bypass', box.checked);
+    });
     pill.addEventListener('click', event => {
       if (!event.target.closest('[data-rvp-toggle]')) return;
       if (pill.classList.contains('is-unsupported')) {
@@ -170,6 +181,14 @@ export function createRefVibeWindow({
     count.textContent = text;
     el.classList.toggle('is-live', !!text && !unsupported);
     el.classList.toggle('is-win', !!panel?.isOpen());
+    // bypass 체크박스 = `ref:` 를 쓸 때만(안 쓰면 아예 안 보이고 서버도 안 쓴다 · 사용자 2026-11-25). ANIMA 는 ref: 가 없다.
+    const bypass = el.querySelector('[data-rvp-bypass]');
+    const showBypass = !unsupported && !crOff && !isAnima() && !!usesRefCalls();
+    const bypassOn = !!getModuleState(KINDS.cr)?.bypass;
+    bypass.hidden = !showBypass;
+    bypass.querySelector('input').checked = bypassOn;
+    el.classList.toggle('has-bypass', showBypass);
+    el.classList.toggle('is-bypass', showBypass && bypassOn);
     placePill();
     // ⚠️ placePill 은 onLayout 을 부르지 않는다 - 인셋 배지 쪽이 placePill 을 부르므로 돌고 돈다.
     onLayout();

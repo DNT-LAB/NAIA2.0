@@ -16913,6 +16913,12 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .ref-ac-text.is-uc .ref-ac-value { color: #f0a0ad; }
 .ref-ac-text.is-off .ref-ac-value { color: var(--text-dim); text-decoration: line-through; }
 .ref-ac-text.is-dim .ref-ac-value { color: var(--text-dim); }
+/* ref: 후보 = 한 줄짜리 낮은 줄 - 종류 줄(&스타일 · &의상)이 붙어도 7줄 이상이 한 화면에 든다(사용자 2026-11-25) */
+.chunk-ac-list.is-ref > .tag-ac-item.chunk-ac-item { grid-template-areas: "tag count"; padding: 4px 12px; gap: 0 10px; }
+.chunk-ac-list.is-ref .tag-ac-tag { line-height: 18px; }
+.chunk-ac-list.is-ref > .tag-ac-item.ref-ac-variant { padding-left: 28px; }
+.chunk-ac-list.is-ref > .ref-ac-variant .tag-ac-tag { color: #9fb7ff; font-weight: 500; }
+.chunk-ac-list.is-ref > .ref-ac-variant .tag-ac-tag::before { content: "\2514  "; color: var(--text-dim); }
 .chunk-ac-loading {
   padding: 18px;
   color: var(--text-dim);
@@ -32585,6 +32591,14 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvp-count { margin-left: auto; padding: 0 6px; border-radius: 9px; background: rgba(124,106,239,.25); color: #cfc8ff; letter-spacing: 0; }
 /* 못 쓰는 모델(V5 등)에서는 알약을 아예 숨긴다(사용자 지시 2026-10-23). */
 .rvp.is-unsupported { display: none !important; }
+/* REFERENCE bypass(사용자 2026-11-25) - `ref:` 를 쓸 때만 · 켜면 붉은 쪽 */
+.rvp.has-bypass .rvp-box { padding-right: 74px; }
+.rvp-bypass { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; gap: 4px;
+  font: 500 10px var(--font-mono); color: var(--text-dim); cursor: pointer; user-select: none; }
+.rvp-bypass[hidden] { display: none !important; }
+.rvp-bypass input { margin: 0; width: 11px; height: 11px; accent-color: #e05a66; cursor: pointer; }
+.rvp.is-bypass .rvp-box { opacity: 1; border-color: rgba(224,90,102,.65); background: rgba(48,16,22,.72); }
+.rvp.is-bypass .rvp-bypass { color: #ff8f99; font-weight: 700; }
 
 .dragpanel.rvw .dragpanel-body { padding: 0; min-height: 0; display: flex; }
 .rvw-tabs { display: inline-flex; gap: 2px; }

@@ -3164,7 +3164,11 @@ export function createTagAssistController({
     }
     const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster'
       || REF_AC_TYPES.has(r._wc_type));
-    let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
+    // `ref:` 후보만 있으면 한 줄짜리 낮은 줄(사용자 2026-11-25 - 종류 줄이 붙어도 7줄 이상이 한 화면에)
+    const refMode = chunkMode && acResults.every(r => REF_AC_TYPES.has(r._wc_type));
+    let html = chunkMode
+      ? `<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list${refMode ? ' is-ref' : ''}">`
+      : '<div class="tag-ac-list">';
     // 휴대폰 띠에서만 보이는 한 줄 설명(CSS) - 고른 후보(없으면 첫 후보)의 뜻. 태그 후보에만.
     const dockRow = chunkMode ? null : acResults[acSel >= 0 ? acSel : 0];
     if (dockRow && !dockRow._wc_type && dockRow.desc) {
@@ -3180,10 +3184,12 @@ export function createTagAssistController({
       const prefix = REF_AC_TYPES.has(wcType) ? 'ref:' : (wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : (wcType === 'lora_keyword' ? 'lora:' : ''))))));
       // 슬래시 선택지(slash_choice)는 접두가 없다 - 위 표에서 '' 로 떨어진다.
       const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' || wcType === 'ref_folder' ? ':' : '');
-      const itemClass = chunkMode ? ' chunk-ac-item' : '';
+      const itemClass = (chunkMode ? ' chunk-ac-item' : '') + (r.ref_variant ? ' ref-ac-variant' : '');
       const displayTag = wcType === 'preset_path'
         ? (r.tag || r.label || r.prompt || r.value || '')
-        : (wcType === 'preset_status' || wcType === 'lora_status' ? (r.desc || r.tag || '') : prefix + r.tag + suffix);
+        : (wcType === 'preset_status' || wcType === 'lora_status' ? (r.desc || r.tag || '')
+          // `ref:폴더:` 다음의 그림 줄은 이름만(서버가 label 을 준다 · 사용자 2026-11-25)
+          : (wcType === 'ref_item' && r.label ? r.label : prefix + r.tag + suffix));
       const metaText = wcType === 'chunk'
         ? (r.group || '')
         : (wcType === 'lora_status' ? '' : (wcType ? (r.desc || '') : fmtCount(r.count)));

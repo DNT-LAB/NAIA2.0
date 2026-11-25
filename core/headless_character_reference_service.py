@@ -42,6 +42,17 @@ class HeadlessCharacterReferenceService:
             return
         context._character_reference_frames_loaded_mode = mode
         context.character_reference_frames = self._load_persisted(mode)
+        context.character_reference_bypass = self._load_bypass(mode)
+
+    def _load_bypass(self, mode: str) -> bool:
+        """REFERENCE bypass(사용자 2026-11-25) - 켜면 `ref:` 를 부른 장에는 모듈 칸을 안 보낸다. 모드별 파일에 같이 둔다."""
+        try:
+            path = self.context._existing_save_path(f"CharacterReferenceModule_{mode}.json")
+            data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            block = data.get(mode) if isinstance(data, dict) else None
+            return bool(block.get("bypass")) if isinstance(block, dict) else False
+        except Exception:      # noqa: BLE001 - 못 읽으면 끈 채로(모듈 칸이 가는 쪽 = 원래 동작)
+            return False
 
     def _load_persisted(self, mode: str) -> list[dict[str, Any]]:
         try:
@@ -138,7 +149,7 @@ class HeadlessCharacterReferenceService:
         mode = self._settings_mode()
         try:
             frames = [self._persistable_frame(frame) for frame in context.character_reference_frames]
-            payload = {mode: {"frames": frames}}
+            payload = {mode: {"frames": frames, "bypass": bool(getattr(context, "character_reference_bypass", False))}}
             path = context._save_path(f"CharacterReferenceModule_{mode}.json")
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(payload, ensure_ascii=False, indent=4), encoding="utf-8")
@@ -243,7 +254,7 @@ class HeadlessCharacterReferenceService:
                 "is_blocked": no_outfit and frame.get("reference_type") == "costume",
             })
         state = {"is_naid45": self.context._is_naid45_model(), "frames": frames,
-                 "cr_profile": profile}
+                 "cr_profile": profile, "bypass": bool(getattr(self.context, "character_reference_bypass", False))}
         if anima is not None:
             state["anima"] = anima
             # ANIMA 줄은 칸마다 그 그림의 캐릭터 프롬프트를 보여 주고 고친다(사용자 지시 2026-11-05) - 저장은 그림 쪽
@@ -352,6 +363,9 @@ class HeadlessCharacterReferenceService:
             if target == index:
                 return self.module_state()
             frames.insert(target, frames.pop(index))
+        elif key == "bypass":
+            # REFERENCE bypass 체크박스(사용자 2026-11-25) - 칸은 그대로 두고 `ref:` 를 부른 장에만 안 보낸다(api_service)
+            context.character_reference_bypass = str(value).strip().lower() in ("1", "true", "on", "yes")
         elif key == "clear_frames":
             # 프레임만 비운다 - storage(save/character_reference/images)는 보존.
             context.character_reference_frames.clear()
@@ -527,4 +541,6 @@ class HeadlessCharacterReferenceService:
             "inpaintImg2ImgStrength": 1,
             "normalize_reference_strength_multiple": True,
             "_reference_slots": slots,
+            # 켜 두었으면 요청 목이 이 장에 `ref:` 호출이 있을 때만 위 목록을 빼고 보낸다
+            **({"_reference_bypass": True} if getattr(context, "character_reference_bypass", False) else {}),
         }

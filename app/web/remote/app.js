@@ -3347,7 +3347,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-refhist')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-refmods')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3366,6 +3366,7 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-re
         : String(currentMode || modeSelect?.value || 'NAI').toUpperCase() !== 'NAI'
           || naiModelBlocksReference() || naiModelToolUnsupported(moduleId)),
       isAnima: () => isAnimaManagedMode(),
+      usesRefCalls: () => promptUsesRefCalls(),
       installRefAdapter: () => fetch('/api/anima-engine/ref-adapter/install', {
         method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}',
       }).then(response => response.json().catch(() => ({})).then(data => {
@@ -3396,6 +3397,24 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-re
   .catch(error => {
     console.error('Failed to initialize REF & VIBE window', error);
   });
+// REFERENCE bypass 체크박스는 프롬프트에 `ref:` 호출이 있을 때만 보인다(사용자 2026-11-25) - 메인 · 앞뒤 고정 · 캐릭터.
+// 호출은 쉼표로 나뉜 한 덩어리의 맨 앞(서버 split_ref_tokens 와 같은 자리).
+const REF_CALL_IN_TEXT = /(?:^|[,\n])\s*ref:\S/i;
+function promptUsesRefCalls() {
+  const texts = [promptEdit?.value, peFieldText('pre_prompt'), peFieldText('post_prompt')];
+  const characters = moduleStateCache.get('character')?.characters;
+  if (Array.isArray(characters)) characters.forEach(c => texts.push(c?.prompt));
+  return texts.some(text => REF_CALL_IN_TEXT.test(String(text || '')));
+}
+// 칸을 고칠 때마다(메인 · 앞뒤 고정 · 퀵 패널 · 캐릭터 창 모두 input 이 올라온다) 알약을 다시 칠한다 - 바뀔 때만.
+let refCallsShown = null;
+function syncRefBypassVisibility() {
+  const uses = promptUsesRefCalls();
+  if (uses === refCallsShown) return;
+  refCallsShown = uses;
+  refVibeWindow?.paintPill();
+}
+document.addEventListener('input', syncRefBypassVisibility, true);
 // Character 생성 설정 창 - Find ⚙ 가 연다. 값은 Characters 탭의 Prefix · Postfix 와 같다(서로 맞춘다).
 let characterGenSettings = null;
 let characterGenSettingsReady = null;
@@ -14410,6 +14429,7 @@ function onModuleState(m) {
     positionReferenceInsetBadge();
   }
   else if (m.module_id === 'character_reference') {
+    refCallsShown = null;
     updateCharRefBadge(m);
     refVibeWindow?.render('character_reference');
     syncReferenceInsetWithCharRef(m);
@@ -16959,7 +16979,7 @@ paintTouchPlacementSetting();
 import('./js/features/refHoverCard.mjs?v=20261125-refhover')
   .then(({createRefHoverCard}) => createRefHoverCard({document, window, fetchFn: window.fetch.bind(window), escHtml}))
   .catch(error => console.warn('[refHoverCard] load failed', error));
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261125-refhover')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261125-refmods')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

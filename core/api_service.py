@@ -2046,12 +2046,17 @@ class APIService:
             # 히스토리 '레퍼런스 정보' - 모듈 칸이 이 모델 · 작업에서 실제로 갔는지(재시도 · 다시 생성마다 새로)
             from core.ref_prompt_resolver import executed_reference_slots as _executed_reference_slots
             params.pop('_executed_reference_slots', None)
-            _slot_record = _executed_reference_slots(params, _cr_prof, inpainting=(action_type == "infill"))
+            # REFERENCE bypass(사용자 2026-11-25) - 이 장에 `ref:` 호출이 있을 때만 모듈 칸을 안 보낸다(칸은 그대로)
+            _bypass_module_slots = bool(params.get('_reference_bypass')) and bool(_ref_session.cache)
+            _slot_record = _executed_reference_slots(params, _cr_prof, inpainting=(action_type == "infill"),
+                                                     bypass=_bypass_module_slots)
             if _slot_record:
                 params['_executed_reference_slots'] = _slot_record
             if _cr_prof is not None and (action_type != "infill" or _cr_prof.inpaint):
                 generation_request = params.get('_generation_request')
-                if generation_request and generation_request.nai_character_reference:
+                if _bypass_module_slots:
+                    print("  - [REF] bypass - 모듈 칸은 안 보내고 ref: 호출만")
+                elif generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
                     nai_ref_data = generation_request.nai_character_reference
 

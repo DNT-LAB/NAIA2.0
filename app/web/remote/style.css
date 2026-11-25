@@ -16893,6 +16893,11 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
   overflow-wrap: anywhere;
   word-break: break-word;
 }
+/* `ref:` 자동완성 미리보기 - REFERENCE 보관함 그림(2026-11-25) */
+.ref-ac-thumbs { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.ref-ac-thumbs.is-one { grid-template-columns: minmax(0, 1fr); }
+.ref-ac-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: rgba(255,255,255,.04); display: block; }
+.ref-ac-thumbs.is-one .ref-ac-img { aspect-ratio: auto; max-height: 260px; object-fit: contain; }
 .chunk-ac-loading {
   padding: 18px;
   color: var(--text-dim);

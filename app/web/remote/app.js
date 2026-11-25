@@ -16422,7 +16422,8 @@ function insertTagAtLastPromptCursor(tag) {
 
 // ---- Tag tooltip + Autocomplete system ----
 const fmtCount = n => n >= 1e6 ? (n/1e6).toFixed(1)+'M' : n >= 1e3 ? (n/1e3).toFixed(0)+'k' : String(n);
-const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4', vibe_cluster: '#9d8bff' };
+const CAT_COLORS = { artist: '#d4736a', copyright: '#a87fd4', character: '#6abf7b', e621: '#d4c36a', wildcard: '#6ac4d4', vibe_cluster: '#9d8bff',
+  ref_folder: '#e0a96d', ref_wild: '#e0a96d', ref_item: '#f0c38e' };
 function catStyle(cat) { return cat && CAT_COLORS[cat] ? ` style="color:${CAT_COLORS[cat]}"` : ''; }
 
 let tagAssist = null;
@@ -16908,7 +16909,7 @@ $('acTouchPlacement')?.addEventListener('click', event => {
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261121-rv2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261125-refac')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

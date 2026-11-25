@@ -1982,6 +1982,7 @@ export function createTagAssistController({
       lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
+      lower.startsWith('ref:') ||
       lower.startsWith('preset:')
     )) return query;
     // ⚠️ 막는 것은 **콜론까지 친 빈 namespace** 뿐이다(`artist:` 하나만 덜렁).
@@ -2008,6 +2009,7 @@ export function createTagAssistController({
     return lower.startsWith('__') ||
       lower.startsWith('$') ||
       lower.startsWith('vibe:') ||
+      lower.startsWith('ref:') ||
       lower.startsWith('preset:');
   }
 
@@ -2204,7 +2206,9 @@ export function createTagAssistController({
     const isChunkTrigger = !!(info && allowTriggers && info.stripped.startsWith('$'));
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
-    const isTrigger = isChunkTrigger || isVibeClusterTrigger || isPresetTrigger;
+    // `ref:폴더:이름` - REFERENCE 보관함 호출(2026-11-25). 콜론까지만 쳐도 폴더 목록이 뜬다.
+    const isRefTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('ref:'));
+    const isTrigger = isChunkTrigger || isVibeClusterTrigger || isPresetTrigger || isRefTrigger;
     // 가중치 숫자 · `::` 위의 캐럿은 태그를 치는 중이 아니다 - 후보 창만 닫고 태그 힌트는 그대로 둔다
     if (!info || (info.caretOutsideTag && !isTrigger) || (!isTrigger && info.stripped.length < 2)) {
       hideAutocomplete();
@@ -2240,6 +2244,8 @@ export function createTagAssistController({
         sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
+      } else if (allowTriggers && s.toLowerCase().startsWith('ref:')) {
+        sendWs({type: 'autocomplete_ref', query: s.slice(4).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
         requestPresetAutocomplete(s);
       } else {
@@ -2260,7 +2266,8 @@ export function createTagAssistController({
     const matchesChunk = q && q.startsWith('$') && m.query === q.slice(1).trim();
     const matchesVibeCluster = q && q.toLowerCase().startsWith('vibe:') && m.query === q.slice(5).trim();
     const matchesPreset = q && q.toLowerCase().startsWith('preset:') && m.query === q;
-    if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && m.query !== q) return false;
+    const matchesRef = q && q.toLowerCase().startsWith('ref:') && m.query === q.slice(4).trim();
+    if (!matchesWc && !matchesChunk && !matchesVibeCluster && !matchesPreset && !matchesRef && m.query !== q) return false;
     if (m.pending) {
       showAutocompletePending(m.query || q);
       return true;
@@ -2432,8 +2439,23 @@ export function createTagAssistController({
     }
   }
 
+  const REF_AC_TYPES = new Set(['ref_folder', 'ref_wild', 'ref_item']);
+
+  /** `ref:` 후보 미리보기 - 그림 하나(그림 후보) 또는 폴더 앞 몇 장. 인스턴트 와일드카드 미리보기 칸을 그대로 쓴다. */
+  function refPreviewHtml(result) {
+    const urls = result.thumb ? [result.thumb] : (Array.isArray(result.thumbs) ? result.thumbs : []);
+    const img = url => `<img class="ref-ac-img" src="${escHtml(url)}" alt="" loading="lazy" draggable="false">`;
+    const pics = urls.length
+      ? `<div class="ref-ac-thumbs${urls.length === 1 ? ' is-one' : ''}">${urls.map(img).join('')}</div>`
+      : '<div class="chunk-ac-preview-meta">그림이 없습니다</div>';
+    return '<div class="chunk-ac-preview-title">' + escHtml(result.value || '') + '</div>'
+      + '<div class="chunk-ac-preview-meta">' + escHtml([result.group, result.preview].filter(Boolean).join(' · ')) + '</div>'
+      + pics;
+  }
+
   function chunkPreviewHtml(result) {
     if (!result) return '';
+    if (REF_AC_TYPES.has(result._wc_type)) return refPreviewHtml(result);
     const title = result._wc_type === 'vibe_cluster'
       ? `vibe:${result.tag}`
       : (result._wc_type === 'chunk_group' ? `$${result.tag}:` : `$${result.tag}`);
@@ -3106,7 +3128,8 @@ export function createTagAssistController({
       renderPresetEventAutocomplete();
       return;
     }
-    const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster');
+    const chunkMode = acResults.some(r => r._wc_type === 'chunk' || r._wc_type === 'chunk_group' || r._wc_type === 'vibe_cluster'
+      || REF_AC_TYPES.has(r._wc_type));
     let html = chunkMode ? '<div class="chunk-ac-layout"><div class="tag-ac-list chunk-ac-list">' : '<div class="tag-ac-list">';
     // 휴대폰 띠에서만 보이는 한 줄 설명(CSS) - 고른 후보(없으면 첫 후보)의 뜻. 태그 후보에만.
     const dockRow = chunkMode ? null : acResults[acSel >= 0 ? acSel : 0];
@@ -3120,9 +3143,9 @@ export function createTagAssistController({
       const sel = i === acSel ? ' selected' : '';
       const wcType = r._wc_type;
       const tagColor = wcType ? catStyle(wcType) : catStyle(r.cat);
-      const prefix = wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : (wcType === 'lora_keyword' ? 'lora:' : '')))));
+      const prefix = REF_AC_TYPES.has(wcType) ? 'ref:' : (wcType === 'wildcard' ? '__' : (wcType === 'wildcard_master' ? '$' : (wcType === 'vibe_cluster' ? 'vibe:' : (wcType === 'chunk' || wcType === 'chunk_group' ? '$' : (wcType === 'slash' ? '/' : (wcType === 'lora_keyword' ? 'lora:' : ''))))));
       // 슬래시 선택지(slash_choice)는 접두가 없다 - 위 표에서 '' 로 떨어진다.
-      const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' ? ':' : '');
+      const suffix = wcType === 'wildcard' ? '__' : (wcType === 'chunk_group' || wcType === 'ref_folder' ? ':' : '');
       const itemClass = chunkMode ? ' chunk-ac-item' : '';
       const displayTag = wcType === 'preset_path'
         ? (r.tag || r.label || r.prompt || r.value || '')
@@ -3272,6 +3295,17 @@ export function createTagAssistController({
 
     if (r._wc_type === 'vibe_cluster') {
       swapToken(target, info, r.value || `vibe:${r.tag}`);
+      hideAutocomplete();
+      return;
+    }
+    if (r._wc_type === 'ref_folder') {
+      // 폴더를 고르면 `ref:폴더:` 까지 넣고 그 폴더의 그림을 이어서 띄운다
+      swapToken(target, info, r.value || `ref:${r.tag}:`);
+      window.setTimeout(() => scheduleAutocomplete({force: true, target}), 0);
+      return;
+    }
+    if (r._wc_type === 'ref_wild' || r._wc_type === 'ref_item') {
+      swapToken(target, info, r.value || `ref:${r.tag}`);
       hideAutocomplete();
       return;
     }
@@ -4126,7 +4160,7 @@ export function createTagAssistController({
         const row = acSel >= 0 ? acResults[acSel] : null;
         // 단계형 후보(청크 그룹 · 와일드카드 master · 중간 프리셋 경로)는 다음 목록을 연다 - 그 Enter 는 고르기의 한 단계라
         // 예전처럼 삼키고 목록을 둔다(닫으면 하위 후보 응답이 버려졌다 - Codex 리뷰).
-        const stepping = !!row && (row._wc_type === 'chunk_group' || row._wc_type === 'wildcard_master'
+        const stepping = !!row && (row._wc_type === 'chunk_group' || row._wc_type === 'wildcard_master' || row._wc_type === 'ref_folder'
           || (row._wc_type === 'preset_path' && !row.final));
         if (stepping) {
           e.preventDefault();

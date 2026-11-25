@@ -114,7 +114,7 @@ LIVE_DISPATCH_TYPES = {"tag_filter_search", "event_corpus_query"}
 HEAVY_DISPATCH_TYPES = {"get_search_state", "bootstrap_random"}
 HEAVY_LANE_BYPASS = {
     "tag_search", "tag_filter_ac", "autocomplete", "autocomplete_translate",
-    "autocomplete_vibe_cluster", "translate_text", "interactive_autocomplete", "interactive_related",
+    "autocomplete_vibe_cluster", "autocomplete_ref", "translate_text", "interactive_autocomplete", "interactive_related",
 }
 SEARCH_DEPENDENT_TYPES = (
     TEMPORARY_SEARCH_COMMAND_TYPES | SEARCH_COMMAND_TYPES | DEPTH_SEARCH_COMMAND_TYPES | GENERATION_COMMAND_TYPES

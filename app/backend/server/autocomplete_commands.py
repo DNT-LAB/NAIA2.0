@@ -30,6 +30,7 @@ AUTOCOMPLETE_COMMAND_TYPES = {
     "autocomplete_wildcard",
     "autocomplete_chunk",
     "autocomplete_vibe_cluster",
+    "autocomplete_ref",
     "autocomplete_preset",
     "tag_lookup",
     "translate_text",
@@ -1126,6 +1127,19 @@ async def handle_autocomplete_command(
             12,
             context._existing_save_path("vibe_transfer_clusters"),
         )
+        await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results})
+        return True
+
+    if command_type == "autocomplete_ref":
+        # `ref:폴더:이름` - REFERENCE 보관함 폴더 · 그림(썸네일 미리보기 · 2026-11-25)
+        from core.ref_prompt_resolver import search_ref_calls
+        from core.ref_vibe_library import get_ref_vibe_library
+
+        try:
+            results = await run_in_thread(search_ref_calls, get_ref_vibe_library(context), query, 14)
+        except Exception as exc:  # noqa: BLE001 - 보관함을 못 읽어도 자동완성이 죽으면 안 된다
+            print(f"[REF] autocomplete failed: {type(exc).__name__}")
+            results = []
         await _send_json(ws, {"type": "autocomplete_result", "query": query, "results": results})
         return True
 

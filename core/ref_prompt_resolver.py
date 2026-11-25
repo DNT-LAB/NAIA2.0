@@ -175,5 +175,108 @@ def append_to_director_lists(api_parameters: dict[str, Any], frames: list[dict[s
     api_parameters["normalize_reference_strength_multiple"] = True
 
 
+# ── 자동완성(프롬프트 칸에서 `ref:` 를 치면) ────────────────────────────────────
+GROUP_LABEL = {"character": "캐릭터", "outfit": "의상", "style": "스타일"}
+TYPE_LABEL = {"costume": "Outfit", "style": "Style", "character&style": "Char&Style",
+              "character&style_anyoutfit": "Char&Style", "character": "Character", "character_mainoutfit": "Character"}
+
+
+def _rank(text: str, needle: str) -> int | None:
+    low = text.casefold()
+    if not needle:
+        return 3
+    if low == needle:
+        return 0
+    if low.startswith(needle):
+        return 1
+    if needle in low:
+        return 2
+    return None
+
+
+def _call_name(item: dict[str, Any]) -> str:
+    name = str(item.get("display_name") or "")
+    return name if name and not any(mark in name for mark in (":", ",")) else str(item.get("file_hash") or "")[:8]
+
+
+def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
+    return [str(i.get("thumbnail_url")) for i in folder["items"] if i.get("thumbnail_url")][:count]
+
+
+def search_ref_calls(library: Any, query: str, limit: int = 14) -> list[dict[str, Any]]:
+    """`ref:` 뒤에 친 글로 후보를 낸다.
+    - `폴더`(콜론 전): 맞는 폴더(-> ref:폴더: 로 이어 치기) + 이름이 맞는 그림(-> ref:폴더:이름)
+    - `__` · `__*`: 폴더 무작위 · 차례 호출
+    - `폴더:이름`: 그 폴더의 그림(이름을 비우면 무작위 · 차례 호출도 맨 위에)
+    - 강도(`:1.5`)를 치는 중이면 후보 없음."""
+    text = str(query or "").strip()
+    parts = text.split(":")
+    if len(parts) >= 3:
+        return []
+    folders = library.callable_folders()
+    ranked: list[tuple[int, int, dict[str, Any]]] = []
+
+    def folder_row(folder):
+        count = len(folder["items"])
+        return {"tag": folder["name"], "value": f"ref:{folder['name']}:", "_wc_type": "ref_folder", "cat": "",
+                "group": GROUP_LABEL.get(folder["group"], folder["group"]), "desc": f"{count}장",
+                "preview": f"{count}장 - 고르면 그림 이름을 이어서 고릅니다", "thumbs": _thumbs(folder)}
+
+    def wild_row(folder, sequential):
+        mark = "*" if sequential else ""
+        return {"tag": f"__{mark}{folder['name']}__", "value": f"ref:__{mark}{folder['name']}__", "_wc_type": "ref_wild",
+                "cat": "", "group": GROUP_LABEL.get(folder["group"], folder["group"]),
+                "desc": "차례로" if sequential else "무작위",
+                "preview": ("장마다 다음 그림" if sequential else "장마다 무작위 한 장") + f" · {len(folder['items'])}장"
+                           " · 끝에 :1.5 처럼 강도(생략 = 1.0)",
+                "thumbs": _thumbs(folder)}
+
+    def item_row(folder, item):
+        reference_type = _reference_type(folder["group"], item.get("settings") or {})
+        return {"tag": f"{folder['name']}:{item.get('display_name') or item.get('file_hash')}",
+                "value": f"ref:{folder['name']}:{_call_name(item)}", "_wc_type": "ref_item", "cat": "",
+                "group": GROUP_LABEL.get(folder["group"], folder["group"]),
+                "desc": TYPE_LABEL.get(reference_type, reference_type),
+                "preview": f"{TYPE_LABEL.get(reference_type, reference_type)} · 끝에 :1.5 처럼 강도(생략 = 1.0)",
+                "thumb": str(item.get("thumbnail_url") or "")}
+
+    if len(parts) == 2:
+        folder = next((f for f in folders if f["name"].casefold() == parts[0].strip().casefold()), None)
+        if folder is None:
+            return []
+        needle = parts[1].strip().casefold()
+        if not needle:
+            ranked += [(-1, 0, wild_row(folder, False)), (-1, 1, wild_row(folder, True))]
+        for index, item in enumerate(folder["items"]):
+            rank = _rank(str(item.get("display_name") or ""), needle)
+            if rank is None and len(needle) >= 2 and str(item.get("file_hash") or "").startswith(needle):
+                rank = 2
+            if rank is not None:
+                ranked.append((rank, index, item_row(folder, item)))
+    elif text.startswith("__"):
+        sequential = text.startswith("__*")
+        needle = text[3 if sequential else 2:].rstrip("_").strip().casefold()
+        for index, folder in enumerate(folders):
+            rank = _rank(folder["name"], needle)
+            if rank is not None and folder["items"]:
+                ranked.append((rank, index, wild_row(folder, sequential)))
+    else:
+        needle = text.casefold()
+        for index, folder in enumerate(folders):
+            rank = _rank(folder["name"], needle)
+            if rank is not None:
+                ranked.append((rank, index, folder_row(folder)))
+        if needle:
+            order = len(folders)
+            for folder in folders:
+                for item in folder["items"]:
+                    rank = _rank(str(item.get("display_name") or ""), needle)
+                    if rank is not None:
+                        ranked.append((rank + 4, order, item_row(folder, item)))
+                        order += 1
+    ranked.sort(key=lambda entry: (entry[0], entry[1]))
+    return [row for _, _, row in ranked[:limit]]
+
+
 def describe(frames: list[dict[str, Any]]) -> str:
     return " · ".join(f"{f['folder']}:{f['name']}({f['reference_type']} {f['strength']:g})" for f in frames)

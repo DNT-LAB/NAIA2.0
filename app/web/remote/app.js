@@ -3306,7 +3306,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-v5pr')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-v5pr2')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3632,7 +3632,7 @@ const e621EventPanelReady = Promise.all([import('./js/features/e621EventPanel.mj
   .catch(error => {
     console.error('Failed to initialize E621 event panel module', error);
   });
-const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20261125-v5pr')
+const imageModulePanelsReady = import('./js/features/imageModulePanels.mjs?v=20261125-v5pr2')
   .then(({createImageModulePanels}) => {
     imageModulePanels = createImageModulePanels({
       document,

@@ -258,9 +258,7 @@ export function createImageModulePanels({
         canvas.getContext('2d').drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL('image/png');
         const b64 = dataUrl.split(',')[1];
-        // Char Ref 의 의상 · 스타일 칸에서 올리면 그 유형으로 넣는다(V5 Precise Reference · 2026-11-25).
-        setModuleParam(moduleId, 'upload_image',
-          options.referenceType ? JSON.stringify({image: b64, reference_type: options.referenceType}) : b64);
+        setModuleParam(moduleId, 'upload_image', b64);
       };
       img.src = reader.result;
     };

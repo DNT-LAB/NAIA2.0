@@ -32682,6 +32682,9 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; align-content: start;
 }
 .rvw-grid > .rvw-empty, .rvw-more { grid-column: 1 / -1; }
+/* 카드가 많아 격자가 넘치면 auto 줄이 이름 줄(18px)까지 눌렸다 - 카드가 overflow:hidden 이라 최소 높이가 0 이다.
+   줄을 내용 높이로 두어 정사각형 그림 + 이름 줄을 늘 지킨다(사용자 지시 2026-11-25). 넘치면 격자가 스크롤한다. */
+.rvw-grid { grid-auto-rows: max-content; }
 .rvw-more { text-align: center; color: var(--text-dim); font-size: 10px; padding: 4px; }
 .rvw-card {
   position: relative; display: flex; flex-direction: column; padding: 0; border: 1px solid var(--border-dim);

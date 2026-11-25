@@ -32629,6 +32629,20 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-num { width: 58px; height: 22px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-dim); border-radius: 5px; font: 10.5px var(--font-mono); padding: 0 4px; }
 /* CR 강도 · Fidelity 값 칸 - 0~5 라 직접 친다(2026-11-25) */
 .rvw-num.is-cr { flex: 0 0 auto; width: 64px; height: 26px; font-size: 13px; text-align: right; }
+/* CR 줄 한 줄 압축 - [켜기] [썸네일] [종류] [슬라이더] [값] [빼기] · 둘째 줄은 같은 옷 유지 · Fidelity(2026-11-25) */
+.rvw-row.is-cr { gap: 8px; padding: 4px 8px; }
+.rvw-row.is-cr.has-sub { border-bottom-color: transparent; }
+.rvw-row.is-cr.is-off > :not(.rvw-en) { opacity: .5; }
+.rvw-crth { flex: 0 0 auto; display: inline-flex; }
+.rvw-crsub { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 5px 76px; border-bottom: 1px solid rgba(255,255,255,.05); }
+.rvw-crsub.is-live { background: rgba(124,106,239,.16); box-shadow: inset 2px 0 0 rgb(124,106,239); }
+.rvw-crsub.is-off { opacity: .5; }
+.rvw-line.is-crfid { flex-wrap: nowrap; gap: 8px; }
+.rvw-line.is-crfid .rvw-k { width: 108px; font-size: 11px; }
+/* Fidelity 는 V4.5 사양 - 회색 · 살짝 들여서 Strength 아래 딸린 값으로 보이게 */
+.rvw-line.is-crfid .rvw-range { margin-left: 16px; accent-color: #8b8b99; }
+.rvw-crth { cursor: zoom-in; }
+.rvw-x-pad { flex: 0 0 auto; width: 20px; }
 .rvw-detail { padding: 4px 8px 6px 36px; background: rgba(124,106,239,.05); border-bottom: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; gap: 4px; }
 .rvw-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .rvw-hint { color: var(--text-dim); font-size: 10.5px; }
@@ -32718,6 +32732,9 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .custom-select.custom-rvw-sel .custom-select-button:hover { border-color: rgba(124,106,239,.6); color: var(--text-primary); }
 .custom-select.custom-rvw-sel.is-open .custom-select-button { border-color: var(--accent); }
 .custom-select-menu.custom-rvw-sel .custom-select-option { padding: 6px 8px; font-size: 10.5px; }
+/* CR 줄의 종류 칸 - 폭을 고정해 슬라이더 · 둘째 줄(Fidelity)이 줄마다 같은 자리에서 시작한다(2026-11-25) */
+.custom-select.custom-rvw-sel.custom-is-crtype { width: 108px; height: 26px; }
+.custom-select.custom-rvw-sel.custom-is-crtype .custom-select-button { width: 100%; height: 26px; font-size: 12px; justify-content: space-between; }
 
 /* STORAGE 두 칸(사용자 지시 2026-10-23 · Snapshot 창처럼) - 왼쪽 카테고리 · 오른쪽 썸네일.
    카테고리 줄 = 놓을 자리(data-rvw-drop) · 끌어 순서 바꾸기(data-rvw-catdrag). ◆ 클러스터 = 클러스터 목록 → 멤버 편집. */

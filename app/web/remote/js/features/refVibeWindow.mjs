@@ -678,26 +678,31 @@ export function createRefVibeWindow({
     else if (type === 'costume') choices.push(['costume', 'Outfit (V5 전용)']);
     const options = choices
       .map(([value, label]) => `<option value="${value}"${value === shownType ? ' selected' : ''}>${label}</option>`).join('');
-    const typeCell = `<select class="rvw-sel" data-rvw-type="${index}">${options}</select>`;
-    const head = `<div class="rvw-row${live}" data-rvw-row="${index}">`
-      + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
-      + thumbHtml(frame)
-      + `<span class="rvw-name">R${index + 1} · ${escHtml(frameName(frame))}</span>`
-      + typeCell
-      + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
-    const slider = (name, value, top) => `<span class="rvw-k">${name === 'strength' ? 'Strength' : 'Fidelity'}</span>`
-      + `<input type="range" class="rvw-range is-wide" min="0" max="${Math.round(top * 20)}" step="1" value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}">`
+    const typeCell = `<select class="rvw-sel is-crtype" data-rvw-type="${index}" aria-label="종류">${options}</select>`;
+    // 한 줄 = [켜기] [썸네일] [종류] [Strength 슬라이더] [값] [빼기](사용자 지시 2026-11-25 · 이름은 썸네일 툴팁).
+    // 둘째 줄은 있을 때만 - '같은 옷 유지'(V5 캐릭터 종류) · Fidelity(V4.5).
+    const slider = (name, value, top) => `<input type="range" class="rvw-range is-wide" min="0" max="${Math.round(top * 20)}" step="1"`
+      + ` value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}" aria-label="${name === 'strength' ? 'Strength' : 'Fidelity'}">`
       + `<input type="number" class="rvw-num is-cr" min="0" max="${top}" step="0.05" value="${fmt(value)}"`
       + ` data-rvw-crnum="${name}" data-index="${index}" data-max="${top}" aria-label="${name === 'strength' ? 'Strength' : 'Fidelity'}">`;
     const keep = isChar && profile.outfit
       ? `<label class="rvw-check" data-naia-title="켜면 그림 속 옷도 따라 그립니다(Prefer same outfit)">`
         + `<input type="checkbox" data-rvw-keep="${index}"${crKeepOutfit(type) ? ' checked' : ''}> 같은 옷 유지</label>`
       : '';
-    return head + `<div class="rvw-detail" data-rvw-cr-detail="${index}">`
-      + (keep ? `<div class="rvw-line">${keep}</div>` : '')
-      + `<div class="rvw-line">${slider('strength', strength, max)}</div>`
-      + (profile.fidelity ? `<div class="rvw-line">${slider('fidelity', frame.fidelity, 1)}</div>` : '')
-      + `</div>`;
+    const fidelity = profile.fidelity
+      ? `<div class="rvw-line is-crfid"><span class="rvw-k">Fidelity</span>${slider('fidelity', frame.fidelity, 1)}<span class="rvw-x-pad"></span></div>`
+      : '';
+    const sub = keep || fidelity;
+    const name = `R${index + 1} · ${escHtml(frameName(frame))}`;
+    const head = `<div class="rvw-row is-cr${live}${sub ? ' has-sub' : ''}" data-rvw-row="${index}">`
+      + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
+      + `<span class="rvw-crth" data-rvw-crth="${index}" aria-label="${name}">${thumbHtml(frame)}</span>`
+      + typeCell
+      + slider('strength', strength, max)
+      + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
+    return head + (sub
+      ? `<div class="rvw-crsub${live}" data-rvw-cr-detail="${index}">${keep ? `<div class="rvw-line">${keep}</div>` : ''}${fidelity}</div>`
+      : '');
   }
 
 
@@ -2036,6 +2041,19 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
         ? `IE ${(item.encoding_keys || []).map(k => fmt(k)).join(' · ')}`
         : `${item.settings?.reference_type || 'character&style'} · S ${fmt(item.settings?.strength ?? 1)} · F ${fmt(item.settings?.fidelity ?? 0.8)}`;
       return {key: `card:${tab}:${item.file_hash}`, src: `${item.thumbnail_url}&size=640`, title: item.display_name || item.file_hash, note, anchor: card};
+    }
+    // 활성 CR 줄 썸네일(2026-11-25) - 줄을 한 줄로 접으며 이름을 숨겨 그림으로 구분한다. 보관함에 있으면 그 640px 판.
+    const crThumb = target.closest?.('[data-rvw-crth]');
+    if (crThumb) {
+      const i = Number(crThumb.dataset.rvwCrth);
+      const frame = (getModuleState(KINDS.cr)?.frames || [])[i];
+      if (!frame) return null;
+      const item = lib.cr.items.find(it => String(it.file_hash) === String(frame.file_hash || ''));
+      const src = item?.thumbnail_url ? `${item.thumbnail_url}&size=640`
+        : (frame.thumbnail ? `data:image/jpeg;base64,${frame.thumbnail}` : '');
+      if (!src) return null;
+      return {key: `crrow:${i}:${frame.file_hash || src.length}`, src, title: `R${i + 1} · ${frameName(frame)}`,
+        note: `${frame.reference_type || 'character&style'} · S ${fmt(frame.strength ?? 1)}`, anchor: crThumb.closest('.rvw-row') || crThumb};
     }
     const thumb = target.closest?.('.rvw-mrow img.rvw-th');
     if (thumb) {

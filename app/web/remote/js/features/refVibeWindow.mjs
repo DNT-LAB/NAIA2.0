@@ -664,9 +664,8 @@ export function createRefVibeWindow({
 
   // V5 Precise Reference(2026-11-25): 캐릭터 칸만 유형 고르기 + 같은 옷 유지(V5) · Strength 상한 = 모델(V5 5 · 4.5 1)
   //  · Fidelity 는 그 모델이 쓸 때만(V5 웹은 숨긴다). 값을 모델 상한으로 자르는 것은 서버의 요청 목이 한다.
+  //  조작은 펼치지 않고 줄마다 다 보인다(사용자 지시 2026-11-25 - 공홈 Precise Reference 처럼 한 번에 제어).
   function crRow(frame, index, profile = CR_PROFILE_FALLBACK) {
-    const key = `cr:${index}`;
-    const open = openRows.has(key);
     const live = frame.is_enabled ? ' is-live' : ' is-off';
     const type = String(frame.reference_type || 'character&style');
     const isChar = crIsCharType(type);
@@ -680,15 +679,12 @@ export function createRefVibeWindow({
     const options = choices
       .map(([value, label]) => `<option value="${value}"${value === shownType ? ' selected' : ''}>${label}</option>`).join('');
     const typeCell = `<select class="rvw-sel" data-rvw-type="${index}">${options}</select>`;
-    const summary = profile.fidelity ? `S ${fmt(strength)} · F ${fmt(frame.fidelity)}` : `S ${fmt(strength)}`;
     const head = `<div class="rvw-row${live}" data-rvw-row="${index}">`
       + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
       + thumbHtml(frame)
-      + `<button type="button" class="rvw-name" data-rvw-open="${index}">R${index + 1} · ${escHtml(frameName(frame))}</button>`
+      + `<span class="rvw-name">R${index + 1} · ${escHtml(frameName(frame))}</span>`
       + typeCell
-      + `<button type="button" class="rvw-sf" data-rvw-open="${index}">${summary}</button>`
       + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
-    if (!open) return head;
     const slider = (name, value, top) => `<span class="rvw-k">${name === 'strength' ? 'Strength' : 'Fidelity'}</span>`
       + `<input type="range" class="rvw-range is-wide" min="0" max="${Math.round(top * 20)}" step="1" value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}">`
       + `<span class="rvw-v" data-rvw-cr-out="${name}:${index}">${fmt(value)}</span>`;
@@ -696,7 +692,7 @@ export function createRefVibeWindow({
       ? `<label class="rvw-check" data-naia-title="켜면 그림 속 옷도 따라 그립니다(Prefer same outfit)">`
         + `<input type="checkbox" data-rvw-keep="${index}"${crKeepOutfit(type) ? ' checked' : ''}> 같은 옷 유지</label>`
       : '';
-    return head + `<div class="rvw-detail">`
+    return head + `<div class="rvw-detail" data-rvw-cr-detail="${index}">`
       + (keep ? `<div class="rvw-line">${keep}</div>` : '')
       + `<div class="rvw-line">${slider('strength', strength, max)}</div>`
       + (profile.fidelity ? `<div class="rvw-line">${slider('fidelity', frame.fidelity, 1)}</div>` : '')

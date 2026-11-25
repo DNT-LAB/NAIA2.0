@@ -48,7 +48,8 @@ def is_ref_token(text: Any) -> bool:
 
 def parse_ref_token(text: str) -> dict[str, Any]:
     token = str(text).strip()
-    body = token[4:].strip()
+    # 마지막 다듬기가 괄호를 `\(` 로 감싼다 - 이름의 괄호는 글 그대로 읽는다
+    body = token[4:].strip().replace("\\(", "(").replace("\\)", ")")
     match = _WILD.fullmatch(body)
     if match:
         mode = "sequential" if match.group(1) else "random"
@@ -115,59 +116,212 @@ def _reference_type(group: str, settings: dict[str, Any]) -> str:
     return stored if stored in _CHAR_TYPES else DEFAULT_REFERENCE_TYPE
 
 
-def resolve_ref_tokens(library: Any, tokens: list[str]) -> list[dict[str, Any]]:
-    """호출들을 보낼 칸으로. 하나라도 못 찾으면 RefPromptError(생성을 멈추고 까닭을 보여 준다)."""
-    if not tokens:
-        return []
+def _one_line(text: Any) -> str:
+    pieces = [piece.strip() for line in str(text or "").splitlines() for piece in line.split(",")]
+    return ", ".join(piece for piece in pieces if piece and not is_ref_token(piece))
+
+
+def call_text(item: dict[str, Any], group: str) -> tuple[str, str]:
+    """부른 자리에 넣을 (프롬프트, 네거티브). 꺼 두었으면 둘 다 빈 글.
+    캐릭터 그림 = 캐릭터 프롬프트(슬롯을 대치) · 의상 · 스타일 = 호출 프롬프트(부른 자리에)."""
+    if item.get("call_prompt_on") is False:
+        return "", ""
+    if group == "character":
+        return _one_line(item.get("character_prompt")), _one_line(item.get("character_uc"))
+    return _one_line(item.get("call_prompt")), _one_line(item.get("call_uc"))
+
+
+def resolved_call(frame: dict[str, Any], folder_items: list[dict[str, Any]]) -> str:
+    """고른 그림을 다시 같은 그림으로 부르는 글 - 와일드카드 호출을 기록에 남길 때(파생 요청이 다시 굴리지 않게).
+    이름이 갈라지는 글자를 품었거나 폴더에 같은 이름이 또 있으면 해시 앞 8자로."""
+    name = str(frame.get("display_name") or "")
+    same = [i for i in folder_items if str(i.get("display_name") or "").casefold() == name.casefold()]
+    if not name or any(mark in name for mark in (":", ",", "__")) or len(same) != 1:
+        name = str(frame["file_hash"])[:8]
+    strength = "" if frame["strength"] == STRENGTH_DEFAULT else f":{frame['strength']:g}"
+    return f"ref:{frame['folder']}:{name}{strength}"
+
+
+def _folder_index(library: Any) -> dict[str, dict[str, Any]]:
+    return {folder["name"].casefold(): folder for folder in library.callable_folders()}
+
+
+def resolve_ref_call(library: Any, token: str, *, folders: dict[str, dict[str, Any]] | None = None,
+                     scope: str = "main") -> dict[str, Any]:
+    """호출 하나를 칸으로. 못 찾으면 RefPromptError(생성을 멈추고 까닭을 보여 준다).
+    캐릭터 분류는 캐릭터 프롬프트에서만 부른다(사용자 결정) - 메인에서 부르면 고르기 전에 멈춘다(차례가 안 넘어간다)."""
     from PIL import Image
 
-    calls = [parse_ref_token(token) for token in tokens]
-    folders = {folder["name"].casefold(): folder for folder in library.callable_folders()}
-    frames = []
-    for call in calls:
-        folder = folders.get(call["folder"].casefold())
-        if folder is None:
-            raise RefPromptError(f"'{call['token']}' - 폴더 '{call['folder']}' 이 보관함에 없습니다")
-        item = _pick(call, folder)
-        file_hash = str(item["file_hash"])
-        settings = item.get("settings") or {}
-        try:
-            with Image.open(library.character_image_path(file_hash)) as opened:
-                opened.load()
-                image_data = source_image_data(opened)
-        except RefPromptError:
-            raise
-        except Exception as exc:
-            raise RefPromptError(f"'{call['token']}' - 그림을 읽지 못했습니다({type(exc).__name__})") from None
-        try:
-            fidelity = max(0.0, min(1.0, float(settings.get("fidelity", 0.8))))
-        except (TypeError, ValueError):
-            fidelity = 0.8
-        frames.append({
-            "token": call["token"],
-            "folder": folder["name"],
-            "group": folder["group"],
-            "file_hash": file_hash,
-            "name": str(item.get("display_name") or file_hash),
-            "reference_type": _reference_type(folder["group"], settings),
-            "strength": call["strength"],
-            "secondary_strength": round((1.0 - fidelity) * 20) / 20.0,
-            "image_data": image_data,
-        })
-    return frames
+    call = parse_ref_token(token)
+    folders = folders if folders is not None else _folder_index(library)
+    folder = folders.get(call["folder"].casefold())
+    if folder is None:
+        raise RefPromptError(f"'{call['token']}' - 폴더 '{call['folder']}' 이 보관함에 없습니다")
+    if scope != "char" and folder["group"] == "character":
+        raise RefPromptError(f"'{call['token']}' - 캐릭터 분류 폴더는 캐릭터 프롬프트 칸에서만 부를 수 있습니다")
+    item = _pick(call, folder)
+    file_hash = str(item["file_hash"])
+    settings = item.get("settings") or {}
+    try:
+        with Image.open(library.character_image_path(file_hash)) as opened:
+            opened.load()
+            image_data = source_image_data(opened)
+    except RefPromptError:
+        raise
+    except Exception as exc:
+        raise RefPromptError(f"'{call['token']}' - 그림을 읽지 못했습니다({type(exc).__name__})") from None
+    try:
+        fidelity = max(0.0, min(1.0, float(settings.get("fidelity", 0.8))))
+    except (TypeError, ValueError):
+        fidelity = 0.8
+    prompt, uc = call_text(item, folder["group"])
+    frame = {
+        "token": call["token"],
+        "mode": call["mode"],
+        "folder": folder["name"],
+        "group": folder["group"],
+        "file_hash": file_hash,
+        "display_name": str(item.get("display_name") or ""),
+        "name": str(item.get("display_name") or file_hash),
+        "reference_type": _reference_type(folder["group"], settings),
+        "strength": call["strength"],
+        "secondary_strength": round((1.0 - fidelity) * 20) / 20.0,
+        "prompt": prompt,
+        "uc": uc,
+        "image_data": image_data,
+    }
+    frame["call"] = resolved_call(frame, folder["items"])
+    return frame
+
+
+def resolve_ref_tokens(library: Any, tokens: list[str], *, scope: str = "char") -> list[dict[str, Any]]:
+    """호출들을 칸으로(시험 · 도구용 - 생성 길은 RefCallSession)."""
+    folders = _folder_index(library) if tokens else {}
+    return [resolve_ref_call(library, token, folders=folders, scope=scope) for token in tokens]
+
+
+def _join(*texts: Any) -> str:
+    return ", ".join(str(text).strip() for text in texts if str(text or "").strip())
+
+
+class RefCallSession:
+    """NAI 요청 하나(시도 하나)의 `ref:` 호출 - 프롬프트 · 캐릭터 프롬프트를 **부른 자리에서** 풀어 쓴다.
+
+    - 메인(`scope="main"` · 앞뒤 고정 포함): 호출 자리에 호출 프롬프트 · 네거티브는 메인 네거티브 끝에.
+    - 캐릭터(`scope="char"`): 의상 · 스타일은 호출 자리에 · 캐릭터 그림은 그 슬롯을 대치(캐릭터 프롬프트가 맨 앞,
+      슬롯에 따로 적은 태그는 뒤에 남는다) · 네거티브는 그 캐릭터의 네거티브 끝에.
+    - 막힘(그림도 글도 안 넣음): V4.5 의 Outfit · V5 인페인트. CR 을 못 받는 모델은 오류(멈춤).
+    - 해석은 `cache`(params 에 둔다)에 자리 + 글로 적어 재시도가 같은 그림을 쓴다(차례 호출이 안 넘어간다).
+    """
+
+    def __init__(self, library_getter, cache: dict, *, profile: Any, inpainting: bool, model_name: str = ""):
+        self._library_getter = library_getter
+        self._library = None
+        self._folders = None
+        self.cache = cache
+        self.profile = profile
+        self.inpainting = inpainting
+        self.model_name = model_name
+        self.frames: list[dict[str, Any]] = []
+
+    def _resolve(self, token: str, scope: str) -> dict[str, Any]:
+        if self._library is None:
+            self._library = self._library_getter()
+            self._folders = _folder_index(self._library)
+        return resolve_ref_call(self._library, token, folders=self._folders, scope=scope)
+
+    def blocked(self, frame: dict[str, Any]) -> str:
+        from core.nai_character_reference_spec import wire_type
+
+        if self.inpainting and not self.profile.inpaint:
+            return "V5 인페인트는 Character Reference 를 받지 않는다"
+        if wire_type(frame["reference_type"], self.profile) is None:
+            return "이 모델은 Outfit 을 받지 않는다"
+        return ""
+
+    def render(self, text: Any, scope: str, slot: int = 0) -> tuple[Any, str]:
+        """(풀어 쓴 글, 덧붙일 네거티브). 호출이 없으면 글을 그대로 돌려준다."""
+        if not isinstance(text, str) or REF_PREFIX not in text.lower():
+            return text, ""
+        pieces = text.split(",")
+        if not any(is_ref_token(piece) for piece in pieces):
+            return text, ""
+        if self.profile is None:
+            raise RefPromptError(f"이 모델({self.model_name})은 Character Reference 를 받지 않아 ref: 를 쓸 수 없습니다")
+        lead, kept, negatives = [], [], []
+        occurrence = 0
+        for piece in pieces:
+            piece = piece.strip()
+            if not is_ref_token(piece):
+                kept.append(piece)
+                continue
+            key = f"{scope}|{slot}|{occurrence}|{piece}"
+            occurrence += 1
+            frame = self.cache.get(key)
+            if frame is None:
+                frame = self._resolve(piece, scope)
+                frame.update(scope=scope, slot=slot, occurrence=occurrence - 1)
+                self.cache[key] = frame
+            frame["blocked"] = self.blocked(frame)
+            if frame["blocked"]:
+                print(f"  - [REF] {piece} - {frame['blocked']} - 그림도 글도 넣지 않았다")
+                continue
+            self.frames.append(frame)
+            if frame["prompt"]:
+                (lead if (scope == "char" and frame["group"] == "character") else kept).append(frame["prompt"])
+            if frame["uc"]:
+                negatives.append(frame["uc"])
+        return _join(*lead, *kept), _join(*negatives)
+
+
+def finish_main_prompt(prompt: Any, cache: dict) -> Any:
+    """끝난 요청의 메인 프롬프트 - 와일드카드 호출(`ref:__폴더__`)을 고른 그림의 호출로 바꿔 둔다.
+    기록 · 다시 생성 · 파생 요청이 다시 굴리지 않는다. 이름 호출은 그대로."""
+    if not isinstance(prompt, str) or not cache:
+        return prompt
+    pieces = prompt.split(",")
+    occurrence = 0
+    changed = False
+    for index, piece in enumerate(pieces):
+        token = piece.strip()
+        if not is_ref_token(token):
+            continue
+        frame = cache.get(f"main|0|{occurrence}|{token}")
+        occurrence += 1
+        if frame and frame.get("mode") in ("random", "sequential"):
+            pieces[index] = (" " if index else "") + frame["call"]
+            changed = True
+    return ",".join(pieces) if changed else prompt
+
+
+def ref_picks(cache: dict) -> list[dict[str, Any]]:
+    """생성 정보에 남길 짧은 기록(그림 base64 는 안 남긴다)."""
+    keys = ("token", "scope", "slot", "folder", "name", "file_hash", "reference_type", "strength", "blocked")
+    picks = []
+    for frame in (cache or {}).values():
+        pick = {key: frame.get(key) for key in keys}
+        pick["prompt_applied"] = bool(frame.get("prompt") or frame.get("uc")) and not frame.get("blocked")
+        picks.append(pick)
+    return picks
 
 
 def append_to_director_lists(api_parameters: dict[str, Any], frames: list[dict[str, Any]]) -> None:
     """요청의 director_* 목록 뒤에 칸을 붙인다(활성 칸 뒤 · adapt_payload 전에)."""
     if not frames:
         return
-    for frame in frames:
-        api_parameters.setdefault("director_reference_descriptions", []).append(
-            {"caption": {"base_caption": frame["reference_type"], "char_captions": []}, "legacy_uc": False})
-        api_parameters.setdefault("director_reference_images", []).append(frame["image_data"])
-        api_parameters.setdefault("director_reference_information_extracted", []).append(1)
-        api_parameters.setdefault("director_reference_strength_values", []).append(frame["strength"])
-        api_parameters.setdefault("director_reference_secondary_strength_values", []).append(frame["secondary_strength"])
+    # ⚠️ 새 목록으로 - 활성 칸 목록은 params · GenerationRequest 의 것을 그대로 가리킨다(같은 객체).
+    #    제자리에 붙이면 재시도마다 칸이 또 붙고, 생성 정보 · 파생 요청에 base64 가 남는다.
+    added = {
+        "director_reference_descriptions": [
+            {"caption": {"base_caption": frame["reference_type"], "char_captions": []}, "legacy_uc": False}
+            for frame in frames],
+        "director_reference_images": [frame["image_data"] for frame in frames],
+        "director_reference_information_extracted": [1 for _ in frames],
+        "director_reference_strength_values": [frame["strength"] for frame in frames],
+        "director_reference_secondary_strength_values": [frame["secondary_strength"] for frame in frames],
+    }
+    for key, values in added.items():
+        api_parameters[key] = list(api_parameters.get(key) or []) + values
     # CR 을 실을 때의 곁 설정 - 활성 칸이 없고 ref: 만 있어도 같게(headless_character_reference_service.active_params)
     api_parameters.pop("skip_cfg_above_sigma", None)
     api_parameters.setdefault("controlnet_strength", 1)
@@ -203,17 +357,20 @@ def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
     return [str(i.get("thumbnail_url")) for i in folder["items"] if i.get("thumbnail_url")][:count]
 
 
-def search_ref_calls(library: Any, query: str, limit: int = 14) -> list[dict[str, Any]]:
+def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "") -> list[dict[str, Any]]:
     """`ref:` 뒤에 친 글로 후보를 낸다.
     - `폴더`(콜론 전): 맞는 폴더(-> ref:폴더: 로 이어 치기) + 이름이 맞는 그림(-> ref:폴더:이름)
     - `__` · `__*`: 폴더 무작위 · 차례 호출
     - `폴더:이름`: 그 폴더의 그림(이름을 비우면 무작위 · 차례 호출도 맨 위에)
-    - 강도(`:1.5`)를 치는 중이면 후보 없음."""
+    - 강도(`:1.5`)를 치는 중이면 후보 없음.
+    `scope="main"`(메인 · 앞뒤 고정 칸) = 캐릭터 분류 폴더는 빼고(거기서 못 부른다 · 사용자 결정)."""
     text = str(query or "").strip()
     parts = text.split(":")
     if len(parts) >= 3:
         return []
     folders = library.callable_folders()
+    if scope == "main":
+        folders = [folder for folder in folders if folder["group"] != "character"]
     ranked: list[tuple[int, int, dict[str, Any]]] = []
 
     def folder_row(folder):

@@ -748,13 +748,14 @@ class APIService:
         프롬프트에는 호출 글을 되돌려 둔다(히스토리 · 다시 생성 · 파생 요청이 같은 호출을 다시 푼다)."""
         if not isinstance(parameters, dict):
             return
-        frames = parameters.pop('_ref_prompt_frames', None)
+        from core.ref_prompt_resolver import finish_main_prompt, ref_picks
+
+        cache = parameters.pop('_ref_prompt_cache', None)
         tokens = parameters.pop('_ref_prompt_tokens', None)
-        parameters.pop('_ref_prompt_char_tokens', None)
-        if frames:
-            parameters['ref_prompt_picks'] = [
-                {key: frame.get(key) for key in ('token', 'folder', 'name', 'file_hash', 'reference_type', 'strength')}
-                for frame in frames]
+        if cache:
+            parameters['ref_prompt_picks'] = ref_picks(cache)
+            # NAI: 호출 글은 프롬프트에 제자리 그대로 있다 - 와일드카드 호출만 고른 그림으로 바꿔 둔다(다시 굴리지 않게)
+            parameters['input'] = finish_main_prompt(parameters.get('input'), cache)
         if tokens and isinstance(parameters.get('input'), str):
             parameters['input'] = ", ".join(filter(None, [parameters['input'].strip(), *tokens]))
 
@@ -888,13 +889,14 @@ class APIService:
             parameters['input'] = restore_network_tokens(parameters['input'])
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
 
-        # `ref:폴더:이름` 호출(사용자 지시 2026-11-25 · core/ref_prompt_resolver.py) - 프롬프트에서 걷고 NAI 요청 목에서
-        # Character Reference 칸으로 덧붙인다. 다른 모드는 글만 걷는다(모델에 글로 새지 않게).
-        if isinstance(parameters.get('input'), str) and '_ref_prompt_tokens' not in parameters:
+        # `ref:폴더:이름` 호출(사용자 지시 2026-11-25 · core/ref_prompt_resolver.py). NAI 는 요청 목(_call_nai_api)에서
+        # **부른 자리에서** 풀어 쓴다(호출 프롬프트 · Character Reference 칸). 다른 모드는 글만 걷는다(그림도 글도 안 넣음).
+        if (api_mode != "NAI" and isinstance(parameters.get('input'), str)
+                and '_ref_prompt_tokens' not in parameters):
             from core.ref_prompt_resolver import split_ref_tokens
             parameters['input'], _ref_tokens = split_ref_tokens(parameters['input'])
             parameters['_ref_prompt_tokens'] = _ref_tokens
-            if _ref_tokens and api_mode != "NAI":
+            if _ref_tokens:
                 print(f"[REF] {api_mode} 는 ref: 를 쓰지 않습니다 - 걷기만 했습니다: {_ref_tokens}")
 
         if (
@@ -1505,10 +1507,31 @@ class APIService:
             # 에만 넣으면 두 자리가 어긋난다(사용자 실측 2026-08-25).
             nai_input_override: str | None = None
 
+            # `ref:` 호출 - 부른 자리에서 풀어 쓴다(메인 = 호출 프롬프트 · 네거티브는 메인 네거티브 끝에).
+            # params['input'] 은 고치지 않는다(호출 글이 남아야 기록 · 재시도가 같은 호출을 안다) - 나가는 글만.
+            from core.nai_character_reference_spec import cr_profile as _ref_cr_profile
+            from core.ref_prompt_resolver import RefCallSession
+
+            def _ref_library():
+                from core.ref_vibe_library import get_ref_vibe_library
+                return get_ref_vibe_library(self.app_context)
+
+            _ref_session = RefCallSession(
+                _ref_library, params.get('_ref_prompt_cache') or {},
+                profile=_ref_cr_profile(model_spec), inpainting=(action_type == "infill"), model_name=model_name)
+            _ref_input, _ref_negative = _ref_session.render(params.get('input', ''), "main")
+            _nai_negative = params.get('negative_prompt', '')
+            if _ref_negative:
+                _nai_negative = ", ".join(filter(None, [str(_nai_negative or '').strip(), _ref_negative]))
+                api_parameters["negative_prompt"] = _nai_negative
+            # 해석을 params 에 둔다 - 재시도가 같은 그림을 쓰고, 끝나면 기록으로 바뀐다(_finish_ref_prompt)
+            if _ref_session.cache:
+                params['_ref_prompt_cache'] = _ref_session.cache
+
             # V4 특화 설정 (기존과 동일)
             if model_spec.uses_v4_payload:
-                main_prompt = params.get('input', '')
-                negative_prompt = params.get('negative_prompt', '')
+                main_prompt = _ref_input
+                negative_prompt = _nai_negative
 
                 api_parameters.update({
                     'params_version': 3,
@@ -1822,17 +1845,19 @@ class APIService:
                 if characters:
                     characters, ucs, character_positions, character_ids = strip_character_comment_tags(
                         characters, ucs, character_positions, character_ids)
-                    # 캐릭터 프롬프트 안의 `ref:` 호출도 걷어 칸으로(사용자 지시 2026-11-25)
-                    from core.ref_prompt_resolver import split_ref_tokens as _split_ref
-                    _char_ref_tokens = []
-                    _stripped_characters = []
-                    for _prompt in characters:
-                        _rest, _found = _split_ref(_prompt)
-                        _stripped_characters.append(_rest)
-                        _char_ref_tokens.extend(_found)
-                    if _char_ref_tokens:
-                        characters = _stripped_characters
-                        params['_ref_prompt_char_tokens'] = _char_ref_tokens
+                    # 캐릭터 프롬프트 안의 `ref:` 호출 - 그 슬롯에서 풀어 쓴다(사용자 지시 2026-11-25).
+                    # 의상 · 스타일 = 부른 자리에 · 캐릭터 그림 = 슬롯 대치 · 네거티브 = 그 캐릭터 네거티브 끝에.
+                    # 새 목록으로(params · 굴림 사본의 목록을 그대로 가리킬 수 있다).
+                    characters, ucs = list(characters), list(ucs)
+                    for _slot, _prompt in enumerate(characters):
+                        _rendered, _slot_negative = _ref_session.render(_prompt, "char", _slot)
+                        characters[_slot] = _rendered
+                        if _slot_negative:
+                            while len(ucs) <= _slot:
+                                ucs.append("")
+                            ucs[_slot] = ", ".join(filter(None, [str(ucs[_slot] or '').strip(), _slot_negative]))
+                    if _ref_session.cache:
+                        params['_ref_prompt_cache'] = _ref_session.cache
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:
@@ -2070,26 +2095,16 @@ class APIService:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
 
                     print(f"  - Director images: {len(params['director_reference_images'])}")
-                # `ref:` 호출 - 활성 칸 뒤에 이 장에만 덧붙인다. 해석은 한 번만(재시도 · 차례 호출이 같은 그림).
-                _ref_tokens = list(params.get('_ref_prompt_tokens') or []) + list(params.get('_ref_prompt_char_tokens') or [])
-                if _ref_tokens:
-                    from core.ref_prompt_resolver import append_to_director_lists, describe, resolve_ref_tokens
+                # `ref:` 호출 - 활성 칸 뒤에 이 장에만 덧붙인다(위에서 풀어 쓴 것 중 막히지 않은 것 · 메인 -> 캐릭터 순).
+                if _ref_session.frames:
+                    from core.ref_prompt_resolver import append_to_director_lists, describe
                     if api_parameters.get('reference_image_multiple'):
                         raise RefPromptError("Vibe 가 켜져 있어 ref: 를 쓸 수 없습니다 - Vibe 를 끄거나 ref: 를 빼세요")
-                    _ref_frames = params.get('_ref_prompt_frames')
-                    if _ref_frames is None:
-                        from core.ref_vibe_library import get_ref_vibe_library
-                        _ref_frames = resolve_ref_tokens(get_ref_vibe_library(self.app_context), _ref_tokens)
-                        params['_ref_prompt_frames'] = _ref_frames
-                    append_to_director_lists(api_parameters, _ref_frames)
-                    print(f"  - [REF] ref: {len(_ref_frames)}장 - {describe(_ref_frames)}")
+                    append_to_director_lists(api_parameters, _ref_session.frames)
+                    print(f"  - [REF] ref: {len(_ref_session.frames)}장 - {describe(_ref_session.frames)}")
                 # 모델마다 갈라진 사양으로 한 번 맞춘다(유형 · Strength 상한 · Fidelity · 그림 캔버스/버킷).
                 for _note in _adapt_cr_payload(api_parameters, model_spec, inpainting=(action_type == "infill")):
                     print(f"  - [CR] {_note}")
-            elif params.get('_ref_prompt_tokens') or params.get('_ref_prompt_char_tokens'):
-                if _cr_prof is None:
-                    raise RefPromptError(f"이 모델({model_name})은 Character Reference 를 받지 않아 ref: 를 쓸 수 없습니다")
-                print("  - [REF] V5 인페인트는 Character Reference 를 받지 않는다 - ref: 를 걷기만 했다")
 
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
@@ -2150,7 +2165,7 @@ class APIService:
                 # 캐릭터 대사가 합쳐졌으면 그 값이다 - base_caption 과 **같은 문자열**
                 # 이어야 한다(공홈도 두 자리가 같다).
                 "input": (nai_input_override if nai_input_override is not None
-                          else params.get('input', '')),
+                          else _ref_input),
                 "model": model_name,
                 "action": action_type,
                 "parameters": api_parameters

@@ -32589,6 +32589,13 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 .rvw-grps:empty { display: none; }
 .rvw-call { font: 11px var(--font-mono); color: #d9d2ff; background: rgba(124,106,239,.14); border-radius: 4px;
   padding: 1px 6px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
+/* 호출 프롬프트(2026-11-25) - 고른 줄의 켜기 · 썸네일 P · 창의 켜기 줄 */
+.rvw-callon { display: inline-flex; align-items: center; gap: 3px; color: var(--text-dim); font-size: 10.5px;
+  white-space: nowrap; cursor: pointer; }
+.rvw-callon input { margin: 0; }
+.rvw-card-p { position: absolute; right: 3px; bottom: 19px; padding: 0 4px; border-radius: 4px;
+  background: rgba(70,160,120,.92); color: #fff; font: 600 9.5px var(--font-mono); line-height: 15px; }
+.rvw-cp-on { display: flex; align-items: center; gap: 5px; font-size: 11.5px; }
 .rvw-sec-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
 .rvw-btn {
   border: 1px solid var(--border-glow); background: transparent; color: var(--text-muted);

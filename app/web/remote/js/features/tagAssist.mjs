@@ -2245,7 +2245,9 @@ export function createTagAssistController({
       } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('ref:')) {
-        sendWs({type: 'autocomplete_ref', query: s.slice(4).trim()});
+        // 캐릭터 프롬프트 칸(data-cw-min="prompt")에서만 캐릭터 분류 폴더가 뜬다 - 메인에서는 못 부른다
+        sendWs({type: 'autocomplete_ref', query: s.slice(4).trim(),
+          scope: target?.matches?.('[data-cw-min="prompt"]') ? 'char' : 'main'});
       } else if (allowTriggers && s.toLowerCase().startsWith('preset:')) {
         requestPresetAutocomplete(s);
       } else {

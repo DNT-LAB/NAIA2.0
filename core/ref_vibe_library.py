@@ -98,6 +98,25 @@ def regroup_item(meta: dict, group: str, categories: list) -> None:
     meta["settings"] = settings
 
 
+# 호출 프롬프트(사용자 지시 2026-11-25) - 의상 · 스타일 그림을 `ref:` 로 부르면 부른 자리에 넣는 글.
+#  캐릭터 그림은 따로 두지 않는다 - 이미 있는 캐릭터 프롬프트(character_prompt · character_uc)가 그 슬롯을 대치한다.
+#  켜기(`call_prompt_on`)는 두 경우 모두에 걸린다. 적지 않았으면 켜짐(글이 있으면 켜짐 · 사용자 결정).
+CALL_PROMPT_MAX = 2000
+
+
+def clean_call_prompt(value: Any, label: str) -> str:
+    """한 줄 글로 - 줄바꿈은 쉼표로. `ref:` 는 못 쓴다(부른 글이 또 부르지 않게)."""
+    if not isinstance(value, str):
+        raise LibraryError(f"{label} must be text")
+    pieces = [piece.strip() for line in value.splitlines() for piece in line.split(",")]
+    text = ", ".join(piece for piece in pieces if piece)
+    if len(text) > CALL_PROMPT_MAX:
+        raise LibraryError(f"{label} 는 {CALL_PROMPT_MAX}자까지입니다")
+    if any(piece.lower().startswith("ref:") for piece in pieces):
+        raise LibraryError(f"{label} 에는 ref: 를 쓸 수 없습니다")
+    return text
+
+
 def callable_name_problem(name: str) -> str:
     """`ref:` 로 부를 수 있는 이름인가 - 안 되면 까닭(빈 글 = 된다)."""
     bad = [mark for mark in CALL_NAME_FORBIDDEN if mark in name]
@@ -354,6 +373,9 @@ class RefVibeLibrary:
                 item["group"] = item_group(meta)
                 item["character_prompt"] = stored["character_prompt"]
                 item["character_uc"] = stored["character_uc"]
+                item["call_prompt"] = str(meta.get("call_prompt") or "")
+                item["call_uc"] = str(meta.get("call_uc") or "")
+                item["call_prompt_on"] = meta.get("call_prompt_on") is not False
                 url = "/api/module-storage/character-reference/thumb?" + urlencode({"file_hash": file_hash})
             item["thumbnail_url"] = url if item["has_image"] else ""
             counts["favorite"] += item["favorite"]
@@ -430,6 +452,13 @@ class RefVibeLibrary:
             updates["name"] = updates["name"].strip()
         if "favorite" in updates and not isinstance(updates["favorite"], bool):
             raise LibraryError("favorite must be boolean")
+        if "call_prompt_on" in updates and not isinstance(updates["call_prompt_on"], bool):
+            raise LibraryError("call_prompt_on must be boolean")
+        for key, label in (("call_prompt", "호출 프롬프트"), ("call_uc", "호출 네거티브")):
+            if key in updates:
+                if kind != "character_reference":
+                    raise LibraryError(f"{key} is only for Character Reference")
+                updates[key] = clean_call_prompt(updates[key], label)
         if kind == "character_reference" and updates.get("name"):
             problem = callable_name_problem(updates["name"])
             if problem:
@@ -444,7 +473,13 @@ class RefVibeLibrary:
             data = self._read()
             old = self._item(data, kind, file_hash, model)
             meta = data[kind]["items"].setdefault(file_hash, {"created_at": old["created_at"], "category": ""})
-            meta.update({k: updates[k] for k in ("name", "favorite") if k in updates})
+            meta.update({k: updates[k] for k in ("name", "favorite", "call_prompt", "call_uc") if k in updates})
+            if "call_prompt_on" in updates:
+                # 켜짐이 기본이라 꺼짐만 적어 둔다
+                if updates["call_prompt_on"]:
+                    meta.pop("call_prompt_on", None)
+                else:
+                    meta["call_prompt_on"] = False
             if "reference_type" in updates:
                 meta["settings"] = reference_settings({**(meta.get("settings") or {}),
                                                        "reference_type": updates["reference_type"]})

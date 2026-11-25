@@ -749,6 +749,41 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     return `ref:${folder}:${safe}`;
   }
 
+  // ── 호출 프롬프트(사용자 지시 2026-11-25) ── `ref:` 로 부르면 부른 자리에 넣는 글.
+  //  캐릭터 그림 = 캐릭터 프롬프트(부른 캐릭터 슬롯을 대치) · 의상 · 스타일 = 호출 프롬프트(부른 자리에) · 네거티브는 끝에.
+  //  켜기 = '호출시 추가 프롬프트 적용'(글이 있으면 켜짐). 저장 = 보관함 색인의 call_prompt · call_uc · call_prompt_on.
+  function itemGroup(item) {
+    return String(item.group || lib.cr.group || 'character');
+  }
+
+  function callTextOf(item) {
+    return itemGroup(item) === 'character'
+      ? [String(item.character_prompt || ''), String(item.character_uc || '')]
+      : [String(item.call_prompt || ''), String(item.call_uc || '')];
+  }
+
+  function hasCallText(item) {
+    const [prompt, uc] = callTextOf(item);
+    return !!(prompt.trim() || uc.trim());
+  }
+
+  async function editCallPrompt(item, body) {
+    const data = await api('/api/ref-vibe/library/item', {method: 'POST',
+      body: {kind: API_KIND.cr, file_hash: item.file_hash, model: lib.cr.model, ...body}});
+    replaceCrItem(data.item || data);
+    return data;
+  }
+
+  async function setCallPromptOn(item, on) {
+    try {
+      await editCallPrompt(item, {call_prompt_on: on});
+      showToast(on ? `${itemName(item)} - 부르면 글도 넣습니다` : `${itemName(item)} - 부르면 그림만 붙습니다`, 'info');
+    } catch (error) {
+      showToast(`바꾸지 못했습니다: ${error.message || error}`, 'error');
+      renderStore();
+    }
+  }
+
   async function copyCall(item) {
     const call = refCall(item);
     if (!call) return;
@@ -866,6 +901,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     return `<button type="button" class="rvw-card${selected}${slots.length ? ' is-applied' : ''}" draggable="true" data-rvw-card="${escHtml(hash)}">${img}`
       + (slots.length ? `<span class="rvw-card-slot" data-naia-title="활성 ${slotLabel(slots)} 칸에 있습니다">${slotLabel(slots)}</span>` : '')
       + (item.favorite ? `<span class="rvw-card-star">★</span>` : '')
+      + (tab === 'cr' && crGrouped() && item.call_prompt_on !== false && hasCallText(item)
+        ? `<span class="rvw-card-p" data-naia-title="ref: 로 부르면 글도 넣습니다">P</span>` : '')
       + ieCount + `<span class="rvw-card-lb">${escHtml(name)}</span></button>`;
   }
 
@@ -909,6 +946,10 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       middle = call
         ? `<code class="rvw-call" data-naia-title="프롬프트에 넣으면 그 장을 만들 때만 칸을 하나 더합니다 · 끝에 :1.75 처럼 강도(생략 = 1.0)">${escHtml(call)}</code>`
           + `<button type="button" class="rvw-btn" data-rvw-act="copycall">호출 복사</button>`
+          + (hasCallText(item)
+            ? `<label class="rvw-callon" data-naia-title="호출시 추가 프롬프트 적용 - 끄면 ref: 로 불러도 그림만 붙습니다">`
+              + `<input type="checkbox" data-rvw-callon${item.call_prompt_on !== false ? ' checked' : ''}>추가 프롬프트</label>`
+            : '')
         : (crGrouped()
           ? `<span class="rvw-hint">폴더에 넣으면 ref: 로 부를 수 있습니다</span>`
           : `<span class="rvw-hint">${escHtml(String(s.reference_type || 'character&style'))} · S ${fmt(s.strength ?? 1)} · F ${fmt(s.fidelity ?? 0.8)}</span>`);
@@ -1754,8 +1795,18 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   //  저장 = character_reference/metadata/<해시>.json 의 character_prompt · character_uc(옛 형식 그대로 - 남아 있던 것이 보인다).
   //  [적용] = Character Find 와 같은 add_character(슬롯 맨 아래 · 같은 프롬프트가 있으면 그 슬롯을 켠다).
   //  [추가] · [편집] = 작은 창. [특징 추출] = 레퍼런스 인셋과 같은 WD 태거(그림이 외부로 나간다 - 누를 때만).
+  function callPromptRows(item) {
+    const has = !!String(item.call_prompt || '').trim() || !!String(item.call_uc || '').trim();
+    return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">호출 프롬프트</div>`
+      + (has
+        ? `<button type="button" class="rvw-menu-i" data-rvw-menu="call:edit"><span class="rvw-menu-mark">✎</span>호출 프롬프트 편집</button>`
+          + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="call:delete"><span class="rvw-menu-mark">✕</span>호출 프롬프트 삭제</button>`
+        : `<button type="button" class="rvw-menu-i is-new" data-rvw-menu="call:edit"><span class="rvw-menu-mark">＋</span>호출 프롬프트 추가</button>`);
+  }
+
   function characterPromptRows(item) {
     if (tab !== 'cr') return '';
+    if (crGrouped() && itemGroup(item) !== 'character') return callPromptRows(item);
     const has = !!String(item.character_prompt || '').trim();
     return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">캐릭터 프롬프트</div>`
       + (has
@@ -1775,7 +1826,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   function keepNewerCharacterPrompts(items, startedAt) {
     items.forEach(item => {
       const m = crMutations.get(String(item.file_hash));
-      if (m && m.at > startedAt) Object.assign(item, {character_prompt: m.character_prompt, character_uc: m.character_uc});
+      if (m && m.at > startedAt) Object.assign(item, m.fields);
     });
   }
 
@@ -1835,8 +1886,11 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   function replaceCrItem(next) {
     if (!next || !next.file_hash) return;
     crMutationClock += 1;
-    crMutations.set(String(next.file_hash), {at: crMutationClock,
-      character_prompt: String(next.character_prompt || ''), character_uc: String(next.character_uc || '')});
+    // 캐릭터 프롬프트 · 호출 프롬프트 · 켜기 - 그보다 먼저 떠난 목록 답이 옛 글로 덮지 않게
+    const fields = {};
+    ['character_prompt', 'character_uc', 'call_prompt', 'call_uc', 'call_prompt_on']
+      .forEach(key => { if (key in next) fields[key] = next[key]; });
+    crMutations.set(String(next.file_hash), {at: crMutationClock, fields});
     const items = lib.cr.items;
     const at = items.findIndex(item => String(item.file_hash) === String(next.file_hash));
     if (at >= 0) items[at] = {...items[at], ...next};
@@ -1929,7 +1983,85 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     doc.body.appendChild(el);
     cpBox = {el, hash: String(item.file_hash), extracted: null, extracting: false};
     doc.addEventListener('keydown', onCharacterPromptKey, true);
-    // 머리를 잡고 끌어 옮긴다(사용자 지시 2026-10-23 - 에셋 창의 프롬프트를 옆에 두고 옮겨 적는다). 창 밖으로는 못 나간다.
+    attachCpDrag(el);
+    el.addEventListener('click', event => {
+      const mode = event.target.closest('[data-cp-mode]');
+      if (mode && cpBox?.extracted) {
+        el.querySelectorAll('[data-cp-mode]').forEach(b => b.classList.toggle('on', b === mode));
+        el.querySelector('[data-cp-prompt]').value = cpModeText(cpBox.extracted, mode.dataset.cpMode);
+        return;
+      }
+      const act = event.target.closest('[data-cp]')?.dataset.cp;
+      if (act === 'close' || act === 'cancel') closeCharacterPrompt();
+      else if (act === 'extract') extractCharacterPrompt();
+      else if (act === 'save') submitCharacterPrompt();
+    });
+    el.querySelector('[data-cp-prompt]').focus();
+  }
+
+  // 의상 · 스타일 그림의 호출 프롬프트 창 - 캐릭터 프롬프트 창과 같은 틀(같은 자리 · 하나만 연다)
+  function openCallPrompt(item) {
+    closeCharacterPrompt();
+    const el = doc.createElement('div');
+    el.className = 'rvw-cp';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-label', '호출 프롬프트');
+    const label = groupLabel(itemGroup(item));
+    el.innerHTML = `<div class="rvw-cp-head"><span class="rvw-cp-title">호출 프롬프트 — ${escHtml(itemName(item))} (${escHtml(label)})</span>`
+      + `<button type="button" class="rvw-cp-x" data-cp="close" aria-label="닫기">✕</button></div>`
+      + `<label class="rvw-cp-on"><input type="checkbox" data-cp-on${item.call_prompt_on !== false ? ' checked' : ''}>호출시 추가 프롬프트 적용</label>`
+      + `<label class="rvw-cp-k">PROMPT<textarea class="rvw-cp-text" data-cp-prompt rows="3" spellcheck="false"`
+      + ` placeholder="white dress, sundress …">${escHtml(String(item.call_prompt || ''))}</textarea></label>`
+      + `<label class="rvw-cp-k">NEGATIVE (선택)<textarea class="rvw-cp-text" data-cp-uc rows="2" spellcheck="false">`
+      + `${escHtml(String(item.call_uc || ''))}</textarea></label>`
+      + `<div class="rvw-cp-note">부른 자리에 글 그대로 넣습니다 · 네거티브는 부른 칸의 네거티브 끝에 · ref: 는 못 씁니다</div>`
+      + `<div class="rvw-cp-foot"><button type="button" class="rvw-btn" data-cp="cancel">취소</button>`
+      + `<button type="button" class="rvw-btn is-accent" data-cp="save">저장</button></div>`;
+    doc.body.appendChild(el);
+    cpBox = {el, hash: String(item.file_hash), extracted: null, extracting: false};
+    doc.addEventListener('keydown', onCharacterPromptKey, true);
+    attachCpDrag(el);
+    el.addEventListener('click', event => {
+      const act = event.target.closest('[data-cp]')?.dataset.cp;
+      if (act === 'close' || act === 'cancel') closeCharacterPrompt();
+      else if (act === 'save') submitCallPrompt(item);
+    });
+    el.querySelector('[data-cp-prompt]').focus();
+  }
+
+  async function submitCallPrompt(item) {
+    const box = cpBox;
+    if (!box) return;
+    const save = box.el.querySelector('[data-cp="save"]');
+    save.disabled = true;
+    try {
+      await editCallPrompt(item, {
+        call_prompt: box.el.querySelector('[data-cp-prompt]').value,
+        call_uc: box.el.querySelector('[data-cp-uc]').value,
+        call_prompt_on: box.el.querySelector('[data-cp-on]').checked,
+      });
+      showToast('호출 프롬프트를 저장했습니다', 'success');
+      if (cpBox === box) closeCharacterPrompt();
+    } catch (error) {
+      showToast(`호출 프롬프트를 저장하지 못했습니다: ${error.message || error}`, 'error');
+      if (cpBox === box) save.disabled = false;
+    }
+  }
+
+  async function deleteCallPrompt(item) {
+    const ok = await confirmDialog(`"${itemName(item)}" 의 호출 프롬프트를 지웁니다. 그림과 이름은 그대로입니다.`,
+      {title: '호출 프롬프트 삭제', okText: '지우기'});
+    if (!ok) return;
+    try {
+      await editCallPrompt(item, {call_prompt: '', call_uc: ''});
+      showToast('호출 프롬프트를 지웠습니다', 'success');
+    } catch (error) {
+      showToast(`호출 프롬프트를 못 지웠습니다: ${error.message || error}`, 'error');
+    }
+  }
+
+  // 머리를 잡고 끌어 옮긴다(사용자 지시 2026-10-23 - 에셋 창의 프롬프트를 옆에 두고 옮겨 적는다). 창 밖으로는 못 나간다.
+  function attachCpDrag(el) {
     el.querySelector('.rvw-cp-head').addEventListener('pointerdown', event => {
       if (event.button !== 0 || event.target.closest('[data-cp]')) return;
       event.preventDefault();
@@ -1960,19 +2092,6 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       doc.addEventListener('pointerup', up);
       doc.addEventListener('pointercancel', up);
     });
-    el.addEventListener('click', event => {
-      const mode = event.target.closest('[data-cp-mode]');
-      if (mode && cpBox?.extracted) {
-        el.querySelectorAll('[data-cp-mode]').forEach(b => b.classList.toggle('on', b === mode));
-        el.querySelector('[data-cp-prompt]').value = cpModeText(cpBox.extracted, mode.dataset.cpMode);
-        return;
-      }
-      const act = event.target.closest('[data-cp]')?.dataset.cp;
-      if (act === 'close' || act === 'cancel') closeCharacterPrompt();
-      else if (act === 'extract') extractCharacterPrompt();
-      else if (act === 'save') submitCharacterPrompt();
-    });
-    el.querySelector('[data-cp-prompt]').focus();
   }
 
   async function extractCharacterPrompt() {
@@ -2084,6 +2203,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       if (op === 'cp:release') { releaseSelected(); releaseCharacterPrompt(item); return; }
       if (op === 'cp:edit') { openCharacterPrompt(item); return; }
       if (op === 'cp:delete') { deleteCharacterPrompt(item); return; }
+      if (op === 'call:edit') { openCallPrompt(item); return; }
+      if (op === 'call:delete') { deleteCallPrompt(item); return; }
       if (op === 'apply') applySelected();
       else if (op === 'release') releaseSelected();
       else if (op === 'rename') renameSelected();
@@ -2219,6 +2340,11 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
 
   function onChange(event) {
     const t = event.target;
+    if (t.matches('[data-rvw-callon]')) {
+      const item = selectedItem();
+      if (item) setCallPromptOn(item, t.checked);
+      return;
+    }
     if (t.matches('[data-rvw-rs]')) {
       setModuleParam(KINDS.vibe, `ref_strength_${t.dataset.rvwRs}`, fmt(Number(t.value) / 100));
     } else if (t.matches('[data-rvw-rsnum]')) {

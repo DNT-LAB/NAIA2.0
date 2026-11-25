@@ -2178,6 +2178,13 @@ export function createTagAssistController({
     }
   }
 
+  /** `ref:` 를 풀지 않는 칸 - 네거티브 칸들(메인 · 세션 · 하이레스 · 벤치 · 캐릭터 네거티브). */
+  function isRefBlockedField(el) {
+    if (!el) return false;
+    if (el === negEdit || el.matches?.('[data-cq-min="uc"], [data-cw-min="uc"]')) return true;
+    return /negative|negedit/i.test(`${el.id || ''} ${el.dataset?.field || ''}`);
+  }
+
   function scheduleAutocomplete(options = {}) {
     const target = options.target || acTarget || promptEdit;
     if (!autocompleteOn(target)) {
@@ -2207,9 +2214,11 @@ export function createTagAssistController({
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
     // `ref:폴더:이름` - REFERENCE 보관함 호출(2026-11-25). 콜론까지만 쳐도 폴더 목록이 뜬다.
-    // 부정 칸(퀵 패널 · 슬롯 창의 캐릭터 네거티브)은 `ref:` 를 풀지 않는다 - 후보도 안 띄운다(Codex 리뷰 #11).
-    const refField = !target?.matches?.('[data-cq-min="uc"], [data-cw-min="uc"], #sessionNegEdit');
-    const isRefTrigger = !!(info && allowTriggers && refField && info.stripped.toLowerCase().startsWith('ref:'));
+    // 부정 칸(캐릭터 네거티브 · 세션 · 벤치 Negative 등)은 `ref:` 를 풀지 않는다 - 후보도 안 띄운다(Codex 리뷰 #11 · 2차 #8).
+    // 판정은 **원문 토큰**으로 - 괄호로 감싼 `(ref:…)` 는 호출이 아니고, 숫자 폴더 `ref:123:86` 은 가중치처럼 보여도
+    // 호출이다(2차 #6).
+    const refRawToken = info ? String(info.raw || '').trim() : '';
+    const isRefTrigger = !!(info && allowTriggers && !isRefBlockedField(target) && /^ref:/i.test(refRawToken));
     const isTrigger = isChunkTrigger || isVibeClusterTrigger || isPresetTrigger || isRefTrigger;
     // 가중치 숫자 · `::` 위의 캐럿은 태그를 치는 중이 아니다 - 후보 창만 닫고 태그 힌트는 그대로 둔다
     if (!info || (info.caretOutsideTag && !isTrigger) || (!isTrigger && info.stripped.length < 2)) {
@@ -2219,8 +2228,9 @@ export function createTagAssistController({
     }
     // `ref:` 는 가중치를 걷기 전 원문으로 묻는다 - `ref:캐릭터:86`(숫자로 시작하는 해시) · `ref:폴더:이름:1.5`(강도)가
     // 태그 가중치로 잘려 폴더 목록으로 되돌아가지 않게(Codex 리뷰 #12).
-    const refRaw = isRefTrigger ? String(info.raw || '').trim() : '';
-    const query = /^ref:/i.test(refRaw) ? refRaw : normalizeAutocompleteQuery(info.stripped, allowTriggers);
+    // 이름의 괄호는 마지막 다듬기가 `\(` 로 감싼다 - 묻는 글에서는 푼다(해석기와 같다 · 2차 #7).
+    const query = isRefTrigger ? refRawToken.replace(/\\([()])/g, '$1')
+      : normalizeAutocompleteQuery(info.stripped, allowTriggers);
     if (!query) {
       hideAutocomplete();
       checkTagHint();

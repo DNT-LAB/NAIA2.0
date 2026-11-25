@@ -744,6 +744,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
    *  폴더 밖(미분류)이면 분류 이름(`ref:캐릭터:` - 그 분류 그림 전체)으로 부른다(사용자 2026-11-25).
    *  옛 폴더가 이미 그 분류 이름을 쓰고 있으면 그 폴더가 이겨서 못 부른다(빈 글). */
   function refCall(item) {
+    // 서버가 정한 호출이 있으면 그것(다른 분류의 옛 폴더 · 이름 겹침 · 해시 충돌까지 생성과 같은 규칙 · Codex 리뷰 2차)
+    if (typeof item.ref_call === 'string') return item.ref_call;
     let folder = categoryName(String(item.category || ''));
     if (!folder) {
       const label = CR_GROUPS.find(([g]) => g === item.group)?.[1] || '';
@@ -1157,7 +1159,9 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     const state = lib[tab];
     try {
       const data = await api('/api/ref-vibe/library/move', {method: 'POST',
-        body: {kind: API_KIND[tab], file_hashes: hashes, category_id: categoryId, model: state.model}});
+        // 셈은 보고 있는 분류 안으로(분류 없는 화면 = 전체 · Codex 리뷰 2차 #11)
+        body: {kind: API_KIND[tab], file_hashes: hashes, category_id: categoryId, model: state.model,
+          group: crGrouped() ? lib.cr.group : ''}});
       replaceItems(data.items || []);
       if (data.counts) state.counts = data.counts;
       const first = state.items.find(item => String(item.file_hash) === hashes[0]);

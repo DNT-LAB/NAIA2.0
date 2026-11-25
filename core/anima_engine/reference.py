@@ -109,8 +109,10 @@ def enabled_hashes(context) -> list[str]:
 
 
 def _tags(prompt: str) -> list[str]:
+    # `ref:` 조각은 뺀다 - 저장 검증이 생기기 전에 캐릭터 프롬프트에 적힌 호출이 가중치 문장 안에 들어가면,
+    # 뒤의 걷기가 닫는 괄호까지 잘라 문장이 깨진다(Codex 리뷰 2차 #12).
     body = " ".join(str(prompt or "").split())
-    return [part.strip() for part in body.split(",") if part.strip()]
+    return [part.strip() for part in body.split(",") if part.strip() and part.strip()[:4].lower() != "ref:"]
 
 
 def prompt_block(prompts: list[str]) -> str:

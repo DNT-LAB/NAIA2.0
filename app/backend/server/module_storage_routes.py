@@ -144,7 +144,8 @@ def register_module_storage_routes(
     @app.post("/api/ref-vibe/library/move")
     async def api_ref_vibe_move(body: dict):
         return await library_call("move_items", body.get("kind"), body.get("file_hashes"),
-                                  category_id=body.get("category_id", ""), model=body.get("model", ""))
+                                  category_id=body.get("category_id", ""), model=body.get("model", ""),
+                                  group=body.get("group"))
 
     async def clusters_call(method, *args):
         from core.ref_vibe_clusters import get_ref_vibe_clusters

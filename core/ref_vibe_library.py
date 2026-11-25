@@ -347,6 +347,7 @@ class RefVibeLibrary:
         models = self._vibes() if kind == "vibe" else {}
         storage = models.get(model, {}) if kind == "vibe" else self._characters()
         categories = sorted(data[kind]["categories"], key=lambda g: g.get("order", 0))
+        ref_calls = self._ref_calls(data, storage) if kind == "character_reference" else {}
         group_counts = {g: 0 for g in CR_GROUPS} if kind == "character_reference" else {}
         if group_counts:
             for file_hash in storage:
@@ -381,6 +382,7 @@ class RefVibeLibrary:
                 item["call_prompt"] = str(meta.get("call_prompt") or "")
                 item["call_uc"] = str(meta.get("call_uc") or "")
                 item["call_prompt_on"] = meta.get("call_prompt_on") is not False
+                item["ref_call"] = ref_calls.get(file_hash, "")
                 url = "/api/module-storage/character-reference/thumb?" + urlencode({"file_hash": file_hash})
             item["thumbnail_url"] = url if item["has_image"] else ""
             counts["favorite"] += item["favorite"]
@@ -413,6 +415,36 @@ class RefVibeLibrary:
                 "counts": counts, "categories": [{"id": g["id"], "name": g["name"], "order": g.get("order", 0),
                     "group": category_group(g),
                     "count": counts["categories"][g["id"]]} for g in categories], "items": items[offset:offset + limit]}
+
+    @staticmethod
+    def _ref_calls(data, storage):
+        """보관 그림마다 프롬프트에서 **그 그림 하나**를 부르는 말(못 부르면 빈 글) - callable_folders 와 같은 소속 ·
+        core/ref_prompt_resolver.call_names 와 같은 이름 규칙. 폴더에 든 그림은 그 폴더로, 아니면 분류 이름으로."""
+        from core.ref_prompt_resolver import call_names
+
+        kind = "character_reference"
+        metas = data[kind]["items"]
+        categories = data[kind]["categories"]
+        by_folder: dict = {}
+        by_group: dict = {}
+        for file_hash, stored in storage.items():
+            meta = metas.get(file_hash, {})
+            row = {"file_hash": file_hash, "has_image": stored["has_image"],
+                   "display_name": str(meta.get("name") or "") or stored.get("character_name")
+                   or Path(stored["file_name"]).stem}
+            group = item_group(meta)
+            by_folder.setdefault((meta.get("category", ""), group), []).append(row)
+            by_group.setdefault(group, []).append(row)
+        folders = [(c["name"], by_folder.get((c["id"], category_group(c)), [])) for c in categories]
+        taken = {c["name"].casefold() for c in categories}
+        folders += [(name, by_group.get(group, [])) for group, name in GROUP_FOLDER_NAMES.items()
+                    if name.casefold() not in taken]
+        calls = {}
+        for folder_name, rows in folders:
+            names = call_names(rows)
+            for row in rows:
+                calls.setdefault(row["file_hash"], f"ref:{folder_name}:{names[row['file_hash']]}")
+        return calls
 
     def list_items(self, kind, **query):
         with self._lock:
@@ -559,7 +591,7 @@ class RefVibeLibrary:
             result = self._listing(data, kind, model=model, group=group)
             return {k: result[k] for k in ("categories", "counts", "group_counts")}
 
-    def move_items(self, kind, file_hashes, category_id="", model=""):
+    def move_items(self, kind, file_hashes, category_id="", model="", group=None):
         self._kind(kind)
         if not isinstance(file_hashes, list) or not isinstance(category_id, str):
             raise LibraryError("Invalid category move")
@@ -577,8 +609,11 @@ class RefVibeLibrary:
                     raise LibraryError("다른 분류의 폴더로는 옮길 수 없습니다 - 먼저 우클릭 > 보내기로 분류를 바꾸세요")
                 meta["category"] = category_id
             self._write(data)
+            view_group = group
             group = ""
-            if kind == "character_reference":
+            if isinstance(view_group, str):
+                group = view_group if (kind == "character_reference" and view_group in CR_GROUPS) else ""
+            elif kind == "character_reference":
                 # 폴더로 옮기면 그 폴더의 분류 · 미분류로 옮기면 옮긴 그림의 분류(전체 수로 바뀌지 않게)
                 group = category_group(target) if target is not None else item_group(
                     data[kind]["items"].get(hashes[0], {}) if hashes else {})

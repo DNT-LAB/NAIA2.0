@@ -17,6 +17,7 @@ import math
 import random
 import re
 import threading
+from collections import Counter
 from typing import Any
 
 from core.nai_character_reference_spec import (
@@ -135,15 +136,42 @@ def call_text(item: dict[str, Any], group: str) -> tuple[str, str]:
     return _one_line(item.get("call_prompt")), _one_line(item.get("call_uc"))
 
 
+_CALL_NAME_BAD = (":", ",", "__", "\\")
+
+
+def call_names(folder_items: list[dict[str, Any]]) -> dict[str, str]:
+    """폴더 안 그림마다 **그 그림 하나만** 가리키는 호출 이름(해시 -> 이름) - 호출 복사 · 자동완성 · 와일드카드 기록이 같이 쓴다.
+    - 이름이 있고 폴더에서 하나뿐이고 갈라지는 글자가 없으면 이름.
+    - 아니면 해시 앞 8자 - 그 8자가 다른 그림의 **이름**이거나 다른 해시와 겹치면 해시 전체(`_pick` 은 이름을 먼저 본다 ·
+      Codex 리뷰 2차 #2). 빈도는 한 번만 센다(분류 전체 폴더가 커도 줄마다 다시 훑지 않는다 · 2차 #10)."""
+    names = Counter(str(item.get("display_name") or "").casefold() for item in folder_items)
+    prefixes = Counter(str(item.get("file_hash") or "")[:8].casefold() for item in folder_items)
+    out: dict[str, str] = {}
+    for item in folder_items:
+        file_hash = str(item.get("file_hash") or "")
+        name = str(item.get("display_name") or "")
+        if (name and name != file_hash and name == name.strip() and names[name.casefold()] == 1
+                and not any(mark in name for mark in _CALL_NAME_BAD)):
+            out[file_hash] = name
+            continue
+        short = file_hash[:8]
+        out[file_hash] = file_hash if (names.get(short.casefold()) or prefixes[short.casefold()] > 1) else short
+    return out
+
+
 def resolved_call(frame: dict[str, Any], folder_items: list[dict[str, Any]]) -> str:
-    """고른 그림을 다시 같은 그림으로 부르는 글 - 와일드카드 호출을 기록에 남길 때(파생 요청이 다시 굴리지 않게).
-    이름이 갈라지는 글자를 품었거나 폴더에 같은 이름이 또 있으면 해시 앞 8자로."""
-    name = str(frame.get("display_name") or "")
-    same = [i for i in folder_items if str(i.get("display_name") or "").casefold() == name.casefold()]
-    if not name or name == frame["file_hash"] or any(mark in name for mark in (":", ",", "__")) or len(same) != 1:
-        name = str(frame["file_hash"])[:8]
+    """고른 그림을 다시 같은 그림으로 부르는 글 - 와일드카드 호출을 기록에 남길 때(파생 요청이 다시 굴리지 않게)."""
+    name = call_names(folder_items).get(frame["file_hash"]) or str(frame["file_hash"])
     strength = "" if frame["strength"] == STRENGTH_DEFAULT else f":{frame['strength']:g}"
     return f"ref:{frame['folder']}:{name}{strength}"
+
+
+def check_pickable(call: dict[str, Any], folder: dict[str, Any]) -> None:
+    """고르기 전에 틀린 호출을 잡는다(이름 없음 · 이름 겹침 · 빈 폴더) - 차례를 굴리지 않는다(Codex 리뷰 2차 #4)."""
+    if call["mode"] == "name":
+        _pick(call, folder)                       # 이름 호출은 굴림이 없다 - 찾기만 한다
+    elif not any(item.get("has_image", True) for item in folder["items"]):
+        raise RefPromptError(f"'{call['token']}' - 폴더 '{folder['name']}' 에 그림이 없습니다")
 
 
 def _folder_index(library: Any) -> dict[str, dict[str, Any]]:
@@ -285,7 +313,9 @@ class RefCallSession:
                 key = f"{scope}|{slot}|{occurrence}|{piece}"
                 occurrence += 1
                 if key not in self.cache:
-                    located[key] = self._locate(piece, scope)
+                    call, folder = located[key] = self._locate(piece, scope)
+                    if not self._group_block(folder["group"]):
+                        check_pickable(call, folder)        # 막힌 호출은 고르지 않으니 묻지도 않는다
         lead, kept, negatives = [], [], []
         occurrence = 0
         for piece in pieces:
@@ -394,17 +424,6 @@ def _rank(text: str, needle: str) -> int | None:
     return None
 
 
-def _call_name(item: dict[str, Any], folder_items: list[dict[str, Any]] = ()) -> str:
-    """후보 줄의 호출 이름 - 이름이 없거나 · 갈라지는 글자를 품었거나 · 폴더에 같은 이름이 또 있으면 해시 앞 8자
-    (같은 이름 두 장을 썸네일로 골라도 부를 수 있게 · Codex 리뷰 #10)."""
-    name = str(item.get("display_name") or "")
-    unnamed = not name or name == str(item.get("file_hash") or "")
-    twins = sum(1 for other in folder_items if str(other.get("display_name") or "").casefold() == name.casefold())
-    if unnamed or any(mark in name for mark in (":", ",")) or twins > 1:
-        return str(item.get("file_hash") or "")[:8]
-    return name
-
-
 def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
     return [str(i.get("thumbnail_url")) for i in folder["items"] if i.get("thumbnail_url")][:count]
 
@@ -424,6 +443,18 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     if scope == "main":
         folders = [folder for folder in folders if folder["group"] != "character"]
     ranked: list[tuple[int, int, dict[str, Any]]] = []
+    names_by_folder: dict[str, dict[str, str]] = {}
+
+    def names_of(folder):
+        if folder["id"] not in names_by_folder:
+            names_by_folder[folder["id"]] = call_names(folder["items"])
+        return names_by_folder[folder["id"]]
+
+    def wild_ok(folder, sequential):
+        # 그림이 없으면 반드시 실패한다(2차 #9) · `*` 로 시작하는 옛 폴더의 무작위는 `ref:__*폴더__` 가 되어
+        # 다른 폴더의 차례 호출로 읽힌다 - 그 줄은 안 낸다(2차 #3 · 차례는 `ref:__**폴더__` 로 맞게 읽힌다)
+        has = any(item.get("has_image", True) for item in folder["items"])
+        return has and (sequential or not folder["name"].startswith("*"))
 
     def folder_row(folder):
         count = len(folder["items"])
@@ -444,7 +475,8 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     def item_row(folder, item):
         reference_type = _reference_type(folder["group"], item.get("settings") or {})
         return {"tag": f"{folder['name']}:{item.get('display_name') or item.get('file_hash')}",
-                "value": f"ref:{folder['name']}:{_call_name(item, folder['items'])}", "_wc_type": "ref_item", "cat": "",
+                "value": f"ref:{folder['name']}:{names_of(folder).get(item.get('file_hash'), item.get('file_hash'))}",
+                "_wc_type": "ref_item", "cat": "",
                 "group": GROUP_LABEL.get(folder["group"], folder["group"]),
                 "desc": TYPE_LABEL.get(reference_type, reference_type),
                 "preview": f"{TYPE_LABEL.get(reference_type, reference_type)} · 끝에 :1.5 처럼 강도(생략 = 1.0)",
@@ -456,7 +488,7 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             return []
         needle = parts[1].strip().casefold()
         if not needle:
-            ranked += [(-1, 0, wild_row(folder, False)), (-1, 1, wild_row(folder, True))]
+            ranked += [(-1, n, wild_row(folder, seq)) for n, seq in enumerate((False, True)) if wild_ok(folder, seq)]
         for index, item in enumerate(folder["items"]):
             rank = _rank(str(item.get("display_name") or ""), needle)
             if rank is None and len(needle) >= 2 and str(item.get("file_hash") or "").startswith(needle):
@@ -468,7 +500,7 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
         needle = text[3 if sequential else 2:].rstrip("_").strip().casefold()
         for index, folder in enumerate(folders):
             rank = _rank(folder["name"], needle)
-            if rank is not None and folder["items"]:
+            if rank is not None and wild_ok(folder, sequential):
                 ranked.append((rank, index, wild_row(folder, sequential)))
     else:
         needle = text.casefold()

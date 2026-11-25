@@ -287,6 +287,7 @@ export function createTagAssistController({
   let dockExpanded = false;
   let acResults = [];
   let acSel = -1;
+  let renderedAcResults = null;   // 마지막으로 그린 후보 배열 - 같은 배열을 다시 그리면 스크롤 자리를 지킨다
   let acTimer = null;
   let acTranslationTimer = null;
   let visibleTranslatedAutocompleteQuery = '';
@@ -3187,7 +3188,22 @@ export function createTagAssistController({
       && !isAutocompleteControlQuery(lastAcQuery, true)
       && !String(lastAcQuery).startsWith('/') && !acResults.some(r => r._wc_type);
     if (showMore) html += '<div class="tag-ac-footer"><button type="button" class="search-more-btn" data-ac-more title="Tag Search에서 ALL 검색">더보기+</button></div>';
+    // 같은 후보를 다시 그릴 때(마우스를 올려 고르는 줄만 바뀜 · 화살표) 스크롤 자리를 지킨다 - 안 그러면 줄에
+    // 마우스를 올리는 순간 목록이 맨 위로 튀어 아래 후보를 못 고른다(2026-11-25 ref: 후보 22장).
+    const prevList = tagTooltip.querySelector('.tag-ac-list');
+    const keepScroll = prevList && renderedAcResults === acResults ? prevList.scrollTop : 0;
+    renderedAcResults = acResults;
     tagTooltip.innerHTML = html;
+    const listEl = tagTooltip.querySelector('.tag-ac-list');
+    if (listEl && keepScroll) listEl.scrollTop = keepScroll;
+    const selEl = listEl?.querySelector('.tag-ac-item.selected');
+    if (listEl && selEl && listEl.scrollHeight > listEl.clientHeight) {
+      const top = selEl.getBoundingClientRect().top - listEl.getBoundingClientRect().top + listEl.scrollTop;
+      if (top < listEl.scrollTop) listEl.scrollTop = top;
+      else if (top + selEl.offsetHeight > listEl.scrollTop + listEl.clientHeight) {
+        listEl.scrollTop = top + selEl.offsetHeight - listEl.clientHeight;
+      }
+    }
     const more = tagTooltip.querySelector('[data-ac-more]');
     if (more) {
       more.addEventListener('mousedown', e => e.preventDefault());

@@ -16813,9 +16813,14 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 }
 .chunk-ac-list {
   min-width: 0;
+  /* 그리드 줄은 내용만큼 자라 틀(max-height)에 잘린다 - 목록이 같은 상한을 가져야 스크롤이 생긴다(2026-11-25) */
+  max-height: inherit;
   overflow-y: auto;
   overflow-x: hidden;
   border-right: 1px solid rgba(255,255,255,0.08);
+}
+.chunk-ac-list > .tag-ac-item {
+  flex-shrink: 0;
 }
 .tag-ac-item.chunk-ac-item {
   grid-template-columns: minmax(0, 1fr) auto;

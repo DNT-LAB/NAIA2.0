@@ -1138,7 +1138,7 @@ async def handle_autocomplete_command(
         try:
             # 캐릭터 분류는 캐릭터 프롬프트 칸에서만 부른다(사용자 결정) - 메인 칸엔 후보로도 안 낸다
             scope = "char" if command.get("scope") == "char" else "main"
-            results = await run_in_thread(search_ref_calls, get_ref_vibe_library(context), query, 14, scope)
+            results = await run_in_thread(search_ref_calls, get_ref_vibe_library(context), query, 80, scope)
         except Exception as exc:  # noqa: BLE001 - 보관함을 못 읽어도 자동완성이 죽으면 안 된다
             print(f"[REF] autocomplete failed: {type(exc).__name__}")
             results = []

@@ -16941,7 +16941,7 @@ $('acTouchPlacement')?.addEventListener('click', event => {
 });
 paintTouchPlacementSetting();
 
-const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261125-rvw2')
+const tagAssistReady = import('./js/features/tagAssist.mjs?v=20261125-acscroll')
   .then(({createTagAssistController}) => {
     tagAssist = createTagAssistController({
       document,

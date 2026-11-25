@@ -507,9 +507,13 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
         for index, folder in enumerate(folders):
             rank = _rank(folder["name"], needle)
             if rank is not None:
-                ranked.append((rank, index, folder_row(folder)))
+                ranked.append((rank, index * 3, folder_row(folder)))
+                # 폴더 이름을 치는 중이면 그 폴더의 무작위 · 차례 호출도 바로 아래에(사용자 2026-11-25 - `ref:캐릭터`)
+                if needle:
+                    ranked += [(rank, index * 3 + 1 + n, wild_row(folder, seq))
+                               for n, seq in enumerate((False, True)) if wild_ok(folder, seq)]
         if needle:
-            order = len(folders)
+            order = len(folders) * 3
             for folder in folders:
                 for item in folder["items"]:
                     rank = _rank(str(item.get("display_name") or ""), needle)

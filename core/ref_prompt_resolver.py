@@ -30,6 +30,7 @@ REF_PREFIX = "ref:"
 STRENGTH_DEFAULT = 1.0
 GROUP_TYPE = {"outfit": "costume", "style": "style"}
 _CHAR_TYPES = ("character&style", "character&style_anyoutfit", "character", "character_mainoutfit")
+_SAME_OUTFIT_OFF = {"character&style": "character&style_anyoutfit", "character_mainoutfit": "character"}
 _WILD = re.compile(r"__(\*?)(.+?)__(?::\s*(.*))?", re.S)
 _HASH_PREFIX_MIN = 6
 
@@ -113,7 +114,10 @@ def _reference_type(group: str, settings: dict[str, Any]) -> str:
     if group in GROUP_TYPE:
         return GROUP_TYPE[group]
     stored = normalize_reference_type((settings or {}).get("reference_type"))
-    return stored if stored in _CHAR_TYPES else DEFAULT_REFERENCE_TYPE
+    stored = stored if stored in _CHAR_TYPES else DEFAULT_REFERENCE_TYPE
+    # 프롬프트로 부른 캐릭터는 '같은 옷 유지(Prefer same outfit)' 를 끈다(사용자 지시 2026-11-25) - 옷은 의상 호출 ·
+    # 프롬프트가 정한다. 보관 그림에 적힌 종류는 그대로 두고 이 호출에서만 끈 쪽으로 바꾼다.
+    return _SAME_OUTFIT_OFF.get(stored, stored)
 
 
 def _one_line(text: Any) -> str:

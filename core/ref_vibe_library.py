@@ -420,9 +420,10 @@ class RefVibeLibrary:
     @staticmethod
     def _ref_calls(data, storage):
         """보관 그림마다 프롬프트에서 **그 그림 하나**를 부르는 말(못 부르면 빈 글) - callable_folders 와 같은 소속 ·
-        core/ref_prompt_resolver.call_names 와 같은 이름 규칙. 늘 분류 이름으로(`ref:캐릭터:이름` - 폴더는 분류 아래 ·
-        사용자 2026-11-25) · 분류 이름을 쓰는 옛 폴더가 있으면 그 폴더가 분류 자리다."""
-        from core.ref_prompt_resolver import call_names
+        core/ref_prompt_resolver.call_names 와 같은 이름 규칙. 폴더에 든 그림은 폴더 경로로(`ref:캐릭터:폴더:이름` - 그림이
+        많이 쌓여 분류 안 이름이 겹쳐도 폴더 안에선 하나 · 사용자 2026-11-25), 미분류는 분류 이름으로(`ref:캐릭터:이름`).
+        분류 이름을 쓰는 옛 폴더가 있으면 그 폴더가 분류 자리다."""
+        from core.ref_prompt_resolver import call_names, path_call, path_ok
 
         kind = "character_reference"
         metas = data[kind]["items"]
@@ -443,7 +444,20 @@ class RefVibeLibrary:
         taken = {c["name"].casefold() for c in categories}
         folders += [(name, by_group.get(group, [])) for group, name in GROUP_FOLDER_NAMES.items()
                     if name.casefold() not in taken]
+        # 분류마다 부를 머리 이름(분류 전체 폴더가 먼저 · 분류 이름을 쓰는 옛 폴더는 그 폴더의 분류로)
+        group_head = {group: name for group, name in GROUP_FOLDER_NAMES.items() if name.casefold() not in taken}
+        for c in categories:
+            if c["name"].casefold() in heads:
+                group_head.setdefault(category_group(c), c["name"])
         calls = {}
+        for c in categories:
+            group = category_group(c)
+            if c["name"].casefold() in heads or not path_ok(c["name"]) or group not in group_head:
+                continue
+            rows = by_folder.get((c["id"], group), [])
+            names = call_names(rows)
+            for row in rows:
+                calls[row["file_hash"]] = path_call(group_head[group], "", c["name"], names[row["file_hash"]])
         for folder_name, rows in folders:
             names = call_names(rows)
             for row in rows:

@@ -2,6 +2,8 @@
 
 문법(쉼표로 나뉜 한 조각 전체가 호출이어야 한다) - 분류 -> 폴더 -> 그림(사용자 2026-11-25):
     ref:분류:이름[:강도]          분류의 그 그림(이름 = 보관함에 보이는 이름 · 대소문자 무시 · 또는 해시 앞 6자 이상)
+    ref:분류:폴더:이름[:강도]     그 폴더 안의 그 그림(그림이 많아 이름이 겹칠 때 · 사용자 2026-11-25)
+                                  칸이 셋이면 끝이 숫자일 때 강도(`ref:분류:이름:1.5`) · 아니면 폴더:이름
     ref:분류:__폴더__[:강도]      분류 안 그 폴더에서 무작위 한 장
     ref:분류:__*폴더__[:강도]     그 폴더를 차례로(장마다 다음 그림 · 프로세스가 살아 있는 동안)
     ref:__분류__[:강도] · ref:__*분류__[:강도]   분류 전체에서 무작위 · 차례로
@@ -56,6 +58,14 @@ def is_ref_token(text: Any) -> bool:
     return str(text or "").strip()[:4].lower() == REF_PREFIX
 
 
+def is_number(text: Any) -> bool:
+    try:
+        float(str(text).strip())
+    except ValueError:
+        return False
+    return True
+
+
 def parse_ref_token(text: str) -> dict[str, Any]:
     token = str(text).strip()
     # 마지막 다듬기가 괄호를 `\(` 로 감싼다 - 이름의 괄호는 글 그대로 읽는다
@@ -67,11 +77,18 @@ def parse_ref_token(text: str) -> dict[str, Any]:
         folder, name, strength_text = match.group(2).strip(), "", match.group(3)
     else:
         parts = [part.strip() for part in body.split(":")]
-        if len(parts) not in (2, 3) or not parts[0] or not parts[1]:
-            raise RefPromptError(f"'{token}' - ref:폴더:이름[:강도] 또는 ref:__폴더__[:강도] 로 쓰세요")
-        mode, folder, name = "name", parts[0], parts[1]
-        strength_text = parts[2] if len(parts) == 3 else None
-        inner = _SUB_WILD.fullmatch(name)
+        if len(parts) not in (2, 3, 4) or not parts[0] or not parts[1]:
+            raise RefPromptError(f"'{token}' - ref:분류:이름 · ref:분류:폴더:이름 · ref:분류:__폴더__ 로 쓰세요(끝에 :강도)")
+        mode, folder, name, strength_text = "name", parts[0], parts[1], None
+        # 칸이 넷 = 폴더:이름:강도 · 셋 = 끝이 숫자면 이름:강도, 아니면 폴더:이름(사용자 2026-11-25 - 많이 쌓이면 이름이 겹친다)
+        if len(parts) == 4 or (len(parts) == 3 and not is_number(parts[2])):
+            sub_folder, name = parts[1], parts[2]
+            strength_text = parts[3] if len(parts) == 4 else None
+            if not name:
+                raise RefPromptError(f"'{token}' - 이름이 비었습니다")
+        elif len(parts) == 3:
+            strength_text = parts[2]
+        inner = None if sub_folder else _SUB_WILD.fullmatch(name)
         if inner:
             mode, sub_folder, name = ("sequential" if inner.group(1) else "random"), inner.group(2).strip(), ""
             if not sub_folder:
@@ -90,7 +107,7 @@ def parse_ref_token(text: str) -> dict[str, Any]:
         strength = min(STRENGTH_STORE_MAX, strength)
     return {"token": token, "mode": mode, "folder": folder, "base": base, "mods": tuple(mods), "name": name,
             "strength": strength, "style": False, "outfit": False, "suffix": "",
-            "sub": sub_folder if mode != "name" and match is None else ""}
+            "sub": sub_folder}
 
 
 def mods_suffix(style: bool, outfit: bool) -> str:
@@ -206,6 +223,20 @@ def call_names(folder_items: list[dict[str, Any]]) -> dict[str, str]:
     return out
 
 
+def path_ok(folder_name: str) -> bool:
+    """폴더 이름을 `ref:분류:폴더:이름` 의 가운데에 그대로 쓸 수 있나(갈라지는 글자가 없나)."""
+    name = str(folder_name or "")
+    return bool(name) and name == name.strip() and not any(mark in name for mark in _CALL_NAME_BAD)
+
+
+def path_call(head_name: str, suffix: str, folder_name: str, name: str, strength: float = STRENGTH_DEFAULT) -> str:
+    """폴더 안 그림을 부르는 글 - 숫자처럼 생긴 이름(해시 앞자리 `12345678`)은 강도로 읽히지 않게 강도를 붙인다."""
+    tail = "" if strength == STRENGTH_DEFAULT else f":{strength:g}"
+    if not tail and is_number(name):
+        tail = f":{STRENGTH_DEFAULT:g}"
+    return f"ref:{head_name}{suffix}:{folder_name}:{name}{tail}"
+
+
 def resolved_call(frame: dict[str, Any], folder_items: list[dict[str, Any]]) -> str:
     """고른 그림을 다시 같은 그림으로 부르는 글 - 와일드카드 호출을 기록에 남길 때(파생 요청이 다시 굴리지 않게)."""
     name = call_names(folder_items).get(frame["file_hash"]) or str(frame["file_hash"])
@@ -311,8 +342,13 @@ def frame_for(library: Any, call: dict[str, Any], folder: dict[str, Any]) -> dic
         "uc": uc,
         "image_data": image_data,
     }
-    # 기록 글은 분류 이름으로(`ref:캐릭터:이름`) - 이름은 분류 안에서 하나인 것으로
-    frame["call"] = resolved_call(frame, (call.get("head") or folder)["items"])
+    if call.get("sub") and path_ok(folder["name"]):
+        # 폴더에서 고른 그림 = 폴더 경로로 기록(`ref:캐릭터:폴더:이름`) - 이름은 폴더 안에서 하나면 된다
+        name = call_names(folder["items"]).get(file_hash) or file_hash
+        frame["call"] = path_call(frame["head"], frame["suffix"], folder["name"], name, call["strength"])
+    else:
+        # 분류에서 고른 그림 = 분류 이름으로(`ref:캐릭터:이름`) - 이름은 분류 안에서 하나인 것으로
+        frame["call"] = resolved_call(frame, (call.get("head") or folder)["items"])
     return frame
 
 
@@ -592,12 +628,13 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     """`ref:` 뒤에 친 글로 후보를 낸다 - 분류 -> 폴더 -> 그림(사용자 2026-11-25).
     - (빈 글) 분류 셋(캐릭터 아래 종류 줄 셋) · 글을 치면 분류 · 폴더(`ref:분류:__폴더__`) · 그림(`ref:분류:이름`)
     - `__` · `__*`: 분류 전체 무작위 · 차례 + 이름이 맞는 폴더의 호출
-    - `분류:` 다음: 분류 전체 무작위 · 차례 · 그 분류의 폴더(`__폴더__` · `__*폴더__`) · 그림 - 줄에는 콜론 뒤만 보인다
+    - `분류:` 다음: 분류 전체 무작위 · 차례 · 그 분류의 폴더(`폴더:` · `__폴더__` · `__*폴더__`) · 그림 - 줄에는 콜론 뒤만 보인다
+    - `분류:폴더:` 다음: 그 폴더의 그림만(`ref:분류:폴더:이름`) · 폴더에 든 그림은 어디서든 폴더 경로로 넣는다
     - 강도(`:1.5`)를 치는 중이면 후보 없음.
     `scope="main"`(메인 · 앞뒤 고정 칸) = 캐릭터 분류는 빼고(거기서 못 부른다 · 사용자 결정)."""
     text = str(query or "").strip()
     parts = text.split(":")
-    if len(parts) >= 3:
+    if len(parts) >= 4:
         return []
     folders = library.callable_folders()
     if scope == "main":
@@ -608,6 +645,8 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     for head in heads:                       # 분류마다 머리 하나 - 분류 전체 폴더가 먼저
         if head.get("virtual") or head["group"] not in head_of:
             head_of[head["group"]] = head
+    # 사용자 폴더에 든 그림 = 폴더 경로로 부른다(그림이 많이 쌓여 분류 안 이름이 겹쳐도 폴더 안에선 하나 · 사용자 2026-11-25)
+    home = {str(item.get("file_hash")): folder for folder in subs if path_ok(folder["name"]) for item in folder["items"]}
     ranked: list[tuple[int, int, dict[str, Any]]] = []
     names_by_folder: dict[str, dict[str, str]] = {}
 
@@ -665,11 +704,28 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
                            + " · 끝에 :1.5 처럼 강도(생략 = 1.0)",
                 "thumbs": _thumbs(folder)}
 
+    def folder_row(head, folder, suffix="", style=False, outfit=False):
+        # 폴더 열기 - 고르면 `ref:분류:폴더:` 까지 넣고 그 폴더의 그림만 이어서 띄운다
+        count = len(folder["items"])
+        return {"tag": f"{head['name']}{suffix}:{folder['name']}", "value": f"ref:{head['name']}{suffix}:{folder['name']}:",
+                "_wc_type": "ref_folder", "cat": "", "group": group_of(head), "desc": f"폴더 · {count}장",
+                "preview": f"{type_of(head, style, outfit)} · 폴더 {folder['name']} · {count}장 - 고르면 이 폴더의 그림만 이어서 고릅니다",
+                "thumbs": _thumbs(folder)}
+
+    def folder_open_ok(folder):
+        return path_ok(folder["name"]) and any(item.get("has_image", True) for item in folder["items"])
+
+    def item_value(head, item, suffix):
+        file_hash = str(item.get("file_hash") or "")
+        folder = home.get(file_hash)
+        if folder is not None:
+            return path_call(head["name"], suffix, folder["name"], names_of(folder).get(file_hash, file_hash))
+        return f"ref:{head['name']}{suffix}:{names_of(head).get(file_hash, file_hash)}"
+
     def item_row(head, item, suffix="", style=False, outfit=False):
         kind = type_of(head, style, outfit)
         return {"tag": f"{head['name']}{suffix}:{item.get('display_name') or item.get('file_hash')}",
-                "value": f"ref:{head['name']}{suffix}:"
-                         f"{names_of(head).get(item.get('file_hash'), item.get('file_hash'))}",
+                "value": item_value(head, item, suffix),
                 "_wc_type": "ref_item", "cat": "", "group": group_of(head),
                 "desc": kind, "preview": f"{kind} · 끝에 :1.5 처럼 강도(생략 = 1.0)",
                 "thumb": str(item.get("thumbnail_url") or ""),
@@ -679,7 +735,7 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     def subs_in(head):
         return [folder for folder in subs if folder["group"] == head["group"]]
 
-    if len(parts) == 2:
+    if len(parts) in (2, 3):
         call = {"token": "ref:" + text, "folder": parts[0].strip(), "base": parts[0].split("&")[0].strip(),
                 "mods": tuple(piece.strip() for piece in parts[0].split("&")[1:]), "style": False, "outfit": False,
                 "suffix": ""}
@@ -697,7 +753,35 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             row["label"] = row["value"][cut:]          # 분류를 친 단계 = 줄에는 콜론 뒤만(사용자 2026-11-25)
             return row
 
-        if rest.startswith("__"):
+        def labelled(row, item, call_name, name_only):
+            display = str(item.get("display_name") or "")
+            if display == str(item.get("file_hash") or ""):
+                display = ""                      # 이름 없는 그림 = 해시 앞자리만(해시 전체를 또 보이지 않는다)
+            # 이름이 겹치면 넣는 글은 해시 앞자리다 - 이름만 보이면 어느 쪽인지 모른다(리뷰 #11)
+            row["label"] = (f"{display} · {call_name}" if display and display.casefold() != name_only.casefold()
+                            else call_name)
+            row["desc"] = ""
+            return row
+
+        if len(parts) == 3:
+            # `ref:분류:폴더:` = 그 폴더의 그림만 · 폴더가 아니면 `이름:강도` 를 치는 중이다
+            wanted = rest.casefold()
+            folder = next((f for f in subs_in(head) if f["name"].casefold() == wanted and path_ok(f["name"])), None)
+            if folder is None:
+                return []
+            needle = parts[2].strip().casefold()
+            inner = len(f"ref:{head['name']}{call['suffix']}:{folder['name']}:")
+            for index, item in enumerate(folder["items"]):
+                rank = _rank(str(item.get("display_name") or ""), needle)
+                if rank is None and len(needle) >= 2 and str(item.get("file_hash") or "").casefold().startswith(needle):
+                    rank = 2
+                if rank is not None:
+                    row = item_row(head, item, *mods)
+                    row["value"] = path_call(head["name"], call["suffix"], folder["name"],
+                                             names_of(folder).get(str(item.get("file_hash")), str(item.get("file_hash"))))
+                    name_only = row["value"][inner:].split(":")[0]
+                    ranked.append((rank, index, labelled(row, item, name_only, name_only)))
+        elif rest.startswith("__"):
             sequential_only = rest.startswith("__*")
             needle = rest[3 if sequential_only else 2:].rstrip("_").strip().casefold()
             for index, folder in enumerate(subs_in(head)):
@@ -715,7 +799,9 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             for index, folder in enumerate(subs_in(head)):
                 rank = _rank(folder["name"], needle)
                 if rank is not None:
-                    ranked += [(rank, index * 2 + n, short(sub_row(head, folder, seq, *mods)))
+                    if folder_open_ok(folder):
+                        ranked.append((rank, index * 3, short(folder_row(head, folder, *mods))))
+                    ranked += [(rank, index * 3 + 1 + n, short(sub_row(head, folder, seq, *mods)))
                                for n, seq in enumerate((False, True)) if wild_ok(folder, seq)]
             for index, item in enumerate(head["items"]):
                 rank = _rank(str(item.get("display_name") or ""), needle)
@@ -724,14 +810,8 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
                 if rank is not None:
                     row = item_row(head, item, *mods)
                     call_name = row["value"][cut:]
-                    display = str(item.get("display_name") or "")
-                    if display == str(item.get("file_hash") or ""):
-                        display = ""                      # 이름 없는 그림 = 해시 앞자리만(해시 전체를 또 보이지 않는다)
-                    # 이름이 겹치면 넣는 글은 해시 앞자리다 - 이름만 보이면 어느 쪽인지 모른다(리뷰 #11)
-                    row["label"] = (f"{display} · {call_name}" if display and display.casefold() != call_name.casefold()
-                                    else call_name)
-                    row["desc"] = ""
-                    ranked.append((rank, 10_000 + index, row))
+                    name_only = call_name.split(":")[1] if str(item.get("file_hash")) in home else call_name
+                    ranked.append((rank, 10_000 + index, labelled(row, item, call_name, name_only)))
     elif text.startswith("__"):
         sequential = text.startswith("__*")
         needle = text[3 if sequential else 2:].rstrip("_").strip().casefold()
@@ -782,6 +862,9 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
                 rank = _rank(folder["name"], needle)
                 head = head_of.get(folder["group"])
                 if rank is not None and head is not None:
+                    if folder_open_ok(folder):
+                        ranked.append((rank, order, folder_row(head, folder)))
+                        order += 1
                     for seq in (False, True):
                         if wild_ok(folder, seq):
                             ranked.append((rank, order, sub_row(head, folder, seq)))

@@ -330,7 +330,7 @@ class RefVibeLibrary:
         return items
 
     def _listing(self, data, kind, model="", filter="all", category_id="", q="", sort="recent", offset=0, limit=60,
-                 _file_hash="", group=""):
+                 _file_hash="", group="", _unbounded=False):
         self._kind(kind)
         if filter not in {"all", "favorite", "uncategorized", "category"} or sort not in {"recent", "name", "used"}:
             raise LibraryError("Invalid filter or sort")
@@ -338,6 +338,8 @@ class RefVibeLibrary:
         group = group if (kind == "character_reference" and group in CR_GROUPS) else ""
         try:
             offset, limit = max(0, int(offset)), max(1, min(200, int(limit)))
+            if _unbounded:   # 안에서만(callable_folders) - 화면 응답은 여전히 200 까지
+                limit = 10 ** 9
         except (ValueError, TypeError):
             raise LibraryError("Invalid pagination") from None
         current = self.context._current_model_key()
@@ -422,15 +424,11 @@ class RefVibeLibrary:
         kind = "character_reference"
         with self._lock:
             data = self._read()
-            first = self._listing(data, kind, sort="name", limit=200)
+            first = self._listing(data, kind, sort="name", _unbounded=True)
             items = list(first["items"])
-            while len(items) < first["total"]:
-                page = self._listing(data, kind, sort="name", offset=len(items), limit=200)["items"]
-                if not page:
-                    break
-                items += page
         folders = [{"id": c["id"], "name": c["name"], "group": c["group"],
-                    "items": [i for i in items if i["category"] == c["id"]]} for c in first["categories"]]
+                    "items": [i for i in items if i["category"] == c["id"] and i.get("group") == c["group"]]}
+                   for c in first["categories"]]
         taken = {folder["name"].casefold() for folder in folders}
         for group, name in GROUP_FOLDER_NAMES.items():
             if name.casefold() not in taken:
@@ -461,8 +459,9 @@ class RefVibeLibrary:
             updates["name"] = updates["name"].strip()
         if "favorite" in updates and not isinstance(updates["favorite"], bool):
             raise LibraryError("favorite must be boolean")
-        if "call_prompt_on" in updates and not isinstance(updates["call_prompt_on"], bool):
-            raise LibraryError("call_prompt_on must be boolean")
+        if "call_prompt_on" in updates and (kind != "character_reference"
+                                            or not isinstance(updates["call_prompt_on"], bool)):
+            raise LibraryError("call_prompt_on must be boolean (Character Reference only)")
         for key, label in (("call_prompt", "호출 프롬프트"), ("call_uc", "호출 네거티브")):
             if key in updates:
                 if kind != "character_reference":
@@ -518,6 +517,8 @@ class RefVibeLibrary:
                     problem = callable_name_problem(name)
                     if problem:
                         raise LibraryError(problem)
+                    if name.startswith("*"):
+                        raise LibraryError("폴더 이름은 * 로 시작할 수 없습니다(ref:__*폴더__ 는 차례 호출입니다)")
                     if name.casefold() in {n.casefold() for n in GROUP_FOLDER_NAMES.values()}:
                         raise LibraryError(f"'{name}' 은 분류 이름이라 폴더 이름으로 못 씁니다"
                                            f"(ref:{name}: 은 그 분류 그림 전체를 부릅니다)")
@@ -576,7 +577,11 @@ class RefVibeLibrary:
                     raise LibraryError("다른 분류의 폴더로는 옮길 수 없습니다 - 먼저 우클릭 > 보내기로 분류를 바꾸세요")
                 meta["category"] = category_id
             self._write(data)
-            group = category_group(target) if (kind == "character_reference" and target is not None) else ""
+            group = ""
+            if kind == "character_reference":
+                # 폴더로 옮기면 그 폴더의 분류 · 미분류로 옮기면 옮긴 그림의 분류(전체 수로 바뀌지 않게)
+                group = category_group(target) if target is not None else item_group(
+                    data[kind]["items"].get(hashes[0], {}) if hashes else {})
             return {"items": [self._item(data, kind, h, model) for h in hashes],
                     "counts": self._listing(data, kind, model=model, group=group)["counts"]}
 
@@ -701,6 +706,9 @@ class RefVibeLibrary:
             if not isinstance(value, str) or len(value.strip()) > 4000:
                 raise LibraryError(f"{name} must be a string of at most 4000 characters")
         prompt, uc = prompt.strip(), uc.strip()
+        if any(piece.strip().lower().startswith("ref:") for text in (prompt, uc)
+               for line in text.splitlines() for piece in line.split(",")):
+            raise LibraryError("캐릭터 프롬프트에는 ref: 를 쓸 수 없습니다")
         with self._lock:
             root, image = self._character_image(file_hash)
             path = root / "metadata" / (file_hash + ".json")

@@ -752,6 +752,12 @@ class APIService:
 
         cache = parameters.pop('_ref_prompt_cache', None)
         tokens = parameters.pop('_ref_prompt_tokens', None)
+        original = parameters.pop('_ref_prompt_original_input', None)
+        if tokens and isinstance(original, list) and parameters.get('input') == original[1]:
+            # NAI 아닌 모드: 걷은 글을 아무도 안 고쳤으면 걷기 전 글 그대로(호출 자리가 끝으로 옮겨지지 않게 ·
+            # Codex 리뷰 #7). 누가 고쳤으면 예전처럼 끝에 붙인다.
+            parameters['input'] = original[0]
+            tokens = None
         if cache:
             parameters['ref_prompt_picks'] = ref_picks(cache)
             # NAI: 호출 글은 프롬프트에 제자리 그대로 있다 - 와일드카드 호출만 고른 그림으로 바꿔 둔다(다시 굴리지 않게)
@@ -894,8 +900,11 @@ class APIService:
         if (api_mode != "NAI" and isinstance(parameters.get('input'), str)
                 and '_ref_prompt_tokens' not in parameters):
             from core.ref_prompt_resolver import split_ref_tokens
+            _ref_before = parameters['input']
             parameters['input'], _ref_tokens = split_ref_tokens(parameters['input'])
             parameters['_ref_prompt_tokens'] = _ref_tokens
+            if _ref_tokens:
+                parameters['_ref_prompt_original_input'] = [_ref_before, parameters['input']]
             if _ref_tokens:
                 print(f"[REF] {api_mode} 는 ref: 를 쓰지 않습니다 - 걷기만 했습니다: {_ref_tokens}")
 

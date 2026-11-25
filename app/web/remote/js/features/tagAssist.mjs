@@ -2207,7 +2207,9 @@ export function createTagAssistController({
     const isVibeClusterTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('vibe:'));
     const isPresetTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('preset:'));
     // `ref:폴더:이름` - REFERENCE 보관함 호출(2026-11-25). 콜론까지만 쳐도 폴더 목록이 뜬다.
-    const isRefTrigger = !!(info && allowTriggers && info.stripped.toLowerCase().startsWith('ref:'));
+    // 부정 칸(퀵 패널 · 슬롯 창의 캐릭터 네거티브)은 `ref:` 를 풀지 않는다 - 후보도 안 띄운다(Codex 리뷰 #11).
+    const refField = !target?.matches?.('[data-cq-min="uc"], [data-cw-min="uc"], #sessionNegEdit');
+    const isRefTrigger = !!(info && allowTriggers && refField && info.stripped.toLowerCase().startsWith('ref:'));
     const isTrigger = isChunkTrigger || isVibeClusterTrigger || isPresetTrigger || isRefTrigger;
     // 가중치 숫자 · `::` 위의 캐럿은 태그를 치는 중이 아니다 - 후보 창만 닫고 태그 힌트는 그대로 둔다
     if (!info || (info.caretOutsideTag && !isTrigger) || (!isTrigger && info.stripped.length < 2)) {
@@ -2215,7 +2217,10 @@ export function createTagAssistController({
       checkTagHint();
       return;
     }
-    const query = normalizeAutocompleteQuery(info.stripped, allowTriggers);
+    // `ref:` 는 가중치를 걷기 전 원문으로 묻는다 - `ref:캐릭터:86`(숫자로 시작하는 해시) · `ref:폴더:이름:1.5`(강도)가
+    // 태그 가중치로 잘려 폴더 목록으로 되돌아가지 않게(Codex 리뷰 #12).
+    const refRaw = isRefTrigger ? String(info.raw || '').trim() : '';
+    const query = /^ref:/i.test(refRaw) ? refRaw : normalizeAutocompleteQuery(info.stripped, allowTriggers);
     if (!query) {
       hideAutocomplete();
       checkTagHint();
@@ -2244,7 +2249,7 @@ export function createTagAssistController({
         sendWs({type: 'autocomplete_chunk', query: s.slice(1).trim()});
       } else if (allowTriggers && s.toLowerCase().startsWith('vibe:')) {
         sendWs({type: 'autocomplete_vibe_cluster', query: s.slice(5).trim()});
-      } else if (allowTriggers && s.toLowerCase().startsWith('ref:')) {
+      } else if (isRefTrigger && s.toLowerCase().startsWith('ref:')) {
         // 캐릭터 프롬프트 칸(슬롯 창 data-cw-min · 퀵 패널 data-cq-min)에서만 캐릭터 분류 폴더가 뜬다 - 메인에서는 못 부른다
         sendWs({type: 'autocomplete_ref', query: s.slice(4).trim(),
           scope: target?.matches?.('[data-cw-min="prompt"], [data-cq-min="prompt"]') ? 'char' : 'main'});
@@ -3300,14 +3305,18 @@ export function createTagAssistController({
       hideAutocomplete();
       return;
     }
+    // `ref:` 후보는 친 글 **전체**를 갈아 끼운다 - 가중치처럼 보여 걷힌 꼬리(`ref:캐릭터:86` 의 `:86` · 강도)가
+    // 뒤에 남아 `ref:캐릭터:86d60a62:86` 이 되지 않게(질의도 원문으로 묻는다 · Codex 리뷰 #12).
+    const refInfo = /^ref:/i.test(String(info.raw || '').trim())
+      ? {...info, coreStart: 0, coreEnd: String(info.raw).length} : info;
     if (r._wc_type === 'ref_folder') {
       // 폴더를 고르면 `ref:폴더:` 까지 넣고 그 폴더의 그림을 이어서 띄운다
-      swapToken(target, info, r.value || `ref:${r.tag}:`);
+      swapToken(target, refInfo, r.value || `ref:${r.tag}:`);
       window.setTimeout(() => scheduleAutocomplete({force: true, target}), 0);
       return;
     }
     if (r._wc_type === 'ref_wild' || r._wc_type === 'ref_item') {
-      swapToken(target, info, r.value || `ref:${r.tag}`);
+      swapToken(target, refInfo, r.value || `ref:${r.tag}`);
       hideAutocomplete();
       return;
     }

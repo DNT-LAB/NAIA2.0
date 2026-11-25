@@ -154,15 +154,26 @@ def resolve_ref_call(library: Any, token: str, *, folders: dict[str, dict[str, A
                      scope: str = "main") -> dict[str, Any]:
     """호출 하나를 칸으로. 못 찾으면 RefPromptError(생성을 멈추고 까닭을 보여 준다).
     캐릭터 분류는 캐릭터 프롬프트에서만 부른다(사용자 결정) - 메인에서 부르면 고르기 전에 멈춘다(차례가 안 넘어간다)."""
-    from PIL import Image
-
-    call = parse_ref_token(token)
     folders = folders if folders is not None else _folder_index(library)
+    call, folder = locate_ref_call(token, folders, scope)
+    return frame_for(library, call, folder)
+
+
+def locate_ref_call(token: str, folders: dict[str, dict[str, Any]], scope: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """호출의 폴더를 찾고 부를 수 있는 자리인지 본다 - 그림은 아직 안 고른다(차례가 안 넘어간다)."""
+    call = parse_ref_token(token)
     folder = folders.get(call["folder"].casefold())
     if folder is None:
         raise RefPromptError(f"'{call['token']}' - 폴더 '{call['folder']}' 이 보관함에 없습니다")
     if scope != "char" and folder["group"] == "character":
         raise RefPromptError(f"'{call['token']}' - 캐릭터 분류 폴더는 캐릭터 프롬프트 칸에서만 부를 수 있습니다")
+    return call, folder
+
+
+def frame_for(library: Any, call: dict[str, Any], folder: dict[str, Any]) -> dict[str, Any]:
+    """찾은 폴더에서 그림을 고르고(차례 · 무작위는 여기서 굴린다) 칸을 만든다."""
+    from PIL import Image
+
     item = _pick(call, folder)
     file_hash = str(item["file_hash"])
     settings = item.get("settings") or {}
@@ -228,15 +239,27 @@ class RefCallSession:
         self.model_name = model_name
         self.frames: list[dict[str, Any]] = []
 
-    def _resolve(self, token: str, scope: str) -> dict[str, Any]:
+    def _locate(self, token: str, scope: str) -> tuple[dict[str, Any], dict[str, Any]]:
         if self._library is None:
             self._library = self._library_getter()
             self._folders = _folder_index(self._library)
-        return resolve_ref_call(self._library, token, folders=self._folders, scope=scope)
+        return locate_ref_call(token, self._folders, scope)
+
+    def _group_block(self, group: str) -> str:
+        """그림을 고르기 전에 정해지는 막힘(모델 · 작업 · 분류만 본다) - 막힌 호출은 그림을 고르지도 읽지도 않는다."""
+        from core.nai_character_reference_spec import wire_type
+
+        if self.inpainting and not self.profile.inpaint:
+            return "V5 인페인트는 Character Reference 를 받지 않는다"
+        if group in GROUP_TYPE and wire_type(GROUP_TYPE[group], self.profile) is None:
+            return "이 모델은 Outfit 을 받지 않는다"
+        return ""
 
     def blocked(self, frame: dict[str, Any]) -> str:
         from core.nai_character_reference_spec import wire_type
 
+        if frame.get("unpicked"):
+            return frame["blocked"]
         if self.inpainting and not self.profile.inpaint:
             return "V5 인페인트는 Character Reference 를 받지 않는다"
         if wire_type(frame["reference_type"], self.profile) is None:
@@ -252,6 +275,17 @@ class RefCallSession:
             return text, ""
         if self.profile is None:
             raise RefPromptError(f"이 모델({self.model_name})은 Character Reference 를 받지 않아 ref: 를 쓸 수 없습니다")
+        # 1) 이 글의 호출을 **모두** 찾고 자리를 본다 - 하나라도 틀리면 아무것도 고르기 전에 멈춘다(Codex 리뷰 #3:
+        #    앞 호출이 차례를 먹은 뒤 뒤 호출이 오류면, 고쳐 다시 눌렀을 때 한 장을 건너뛰었다).
+        located: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+        occurrence = 0
+        for piece in pieces:
+            piece = piece.strip()
+            if is_ref_token(piece):
+                key = f"{scope}|{slot}|{occurrence}|{piece}"
+                occurrence += 1
+                if key not in self.cache:
+                    located[key] = self._locate(piece, scope)
         lead, kept, negatives = [], [], []
         occurrence = 0
         for piece in pieces:
@@ -263,7 +297,15 @@ class RefCallSession:
             occurrence += 1
             frame = self.cache.get(key)
             if frame is None:
-                frame = self._resolve(piece, scope)
+                call, folder = located[key]
+                reason = self._group_block(folder["group"])
+                if reason:
+                    # 2) 막힌 호출은 고르지 않는다(빈 폴더 · 지운 그림이어도 멈추지 않는다 · 와일드카드는 그대로 남는다)
+                    frame = {"token": call["token"], "mode": call["mode"], "folder": folder["name"],
+                             "group": folder["group"], "call": call["token"], "strength": call["strength"],
+                             "prompt": "", "uc": "", "unpicked": True, "blocked": reason}
+                else:
+                    frame = frame_for(self._library, call, folder)
                 frame.update(scope=scope, slot=slot, occurrence=occurrence - 1)
                 self.cache[key] = frame
             frame["blocked"] = self.blocked(frame)
@@ -352,10 +394,15 @@ def _rank(text: str, needle: str) -> int | None:
     return None
 
 
-def _call_name(item: dict[str, Any]) -> str:
+def _call_name(item: dict[str, Any], folder_items: list[dict[str, Any]] = ()) -> str:
+    """후보 줄의 호출 이름 - 이름이 없거나 · 갈라지는 글자를 품었거나 · 폴더에 같은 이름이 또 있으면 해시 앞 8자
+    (같은 이름 두 장을 썸네일로 골라도 부를 수 있게 · Codex 리뷰 #10)."""
     name = str(item.get("display_name") or "")
     unnamed = not name or name == str(item.get("file_hash") or "")
-    return name if not unnamed and not any(mark in name for mark in (":", ",")) else str(item.get("file_hash") or "")[:8]
+    twins = sum(1 for other in folder_items if str(other.get("display_name") or "").casefold() == name.casefold())
+    if unnamed or any(mark in name for mark in (":", ",")) or twins > 1:
+        return str(item.get("file_hash") or "")[:8]
+    return name
 
 
 def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
@@ -397,7 +444,7 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
     def item_row(folder, item):
         reference_type = _reference_type(folder["group"], item.get("settings") or {})
         return {"tag": f"{folder['name']}:{item.get('display_name') or item.get('file_hash')}",
-                "value": f"ref:{folder['name']}:{_call_name(item)}", "_wc_type": "ref_item", "cat": "",
+                "value": f"ref:{folder['name']}:{_call_name(item, folder['items'])}", "_wc_type": "ref_item", "cat": "",
                 "group": GROUP_LABEL.get(folder["group"], folder["group"]),
                 "desc": TYPE_LABEL.get(reference_type, reference_type),
                 "preview": f"{TYPE_LABEL.get(reference_type, reference_type)} · 끝에 :1.5 처럼 강도(생략 = 1.0)",

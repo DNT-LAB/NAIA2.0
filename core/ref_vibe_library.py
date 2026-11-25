@@ -5,6 +5,8 @@ and single category membership. All public operations serialize through one inst
 """
 from __future__ import annotations
 
+from core.nai_character_reference_spec import REFERENCE_TYPES, STRENGTH_STORE_MAX
+
 import copy
 import json
 import math
@@ -57,8 +59,8 @@ def reference_settings(value: Any) -> dict:
     value = value if isinstance(value, dict) else {}
     ref_type = value.get("reference_type")
     return {
-        "reference_type": ref_type if ref_type in ("character&style", "character", "style") else DEFAULT_SETTINGS["reference_type"],
-        "strength": max(0.0, min(1.0, finite(value.get("strength"), DEFAULT_SETTINGS["strength"]))),
+        "reference_type": ref_type if ref_type in REFERENCE_TYPES else DEFAULT_SETTINGS["reference_type"],
+        "strength": max(0.0, min(STRENGTH_STORE_MAX, finite(value.get("strength"), DEFAULT_SETTINGS["strength"]))),
         "fidelity": max(0.0, min(1.0, finite(value.get("fidelity"), DEFAULT_SETTINGS["fidelity"]))),
     }
 

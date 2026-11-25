@@ -81,12 +81,15 @@ class NaiModelSpec:
     def supports_character_reference(self) -> bool:
         """Character Reference 를 쓸 수 있는 모델인가.
 
-        V4.5 와 **V5** 다. V5 는 NovelAI 의 V5 CRef 출시 전에 미리 켠다(사용자 지시 2026-11-19).
-        - 사양은 4.5F 를 따른다 - 같은 `director_reference_*` 필드 · 같은 화면(Strength · Fidelity · 종류).
+        V4.5 와 V5(Curated · Full) 다. **V5 Full Medium 은 못 쓴다**(NAI 웹 2026-11-25 출시 사양).
+        - 모델마다 갈라진 사양(유형 · Strength 상한 · Fidelity · 그림 맞춤 · 인페인트)은
+          `core/nai_character_reference_spec.py` 가 쥔다 - 요청 목에서 `adapt_payload` 가 한 번 맞춘다.
         - Vibe 는 여전히 V5 에서 꺼져 있다(`supports_vibe`) - REFERENCE 창은 ANIMA 처럼 Char Ref 탭만 보인다.
         - V4.0 · V3 은 그대로 못 쓴다.
         """
-        return self.payload_profile in {"v4.5", "v5"}
+        from core.nai_character_reference_spec import cr_profile
+
+        return cr_profile(self) is not None
 
     @property
     def uses_legacy_smea(self) -> bool:

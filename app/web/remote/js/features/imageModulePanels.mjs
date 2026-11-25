@@ -258,7 +258,9 @@ export function createImageModulePanels({
         canvas.getContext('2d').drawImage(img, 0, 0, width, height);
         const dataUrl = canvas.toDataURL('image/png');
         const b64 = dataUrl.split(',')[1];
-        setModuleParam(moduleId, 'upload_image', b64);
+        // Char Ref 의 의상 · 스타일 칸에서 올리면 그 유형으로 넣는다(V5 Precise Reference · 2026-11-25).
+        setModuleParam(moduleId, 'upload_image',
+          options.referenceType ? JSON.stringify({image: b64, reference_type: options.referenceType}) : b64);
       };
       img.src = reader.result;
     };
@@ -561,6 +563,20 @@ export function createImageModulePanels({
     };
   }
 
+  // V5 Precise Reference(2026-11-25) - 유형 6종(옷 유형은 V5 만) · Strength 상한 = 모델.
+  function crMax(profile) { return Math.max(1, Number(profile?.strength_max) || 1); }
+  function crTypeOptions(current, profile) {
+    const outfit = !!profile?.outfit;
+    const list = [['character&style', 'Char & Style'], ['character', 'Character'], ['style', 'Style']];
+    if (outfit) {
+      list.splice(1, 0, ['character&style_anyoutfit', 'Char & Style (아무 옷)']);
+      list.splice(3, 0, ['character_mainoutfit', 'Character (같은 옷)']);
+      list.push(['costume', 'Outfit']);
+    }
+    if (!list.some(([value]) => value === current)) list.push([current, `${current} (V5 전용)`]);
+    return list.map(([value, label]) => `<option value="${escHtml(value)}"${value === current ? ' selected' : ''}>${escHtml(label)}</option>`).join('');
+  }
+
   function renderCharacterReference(message) {
     if (!message.is_naid45) {
       // V4.0 · V3 이 여기로 온다(V5 는 2026-11-19 부터 4.5F 사양으로 쓴다 - 계약 supports_character_reference).
@@ -580,19 +596,17 @@ export function createImageModulePanels({
             </label>
             <select class="mod-select-sm"
               onchange="setModuleParam('character_reference','ref_type_${index}',this.value)">
-              <option value="character&style" ${frame.reference_type==='character&style'?'selected':''}>Char & Style</option>
-              <option value="character" ${frame.reference_type==='character'?'selected':''}>Character</option>
-              <option value="style" ${frame.reference_type==='style'?'selected':''}>Style</option>
+              ${crTypeOptions(frame.reference_type, message.cr_profile)}
             </select>
             <button class="mod-btn-sm mod-btn-danger" onclick="setModuleParam('character_reference','remove_frame_${index}','')">Remove</button>
           </div>
           <div class="mod-slider-row">
             <span class="mod-slider-label">Strength</span>
-            <input type="range" min="0" max="20" step="1" value="${Math.round(frame.strength*20)}"
+            <input type="range" min="0" max="${Math.round(crMax(message.cr_profile)*20)}" step="1" value="${Math.round(Math.min(crMax(message.cr_profile), frame.strength)*20)}"
               oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','strength_${index}',(this.value/20).toFixed(2))">
-            <span class="mod-slider-value">${frame.strength.toFixed(2)}</span>
+            <span class="mod-slider-value">${Math.min(crMax(message.cr_profile), frame.strength).toFixed(2)}</span>
           </div>
-          <div class="mod-slider-row">
+          <div class="mod-slider-row"${message.cr_profile && !message.cr_profile.fidelity ? ' hidden' : ''}>
             <span class="mod-slider-label">Fidelity</span>
             <input type="range" min="0" max="20" step="1" value="${Math.round(frame.fidelity*20)}"
               oninput="this.nextElementSibling.textContent=(this.value/20).toFixed(2);onModSlider('character_reference','fidelity_${index}',(this.value/20).toFixed(2))">

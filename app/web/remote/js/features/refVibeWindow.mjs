@@ -14,6 +14,22 @@
 import {findOldBlocks, stripOldBlocks} from './animaCharPrompt.mjs?v=20261106';
 
 const TAB_KEY = 'naia.refvibe.tab';
+const CRCAT_KEY = 'naia.refvibe.crcat';
+// Char Ref 의 세 칸(V5 Precise Reference · 사용자 지시 2026-11-25) - 칸은 유형에서 나온다(따로 저장하지 않는다).
+const CR_CATS = [['char', '캐릭터'], ['cos', '의상'], ['sty', '스타일']];
+const CR_CAT_TYPE = {char: 'character&style', cos: 'costume', sty: 'style'};
+function crCatOf(type) {
+  const value = String(type || '');
+  return value === 'costume' ? 'cos' : value === 'style' ? 'sty' : 'char';
+}
+// 캐릭터 칸 = [Character & Style | Character] + 같은 옷 유지 -> 보낼 유형 4종(NAI 웹과 같다).
+function crCharBase(type) { return String(type || '').startsWith('character&style') ? 'character&style' : 'character'; }
+function crKeepOutfit(type) { return type === 'character&style' || type === 'character_mainoutfit'; }
+function crCharType(base, keep) {
+  if (base === 'character&style') return keep ? 'character&style' : 'character&style_anyoutfit';
+  return keep ? 'character_mainoutfit' : 'character';
+}
+const CR_PROFILE_FALLBACK = {strength_max: 1, fidelity: true, outfit: false};
 const PAGE = 60;
 const KINDS = {vibe: 'vibe_transfer', cr: 'character_reference'};
 const API_KIND = {vibe: 'vibe', cr: 'character_reference'};
@@ -48,6 +64,7 @@ export function createRefVibeWindow({
   let panel = null;
   let panelReady = null;
   let tab = (() => { try { return storage?.getItem(TAB_KEY) === 'cr' ? 'cr' : 'vibe'; } catch (_) { return 'vibe'; } })();
+  let crCat = (() => { try { const v = storage?.getItem(CRCAT_KEY); return CR_CAT_TYPE[v] ? v : 'char'; } catch (_) { return 'char'; } })();
   let visible = false;
   let pill = null;
   const openRows = new Set();           // `${tab}:${index}` - 펼친 활성 줄
@@ -224,7 +241,7 @@ export function createRefVibeWindow({
       body.querySelector('[data-rvw-file]').addEventListener('change', event => {
         const file = event.target.files?.[0];
         event.target.value = '';
-        if (file) uploadImage(KINDS[tab], file, {quiet: true});
+        if (file) uploadImage(KINDS[tab], file, {quiet: true, ...uploadExtra()});
       });
       body.querySelector('[data-rvw-import]').addEventListener('change', event => {
         const file = event.target.files?.[0];
@@ -364,12 +381,26 @@ export function createRefVibeWindow({
       if (extra > 0) notices.push(`5개 이상 켜면 Anlas 가 더 듭니다(추가 ${extra}개).`);
       if (state.strength_warning) notices.push(`켜진 강도 합이 ${Number(state.strength_total || 0).toFixed(2)} 입니다 - Normalize 를 켜거나 강도를 낮추세요.`);
     }
-    const rows = frames.map((frame, index) => (tab === 'vibe' ? vibeRow(frame, index) : crRow(frame, index))).join('');
+    const profile = state.cr_profile || CR_PROFILE_FALLBACK;
+    // Char Ref 는 지금 칸(캐릭터 · 의상 · 스타일)의 줄만 - 번호(R1 …)는 서버의 칸 번호 그대로 둔다(켜기 · 빼기가 번호로 간다).
+    const shown = frames.map((frame, index) => ({frame, index}))
+      .filter(item => tab === 'vibe' || crCatOf(item.frame.reference_type) === crCat);
+    const rows = shown.map(({frame, index}) => (tab === 'vibe' ? vibeRow(frame, index) : crRow(frame, index, profile))).join('');
     const max = tab === 'vibe' ? Number(state.max_frames || 16) : 0;
-    host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${frames.length}${max ? ` / ${max}` : ''}</span>`
+    if (tab === 'cr' && crCat === 'cos' && !profile.outfit) {
+      notices.push('의상은 V5 전용입니다 - 지금 모델에서는 생성할 때 빠집니다.');
+    }
+    const head = tab === 'vibe'
+      ? `<span class="rvw-sec-t">활성</span><span class="rvw-sec-n">${frames.length}${max ? ` / ${max}` : ''}</span>`
+      : CR_CATS.map(([key, label]) => {
+        const count = frames.filter(frame => crCatOf(frame.reference_type) === key).length;
+        const off = key === 'cos' && !profile.outfit ? ' data-naia-title="V5 전용 - 지금 모델에서는 생성할 때 빠집니다"' : '';
+        return `<button type="button" class="rvw-btn${key === crCat ? ' is-accent' : ''}" data-rvw-crcat="${key}"${off}>${label} ${count}</button>`;
+      }).join('');
+    host.innerHTML = `<div class="rvw-sec">${head}`
       + `<span class="rvw-sec-tools">${tools}</span></div>`
       + notices.map(text => `<div class="rvw-notice is-warn">${escHtml(text)}</div>`).join('')
-      + (frames.length
+      + (shown.length
         ? `<div class="rvw-rows">${rows}</div>`
         : `<div class="rvw-empty">아래 STORAGE 에서 고르거나, 이미지를 올리거나 붙여 넣으세요.</div>`);
     const list = host.querySelector('.rvw-rows');
@@ -648,26 +679,49 @@ export function createRefVibeWindow({
     return head + detail;
   }
 
-  function crRow(frame, index) {
+  // V5 Precise Reference(2026-11-25): 캐릭터 칸만 유형 고르기 + 같은 옷 유지(V5) · Strength 상한 = 모델(V5 5 · 4.5 1)
+  //  · Fidelity 는 그 모델이 쓸 때만(V5 웹은 숨긴다). 값을 모델 상한으로 자르는 것은 서버의 요청 목이 한다.
+  function crRow(frame, index, profile = CR_PROFILE_FALLBACK) {
     const key = `cr:${index}`;
     const open = openRows.has(key);
     const live = frame.is_enabled ? ' is-live' : ' is-off';
     const type = String(frame.reference_type || 'character&style');
-    const options = [['character&style', 'Char&Style'], ['character', 'Character'], ['style', 'Style']]
-      .map(([value, label]) => `<option value="${value}"${value === type ? ' selected' : ''}>${label}</option>`).join('');
+    const cat = crCatOf(type);
+    const max = Math.max(1, Number(profile.strength_max) || 1);
+    const strength = Math.min(max, Number(frame.strength));
+    let typeCell = '';
+    if (cat === 'char') {
+      const base = crCharBase(type);
+      const options = [['character&style', 'Char&Style'], ['character', 'Character']]
+        .map(([value, label]) => `<option value="${value}"${value === base ? ' selected' : ''}>${label}</option>`).join('');
+      typeCell = `<select class="rvw-sel" data-rvw-type="${index}">${options}</select>`;
+    }
+    const summary = profile.fidelity ? `S ${fmt(strength)} · F ${fmt(frame.fidelity)}` : `S ${fmt(strength)}`;
     const head = `<div class="rvw-row${live}" data-rvw-row="${index}">`
       + `<button type="button" class="rvw-en" data-rvw-en="${index}" aria-label="${frame.is_enabled ? '끄기' : '켜기'}">${frame.is_enabled ? '✔' : '✘'}</button>`
       + thumbHtml(frame)
       + `<button type="button" class="rvw-name" data-rvw-open="${index}">R${index + 1} · ${escHtml(frameName(frame))}</button>`
-      + `<select class="rvw-sel" data-rvw-type="${index}">${options}</select>`
-      + `<button type="button" class="rvw-sf" data-rvw-open="${index}">S ${fmt(frame.strength)} · F ${fmt(frame.fidelity)}</button>`
+      + typeCell
+      + `<button type="button" class="rvw-sf" data-rvw-open="${index}">${summary}</button>`
       + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
     if (!open) return head;
-    const slider = (name, value) => `<span class="rvw-k">${name === 'strength' ? 'Strength' : 'Fidelity'}</span>`
-      + `<input type="range" class="rvw-range is-wide" min="0" max="20" step="1" value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}">`
+    const slider = (name, value, top) => `<span class="rvw-k">${name === 'strength' ? 'Strength' : 'Fidelity'}</span>`
+      + `<input type="range" class="rvw-range is-wide" min="0" max="${Math.round(top * 20)}" step="1" value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}">`
       + `<span class="rvw-v" data-rvw-cr-out="${name}:${index}">${fmt(value)}</span>`;
-    return head + `<div class="rvw-detail"><div class="rvw-line">${slider('strength', frame.strength)}</div>`
-      + `<div class="rvw-line">${slider('fidelity', frame.fidelity)}</div></div>`;
+    const keep = cat === 'char' && profile.outfit
+      ? `<label class="rvw-check" data-naia-title="켜면 그림 속 옷도 따라 그립니다(Prefer same outfit)">`
+        + `<input type="checkbox" data-rvw-keep="${index}"${crKeepOutfit(type) ? ' checked' : ''}> 같은 옷 유지</label>`
+      : '';
+    return head + `<div class="rvw-detail">`
+      + (keep ? `<div class="rvw-line">${keep}</div>` : '')
+      + `<div class="rvw-line">${slider('strength', strength, max)}</div>`
+      + (profile.fidelity ? `<div class="rvw-line">${slider('fidelity', frame.fidelity, 1)}</div>` : '')
+      + `</div>`;
+  }
+
+  /** 업로드 · 붙여넣기가 지금 칸으로 들어가게 - 캐릭터 칸이면 서버 기본(Character & Style). */
+  function uploadExtra() {
+    return tab === 'cr' && crCat !== 'char' ? {referenceType: CR_CAT_TYPE[crCat]} : {};
   }
 
   // ── STORAGE ───────────────────────────────────────────────────────────────
@@ -960,7 +1014,11 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       const ie = state.ie ?? defaultIe(item);
       setModuleParam(KINDS.vibe, 'apply_storage', JSON.stringify({model: state.model, file_hash: item.file_hash, ie}));
     } else {
-      setModuleParam(KINDS.cr, 'apply_storage', JSON.stringify({file_hash: item.file_hash}));
+      // 보관함 그림은 지금 칸으로 들어간다 - 저장된 유형이 다른 칸이면 이 칸의 유형으로(캐릭터 칸은 저장된 유형 그대로).
+      const saved = String(item.settings?.reference_type || 'character&style');
+      const request = {file_hash: item.file_hash};
+      if (crCatOf(saved) !== crCat) request.settings = {reference_type: CR_CAT_TYPE[crCat]};
+      setModuleParam(KINDS.cr, 'apply_storage', JSON.stringify(request));
     }
   }
 
@@ -1562,6 +1620,12 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       renderStore();
       return;
     }
+    if ((el = t.closest('[data-rvw-crcat]'))) {
+      crCat = CR_CAT_TYPE[el.dataset.rvwCrcat] ? el.dataset.rvwCrcat : 'char';
+      try { storage?.setItem(CRCAT_KEY, crCat); } catch (_) { /* 기억 못 해도 된다 */ }
+      renderActive();
+      return;
+    }
     if ((el = t.closest('[data-rvw-card]'))) {
       const state = lib[tab];
       const hash = el.dataset.rvwCard;
@@ -1582,7 +1646,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     if ((el = t.closest('[data-rvw-act]'))) {
       const act = el.dataset.rvwAct;
       if (act === 'upload') panel.body.querySelector('[data-rvw-file]').click();
-      else if (act === 'paste') pasteImage(moduleId, {quiet: true});
+      else if (act === 'paste') pasteImage(moduleId, {quiet: true, ...uploadExtra()});
       else if (act === 'import') openImportMenu(el);
       else if (act === 'apply') applySelected();
       else if (act === 'release') releaseSelected();
@@ -2082,7 +2146,11 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     } else if (t.matches('[data-rvw-cr]')) {
       setModuleParam(KINDS.cr, `${t.dataset.rvwCr}_${t.dataset.index}`, fmt(Number(t.value) / 20));
     } else if (t.matches('[data-rvw-type]')) {
-      setModuleParam(KINDS.cr, `ref_type_${t.dataset.rvwType}`, t.value);
+      const frame = (getModuleState(KINDS.cr)?.frames || [])[Number(t.dataset.rvwType)];
+      setModuleParam(KINDS.cr, `ref_type_${t.dataset.rvwType}`, crCharType(t.value, crKeepOutfit(String(frame?.reference_type || 'character&style'))));
+    } else if (t.matches('[data-rvw-keep]')) {
+      const frame = (getModuleState(KINDS.cr)?.frames || [])[Number(t.dataset.rvwKeep)];
+      setModuleParam(KINDS.cr, `ref_type_${t.dataset.rvwKeep}`, crCharType(crCharBase(String(frame?.reference_type || '')), t.checked));
     } else if (t.matches('[data-rvw-anima]')) {
       setModuleParam(KINDS.cr, `anima_${t.dataset.rvwAnima}`, fmt(Number(t.value) / Number(t.dataset.scale), Number(t.dataset.digits)));
     } else if (t.matches('[data-rvw-anima-sel]')) {

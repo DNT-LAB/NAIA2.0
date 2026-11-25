@@ -1254,6 +1254,7 @@
         "app/backend/server/nai_model_routes.py",
         "core/nai_model_registry.py",
         "core/nai_model_contract.py",
+        "core/nai_character_reference_spec.py",
         "core/generation_request.py",
         "core/headless_generation_service.py",
         "core/headless_session_state_service.py",

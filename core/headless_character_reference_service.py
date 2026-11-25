@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from core.nai_character_reference_spec import (
+    REFERENCE_TYPES, clamp_strength, cr_profile, normalize_reference_type, source_image_data,
+)
+
 import base64
 import io
 import json
@@ -64,9 +68,7 @@ class HeadlessCharacterReferenceService:
         if not isinstance(raw, dict):
             return None
         file_hash = str(raw.get("file_hash") or "")
-        ref_type = str(raw.get("reference_type") or "character&style")
-        if ref_type not in {"character&style", "character", "style"}:
-            ref_type = "character&style"
+        ref_type = normalize_reference_type(raw.get("reference_type"))
         image_bytes = b""
         image_data = ""
         thumbnail = ""
@@ -157,32 +159,11 @@ class HeadlessCharacterReferenceService:
             pass
 
     def image_data(self, image) -> str:
-        from PIL import Image
+        """프레임이 들고 있을 원본(여백 없음 · 2026-11-25 V5).
 
-        source = image.convert("RGBA") if image.mode == "RGBA" else image.convert("RGB")
-        width, height = source.size
-        aspect_ratio = width / max(1, height)
-        ratios = {
-            "2:3": (2 / 3, 1024, 1536),
-            "3:2": (3 / 2, 1536, 1024),
-            "1:1": (1, 1472, 1472),
-        }
-        _, canvas_width, canvas_height = min(
-            ratios.values(),
-            key=lambda item: abs(aspect_ratio - item[0]),
-        )
-        canvas = Image.new("RGB", (canvas_width, canvas_height), (0, 0, 0))
-        scale = min(canvas_width / max(1, width), canvas_height / max(1, height))
-        new_width = max(1, int(width * scale))
-        new_height = max(1, int(height * scale))
-        resized = source.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        x_offset = (canvas_width - new_width) // 2
-        y_offset = (canvas_height - new_height) // 2
-        if resized.mode == "RGBA":
-            canvas.paste(resized, (x_offset, y_offset), resized)
-        else:
-            canvas.paste(resized, (x_offset, y_offset))
-        return base64.b64encode(image_to_png_bytes(canvas)).decode("ascii")
+        4.5 캔버스 여백 · V5 버킷 잘라 내기는 요청 목(api_service -> `adapt_payload`)에서 모델에 맞춰 한다.
+        """
+        return source_image_data(image)
 
     def save_storage(self, frame: dict[str, Any]) -> None:
         raw = frame.get("image_bytes")
@@ -228,6 +209,15 @@ class HeadlessCharacterReferenceService:
                 "fidelity": 0.8,
             }
 
+    def _cr_profile_payload(self) -> dict[str, Any] | None:
+        """화면이 쓸 이 모델의 CR 사양(유형 목록 · Strength 상한 · Fidelity 칸)."""
+        try:
+            spec = self.context._remote_state_service()._current_nai_model_spec()
+        except Exception:
+            return None
+        profile = cr_profile(spec)
+        return profile.to_payload() if profile is not None else None
+
     def module_state(self) -> dict[str, Any]:
         self._ensure_loaded()
         display_names = get_ref_vibe_library(self.context).display_names(
@@ -246,7 +236,8 @@ class HeadlessCharacterReferenceService:
                 "fidelity": _as_float(frame.get("fidelity"), 0.8),
                 "thumbnail": frame.get("thumbnail", ""),
             })
-        state = {"is_naid45": self.context._is_naid45_model(), "frames": frames}
+        state = {"is_naid45": self.context._is_naid45_model(), "frames": frames,
+                 "cr_profile": self._cr_profile_payload()}
         anima = self._anima_block()
         if anima is not None:
             state["anima"] = anima
@@ -313,8 +304,20 @@ class HeadlessCharacterReferenceService:
         if key.startswith("anima_"):
             return self._anima_param(key, value)
         if key == "upload_image":
-            image_bytes = base64.b64decode(data_url_payload(str(value or "")))
+            # 값 = base64 그대로, 또는 {"image": base64, "reference_type": 칸 유형}(의상 · 스타일 칸 업로드 · 2026-11-25)
+            text = str(value or "")
+            upload_type = ""
+            if text.lstrip().startswith("{"):
+                try:
+                    request = json.loads(text)
+                    text = str(request.get("image") or "")
+                    upload_type = normalize_reference_type(request.get("reference_type"), "")
+                except (ValueError, TypeError, AttributeError):
+                    return context._toast("Character Reference upload request could not be read", level="error")
+            image_bytes = base64.b64decode(data_url_payload(text))
             frame = self.frame_from_bytes(image_bytes, file_name="remote_upload.png")
+            if upload_type:
+                frame["reference_type"] = upload_type
             # 같은 이미지가 이미 있으면 새 칸을 만들지 않는다(사용자 제보 2026-10-23: 결과 우클릭 > Set as ... 를 누를 때마다
             # 같은 그림이 R1 · R2 · R3 으로 쌓였다). 켜짐 상태는 그대로 - 업로드는 원래 끈 채로 넣는다.
             existing = next((f for f in context.character_reference_frames if f.get("file_hash") == frame["file_hash"]), None)
@@ -361,7 +364,8 @@ class HeadlessCharacterReferenceService:
         elif key.startswith("strength_"):
             index = context._index_from_key(key, "strength_")
             if index is not None and 0 <= index < len(context.character_reference_frames):
-                context.character_reference_frames[index]["strength"] = max(0.0, min(1.0, float(value)))
+                # 저장은 0~5(V5 상한) - 모델 상한(4.5 = 1)으로 자르는 것은 요청 목이 한다.
+                context.character_reference_frames[index]["strength"] = clamp_strength(value)
                 self._save_library_settings(context.character_reference_frames[index])
         elif key.startswith("fidelity_"):
             index = context._index_from_key(key, "fidelity_")
@@ -370,8 +374,8 @@ class HeadlessCharacterReferenceService:
                 self._save_library_settings(context.character_reference_frames[index])
         elif key.startswith("ref_type_"):
             index = context._index_from_key(key, "ref_type_")
-            ref_type = str(value or "").strip()
-            if index is not None and 0 <= index < len(context.character_reference_frames) and ref_type in {"character&style", "character", "style"}:
+            ref_type = str(value or "").strip().lower()
+            if index is not None and 0 <= index < len(context.character_reference_frames) and ref_type in REFERENCE_TYPES:
                 context.character_reference_frames[index]["reference_type"] = ref_type
                 self._save_library_settings(context.character_reference_frames[index])
         elif key == "get_storage":
@@ -485,7 +489,7 @@ class HeadlessCharacterReferenceService:
             })
             images.append(image_data)
             ie.append(1)
-            strength = round(max(0.0, min(1.0, _as_float(frame.get("strength"), 1.0))) * 20) / 20.0
+            strength = round(clamp_strength(frame.get("strength")) * 20) / 20.0
             fidelity = 1.0 - max(0.0, min(1.0, _as_float(frame.get("fidelity"), 0.8)))
             fidelities.append(round(fidelity * 20) / 20.0)
             strengths.append(strength)

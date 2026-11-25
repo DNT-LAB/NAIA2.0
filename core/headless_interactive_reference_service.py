@@ -31,7 +31,7 @@ from typing import Any
 
 _STORE = "InteractiveReferenceModule"
 MAX_FRAMES = 4          # NAI 스펙 상한과 같다. 넘겨 보내면 API 가 거부한다.
-REFERENCE_TYPES = ("character&style", "character", "style")
+from core.nai_character_reference_spec import REFERENCE_TYPES, clamp_strength  # noqa: E402 - 6종(V5 옷 유형 포함)
 
 
 def _as_float(value: Any, fallback: float) -> float:
@@ -189,10 +189,12 @@ class HeadlessInteractiveReferenceService:
             if key == "reference_type":
                 # NAI 가 받는 값은 셋뿐이다. 아무 문자열이나 넣으면 base_caption 으로
                 # 그대로 나가 API 가 거부한다(기존 CR 서비스도 같은 목록을 쓴다).
-                v = str(value or "character&style")
+                v = str(value or "character&style").strip().lower()
                 if v not in REFERENCE_TYPES:
                     raise ValueError(f"unknown reference_type: {v!r}")
                 row[key] = v
+            elif key == "strength":
+                row[key] = clamp_strength(_as_float(value, row.get(key, 1.0)))
             else:
                 row[key] = max(0.0, min(1.0, _as_float(value, row.get(key, 1.0))))
             self._persist()
@@ -220,7 +222,7 @@ class HeadlessInteractiveReferenceService:
             "director_reference_images": [str(f["image_data"]) for f in rows],
             "director_reference_information_extracted": [1] * len(rows),
             "director_reference_strength_values": [
-                round(max(0.0, min(1.0, _as_float(f.get("strength"), 1.0))) * 20) / 20.0
+                round(clamp_strength(f.get("strength")) * 20) / 20.0
                 for f in rows],
             "director_reference_secondary_strength_values": [
                 round((1.0 - max(0.0, min(1.0, _as_float(f.get("fidelity"), 0.8)))) * 20) / 20.0

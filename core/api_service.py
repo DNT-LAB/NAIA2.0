@@ -1958,7 +1958,10 @@ class APIService:
                             print(f"  - {len(vibe_data['reference_image_multiple'])} vibe(s) added")
 
             # ✅ Phase 3: Early Binding - GenerationRequest에서 NAI Character Reference 데이터 가져오기 - NAID4.5 · V5(4.5F 사양 · 2026-11-19)
-            if model_spec.supports_character_reference:
+            # V5 는 마스크가 있으면 CR 을 안 싣는다(웹 charRefInpainting=false · 2026-11-25) - 인페인트 강도 미러도 건너뛴다.
+            from core.nai_character_reference_spec import adapt_payload as _adapt_cr_payload, cr_profile as _cr_profile
+            _cr_prof = _cr_profile(model_spec)
+            if _cr_prof is not None and (action_type != "infill" or _cr_prof.inpaint):
                 generation_request = params.get('_generation_request')
                 if generation_request and generation_request.nai_character_reference:
                     print("✅ [EarlyBinding] Character Reference Data from GenerationRequest")
@@ -2023,6 +2026,9 @@ class APIService:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
 
                     print(f"  - Director images: {len(params['director_reference_images'])}")
+                # 모델마다 갈라진 사양으로 한 번 맞춘다(유형 · Strength 상한 · Fidelity · 그림 캔버스/버킷).
+                for _note in _adapt_cr_payload(api_parameters, model_spec, inpainting=(action_type == "infill")):
+                    print(f"  - [CR] {_note}")
 
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):

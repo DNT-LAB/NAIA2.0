@@ -248,6 +248,9 @@ class WildcardProcessor:
     def _expand_recursive(self, tag: str, context: PromptContext, depth=0) -> List[str]:
         """하나의 태그를 재귀적으로 확장합니다."""
         if depth > 10: return [tag]
+        # `ref:__폴더__` 는 보관함 폴더 호출이다 - 같은 이름의 와일드카드 파일이 있어도 펼치지 않는다(2026-11-25)
+        if tag.lstrip()[:4].lower() == 'ref:':
+            return [tag]
 
         # $ 로 시작하는 인스턴트 와일드카드 처리 (재귀 호출에서도)
         if tag.startswith('$'):

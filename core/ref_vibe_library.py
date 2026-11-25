@@ -391,6 +391,28 @@ class RefVibeLibrary:
         with self._lock:
             return self._listing(self._read(), kind, **query)
 
+    def callable_folders(self):
+        """`ref:` 로 부를 수 있는 폴더(Character Reference) - [{id, name, group, items}] · 그림은 이름순.
+        폴더 밖(미분류) 그림은 부를 수 없다(core/ref_prompt_resolver.py)."""
+        kind = "character_reference"
+        with self._lock:
+            data = self._read()
+            first = self._listing(data, kind, sort="name", limit=200)
+            items = list(first["items"])
+            while len(items) < first["total"]:
+                page = self._listing(data, kind, sort="name", offset=len(items), limit=200)["items"]
+                if not page:
+                    break
+                items += page
+        return [{"id": c["id"], "name": c["name"], "group": c["group"],
+                 "items": [i for i in items if i["category"] == c["id"]]} for c in first["categories"]]
+
+    def character_image_path(self, file_hash):
+        """보관 그림 원본(images/<해시>.png) 경로 - 없으면 LibraryError(404)."""
+        file_hash = safe_component(file_hash)
+        with self._lock:
+            return self._character_image(file_hash)[1]
+
     def _item(self, data, kind, file_hash, model=""):
         # Exact hash lookup must not be bounded by the public page size.
         listing = self._listing(data, kind, model=model, _file_hash=file_hash)

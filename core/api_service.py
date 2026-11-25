@@ -22,6 +22,7 @@ from core.comfyui_service import ComfyUIService
 from core import local_generation_timeout
 from core.wildcard_processor import request_character_overrides
 from core.anima_engine.prompt_loras import split_lora_lines
+from core.ref_prompt_resolver import RefPromptError
 from core.comfyui_workflow_manager import ComfyUIWorkflowManager
 from core.resolution_utils import (
     apply_resolution_to_comfyui_workflow,
@@ -735,6 +736,29 @@ class APIService:
 
     @generation_operation
     def call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
+        try:
+            return self._call_generation_api(parameters, progress_callback=progress_callback,
+                                             preview_callback=preview_callback)
+        finally:
+            self._finish_ref_prompt(parameters)
+
+    @staticmethod
+    def _finish_ref_prompt(parameters: Dict[str, Any]) -> None:
+        """`ref:` 호출을 마무리한다 - 해석한 칸(그림 base64)은 생성 정보에 남기지 않고 고른 것만 짧게 남긴다.
+        프롬프트에는 호출 글을 되돌려 둔다(히스토리 · 다시 생성 · 파생 요청이 같은 호출을 다시 푼다)."""
+        if not isinstance(parameters, dict):
+            return
+        frames = parameters.pop('_ref_prompt_frames', None)
+        tokens = parameters.pop('_ref_prompt_tokens', None)
+        parameters.pop('_ref_prompt_char_tokens', None)
+        if frames:
+            parameters['ref_prompt_picks'] = [
+                {key: frame.get(key) for key in ('token', 'folder', 'name', 'file_hash', 'reference_type', 'strength')}
+                for frame in frames]
+        if tokens and isinstance(parameters.get('input'), str):
+            parameters['input'] = ", ".join(filter(None, [parameters['input'].strip(), *tokens]))
+
+    def _call_generation_api(self, parameters: Dict[str, Any], progress_callback=None, preview_callback=None) -> Dict[str, Any]:
         """
         파라미터의 'api_mode'에 따라 적절한 API 호출 메서드로 분기합니다.
         최대 5회까지 예외 발생 시 재시도합니다.
@@ -863,6 +887,15 @@ class APIService:
         if restore_network_tokens:
             parameters['input'] = restore_network_tokens(parameters['input'])
         api_mode = parameters.get('api_mode', 'NAI') # 기본값은 NAI
+
+        # `ref:폴더:이름` 호출(사용자 지시 2026-11-25 · core/ref_prompt_resolver.py) - 프롬프트에서 걷고 NAI 요청 목에서
+        # Character Reference 칸으로 덧붙인다. 다른 모드는 글만 걷는다(모델에 글로 새지 않게).
+        if isinstance(parameters.get('input'), str) and '_ref_prompt_tokens' not in parameters:
+            from core.ref_prompt_resolver import split_ref_tokens
+            parameters['input'], _ref_tokens = split_ref_tokens(parameters['input'])
+            parameters['_ref_prompt_tokens'] = _ref_tokens
+            if _ref_tokens and api_mode != "NAI":
+                print(f"[REF] {api_mode} 는 ref: 를 쓰지 않습니다 - 걷기만 했습니다: {_ref_tokens}")
 
         if (
             parameters.get('artist_thumb_request')
@@ -1789,6 +1822,17 @@ class APIService:
                 if characters:
                     characters, ucs, character_positions, character_ids = strip_character_comment_tags(
                         characters, ucs, character_positions, character_ids)
+                    # 캐릭터 프롬프트 안의 `ref:` 호출도 걷어 칸으로(사용자 지시 2026-11-25)
+                    from core.ref_prompt_resolver import split_ref_tokens as _split_ref
+                    _char_ref_tokens = []
+                    _stripped_characters = []
+                    for _prompt in characters:
+                        _rest, _found = _split_ref(_prompt)
+                        _stripped_characters.append(_rest)
+                        _char_ref_tokens.extend(_found)
+                    if _char_ref_tokens:
+                        characters = _stripped_characters
+                        params['_ref_prompt_char_tokens'] = _char_ref_tokens
 
                 # 공통 적용: 정규화된 캐릭터 데이터를 v4_prompt에 추가
                 if characters:
@@ -2026,9 +2070,26 @@ class APIService:
                         api_parameters['normalize_reference_strength_multiple'] = params['normalize_reference_strength_multiple']
 
                     print(f"  - Director images: {len(params['director_reference_images'])}")
+                # `ref:` 호출 - 활성 칸 뒤에 이 장에만 덧붙인다. 해석은 한 번만(재시도 · 차례 호출이 같은 그림).
+                _ref_tokens = list(params.get('_ref_prompt_tokens') or []) + list(params.get('_ref_prompt_char_tokens') or [])
+                if _ref_tokens:
+                    from core.ref_prompt_resolver import append_to_director_lists, describe, resolve_ref_tokens
+                    if api_parameters.get('reference_image_multiple'):
+                        raise RefPromptError("Vibe 가 켜져 있어 ref: 를 쓸 수 없습니다 - Vibe 를 끄거나 ref: 를 빼세요")
+                    _ref_frames = params.get('_ref_prompt_frames')
+                    if _ref_frames is None:
+                        from core.ref_vibe_library import get_ref_vibe_library
+                        _ref_frames = resolve_ref_tokens(get_ref_vibe_library(self.app_context), _ref_tokens)
+                        params['_ref_prompt_frames'] = _ref_frames
+                    append_to_director_lists(api_parameters, _ref_frames)
+                    print(f"  - [REF] ref: {len(_ref_frames)}장 - {describe(_ref_frames)}")
                 # 모델마다 갈라진 사양으로 한 번 맞춘다(유형 · Strength 상한 · Fidelity · 그림 캔버스/버킷).
                 for _note in _adapt_cr_payload(api_parameters, model_spec, inpainting=(action_type == "infill")):
                     print(f"  - [CR] {_note}")
+            elif params.get('_ref_prompt_tokens') or params.get('_ref_prompt_char_tokens'):
+                if _cr_prof is None:
+                    raise RefPromptError(f"이 모델({model_name})은 Character Reference 를 받지 않아 ref: 를 쓸 수 없습니다")
+                print("  - [REF] V5 인페인트는 Character Reference 를 받지 않는다 - ref: 를 걷기만 했다")
 
             # 🔥 개선된 커스텀 파라미터 처리 (NAI용)
             if params.get('use_custom_api_params', False):
@@ -2165,6 +2226,10 @@ class APIService:
             else:
                 raise Exception("응답에서 이미지를 처리할 수 없습니다.")
 
+        except RefPromptError as e:
+            # 프롬프트의 ref: 를 못 풀었다 - 다시 보내도 같다(폴더 · 이름 · 모델 · Vibe 충돌)
+            print(f"❌ [REF] {e}")
+            return {'status': 'error', 'message': f"ref: {e}", 'no_retry': True}
         except NaiConnectionLost as e:
             # 재시도하지 않는다(NaiConnectionLost 설명 참고) - call_generation_api 가 no_retry 를 보고 바로 돌려준다
             print(f"❌ {e}")

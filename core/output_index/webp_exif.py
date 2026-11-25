@@ -116,6 +116,28 @@ def texts_for_item(item) -> dict[str, str]:
     raise ValueError("missing PNG terminator")
 
 
+# NAI 가 돌려주는 PNG 의 Comment 에는 **이미 인코딩된 vibe** 가 통째로 실린다(하나에 base64 약 65KB).
+# EXIF 는 UTF-16 이라 vibe 하나에 약 130KB 가 붙어, vibe 4개면 디스크 WebP 가 5배를 넘었다(사용자 제보 11-25 ·
+# v2.0.73 회귀). v2.0.72 까지 WebP 에는 메타가 아예 없었고, 색인은 프롬프트만 본다 - vibe 본문만 뺀다.
+# 강도 · IE 같은 작은 값과 PNG 저장(NAI 원본 그대로)은 건드리지 않는다.
+_VIBE_PAYLOAD_KEYS = ("reference_image_multiple", "reference_image")
+
+
+def _without_vibe_payload(texts: dict[str, str]) -> dict[str, str]:
+    comment = texts.get("Comment")
+    if not isinstance(comment, str) or not any(key in comment for key in _VIBE_PAYLOAD_KEYS):
+        return texts
+    try:
+        payload = json.loads(comment)
+    except ValueError:
+        return texts
+    if not isinstance(payload, dict) or not any(key in payload for key in _VIBE_PAYLOAD_KEYS):
+        return texts
+    for key in _VIBE_PAYLOAD_KEYS:
+        payload.pop(key, None)
+    return {**texts, "Comment": json.dumps(payload, ensure_ascii=False)}
+
+
 def _description(texts: dict[str, str]) -> str | None:
     from utils.image_info import parse_metadata_texts
 
@@ -132,7 +154,7 @@ def _description(texts: dict[str, str]) -> str | None:
 def webp_bytes_for_disk(item) -> bytes:
     original = item.webp_bytes
     try:
-        texts = texts_for_item(item)
+        texts = _without_vibe_payload(texts_for_item(item))
         exif = build_generation_exif(texts, _description(texts))
     except Exception:
         # No usable metadata; a second lossy encoding would not help.

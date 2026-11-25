@@ -960,6 +960,7 @@
         "core/inset_feature_extract.py",
         "app/web/remote/js/features/imageModulePanels.mjs",
         "app/web/remote/js/features/refVibeWindow.mjs",
+        "app/web/remote/js/features/refHoverCard.mjs",
         "app/web/remote/js/features/animaCharPrompt.mjs"
       ],
       "legacy_dependency": "none",
@@ -967,6 +968,7 @@
         {"method": "GET", "path": "/api/module-storage/character-reference/thumb", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/module-storage/vibe/thumb", "smoke": "asset_runtime"},
         {"method": "GET", "path": "/api/ref-vibe/library", "smoke": "non_destructive"},
+        {"method": "GET", "path": "/api/ref-vibe/library/describe", "smoke": "non_destructive"},
         {"method": "POST", "path": "/api/ref-vibe/library/item", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/character-prompt", "smoke": "state_mutation"},
         {"method": "POST", "path": "/api/ref-vibe/library/extract-features", "smoke": "external_live"},

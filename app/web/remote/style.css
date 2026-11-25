@@ -10053,6 +10053,8 @@ body.resizing-result-info {
 .slash-detail-text.is-empty { color: var(--text-dim); }
 /* 회수 안 된 슬래시 명령(`/seq` 등) - 태그가 아니다. 생성 직전에 무시된다(2026-09-13). */
 .prompt-token-slash { color: #ffb86b; background: rgba(255, 184, 107, 0.14); text-decoration: underline dotted; }
+/* `ref:폴더:이름` = REFERENCE 보관함 호출 - 링크처럼(마우스를 올리면 그림 · 넣는 글 카드 · 2026-11-25) */
+.prompt-token-ref { color: #74bfff; background: rgba(116, 191, 255, 0.13); text-decoration: underline; text-decoration-color: rgba(116, 191, 255, 0.75); }
 /* `-태그` = 생성 직전에 네거티브로 빠지는 것.
    ⚠️ **취소선을 쓰지 않는다.** 선이 글자 한가운데를 지나 정작 무슨 태그인지 읽기가
       불편했다(사용자 지적). 대신 캐릭터 슬롯의 빼기 강조와 **같은 어법**으로
@@ -16902,7 +16904,15 @@ body.detached-module.detached-module-img2img .mod-img2img-mask-compact-actions {
 .ref-ac-thumbs { margin-top: 10px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .ref-ac-thumbs.is-one { grid-template-columns: minmax(0, 1fr); }
 .ref-ac-img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: rgba(255,255,255,.04); display: block; }
-.ref-ac-thumbs.is-one .ref-ac-img { aspect-ratio: auto; max-height: 260px; object-fit: contain; }
+/* 그림 하나 = 2:1 칸에 맞춰 넣고 아래에 넣는 글(사용자 2026-11-25 - 썸네일이 클 필요는 없다) */
+.ref-ac-thumbs.is-one .ref-ac-img { aspect-ratio: 2 / 1; object-fit: contain; background: rgba(0,0,0,.28); }
+.ref-ac-texts { margin-top: 10px; display: grid; gap: 5px; }
+.ref-ac-text { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; font-size: 11.5px; line-height: 1.5; }
+.ref-ac-label { color: var(--text-dim); font-size: 10.5px; padding-top: 1px; }
+.ref-ac-value { color: var(--text-primary); overflow-wrap: anywhere; word-break: break-word; }
+.ref-ac-text.is-uc .ref-ac-value { color: #f0a0ad; }
+.ref-ac-text.is-off .ref-ac-value { color: var(--text-dim); text-decoration: line-through; }
+.ref-ac-text.is-dim .ref-ac-value { color: var(--text-dim); }
 .chunk-ac-loading {
   padding: 18px;
   color: var(--text-dim);
@@ -25057,6 +25067,15 @@ button.cq-wcs-row:hover { background: rgba(255,255,255,0.05); }
       비켜 아래로 내린다. 메인 프롬프트의 `-태그` 강조와 같은 어법이다.
    ⚠️ 연결된 슬롯에서만 칠한다(JS `fieldIsLinked`). 연결이 없으면 빼기가 동작하지 않는
       데도 칠하면 화면이 거짓말을 한다. */
+/* 캐릭터 칸의 `ref:` 호출 - 미러는 배경만 그린다(글자는 투명) · 밑줄은 색을 따로 줘서 보인다 */
+.cq-hl-ref {
+  background: rgba(116,191,255,0.16);
+  border-radius: 2px;
+  text-decoration: underline;
+  text-decoration-color: rgba(116,191,255,0.85);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
 .cq-hl-minus {
   background: rgba(226,92,112,0.26);
   box-shadow: 0 0 0 1px rgba(226,92,112,0.42);
@@ -34175,3 +34194,21 @@ body.draft-mode .prompt-highlight-wrap .pe-mini { display: none; }
   border-color: rgba(255,255,255,0.08); }
 .drc-card .drc-more { align-self: center; font-family: var(--font-mono); color: var(--text-dim); }
 .drc-card.is-busy .tag-tooltip-extra-tag { cursor: progress; }
+
+/* 프롬프트 칸의 `ref:` 호출에 마우스를 올리면 뜨는 카드(refHoverCard.mjs · 2026-11-25) */
+.ref-hover-card { position: fixed; z-index: 12000; display: none; gap: 10px; width: 300px; max-width: calc(100vw - 16px);
+  padding: 9px 10px; border-radius: 8px; background: rgba(18,18,26,0.97); border: 1px solid rgba(116,191,255,0.32);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45); pointer-events: none; font-family: var(--font-mono), "Malgun Gothic", sans-serif; }
+.ref-hover-card.open { display: flex; }
+.ref-hover-card .rhc-thumb { flex: none; width: 64px; height: 86px; border-radius: 6px; object-fit: cover; background: rgba(255,255,255,.05); }
+.ref-hover-card .rhc-thumbs { display: grid; grid-template-columns: repeat(3, 34px); gap: 3px; flex: none; align-content: start; }
+.ref-hover-card .rhc-thumbs img { width: 34px; height: 34px; border-radius: 4px; object-fit: cover; }
+.ref-hover-card .rhc-body { min-width: 0; flex: 1; font-size: 11px; line-height: 1.5; color: var(--text-primary); }
+.ref-hover-card .rhc-title { color: #74bfff; font-weight: 700; overflow-wrap: anywhere; }
+.ref-hover-card .rhc-meta { color: var(--text-dim); font-size: 10.5px; }
+.ref-hover-card .rhc-line { overflow-wrap: anywhere; }
+.ref-hover-card .rhc-line.is-uc { color: #f0a0ad; }
+.ref-hover-card .rhc-line.is-off { color: var(--text-dim); text-decoration: line-through; }
+.ref-hover-card .rhc-line.is-dim { color: var(--text-dim); }
+.ref-hover-card.is-error { border-color: rgba(226,92,112,0.55); }
+.ref-hover-card .rhc-error { color: #ff8a9e; }

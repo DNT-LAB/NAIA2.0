@@ -2468,7 +2468,23 @@ export function createTagAssistController({
       : '<div class="chunk-ac-preview-meta">그림이 없습니다</div>';
     return '<div class="chunk-ac-preview-title">' + escHtml(result.value || '') + '</div>'
       + '<div class="chunk-ac-preview-meta">' + escHtml([result.group, result.preview].filter(Boolean).join(' · ')) + '</div>'
-      + pics;
+      + pics + (result._wc_type === 'ref_item' ? refCallTextHtml(result) : '');
+  }
+
+  /** 그림 하나가 부른 자리에 넣을 글(프롬프트 · UC) - 자동완성 미리보기와 프롬프트 칸 마우스 카드가 같이 쓴다. */
+  function refCallTextHtml(row) {
+    const state = String(row.prompt_state || 'empty');
+    const line = (label, text, cls = '') => `<div class="ref-ac-text${cls}"><span class="ref-ac-label">${label}</span>`
+      + `<span class="ref-ac-value">${escHtml(text)}</span></div>`;
+    let html = '<div class="ref-ac-texts">';
+    if (state === 'empty') html += line('넣는 글', '없음', ' is-dim');
+    else {
+      if (state === 'off') html += line('넣는 글', '꺼 둠 - 그림만 갑니다', ' is-dim');
+      if (row.call_prompt) html += line('프롬프트', row.call_prompt, state === 'off' ? ' is-off' : '');
+      if (row.call_uc) html += line('UC', row.call_uc, state === 'off' ? ' is-off' : ' is-uc');
+    }
+    if (row.same_outfit_off) html += line('같은 옷', '유지 끔(프롬프트 호출)', ' is-dim');
+    return html + '</div>';
   }
 
   function chunkPreviewHtml(result) {

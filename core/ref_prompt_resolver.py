@@ -424,6 +424,37 @@ def _rank(text: str, needle: str) -> int | None:
     return None
 
 
+def item_text(item: dict[str, Any], group: str) -> dict[str, str]:
+    """미리보기 · 마우스 카드에 보일 '넣는 글' - 꺼 두어도 글은 보이고 상태로 알린다(on · off · empty)."""
+    if group == "character":
+        prompt, uc = _one_line(item.get("character_prompt")), _one_line(item.get("character_uc"))
+    else:
+        prompt, uc = _one_line(item.get("call_prompt")), _one_line(item.get("call_uc"))
+    state = "off" if item.get("call_prompt_on") is False else ("on" if (prompt or uc) else "empty")
+    return {"call_prompt": prompt, "call_uc": uc, "prompt_state": state}
+
+
+def describe_ref_call(library: Any, token: str, scope: str = "") -> dict[str, Any]:
+    """프롬프트 칸의 호출 하나를 설명한다(마우스 카드) - 차례를 굴리지 않는다. 못 부르면 ok=False + 이유."""
+    try:
+        call, folder = locate_ref_call(str(token or "").strip(), _folder_index(library), scope)
+        base = {"ok": True, "token": call["token"], "folder": folder["name"],
+                "group": GROUP_LABEL.get(folder["group"], folder["group"]), "strength": call["strength"]}
+        if call["mode"] != "name":
+            check_pickable(call, folder)
+            return {**base, "kind": "wild", "mode": call["mode"], "count": len(folder["items"]),
+                    "thumbs": _thumbs(folder)}
+        item = _pick(call, folder)
+        reference_type = _reference_type(folder["group"], item.get("settings") or {})
+        return {**base, "kind": "item", "file_hash": str(item.get("file_hash") or ""),
+                "name": str(item.get("display_name") or item.get("file_hash") or ""),
+                "type": TYPE_LABEL.get(reference_type, reference_type),
+                "thumb": str(item.get("thumbnail_url") or ""), "same_outfit_off": folder["group"] == "character",
+                **item_text(item, folder["group"])}
+    except RefPromptError as exc:
+        return {"ok": False, "token": str(token or ""), "error": str(exc)}
+
+
 def _thumbs(folder: dict[str, Any], count: int = 6) -> list[str]:
     return [str(i.get("thumbnail_url")) for i in folder["items"] if i.get("thumbnail_url")][:count]
 
@@ -480,7 +511,9 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
                 "group": GROUP_LABEL.get(folder["group"], folder["group"]),
                 "desc": TYPE_LABEL.get(reference_type, reference_type),
                 "preview": f"{TYPE_LABEL.get(reference_type, reference_type)} · 끝에 :1.5 처럼 강도(생략 = 1.0)",
-                "thumb": str(item.get("thumbnail_url") or "")}
+                "thumb": str(item.get("thumbnail_url") or ""),
+                # 미리보기 칸 아래에 보일 '넣는 글'(사용자 2026-11-25) · 캐릭터는 같은 옷 유지를 끈다
+                "same_outfit_off": folder["group"] == "character", **item_text(item, folder["group"])}
 
     if len(parts) == 2:
         folder = next((f for f in folders if f["name"].casefold() == parts[0].strip().casefold()), None)

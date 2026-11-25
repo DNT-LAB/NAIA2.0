@@ -105,6 +105,17 @@ def register_module_storage_routes(
         return await library_call("list_items", kind, model=model, filter=filter, category_id=category_id,
                                   q=q, sort=sort, offset=offset, limit=limit, group=group)
 
+    @app.get("/api/ref-vibe/library/describe")
+    async def api_ref_vibe_describe(token: str = "", scope: str = "main"):
+        # 프롬프트 칸의 `ref:` 호출 하나 - 마우스를 올렸을 때의 카드(차례를 굴리지 않는다)
+        from core.ref_prompt_resolver import describe_ref_call
+
+        def work():
+            return describe_ref_call(get_ref_vibe_library(session_context), token,
+                                     "char" if scope == "char" else "main")
+
+        return JSONResponse(await run_in_thread(work))
+
     @app.post("/api/ref-vibe/library/item")
     async def api_ref_vibe_item(body: dict):
         return await library_call("edit_item", body.get("kind"), body.get("file_hash"),

@@ -665,7 +665,7 @@ export function createCharacterQuickPanel({
 
   /** 한 토막 안의 `-태그` 를 감싼다. 나머지는 원문 그대로.
    *  백엔드 `_apply_minus_tags` 와 같은 판정: 맨 앞이 `-` 이고 `::` 가 없을 것. */
-  function minusHtml(text) {
+  function minusHtml(text, minus = true, refs = true) {
     let out = '', cursor = 0, hit = false;
     for (const [start, end] of tagRanges(text)) {
       out += escHtml(text.slice(cursor, start));
@@ -673,8 +673,12 @@ export function createCharacterQuickPanel({
       const lead = piece.match(/^\s*/)[0];
       const core = piece.slice(lead.length).replace(/\s+$/, '');
       const trail = piece.slice(lead.length + core.length);
-      if (core.length > 1 && core.startsWith('-') && !core.includes('::')) {
+      if (minus && core.length > 1 && core.startsWith('-') && !core.includes('::')) {
         out += escHtml(lead) + `<span class="cq-hl-minus">${escHtml(core)}</span>` + escHtml(trail);
+        hit = true;
+      } else if (refs && /^ref:\S/i.test(core)) {
+        // `ref:` 호출 = 링크처럼(마우스를 올리면 refHoverCard 의 카드 · 2026-11-25) - 연결 안 된 칸에서도 칠한다
+        out += escHtml(lead) + `<span class="cq-hl-ref">${escHtml(core)}</span>` + escHtml(trail);
         hit = true;
       } else {
         out += escHtml(piece);
@@ -687,8 +691,8 @@ export function createCharacterQuickPanel({
 
   /** 미러에 칠할 HTML. 칠할 것이 없으면 빈 문자열(강조를 아예 걸지 않는다).
    *  @param minus 이 슬롯에서 `-태그` 가 빼기로 동작하는가(= 연결된 슬롯인가). */
-  function connectHighlightHtml(text, minus) {
-    const paint = segment => (minus ? minusHtml(segment) : {html: escHtml(segment), hit: false});
+  function connectHighlightHtml(text, minus, refs = true) {
+    const paint = segment => minusHtml(segment, minus, refs);
     const parts = connectParts(text);
     if (!parts) {
       // 구간 마커가 없어도 `-태그` 는 칠한다. 둘 다 없으면 아무것도 하지 않는다.
@@ -726,7 +730,8 @@ export function createCharacterQuickPanel({
     paintCommentLayer(element, escHtml);
     const mirror = wrap.querySelector('.cq-hl');
     if (!mirror) return;
-    const html = connectHighlightHtml(element.value, fieldIsLinked(element));
+    // 네거티브 칸의 ref: 는 막히는 글이다 - 링크로 칠하지 않는다
+    const html = connectHighlightHtml(element.value, fieldIsLinked(element), !/^char_uc_/.test(String(element.dataset.cqField || '')));
     if (mirror.innerHTML !== html) mirror.innerHTML = html;
     wrap.classList.toggle('has-hl', !!html);
     mirror.scrollTop = element.scrollTop;

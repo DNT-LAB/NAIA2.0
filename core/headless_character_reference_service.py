@@ -129,7 +129,7 @@ class HeadlessCharacterReferenceService:
     def capture_snapshot(self) -> dict[str, Any]:
         self._ensure_loaded()
         frames = [self._persistable_frame(frame) for frame in self.context.character_reference_frames]
-        return {"frames": frames}
+        return {"frames": frames, "bypass": bool(getattr(self.context, "character_reference_bypass", False))}
 
     def restore_snapshot(self, section: Any, image_directory: Path) -> None:
         from core.snapshot_reference_transfer import (
@@ -142,6 +142,9 @@ class HeadlessCharacterReferenceService:
         frames = [self._frame_from_persisted(raw) for raw in raw_frames]
         # enable 액션의 상대 도구 끄기를 거치면 스냅샷에 기록된 두 도구의 상태가 바뀐다.
         self.context.character_reference_frames = merge_reference_frames(self.context.character_reference_frames, frames)
+        # bypass 도 스냅샷과 함께 돌아온다(리뷰 #6) - 이 키가 없는 옛 스냅샷은 지금 값을 둔다
+        if isinstance(section, dict) and "bypass" in section:
+            self.context.character_reference_bypass = bool(section.get("bypass"))
         self._persist(raise_errors=True)
 
     def _persist(self, *, raise_errors: bool = False) -> None:

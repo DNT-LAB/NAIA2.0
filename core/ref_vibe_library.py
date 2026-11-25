@@ -551,6 +551,9 @@ class RefVibeLibrary:
                         raise LibraryError(problem)
                     if name.startswith("*"):
                         raise LibraryError("폴더 이름은 * 로 시작할 수 없습니다(ref:__*폴더__ 는 차례 호출입니다)")
+                    # `&` 는 캐릭터 종류 말을 붙이는 자리(ref:폴더&의상) - 새 이름에는 못 쓴다(리뷰 #3 · 옛 폴더는 그대로 불린다)
+                    if "&" in name and (category is None or name != category["name"]):
+                        raise LibraryError("폴더 이름에 & 를 쓸 수 없습니다(ref:폴더&의상 처럼 종류를 붙이는 자리입니다)")
                     if name.casefold() in {n.casefold() for n in GROUP_FOLDER_NAMES.values()}:
                         raise LibraryError(f"'{name}' 은 분류 이름이라 폴더 이름으로 못 씁니다"
                                            f"(ref:{name}: 은 그 분류 그림 전체를 부릅니다)")

@@ -811,14 +811,19 @@ function applyInpaintSessionLock() {
  *     바로 그리면, 그쪽이 늦게 돌 때 가상이 메인으로 덮인다 - 실측: 퀵 패널이 동적
  *     import 라 새로고침 때 img2img 상태보다 늦게 준비되어 늘 메인 0명을 그렸다.
  */
-function renderCharacterQuickPanel() {
-  if (!characterQuickPanel) return;
+// 퀵 패널이 지금 그리는 캐릭터 상태 - 인페인트 세션 > 인셋 > 메인(bypass 체크박스도 같은 것을 본다)
+function quickPanelCharacterState() {
   const session = virtualCharacterSession();
   const inset = session ? null : insetVirtualCharacters();
-  characterQuickPanel.render(session
+  return session
     ? virtualCharacterState(session)
     : inset ? insetVirtualCharacterState(inset)
-      : (moduleStateCache.get('character') || {module_id: 'character', characters: []}));
+      : (moduleStateCache.get('character') || {module_id: 'character', characters: []});
+}
+
+function renderCharacterQuickPanel() {
+  if (!characterQuickPanel) return;
+  characterQuickPanel.render(quickPanelCharacterState());
 }
 
 /** 퀵 패널이 `character` 로 쓰려는 것을 인페인트 세션으로 돌린다. */
@@ -1322,6 +1327,7 @@ function setReferenceInsetBadge(state) {
   }
   referenceInsetFull = next;
   referenceInsetState = referenceInsetFull && referenceInsetFull.active ? referenceInsetFull : null;
+  syncRefBypassVisibility();          // 인셋의 가상 캐릭터 프롬프트도 ref: 를 쓴다(리뷰 #7)
   // Generate 옆의 금액도 이 답으로 맞춘다. 인셋이 켜져 있으면 일반 생성이 **인셋 캔버스**로 나가고, 그 캔버스는 1MP 를
   // 넘을 수 있다(고해상도 - 사용자 지정 2026-10-10). 금액은 평소 파라미터 메시지로만 오므로, 인셋을 켜고 끄거나
   // 캔버스를 바꾼 직후에는 여기서 안 받으면 옛 금액(또는 "무료")이 남는다.
@@ -3347,7 +3353,7 @@ const characterQuickPanelReady = import('./js/features/characterQuickPanel.mjs?v
   });
 // REF & VIBE - Character Reference · Vibe Transfer 를 한 창에서(사용자 지시 2026-10-23). 런처 단추 · 결과 우클릭 ·
 // 메타데이터 복원 · 요약 칩은 전부 openModule 을 지나고, openModule 이 이 창으로 돌린다.
-const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-refmods')
+const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-refmods2')
   .then(({createRefVibeWindow}) => {
     refVibeWindow = createRefVibeWindow({
       document, window, escHtml, setModuleParam,
@@ -3398,17 +3404,22 @@ const refVibeWindowReady = import('./js/features/refVibeWindow.mjs?v=20261125-re
     console.error('Failed to initialize REF & VIBE window', error);
   });
 // REFERENCE bypass 체크박스는 프롬프트에 `ref:` 호출이 있을 때만 보인다(사용자 2026-11-25) - 메인 · 앞뒤 고정 · 캐릭터.
-// 호출은 쉼표로 나뉜 한 덩어리의 맨 앞(서버 split_ref_tokens 와 같은 자리).
-const REF_CALL_IN_TEXT = /(?:^|[,\n])\s*ref:\S/i;
+// 호출 판정은 서버(is_ref_token)와 같게 - 쉼표 조각의 맨 앞 4글자 · 조각 안 줄바꿈은 서버가 지운다(리뷰 #9).
+function textHasRefCall(text) {
+  return String(text || '').split(',').some(piece => piece.replace(/[\r\n]/g, '').trim().slice(0, 4).toLowerCase() === 'ref:');
+}
 function promptUsesRefCalls() {
   const texts = [promptEdit?.value, peFieldText('pre_prompt'), peFieldText('post_prompt')];
-  const characters = moduleStateCache.get('character')?.characters;
+  // 캐릭터는 퀵 패널이 그리는 것(인페인트 세션 · 인셋의 가상 캐릭터 포함 - 리뷰 #7)
+  const characters = quickPanelCharacterState()?.characters;
   if (Array.isArray(characters)) characters.forEach(c => texts.push(c?.prompt));
-  return texts.some(text => REF_CALL_IN_TEXT.test(String(text || '')));
+  return texts.some(textHasRefCall);
 }
 // 칸을 고칠 때마다(메인 · 앞뒤 고정 · 퀵 패널 · 캐릭터 창 모두 input 이 올라온다) 알약을 다시 칠한다 - 바뀔 때만.
 let refCallsShown = null;
-function syncRefBypassVisibility() {
+function syncRefBypassVisibility(event) {
+  // ⚠️ 체크박스 자신의 input 은 건너뛴다 - 다시 칠하면 change 전에 서버 값으로 되돌아가 반대 값이 갔다(리뷰 #1)
+  if (event && event.target instanceof Element && event.target.closest('[data-rvp-bypass]')) return;
   const uses = promptUsesRefCalls();
   if (uses === refCallsShown) return;
   refCallsShown = uses;
@@ -8172,6 +8183,7 @@ function _applyPromptSync(m) {
   const interactiveOwnsPrompt = interactivePanel?.isActive?.() && promptBeforeInteractive !== null;
   if (!interactiveOwnsPrompt && 'prompt' in m && m.prompt !== promptEdit.value) {
     promptEdit.value = m.prompt;
+    syncRefBypassVisibility();        // 서버가 칸을 덮었다(Random · 프리셋) - input 이 안 온다(리뷰 #8)
     // 서버 값(Random·프리셋 적용·파이프라인)이 칸을 덮었다 - 사용자 편집 표식을
     // 내린다. 안 내리면 남이 만든 프롬프트가 다음 flush 때 프리셋에 굳는다.
     _promptUserDirty = false;
@@ -8301,6 +8313,7 @@ function routePromptToOwner(text) {
 
 function onPromptEdit() {
   if (syncingPrompt) return;
+  syncRefBypassVisibility();          // 자동완성 · 삽입은 input 을 안 쏜다(리뷰 #8)
   _localPromptDirty = true;
   if (tokenDisplayControl) tokenDisplayControl.invalidatePromptCounts();
   updatePromptHighlight();
@@ -14413,7 +14426,7 @@ function onModuleState(m) {
   }
   if (m.module_id) moduleStateCache.set(m.module_id, m);
   // 캐릭터 · PE 칸이 화면 밖에서 바뀌어도(다른 창 · 씬 불러오기 · 서버) bypass 체크박스가 따라간다 - input 만 보면 남는다
-  if (m.module_id === 'character' || m.module_id === 'prompt_engineering') syncRefBypassVisibility();
+  if (m.module_id === 'character' || m.module_id === 'prompt_engineering' || m.module_id === 'img2img') syncRefBypassVisibility();
   // Update status badges regardless of panel open state
   if (m.module_id === 'automation') updateAutoBadge(m);
   else if (m.module_id === 'auto_save' && autoSavePanel) autoSavePanel.setState(m);
@@ -14431,7 +14444,6 @@ function onModuleState(m) {
     positionReferenceInsetBadge();
   }
   else if (m.module_id === 'character_reference') {
-    refCallsShown = null;
     updateCharRefBadge(m);
     refVibeWindow?.render('character_reference');
     syncReferenceInsetWithCharRef(m);

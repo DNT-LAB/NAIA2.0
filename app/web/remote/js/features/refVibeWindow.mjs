@@ -98,7 +98,11 @@ export function createRefVibeWindow({
     pill.addEventListener('change', event => {
       const box = event.target.closest('[data-rvp-bypass-box]');
       if (!box) return;
-      setModuleParam(KINDS.cr, 'bypass', box.checked ? 'true' : 'false');
+      // 못 보냈으면(재연결 중) 되돌린다 - 빨간 체크가 남으면 서버는 끈 채로 보낸다(리뷰 #10)
+      if (setModuleParam(KINDS.cr, 'bypass', box.checked ? 'true' : 'false') === false) {
+        box.checked = !box.checked;
+        showToast('연결이 끊겨 bypass 를 바꾸지 못했습니다 - 다시 눌러 주세요', 'error');
+      }
       pill.classList.toggle('is-bypass', box.checked);
     });
     pill.addEventListener('click', event => {

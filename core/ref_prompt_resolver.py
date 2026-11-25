@@ -91,15 +91,21 @@ def find_call_folder(folders: dict[str, dict[str, Any]], call: dict[str, Any]) -
     folder = folders.get(call["folder"].casefold())
     if folder is not None or not call["mods"]:
         return folder
-    folder = folders.get(call["base"].casefold()) if call["base"] else None
-    if folder is None:
+    # 이름에 '&' 가 든 옛 폴더 + 종류 말(`ref:a&b&의상`) - 있는 폴더 중 가장 긴 이름이 폴더, 나머지가 종류 말(리뷰 #5)
+    parts = [call["base"], *call["mods"]]
+    for cut in range(len(parts) - 1, 0, -1):
+        folder = folders.get("&".join(parts[:cut]).casefold()) if parts[0] else None
+        if folder is not None:
+            mods = parts[cut:]
+            break
+    else:
         return None
-    bad = [mod for mod in call["mods"] if mod not in _MODS]
+    bad = [mod for mod in mods if mod not in _MODS]
     if bad:
         raise RefPromptError(f"'{call['token']}' - '&{bad[0]}' 은 모르는 말입니다 - &{MOD_STYLE} · &{MOD_OUTFIT} 만 붙습니다")
     if folder["group"] != "character":
         raise RefPromptError(f"'{call['token']}' - &{MOD_STYLE} · &{MOD_OUTFIT} 은 캐릭터 폴더에만 붙습니다")
-    call["style"], call["outfit"] = MOD_STYLE in call["mods"], MOD_OUTFIT in call["mods"]
+    call["style"], call["outfit"] = MOD_STYLE in mods, MOD_OUTFIT in mods
     call["suffix"] = mods_suffix(call["style"], call["outfit"])
     return folder
 
@@ -296,6 +302,16 @@ class RefCallSession:
         self.inpainting = inpainting
         self.model_name = model_name
         self.frames: list[dict[str, Any]] = []
+        # 캐시는 재시도가 물려받는다 - 앞 시도의 호출이 이번 글에 없을 수 있다(`<ref:..|smile>` 다시 굴림).
+        # 이번 시도에 만난 호출만 표시해 bypass 판정 · 기록이 그것만 본다(리뷰 #2).
+        for frame in cache.values():
+            if isinstance(frame, dict):
+                frame["met"] = False
+
+    @property
+    def called(self) -> bool:
+        """이번 시도의 글에 `ref:` 호출이 있었나(막힌 호출도 센다) - REFERENCE bypass 가 이것을 본다."""
+        return any(isinstance(frame, dict) and frame.get("met") for frame in self.cache.values())
 
     def _locate(self, token: str, scope: str) -> tuple[dict[str, Any], dict[str, Any]]:
         if self._library is None:
@@ -368,6 +384,7 @@ class RefCallSession:
                     frame = frame_for(self._library, call, folder)
                 frame.update(scope=scope, slot=slot, occurrence=occurrence - 1)
                 self.cache[key] = frame
+            frame["met"] = True
             frame["blocked"] = self.blocked(frame)
             if frame["blocked"]:
                 print(f"  - [REF] {piece} - {frame['blocked']} - 그림도 글도 넣지 않았다")
@@ -406,6 +423,8 @@ def ref_picks(cache: dict) -> list[dict[str, Any]]:
             "strength", "blocked")
     picks = []
     for frame in (cache or {}).values():
+        if not frame.get("met", True):
+            continue                # 앞 시도에만 있던 호출(이번 장에는 안 갔다) - 리뷰 #2
         pick = {key: frame.get(key) for key in keys}
         secondary = frame.get("secondary_strength")
         pick["fidelity"] = round(1.0 - float(secondary), 2) if isinstance(secondary, (int, float)) else None
@@ -621,7 +640,12 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             if rank is not None:
                 row = item_row(folder, item, *mods)
                 # 폴더를 이미 친 단계 = 줄에는 그림 이름만(사용자 2026-11-25) - 넣는 글은 value 전체 · 종류는 미리보기에
-                row["label"], row["desc"] = row["value"].split(":", 2)[2], ""
+                call_name = row["value"].split(":", 2)[2]
+                display = str(item.get("display_name") or "")
+                # 이름이 겹치면 넣는 글은 해시 앞자리다 - 이름만 보이면 어느 쪽인지 모른다(리뷰 #11)
+                row["label"] = (f"{display} · {call_name}" if display and display.casefold() != call_name.casefold()
+                                else call_name)
+                row["desc"] = ""
                 ranked.append((rank, index, row))
     elif text.startswith("__"):
         sequential = text.startswith("__*")
@@ -633,6 +657,8 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             # `__캐릭터&` 처럼 종류 말을 치는 중이면 그 와일드카드 줄
             if "&" in needle and folder["group"] == "character" and wild_ok(folder, sequential):
                 for n, (suffix, style, outfit) in enumerate(CHAR_VARIANTS):
+                    if (folder["name"] + suffix).casefold() in index_by_name:
+                        continue        # 그 이름의 옛 폴더가 있다 - 글이 그 폴더로 읽힌다(리뷰 #3)
                     variant_rank = _rank(folder["name"] + suffix, needle)
                     if variant_rank is not None:
                         ranked.append((variant_rank, index * 4 + 1 + n,
@@ -644,9 +670,19 @@ def search_ref_calls(library: Any, query: str, limit: int = 14, scope: str = "")
             if rank is not None:
                 ranked.append((rank, index * 6, folder_row(folder)))
             # 캐릭터 폴더 = 바로 아래에 종류 줄 셋(분류 전체 폴더는 늘 · 내 폴더는 이름을 칠 때) - 7줄이 한 화면에 든다
+            # ⚠️ 종류 말(`의상` · `스타일`)만 쳐도 `캐릭터&의상` 이 걸렸다(사용자 2026-11-25 '의상에 캐릭터 데이터') -
+            #    폴더 이름이 맞을 때만 · `&` 를 친 뒤에는 `&` 앞이 폴더 이름에 맞을 때만 종류 말까지 맞춘다.
+            head = needle.split("&", 1)[0].strip() if "&" in needle else ""
             if folder["group"] == "character" and (folder.get("virtual") or needle):
                 for n, (suffix, style, outfit) in enumerate(CHAR_VARIANTS):
-                    variant_rank = rank if rank is not None else _rank(folder["name"] + suffix, needle)
+                    if (folder["name"] + suffix).casefold() in index_by_name:
+                        continue        # 그 이름의 옛 폴더가 있다 - 글이 그 폴더로 읽힌다(리뷰 #3)
+                    if rank is not None:
+                        variant_rank = rank
+                    elif head and _rank(folder["name"], head) is not None:
+                        variant_rank = _rank(folder["name"] + suffix, needle)
+                    else:
+                        variant_rank = None
                     if variant_rank is not None:
                         ranked.append((variant_rank, index * 6 + 1 + n, variant_row(folder, suffix, style, outfit)))
             # 폴더 이름을 치는 중이면 그 폴더의 무작위 · 차례 호출도 바로 아래에(사용자 2026-11-25 - `ref:캐릭터`)

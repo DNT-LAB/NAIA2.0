@@ -2047,7 +2047,8 @@ class APIService:
             from core.ref_prompt_resolver import executed_reference_slots as _executed_reference_slots
             params.pop('_executed_reference_slots', None)
             # REFERENCE bypass(사용자 2026-11-25) - 이 장에 `ref:` 호출이 있을 때만 모듈 칸을 안 보낸다(칸은 그대로)
-            _bypass_module_slots = bool(params.get('_reference_bypass')) and bool(_ref_session.cache)
+            # 이번 시도의 글에 ref: 가 있을 때만 - 캐시는 앞 시도의 호출을 물려받는다(리뷰 #2)
+            _bypass_module_slots = bool(params.get('_reference_bypass')) and _ref_session.called
             _slot_record = _executed_reference_slots(params, _cr_prof, inpainting=(action_type == "infill"),
                                                      bypass=_bypass_module_slots)
             if _slot_record:

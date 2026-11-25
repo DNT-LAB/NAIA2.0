@@ -76,7 +76,7 @@ export function createRefVibeWindow({
   function freshLib() {
     return {model: '', filter: 'all', categoryId: '', q: '', sort: 'recent', items: [], total: 0, offset: 0,
       loading: false, seq: 0, categories: [], counts: {}, models: [], currentModel: '', supported: true,
-      selected: '', ie: null, loaded: false, error: ''};
+      selected: '', ie: null, loaded: false, error: '', group: 'character', groupCounts: {}};
   }
 
   // ── 알약 ──────────────────────────────────────────────────────────────────
@@ -724,6 +724,42 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
 
   function inClusters() { return tab === 'vibe' && lib.vibe.filter === 'clusters'; }
 
+  // ── 상위 분류(사용자 지시 2026-11-25) ──
+  //  캐릭터는 한 번 쓰고 마는 일이 많고 의상 · 스타일은 거듭 쓴다 - 셋을 나눠 각자 폴더로 묶는다.
+  //  폴더에 든 그림은 프롬프트의 `ref:폴더:이름[:강도]` · `ref:__폴더__` · `ref:__*폴더__` 로 부른다(강도 생략 = 1.0).
+  //  분류는 보관 그림의 자기 필드 - 활성 칸의 종류 드롭다운과 따로다. ANIMA(Ref Adapter)는 종류가 없어 나누지 않는다.
+  const CR_GROUPS = [['character', '캐릭터'], ['outfit', '의상'], ['style', '스타일']];
+  function crGrouped() { return tab === 'cr' && !isAnima(); }
+  function groupLabel(group) { return (CR_GROUPS.find(([g]) => g === group) || [])[1] || group; }
+
+  function groupTabsHtml() {
+    if (!crGrouped()) return '';
+    const state = lib.cr;
+    const counts = state.groupCounts || {};
+    return CR_GROUPS.map(([group, label]) => `<button type="button" class="rvw-chip rvw-grp${state.group === group ? ' on' : ''}" data-rvw-group="${group}">`
+      + `${label}<b>${counts[group] ?? ''}</b></button>`).join('');
+  }
+
+  /** 이 보관 그림을 프롬프트에서 부르는 말. 폴더에 없으면 못 부른다(빈 글). 이름에 `:` `,` 가 있으면 해시 앞 8자로. */
+  function refCall(item) {
+    const folder = categoryName(String(item.category || ''));
+    if (!folder) return '';
+    const name = itemName(item);
+    const safe = name && !/[:,]/.test(name) ? name : String(item.file_hash || '').slice(0, 8);
+    return `ref:${folder}:${safe}`;
+  }
+
+  async function copyCall(item) {
+    const call = refCall(item);
+    if (!call) return;
+    try {
+      await win.navigator.clipboard.writeText(call);
+      showToast(`복사했습니다 - ${call}`, 'success');
+    } catch (_) {
+      showToast(call, 'info');
+    }
+  }
+
   function renderStore() {
     if (!panel) return;
     const host = panel.body.querySelector('[data-rvw-store]');
@@ -732,7 +768,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     // 초점을 잃었다 - 칸 안쪽만 갈아 끼운다.
     if (host.dataset.tab !== tab || !host.querySelector('[data-rvw-grid]')) {
       host.dataset.tab = tab;
-      host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">STORAGE</span><span class="rvw-sec-m" data-rvw-models></span>`
+      host.innerHTML = `<div class="rvw-sec"><span class="rvw-sec-t">STORAGE</span><span class="rvw-grps" data-rvw-grps></span>`
+        + `<span class="rvw-sec-m" data-rvw-models></span>`
         + `<span class="rvw-sec-tools"><input type="search" class="rvw-q" placeholder="이름 검색" spellcheck="false" autocomplete="off" data-rvw-q>`
         + `<span data-rvw-sortwrap><select class="rvw-sel" data-rvw-sort>`
         + [['recent', '최근순'], ['used', '사용순'], ['name', '이름순']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('')
@@ -746,6 +783,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       ? `<select class="rvw-sel" data-rvw-libmodel>${state.models.map(m => `<option value="${escHtml(m.key)}"${m.key === state.model ? ' selected' : ''}>${escHtml(m.key)} ${m.count}</option>`).join('')}</select>`
       : (state.model && !inClusters() ? `<span class="rvw-sec-n">${escHtml(state.model)}</span>` : '');
     host.querySelector('[data-rvw-models]').innerHTML = models;
+    host.querySelector('[data-rvw-grps]').innerHTML = groupTabsHtml();
     const input = host.querySelector('[data-rvw-q]');
     input.placeholder = inClusters() ? '클러스터 이름' : '이름 검색';
     const q = inClusters() ? (clusters.q || '') : state.q;
@@ -867,7 +905,13 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       middle = `<span class="rvw-k">IE</span>` + keys.map(k => `<button type="button" class="rvw-chip${Math.abs(k - pick) < 1e-6 ? ' on' : ''}" data-rvw-pickie="${fmt(k)}">${fmt(k)}</button>`).join('');
     } else {
       const s = item.settings || {};
-      middle = `<span class="rvw-hint">${escHtml(String(s.reference_type || 'character&style'))} · S ${fmt(s.strength ?? 1)} · F ${fmt(s.fidelity ?? 0.8)}</span>`;
+      const call = crGrouped() ? refCall(item) : '';
+      middle = call
+        ? `<code class="rvw-call" data-naia-title="프롬프트에 넣으면 그 장을 만들 때만 칸을 하나 더합니다 · 끝에 :1.75 처럼 강도(생략 = 1.0)">${escHtml(call)}</code>`
+          + `<button type="button" class="rvw-btn" data-rvw-act="copycall">호출 복사</button>`
+        : (crGrouped()
+          ? `<span class="rvw-hint">폴더에 넣으면 ref: 로 부를 수 있습니다</span>`
+          : `<span class="rvw-hint">${escHtml(String(s.reference_type || 'character&style'))} · S ${fmt(s.strength ?? 1)} · F ${fmt(s.fidelity ?? 0.8)}</span>`);
     }
     return `<div class="rvw-pick"><span class="rvw-pick-n">${name}</span>`
       + (slots.length ? `<span class="rvw-card-slot is-inline">${slotLabel(slots)}</span>` : '')
@@ -903,12 +947,14 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     params.set('filter', filter);
     if (filter === 'category' && state.categoryId) params.set('category_id', state.categoryId);
     if (state.q.trim() && state.filter !== 'clusters') params.set('q', state.q.trim());
+    if (crGrouped()) params.set('group', state.group);
     return `/api/ref-vibe/library?${params}`;
   }
 
   function takeMeta(state, data) {
     state.categories = Array.isArray(data.categories) ? data.categories : [];
     state.counts = data.counts || {};
+    state.groupCounts = data.group_counts || {};
     state.models = Array.isArray(data.models) ? data.models : [];
     state.currentModel = String(data.current_model || '');
     if (!state.model && data.model) state.model = String(data.model);
@@ -1079,10 +1125,11 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   async function categoryOp(body) {
     try {
       const data = await api('/api/ref-vibe/library/category', {method: 'POST',
-        body: {kind: API_KIND[tab], model: lib[tab].model, ...body}});
+        body: {kind: API_KIND[tab], model: lib[tab].model, ...(crGrouped() ? {group: lib.cr.group} : {}), ...body}});
       const state = lib[tab];
       if (Array.isArray(data.categories)) state.categories = data.categories;
       if (data.counts) state.counts = data.counts;
+      if (data.group_counts) state.groupCounts = data.group_counts;
       return true;
     } catch (error) {
       showToast(`카테고리 작업을 못 했습니다: ${error.message || error}`, 'error');
@@ -1091,7 +1138,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   }
 
   async function newCategory() {
-    const name = await promptDialog('카테고리 이름', {title: '새 카테고리', placeholder: '인물 톤'});
+    const name = await promptDialog(crGrouped() ? `${groupLabel(lib.cr.group)} 폴더 이름 - ref:이름: 으로 부릅니다(: , __ 는 못 씁니다)` : '카테고리 이름',
+      {title: crGrouped() ? `새 ${groupLabel(lib.cr.group)} 폴더` : '새 카테고리', placeholder: crGrouped() && lib.cr.group === 'outfit' ? '외출복' : '인물 톤'});
     if (!name || !String(name).trim()) return '';
     const before = new Set(lib[tab].categories.map(c => c.id));
     if (!await categoryOp({op: 'create', name: String(name).trim()})) return '';
@@ -1146,11 +1194,26 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
   }
 
   function openCategoryRowMenu(anchor, id) {
+    const regroup = crGrouped()
+      ? `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">폴더째 보내기</div>`
+        + CR_GROUPS.filter(([g]) => g !== lib.cr.group).map(([g, label]) => `<button type="button" class="rvw-menu-i" data-rvw-menu="grp:${g}">`
+          + `<span class="rvw-menu-mark">→</span>${label}</button>`).join('')
+      : '';
     openMenu(anchor, `<button type="button" class="rvw-menu-i" data-rvw-menu="rename">이름 바꾸기</button>`
+      + regroup
       + `<div class="rvw-menu-sep"></div>`
-      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete">카테고리 지우기</button>`, op => {
+      + `<button type="button" class="rvw-menu-i is-danger" data-rvw-menu="delete">카테고리 지우기</button>`, async op => {
       if (op === 'rename') renameCategory(id);
       else if (op === 'delete') deleteCategory(id);
+      else if (op.startsWith('grp:')) {
+        const group = op.slice(4);
+        const name = categoryName(id);
+        if (!await categoryOp({op: 'regroup', category_id: id, group})) return;
+        const state = lib.cr;
+        if (state.categoryId === id) { state.filter = 'all'; state.categoryId = ''; }
+        showToast(`${name} 폴더 → ${groupLabel(group)}`, 'info');
+        loadLibrary(true);
+      }
     });
   }
 
@@ -1566,6 +1629,18 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       setModuleParam(KINDS.vibe, `encode_${index(el, 'data-rvw-encode')}`, el.dataset.ie);
       return;
     }
+    if ((el = t.closest('[data-rvw-group]'))) {
+      const state = lib.cr;
+      if (state.group === el.dataset.rvwGroup) return;
+      state.group = el.dataset.rvwGroup;
+      state.filter = 'all';
+      state.categoryId = '';
+      state.selected = '';
+      state.categories = [];
+      loadLibrary(true);
+      renderStore();
+      return;
+    }
     if ((el = t.closest('[data-rvw-filter]'))) {
       const state = lib[tab];
       const filter = el.dataset.rvwFilter;
@@ -1628,6 +1703,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       else if (act === 'release') releaseSelected();
       else if (act === 'rename') renameSelected();
       else if (act === 'fav') { const item = selectedItem(); if (item) setFavorite(item.file_hash, !item.favorite); }
+      else if (act === 'copycall') { const item = selectedItem(); if (item) copyCall(item); }
       else if (act === 'catmenu') openCategoryMenu(el);
       else if (act === 'clustermenu') { if (!clusters.loaded) loadClusters(); openClusterPickMenu(el, selectedItem()); }
       else if (act === 'delete') deleteSelected();
@@ -1946,33 +2022,26 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     }
   }
 
-  // ── 보관 그림의 종류(우클릭 · 사용자 지시 2026-11-25) ──
-  //  Char&Style · Character · Style · Outfit. 다음 [적용] 이 이 종류로 넣는다 - 활성 칸에 있으면 그 칸도 같이 바꾼다.
-  //  Char&Style · Character 끼리 옮길 때는 '같은 옷 유지' 를 이어 간다(Style · Outfit 에서 오면 웹 기본 = 켬).
-  const ITEM_TYPES = [['character&style', 'Char&Style'], ['character', 'Character'], ['style', 'Style'], ['costume', 'Outfit (V5)']];
-  function typeRows(item) {
-    // ANIMA(Ref Adapter v2)는 종류가 없다 - 칸은 그림 + 캐릭터 프롬프트뿐
-    if (tab !== 'cr' || isAnima()) return '';
-    const type = String(item.settings?.reference_type || 'character&style');
-    const shown = crIsCharType(type) ? crCharBase(type) : type;
-    return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">종류</div>`
-      + ITEM_TYPES.map(([value, label]) => `<button type="button" class="rvw-menu-i${value === shown ? ' is-selected' : ''}" data-rvw-menu="type:${value}">`
-        + `<span class="rvw-menu-mark">${value === shown ? '✓' : ''}</span>${label}</button>`).join('');
+  // ── 보관 그림 보내기(우클릭 · 사용자 지시 2026-11-25) ──
+  //  캐릭터 · 의상 · 스타일 중 다른 분류로. 그 분류의 미분류로 가고, 다음 [적용] 의 종류도 그 분류의 것이 된다
+  //  (의상 = Outfit · 스타일 = Style). 활성 칸은 건드리지 않는다 - 활성 칸과 보관함은 따로다.
+  function groupRows(item) {
+    if (!crGrouped()) return '';
+    const current = String(item.group || lib.cr.group);
+    return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">보내기</div>`
+      + CR_GROUPS.filter(([g]) => g !== current).map(([g, label]) => `<button type="button" class="rvw-menu-i" data-rvw-menu="grp:${g}">`
+        + `<span class="rvw-menu-mark">→</span>${label}</button>`).join('');
   }
 
-  async function setItemType(item, picked) {
-    const current = String(item.settings?.reference_type || 'character&style');
-    const keep = crIsCharType(current) ? crKeepOutfit(current) : true;
-    const next = crIsCharType(picked) ? crCharType(picked, keep) : picked;
-    if (next === current) return;
+  async function setItemGroup(item, group) {
     try {
-      const data = await api('/api/ref-vibe/library/item', {method: 'POST',
-        body: {kind: API_KIND.cr, file_hash: item.file_hash, reference_type: next, model: lib.cr.model}});
-      replaceItems(data.item || data);
-      activeSlots(item.file_hash, 'cr').forEach(index => setModuleParam(KINDS.cr, `ref_type_${index}`, next));
-      renderStore();
+      await api('/api/ref-vibe/library/item', {method: 'POST',
+        body: {kind: API_KIND.cr, file_hash: item.file_hash, group, model: lib.cr.model}});
+      lib.cr.selected = '';
+      showToast(`${itemName(item)} → ${groupLabel(group)}`, 'info');
+      loadLibrary(true);
     } catch (error) {
-      showToast(`종류를 못 바꿨습니다: ${error.message || error}`, 'error');
+      showToast(`보내지 못했습니다: ${error.message || error}`, 'error');
     }
   }
 
@@ -2004,7 +2073,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
         + (hasPrompt ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:both"><span class="rvw-menu-mark">▶</span>REF+프롬프트 적용</button>` : ''))
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
-      + typeRows(item)
+      + groupRows(item)
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
       + characterPromptRows(item)
       + clusterRows
@@ -2023,7 +2092,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       else if (op === 'newcat') { const made = await newCategory(); if (made) moveTo([item.file_hash], made); }
       else if (op.startsWith('cat:')) { const target = op.slice(4); if (target !== current) moveTo([item.file_hash], target); }
       else if (op.startsWith('cl:')) addToCluster(op.slice(3), item);
-      else if (op.startsWith('type:')) setItemType(item, op.slice(5));
+      else if (op.startsWith('grp:')) setItemGroup(item, op.slice(4));
     });
     if (tab === 'vibe' && !clusters.loaded) loadClusters();
   }

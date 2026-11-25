@@ -100,15 +100,16 @@ def register_module_storage_routes(
 
     @app.get("/api/ref-vibe/library")
     async def api_ref_vibe_library(kind: str, model: str = "", filter: str = "all", category_id: str = "",
-                                   q: str = "", sort: str = "recent", offset: int = 0, limit: int = 60):
+                                   q: str = "", sort: str = "recent", offset: int = 0, limit: int = 60,
+                                   group: str = ""):
         return await library_call("list_items", kind, model=model, filter=filter, category_id=category_id,
-                                  q=q, sort=sort, offset=offset, limit=limit)
+                                  q=q, sort=sort, offset=offset, limit=limit, group=group)
 
     @app.post("/api/ref-vibe/library/item")
     async def api_ref_vibe_item(body: dict):
         return await library_call("edit_item", body.get("kind"), body.get("file_hash"),
                                   model=body.get("model", ""),
-                                  **{k: body[k] for k in ("name", "favorite", "reference_type") if k in body})
+                                  **{k: body[k] for k in ("name", "favorite", "reference_type", "group") if k in body})
 
     @app.post("/api/ref-vibe/library/character-prompt")
     async def api_ref_vibe_character_prompt(body: dict):
@@ -137,7 +138,7 @@ def register_module_storage_routes(
     async def api_ref_vibe_category(body: dict):
         return await library_call("change_category", body.get("kind"), body.get("op"),
                                   category_id=body.get("category_id", ""), name=body.get("name", ""),
-                                  order=body.get("order"), model=body.get("model", ""))
+                                  order=body.get("order"), model=body.get("model", ""), group=body.get("group", ""))
 
     @app.post("/api/ref-vibe/library/move")
     async def api_ref_vibe_move(body: dict):

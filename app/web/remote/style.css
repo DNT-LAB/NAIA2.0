@@ -32579,6 +32579,11 @@ body:has(#apiPopupOverlay.open) .state-veil { visibility: hidden; }
 }
 .rvw-sec-t { color: var(--text-dim); letter-spacing: .08em; font-size: 10px; }
 .rvw-sec-n { color: var(--text-dim); font-size: 10px; }
+/* REFERENCE 보관함 상위 분류 탭(캐릭터 · 의상 · 스타일 - 2026-11-25) · 고른 그림의 ref: 호출 */
+.rvw-grps { display: flex; gap: 4px; }
+.rvw-grps:empty { display: none; }
+.rvw-call { font: 11px var(--font-mono); color: #d9d2ff; background: rgba(124,106,239,.14); border-radius: 4px;
+  padding: 1px 6px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: all; }
 .rvw-sec-tools { margin-left: auto; display: flex; align-items: center; gap: 4px; min-width: 0; }
 .rvw-btn {
   border: 1px solid var(--border-glow); background: transparent; color: var(--text-muted);

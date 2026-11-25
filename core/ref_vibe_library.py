@@ -55,6 +55,55 @@ def clean_encodings(value: Any) -> dict[str, str]:
             if finite(k) is not None and isinstance(v, str) and v}
 
 
+# ── Character Reference 보관함의 상위 분류(사용자 지시 2026-11-25) ──
+#  캐릭터는 한 번 쓰고 마는 일이 많고, 의상 · 스타일은 거듭 쓴다 - 따로 모아 폴더(카테고리)로 묶고
+#  프롬프트의 `ref:폴더:이름` · `ref:__폴더__` 로 부른다(core/ref_prompt_resolver.py).
+#  - 분류는 그림의 **자기 필드**(`group`)다. 활성 칸 드롭다운의 종류(settings.reference_type)와 따로 -
+#    활성 칸에서 종류를 바꿔도 보관 그림이 다른 분류로 옮겨지지 않는다(활성 칸과 보관함은 따로).
+#  - 폴더(카테고리)도 분류를 가진다. 이름은 **세 분류를 통틀어** 겹치지 않는다(`ref:이름` 이 어느 쪽인지 알아야 한다).
+CR_GROUPS = ("character", "outfit", "style")
+GROUP_DEFAULT_TYPE = {"outfit": "costume", "style": "style"}
+CALL_NAME_FORBIDDEN = (":", ",", "__")
+
+
+def item_group(meta: Any) -> str:
+    """보관 그림의 분류. 아직 분류가 적히지 않은 그림은 저장된 종류에서 한 번 미룬다(Outfit -> 의상 · Style -> 스타일)."""
+    meta = meta if isinstance(meta, dict) else {}
+    group = meta.get("group")
+    if group in CR_GROUPS:
+        return group
+    ref_type = (meta.get("settings") or {}).get("reference_type") if isinstance(meta.get("settings"), dict) else None
+    return "outfit" if ref_type == "costume" else ("style" if ref_type == "style" else "character")
+
+
+def category_group(category: Any) -> str:
+    group = category.get("group") if isinstance(category, dict) else None
+    return group if group in CR_GROUPS else "character"
+
+
+def regroup_item(meta: dict, group: str, categories: list) -> None:
+    """보관 그림을 다른 분류로 - 다른 분류의 폴더엔 남지 않고(미분류로), [적용] 할 때의 종류도 그 분류의 것으로
+    (의상 = Outfit · 스타일 = Style · 캐릭터 = 캐릭터 종류 그대로, 의상/스타일에서 오면 기본 Char&Style)."""
+    if group == item_group(meta) and meta.get("group") == group:
+        return
+    meta["group"] = group
+    category = next((c for c in categories if c["id"] == meta.get("category")), None)
+    if category is not None and category_group(category) != group:
+        meta["category"] = ""
+    settings = reference_settings(meta.get("settings"))
+    if group in GROUP_DEFAULT_TYPE:
+        settings["reference_type"] = GROUP_DEFAULT_TYPE[group]
+    elif settings["reference_type"] in ("costume", "style"):
+        settings["reference_type"] = DEFAULT_SETTINGS["reference_type"]
+    meta["settings"] = settings
+
+
+def callable_name_problem(name: str) -> str:
+    """`ref:` 로 부를 수 있는 이름인가 - 안 되면 까닭(빈 글 = 된다)."""
+    bad = [mark for mark in CALL_NAME_FORBIDDEN if mark in name]
+    return f"이름에 {' '.join(repr(m) for m in bad)} 를 쓸 수 없습니다(ref: 로 부를 때 갈라집니다)" if bad else ""
+
+
 def reference_settings(value: Any) -> dict:
     value = value if isinstance(value, dict) else {}
     ref_type = value.get("reference_type")
@@ -258,10 +307,13 @@ class RefVibeLibrary:
                                     "character_uc": str(meta.get("character_uc") or ""), "has_image": True}
         return items
 
-    def _listing(self, data, kind, model="", filter="all", category_id="", q="", sort="recent", offset=0, limit=60, _file_hash=""):
+    def _listing(self, data, kind, model="", filter="all", category_id="", q="", sort="recent", offset=0, limit=60,
+                 _file_hash="", group=""):
         self._kind(kind)
         if filter not in {"all", "favorite", "uncategorized", "category"} or sort not in {"recent", "name", "used"}:
             raise LibraryError("Invalid filter or sort")
+        # 분류(CR 만) - 빈 값이면 전부(ANIMA · 옛 화면). 셈 · 폴더 목록도 그 분류 안에서.
+        group = group if (kind == "character_reference" and group in CR_GROUPS) else ""
         try:
             offset, limit = max(0, int(offset)), max(1, min(200, int(limit)))
         except (ValueError, TypeError):
@@ -271,6 +323,13 @@ class RefVibeLibrary:
         models = self._vibes() if kind == "vibe" else {}
         storage = models.get(model, {}) if kind == "vibe" else self._characters()
         categories = sorted(data[kind]["categories"], key=lambda g: g.get("order", 0))
+        group_counts = {g: 0 for g in CR_GROUPS} if kind == "character_reference" else {}
+        if group_counts:
+            for file_hash in storage:
+                group_counts[item_group(data[kind]["items"].get(file_hash, {}))] += 1
+        if group:
+            storage = {h: s for h, s in storage.items() if item_group(data[kind]["items"].get(h, {})) == group}
+            categories = [g for g in categories if category_group(g) == group]
         counts = {"all": len(storage), "favorite": 0, "uncategorized": 0, "categories": {g["id"]: 0 for g in categories}}
         items = []
         service = getattr(self.context, "_service_cache", {}).get("vibe_transfer")
@@ -292,6 +351,7 @@ class RefVibeLibrary:
                 url = "/api/module-storage/vibe/thumb?" + urlencode({"model": model, "file_hash": file_hash})
             else:
                 item["settings"] = reference_settings(meta.get("settings"))
+                item["group"] = item_group(meta)
                 item["character_prompt"] = stored["character_prompt"]
                 item["character_uc"] = stored["character_uc"]
                 url = "/api/module-storage/character-reference/thumb?" + urlencode({"file_hash": file_hash})
@@ -322,7 +382,9 @@ class RefVibeLibrary:
         return {"kind": kind, "model": model, "current_model": current,
                 "models": [{"key": k, "count": len(v)} for k, v in sorted(models.items())],
                 "model_supported": supported, "total": len(items), "offset": offset, "limit": limit,
+                "group": group, "group_counts": group_counts,
                 "counts": counts, "categories": [{"id": g["id"], "name": g["name"], "order": g.get("order", 0),
+                    "group": category_group(g),
                     "count": counts["categories"][g["id"]]} for g in categories], "items": items[offset:offset + limit]}
 
     def list_items(self, kind, **query):
@@ -346,6 +408,12 @@ class RefVibeLibrary:
             updates["name"] = updates["name"].strip()
         if "favorite" in updates and not isinstance(updates["favorite"], bool):
             raise LibraryError("favorite must be boolean")
+        if kind == "character_reference" and updates.get("name"):
+            problem = callable_name_problem(updates["name"])
+            if problem:
+                raise LibraryError(problem)
+        if "group" in updates and (kind != "character_reference" or updates["group"] not in CR_GROUPS):
+            raise LibraryError("group must be one of " + ", ".join(CR_GROUPS))
         # 보관 그림의 종류(우클릭 · 2026-11-25) - 다음에 [적용] 할 때 이 종류로 들어간다. CR 만.
         if "reference_type" in updates and (kind != "character_reference"
                                             or updates["reference_type"] not in REFERENCE_TYPES):
@@ -358,45 +426,68 @@ class RefVibeLibrary:
             if "reference_type" in updates:
                 meta["settings"] = reference_settings({**(meta.get("settings") or {}),
                                                        "reference_type": updates["reference_type"]})
+            if "group" in updates and updates["group"] != item_group(meta):
+                regroup_item(meta, updates["group"], data[kind]["categories"])
             self._write(data)
             return self._item(data, kind, file_hash, model)
 
-    def change_category(self, kind, op, category_id="", name="", order=None, model=""):
+    def change_category(self, kind, op, category_id="", name="", order=None, model="", group=""):
         self._kind(kind)
-        if op not in ("create", "rename", "delete", "reorder"):
+        if op not in ("create", "rename", "delete", "reorder", "regroup"):
             raise LibraryError("Invalid category operation")
+        group = group if (kind == "character_reference" and group in CR_GROUPS) else ""
+        if op == "regroup" and not group:
+            raise LibraryError("group must be one of " + ", ".join(CR_GROUPS))
         with self._lock:
             data = self._read()
             categories = data[kind]["categories"]
             category = next((g for g in categories if g["id"] == category_id), None) if op != "create" else None
-            if op in {"rename", "delete"} and category is None:
+            if op in {"rename", "delete", "regroup"} and category is None:
                 raise LibraryError("Category not found", 404)
             if op in {"create", "rename"}:
                 if not isinstance(name, str) or not 1 <= len(name.strip()) <= 40:
                     raise LibraryError("Category name must be 1 to 40 characters")
                 name = name.strip()
-                if any(g["name"] == name and g is not category for g in categories):
+                if kind == "character_reference":
+                    problem = callable_name_problem(name)
+                    if problem:
+                        raise LibraryError(problem)
+                # 세 분류를 통틀어 하나(대소문자 무시) - `ref:폴더` 가 어느 분류인지 이름만으로 안다
+                if any(g["name"].casefold() == name.casefold() and g is not category for g in categories):
                     raise LibraryError("Category name already exists", 409)
                 if op == "create":
                     category = {"id": "c_" + uuid.uuid4().hex[:12], "order": len(categories), "name": name}
+                    if group:
+                        category["group"] = group
                     categories.append(category)
                 else:
                     category["name"] = name
+            elif op == "regroup":
+                # 폴더째 다른 분류로 - 안의 그림도 함께(옛 폴더는 분류가 없어 캐릭터로 보인다)
+                category["group"] = group
+                for item in data[kind]["items"].values():
+                    if item.get("category") == category_id:
+                        regroup_item(item, group, categories)
             elif op == "delete":
                 categories.remove(category)
                 for item in data[kind]["items"].values():
                     if item.get("category") == category_id:
                         item["category"] = ""
             else:
+                # 분류를 주면 그 분류의 폴더만 차례를 바꾼다 - 다른 분류의 폴더는 제자리
+                scope = [g for g in categories if not group or category_group(g) == group]
                 if (not isinstance(order, list) or not all(isinstance(g, str) for g in order)
-                        or len(order) != len(categories) or set(order) != {g["id"] for g in categories}):
+                        or len(order) != len(scope) or set(order) != {g["id"] for g in scope}):
                     raise LibraryError("order must contain each category exactly once")
-                categories.sort(key=lambda g: order.index(g["id"]))
+                ordered = sorted(scope, key=lambda g: order.index(g["id"]))
+                slots = [i for i, g in enumerate(categories) if g in scope]
+                for slot, g in zip(slots, ordered):
+                    categories[slot] = g
             for n, g in enumerate(categories):
                 g["order"] = n
             self._write(data)
-            result = self._listing(data, kind, model=model)
-            return {k: result[k] for k in ("categories", "counts")}
+            result = self._listing(data, kind, model=model, group=group)
+            return {k: result[k] for k in ("categories", "counts", "group_counts")}
 
     def move_items(self, kind, file_hashes, category_id="", model=""):
         self._kind(kind)
@@ -405,15 +496,20 @@ class RefVibeLibrary:
         hashes = list(dict.fromkeys(safe_component(h) for h in file_hashes))
         with self._lock:
             data = self._read()
-            if category_id and not any(c["id"] == category_id for c in data[kind]["categories"]):
+            target = next((c for c in data[kind]["categories"] if c["id"] == category_id), None)
+            if category_id and target is None:
                 raise LibraryError("Category not found", 404)
             items = [self._item(data, kind, h, model) for h in hashes]
             for item in items:
                 meta = data[kind]["items"].setdefault(item["file_hash"], {"created_at": item["created_at"]})
+                # 폴더는 그 분류의 그림만 받는다(의상 폴더에 캐릭터 그림을 끌어다 놓아도 안 들어간다)
+                if kind == "character_reference" and target is not None and category_group(target) != item_group(meta):
+                    raise LibraryError("다른 분류의 폴더로는 옮길 수 없습니다 - 먼저 우클릭 > 보내기로 분류를 바꾸세요")
                 meta["category"] = category_id
             self._write(data)
+            group = category_group(target) if (kind == "character_reference" and target is not None) else ""
             return {"items": [self._item(data, kind, h, model) for h in hashes],
-                    "counts": self._listing(data, kind, model=model)["counts"]}
+                    "counts": self._listing(data, kind, model=model, group=group)["counts"]}
 
     def display_names(self, kind, file_hashes):
         """Batch frame labels from the shared index, cached until a write or external file change."""
@@ -471,6 +567,9 @@ class RefVibeLibrary:
             if used:
                 item["last_used_at"] = time.time()
             if settings is not None:
+                if kind == "character_reference" and item.get("group") not in CR_GROUPS:
+                    # 활성 칸에서 종류를 바꿔도 보관함 분류는 그대로(분류는 보관함에서만 바꾼다)
+                    item["group"] = item_group(before)
                 item["settings"] = reference_settings(settings)
             if ie is not None:
                 item["last_ie"] = finite(ie)

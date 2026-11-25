@@ -346,11 +346,18 @@ class RefVibeLibrary:
             updates["name"] = updates["name"].strip()
         if "favorite" in updates and not isinstance(updates["favorite"], bool):
             raise LibraryError("favorite must be boolean")
+        # 보관 그림의 종류(우클릭 · 2026-11-25) - 다음에 [적용] 할 때 이 종류로 들어간다. CR 만.
+        if "reference_type" in updates and (kind != "character_reference"
+                                            or updates["reference_type"] not in REFERENCE_TYPES):
+            raise LibraryError("reference_type must be one of " + ", ".join(REFERENCE_TYPES))
         with self._lock:
             data = self._read()
             old = self._item(data, kind, file_hash, model)
             meta = data[kind]["items"].setdefault(file_hash, {"created_at": old["created_at"], "category": ""})
             meta.update({k: updates[k] for k in ("name", "favorite") if k in updates})
+            if "reference_type" in updates:
+                meta["settings"] = reference_settings({**(meta.get("settings") or {}),
+                                                       "reference_type": updates["reference_type"]})
             self._write(data)
             return self._item(data, kind, file_hash, model)
 

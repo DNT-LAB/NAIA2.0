@@ -108,7 +108,7 @@ def register_module_storage_routes(
     async def api_ref_vibe_item(body: dict):
         return await library_call("edit_item", body.get("kind"), body.get("file_hash"),
                                   model=body.get("model", ""),
-                                  **{k: body[k] for k in ("name", "favorite") if k in body})
+                                  **{k: body[k] for k in ("name", "favorite", "reference_type") if k in body})
 
     @app.post("/api/ref-vibe/library/character-prompt")
     async def api_ref_vibe_character_prompt(body: dict):

@@ -687,7 +687,8 @@ export function createRefVibeWindow({
       + `<button type="button" class="rvw-x" data-rvw-remove="${index}" aria-label="빼기">-</button></div>`;
     const slider = (name, value, top) => `<span class="rvw-k">${name === 'strength' ? 'Strength' : 'Fidelity'}</span>`
       + `<input type="range" class="rvw-range is-wide" min="0" max="${Math.round(top * 20)}" step="1" value="${Math.round(Number(value) * 20)}" data-rvw-cr="${name}" data-index="${index}">`
-      + `<span class="rvw-v" data-rvw-cr-out="${name}:${index}">${fmt(value)}</span>`;
+      + `<input type="number" class="rvw-num is-cr" min="0" max="${top}" step="0.05" value="${fmt(value)}"`
+      + ` data-rvw-crnum="${name}" data-index="${index}" data-max="${top}" aria-label="${name === 'strength' ? 'Strength' : 'Fidelity'}">`;
     const keep = isChar && profile.outfit
       ? `<label class="rvw-check" data-naia-title="켜면 그림 속 옷도 따라 그립니다(Prefer same outfit)">`
         + `<input type="checkbox" data-rvw-keep="${index}"${crKeepOutfit(type) ? ' checked' : ''}> 같은 옷 유지</label>`
@@ -1936,6 +1937,35 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
     }
   }
 
+  // ── 보관 그림의 종류(우클릭 · 사용자 지시 2026-11-25) ──
+  //  Char&Style · Character · Style · Outfit. 다음 [적용] 이 이 종류로 넣는다 - 활성 칸에 있으면 그 칸도 같이 바꾼다.
+  //  Char&Style · Character 끼리 옮길 때는 '같은 옷 유지' 를 이어 간다(Style · Outfit 에서 오면 웹 기본 = 켬).
+  const ITEM_TYPES = [['character&style', 'Char&Style'], ['character', 'Character'], ['style', 'Style'], ['costume', 'Outfit (V5)']];
+  function typeRows(item) {
+    if (tab !== 'cr') return '';
+    const type = String(item.settings?.reference_type || 'character&style');
+    const shown = crIsCharType(type) ? crCharBase(type) : type;
+    return `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">종류</div>`
+      + ITEM_TYPES.map(([value, label]) => `<button type="button" class="rvw-menu-i${value === shown ? ' is-selected' : ''}" data-rvw-menu="type:${value}">`
+        + `<span class="rvw-menu-mark">${value === shown ? '✓' : ''}</span>${label}</button>`).join('');
+  }
+
+  async function setItemType(item, picked) {
+    const current = String(item.settings?.reference_type || 'character&style');
+    const keep = crIsCharType(current) ? crKeepOutfit(current) : true;
+    const next = crIsCharType(picked) ? crCharType(picked, keep) : picked;
+    if (next === current) return;
+    try {
+      const data = await api('/api/ref-vibe/library/item', {method: 'POST',
+        body: {kind: API_KIND.cr, file_hash: item.file_hash, reference_type: next, model: lib.cr.model}});
+      replaceItems(data.item || data);
+      activeSlots(item.file_hash, 'cr').forEach(index => setModuleParam(KINDS.cr, `ref_type_${index}`, next));
+      renderStore();
+    } catch (error) {
+      showToast(`종류를 못 바꿨습니다: ${error.message || error}`, 'error');
+    }
+  }
+
   /** 썸네일 우클릭(사용자 지시 2026-10-23) - 카테고리 옮기기 · 지우기를 한 자리에서. 옮길 곳은 메뉴 안에 바로 나열한다. */
   function openCardMenu(point) {
     const item = selectedItem();
@@ -1964,6 +1994,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
         + (hasPrompt ? `<button type="button" class="rvw-menu-i" data-rvw-menu="cp:both"><span class="rvw-menu-mark">▶</span>REF+프롬프트 적용</button>` : ''))
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="rename"><span class="rvw-menu-mark"></span>이름 바꾸기</button>`
       + `<button type="button" class="rvw-menu-i" data-rvw-menu="fav"><span class="rvw-menu-mark">★</span>${item.favorite ? '즐겨찾기 풀기' : '즐겨찾기'}</button>`
+      + typeRows(item)
       + `<div class="rvw-menu-sep"></div><div class="rvw-menu-h">카테고리로 옮기기</div>` + cats
       + characterPromptRows(item)
       + clusterRows
@@ -1982,6 +2013,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       else if (op === 'newcat') { const made = await newCategory(); if (made) moveTo([item.file_hash], made); }
       else if (op.startsWith('cat:')) { const target = op.slice(4); if (target !== current) moveTo([item.file_hash], target); }
       else if (op.startsWith('cl:')) addToCluster(op.slice(3), item);
+      else if (op.startsWith('type:')) setItemType(item, op.slice(5));
     });
     if (tab === 'vibe' && !clusters.loaded) loadClusters();
   }
@@ -2074,8 +2106,8 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
         encode.classList.toggle('is-hidden', has);
       }
     } else if (t.matches('[data-rvw-cr]')) {
-      const out = panel.body.querySelector(`[data-rvw-cr-out="${t.dataset.rvwCr}:${t.dataset.index}"]`);
-      if (out) out.textContent = fmt(Number(t.value) / 20);
+      const out = panel.body.querySelector(`[data-rvw-crnum="${t.dataset.rvwCr}"][data-index="${t.dataset.index}"]`);
+      if (out) out.value = fmt(Number(t.value) / 20);
     } else if (t.matches('[data-rvw-anima]')) {
       const out = panel.body.querySelector(`[data-rvw-anima-out="${t.dataset.rvwAnima}"]`);
       if (out) out.textContent = fmt(Number(t.value) / Number(t.dataset.scale), Number(t.dataset.digits));
@@ -2111,6 +2143,15 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
       clusterOp({op: 'update', id: clusters.openId, index: Number(t.dataset.rvwMrs), rs: Number(fmt(Number(t.value) / 100))});
     } else if (t.matches('[data-rvw-cr]')) {
       setModuleParam(KINDS.cr, `${t.dataset.rvwCr}_${t.dataset.index}`, fmt(Number(t.value) / 20));
+    } else if (t.matches('[data-rvw-crnum]')) {
+      // 직접 친 값 - 0 ~ 모델 상한 · 0.05 단위(웹 슬라이더와 같은 칸)
+      const top = Number(t.dataset.max) || 1;
+      const typed = Number(t.value);
+      const value = Math.round(Math.max(0, Math.min(top, Number.isFinite(typed) ? typed : 0)) * 20) / 20;
+      t.value = fmt(value);
+      const range = panel.body.querySelector(`[data-rvw-cr="${t.dataset.rvwCrnum}"][data-index="${t.dataset.index}"]`);
+      if (range) range.value = String(Math.round(value * 20));
+      setModuleParam(KINDS.cr, `${t.dataset.rvwCrnum}_${t.dataset.index}`, fmt(value));
     } else if (t.matches('[data-rvw-type]')) {
       const frame = (getModuleState(KINDS.cr)?.frames || [])[Number(t.dataset.rvwType)];
       const current = String(frame?.reference_type || 'character&style');
@@ -2143,7 +2184,7 @@ const DND_ROW = 'application/x-naia-refvibe-row';      // ANIMA 활성 칸 순�
 
   function onKey(event) {
     const t = event.target;
-    if (t.matches('[data-rvw-rsnum]') && event.key === 'Enter') { event.preventDefault(); t.blur(); }
+    if (t.matches('[data-rvw-rsnum], [data-rvw-crnum]') && event.key === 'Enter') { event.preventDefault(); t.blur(); }
     if (t.matches('[data-rvw-q]') && event.key === 'Escape' && t.value) {
       event.preventDefault();
       t.value = '';

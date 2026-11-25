@@ -570,7 +570,8 @@
         -->
         <button type="button" role="menuitem" onclick="openFnV5Scene()"><span>&#127916;</span><span>V5 Scene</span></button>
         <button type="button" role="menuitem" onclick="openTranslatorPopup()"><span>あ</span><span>Translate</span></button>
-        <button type="button" role="menuitem" onclick="openFnReferenceInset()"><span>&#9703;</span><span>레퍼런스 인셋</span></button>
+        <!-- 레퍼런스 인셋은 NAI 전용 - 로컬 생성 모드에서는 app.js `syncReferenceInsetModeGate` 가 숨긴다. -->
+        <button type="button" role="menuitem" id="fnReferenceInsetItem" onclick="openFnReferenceInset()"><span>&#9703;</span><span>레퍼런스 인셋</span></button>
       </div>
       <div class="tab-content">
         <div class="tab-page active" id="tabPrompt">
@@ -1683,6 +1684,6 @@ function openInSystemBrowser() {
   <button type="button" class="mobile-remote-item" data-mobile-remote="artists" data-label="Artists"><span class="mobile-remote-icon" aria-hidden="true">&#127912;</span>Artists</button>
   <button type="button" class="mobile-remote-item is-pending" hidden data-mobile-remote="metadata" data-label="Metadata"><span class="mobile-remote-icon" aria-hidden="true">&#128221;</span>Metadata<span class="mobile-remote-note">준비 중</span></button>
 </div>
-<script src="app.js?v=20261124-localtimeout"></script>
+<script src="app.js?v=20261125-insetnai"></script>
 </body>
 </html>

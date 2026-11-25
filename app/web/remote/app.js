@@ -1347,8 +1347,34 @@ function afterReferenceInsetApplied(state) {
   switchRightTab('result');
 }
 
+/** 레퍼런스 인셋은 **NAI 전용**이다(사용자 지시 2026-11-25 - ANIMA 에서 창이 떠서 써 봤는데 안 먹는다는 제보).
+ *  서버도 NAI 생성에만 싣는다(`HeadlessImageModuleParamService.apply` 가 비NAI 면 바로 빠진다). 그래서 로컬 생성
+ *  (WEBUI · ComfyUI · ANIMA)에서는 입구(Fn 메뉴 · 빠른 칸) · Result 띠 · 창을 **전부 숨긴다**. 켜 둔 상태는 서버에
+ *  그대로 남는다 - NAI 로 돌아오면 띠가 다시 보인다.
+ *  ⚠️ `currentMode` 는 이 파일 아래쪽에서 선언된다 - 모듈 평가 중에 불리면 TDZ 라 try 로 감싼다. */
+function referenceInsetModeAllowed() {
+  let mode = '';
+  try { mode = currentMode || modeSelect?.value || ''; } catch (_) { /* 아직 선언 전 */ }
+  return mode === 'NAI';
+}
+
+/** 모드가 바뀔 때(`syncMode`) 인셋의 화면을 모드에 맞춘다. */
+function syncReferenceInsetModeGate() {
+  const allowed = referenceInsetModeAllowed();
+  const item = document.getElementById('fnReferenceInsetItem');
+  // ⚠️ `.fn-menu button` 이 `display: flex` 라 `hidden` 속성으로는 안 숨는다.
+  if (item) item.style.display = allowed ? '' : 'none';
+  if (!allowed) referenceInsetWindow?.close?.();
+  renderReferenceInsetBadge();
+  renderFnQuick();
+}
+
 async function openReferenceInsetWindow() {
   closeReferenceInsetMenu();
+  if (!referenceInsetModeAllowed()) {
+    showToast('레퍼런스 인셋은 NAI 모드 전용입니다', 'info');
+    return;
+  }
   // 상태를 아직 못 받았으면(접속 직후 · 받다가 실패) 지금 받는다.
   if (!referenceInsetFull) {
     try {
@@ -1417,7 +1443,8 @@ function renderReferenceInsetBadge() {
   const viewer = document.getElementById('resultViewer');
   if (!viewer) return;
   let badge = document.getElementById('referenceInsetBadge');
-  if (!referenceInsetState) {
+  // 로컬 생성 모드에서는 켜져 있어도 띠를 그리지 않는다 - 서버가 인셋을 싣지 않는다(`referenceInsetModeAllowed`).
+  if (!referenceInsetState || !referenceInsetModeAllowed()) {
     closeReferenceInsetMenu();
     badge?.remove();
     return;
@@ -9999,7 +10026,8 @@ function renderFnQuick() {
   const button = $('fnQuickBtn');
   if (!button) return;
   const item = fnQuickItem();
-  if (!item) {
+  // 레퍼런스 인셋은 NAI 전용 - 로컬 생성 모드에서는 빠른 칸을 숨기기만 한다(저장값은 남겨 NAI 로 돌아오면 다시 뜬다).
+  if (!item || (item.key === 'refinset' && !referenceInsetModeAllowed())) {
     button.hidden = true;
     return;
   }
@@ -11511,6 +11539,8 @@ function syncMode(mode) {
   syncingMode = false;
   currentMode = mode;
   setNaiHighlightMode(mode);
+  // 레퍼런스 인셋은 NAI 전용 - 로컬 생성 모드에서는 입구 · 띠 · 창을 숨긴다(사용자 지시 2026-11-25).
+  syncReferenceInsetModeGate();
   if (mode === 'WEBUI' && animaLoraPanel?.isOpen()) animaLoraPanel.close();
   webuiLoraPanel?.setMode(mode);
   // 모드가 바뀌면 해상도 선택지가 통째로 달라진다 - 앞 모드의 값은 둘 다 무효다.
@@ -12464,6 +12494,8 @@ function sequenceLargeSelected() {
  *  ⚠️ 탭 목록은 `canQueueGenerate` 의 것과 같다 - Generate 가 자기 흐름을 타는 탭들이다. */
 function generationGoesThroughInset() {
   if (!referenceInsetState) return false;
+  // 서버는 NAI 생성에만 인셋을 싣는다(`HeadlessImageModuleParamService.apply`).
+  if (!referenceInsetModeAllowed()) return false;
   if (moduleStateCache.get('img2img')?.active) return false;
   // Interactive 가 켜져 있으면 일반 탭의 Generate 도 `interactive_mode_request` 를 달고 나간다 - 특수 요청이라 인셋이
   // 주입되지 않는다(Codex 리뷰 8차: 화면만 인셋으로 나간다고 보고 '무료' 로 판정했다).
